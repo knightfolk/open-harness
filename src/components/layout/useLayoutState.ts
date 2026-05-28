@@ -4,6 +4,11 @@ import { DEFAULT_LAYOUT } from '../../types/layout';
 
 const STORAGE_KEY = 'cmdui-layout';
 
+/** Panels that prefer to split vertically (top/bottom) when added */
+const VERTICAL_PANELS: Set<PanelId> = new Set(['terminal', 'plan']);
+/** Panels that prefer to split horizontally (left/right) when added */
+const HORIZONTAL_PANELS: Set<PanelId> = new Set(['sub-agents', 'diffs', 'browser', 'files']);
+
 function loadLayout(): LayoutNode {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -31,20 +36,19 @@ function saveLayout(layout: LayoutNode) {
   } catch { /* ignore */ }
 }
 
-/** Check if a panelId exists anywhere in the tree */
 function containsPanel(node: LayoutNode, id: PanelId): boolean {
   if (typeof node === 'string') return node === id;
   return (node as SplitNode).children.some((child) => containsPanel(child, id));
 }
 
 /** Remove a panel from the tree, collapsing empty splits */
-function removePanel(node: LayoutNode, id: PanelId): LayoutNode | null {
+function removePanelFromTree(node: LayoutNode, id: PanelId): LayoutNode | null {
   if (typeof node === 'string') {
     return node === id ? null : node;
   }
   const split = node as SplitNode;
   const newChildren = split.children
-    .map((child) => removePanel(child, id))
+    .map((child) => removePanelFromTree(child, id))
     .filter((c): c is LayoutNode => c !== null);
 
   if (newChildren.length === 0) return null;
@@ -52,21 +56,43 @@ function removePanel(node: LayoutNode, id: PanelId): LayoutNode | null {
   return { ...split, children: newChildren };
 }
 
-/** Find the deepest split in a given direction and append the panel */
-function appendPanel(node: LayoutNode, id: PanelId, direction: 'horizontal' | 'vertical'): LayoutNode {
+/**
+ * Find the deepest, largest leaf node and split it in the given direction,
+ * inserting the new panel alongside it.
+ */
+function splitLargestLeaf(
+  node: LayoutNode,
+  id: PanelId,
+  direction: 'horizontal' | 'vertical',
+): LayoutNode {
   if (typeof node === 'string') {
-    // Turn a leaf into a split
+    // This leaf becomes a split with the old panel + new panel
     return { direction, children: [node, id] };
   }
+
   const split = node as SplitNode;
+
+  // If this split is the same direction, append to it
   if (split.direction === direction) {
-    // Same direction — just append
     return { ...split, children: [...split.children, id] };
   }
-  // Different direction — nest
-  const last = split.children[split.children.length - 1];
-  const newLast = appendPanel(last, id, direction);
-  return { ...split, children: [...split.children.slice(0, -1), newLast] };
+
+  // Different direction — recurse into the largest child
+  // "Largest" = fewest nesting levels (heuristic: pick last child, or the one that's a leaf)
+  const lastChild = split.children[split.children.length - 1];
+  const newLastChild = splitLargestLeaf(lastChild, id, direction);
+  return {
+    ...split,
+    children: [...split.children.slice(0, -1), newLastChild],
+  };
+}
+
+/** Determine the preferred split direction for a panel */
+function preferredDirection(id: PanelId): 'horizontal' | 'vertical' {
+  if (VERTICAL_PANELS.has(id)) return 'vertical';
+  if (HORIZONTAL_PANELS.has(id)) return 'horizontal';
+  // Default: chat-type panels split vertically (terminal below chat)
+  return 'vertical';
 }
 
 export function useLayoutState() {
@@ -80,7 +106,6 @@ export function useLayoutState() {
     });
   }, []);
 
-  // Save on unmount just in case
   useEffect(() => {
     const handler = () => saveLayout(layout);
     window.addEventListener('beforeunload', handler);
@@ -90,14 +115,15 @@ export function useLayoutState() {
   const addPanel = useCallback((id: PanelId) => {
     setLayout((prev) => {
       if (containsPanel(prev, id)) return prev;
-      return appendPanel(prev, id, 'horizontal');
+      const direction = preferredDirection(id);
+      return splitLargestLeaf(prev, id, direction);
     });
   }, [setLayout]);
 
   const removePanelById = useCallback((id: PanelId) => {
     setLayout((prev) => {
       if (!containsPanel(prev, id)) return prev;
-      const result = removePanel(prev, id);
+      const result = removePanelFromTree(prev, id);
       return result ?? { direction: 'horizontal', children: ['chat'] as LayoutNode[] };
     });
   }, [setLayout]);
@@ -105,10 +131,11 @@ export function useLayoutState() {
   const togglePanel = useCallback((id: PanelId) => {
     setLayout((prev) => {
       if (containsPanel(prev, id)) {
-        const result = removePanel(prev, id);
+        const result = removePanelFromTree(prev, id);
         return result ?? { direction: 'horizontal', children: ['chat'] as LayoutNode[] };
       }
-      return appendPanel(prev, id, 'horizontal');
+      const direction = preferredDirection(id);
+      return splitLargestLeaf(prev, id, direction);
     });
   }, [setLayout]);
 
