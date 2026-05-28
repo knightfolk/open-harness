@@ -1,18 +1,20 @@
 import {
-  PanelLeftClose, PanelLeftOpen, Bot, ListChecks, Terminal,
-  GitBranch, MoreHorizontal
+  PanelLeftClose, PanelLeftOpen, MoreHorizontal, RotateCcw,
 } from 'lucide-react';
-import type { PanelView } from '../types';
+import type { PanelId } from '../types/layout';
+import { ALL_PANELS } from '../types/layout';
+import { getPanelIcon, getPanelConfig } from './layout/panelRegistry';
 
 interface Props {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
-  panelView: PanelView;
-  onTogglePanel: (view: PanelView) => void;
+  visiblePanels: Set<PanelId>;
+  onTogglePanel: (id: PanelId) => void;
+  onResetLayout: () => void;
   sessionTitle: string;
 }
 
-export function TopBar({ sidebarOpen, onToggleSidebar, panelView, onTogglePanel, sessionTitle }: Props) {
+export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout, sessionTitle }: Props) {
   return (
     <div className="top-bar">
       <button className="top-bar-toggle" onClick={onToggleSidebar} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
@@ -27,32 +29,26 @@ export function TopBar({ sidebarOpen, onToggleSidebar, panelView, onTogglePanel,
       </div>
 
       <div className="top-bar-actions">
-        <button
-          className={`top-bar-action ${panelView === 'sub-agents' ? 'active' : ''}`}
-          onClick={() => onTogglePanel(panelView === 'sub-agents' ? 'none' : 'sub-agents')}
-          title="Sub-agents"
-        >
-          <Bot size={16} />
-        </button>
-        <button
-          className={`top-bar-action ${panelView === 'plan' ? 'active' : ''}`}
-          onClick={() => onTogglePanel(panelView === 'plan' ? 'none' : 'plan')}
-          title="Plan"
-        >
-          <ListChecks size={16} />
-        </button>
-        <button
-          className={`top-bar-action ${panelView === 'terminal' ? 'active' : ''}`}
-          onClick={() => onTogglePanel(panelView === 'terminal' ? 'none' : 'terminal')}
-          title="Terminal & Files"
-        >
-          <Terminal size={16} />
-        </button>
+        {ALL_PANELS.map((id) => {
+          const Icon = getPanelIcon(id);
+          const config = getPanelConfig(id);
+          const active = visiblePanels.has(id);
+          return (
+            <button
+              key={id}
+              className={`top-bar-action ${active ? 'active' : ''}`}
+              onClick={() => onTogglePanel(id)}
+              title={config.label}
+            >
+              <Icon size={16} />
+            </button>
+          );
+        })}
 
         <div style={{ width: 1, height: 20, background: 'var(--border-primary)', margin: '0 4px' }} />
 
-        <button className="top-bar-action" title="Git status">
-          <GitBranch size={16} />
+        <button className="top-bar-action" onClick={onResetLayout} title="Reset layout">
+          <RotateCcw size={16} />
         </button>
         <button className="top-bar-action" title="More options">
           <MoreHorizontal size={16} />

@@ -1710,3 +1710,94 @@ button:focus-visible {
   gap: 10px;
   font-size: 10px;
 }
+
+/* ========== Panel Frame ========== */
+.panel-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.panel-header {
+  height: 36px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  cursor: grab;
+  user-select: none;
+}
+
+.panel-header:active {
+  cursor: grabbing;
+}
+
+.panel-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.panel-close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: all var(--transition-fast);
+}
+
+.panel-close:hover {
+  background: var(--accent-error-muted);
+  color: var(--accent-error);
+}
+
+.panel-body {
+  flex: 1;
+  overflow: auto;
+}
+
+/* ========== Allotment overrides ========== */
+.split-view-view {
+  overflow: hidden !important;
+}
+
+.allotment-splitter {
+  background: var(--border-primary) !important;
+  transition: background var(--transition-fast) !important;
+  z-index: 5;
+}
+
+.allotment-splitter:hover,
+.allotment-splitter:active {
+  background: var(--accent-primary) !important;
+}
+
+.allotment-splitter[data-type="horizontal"] {
+  width: 1px !important;
+}
+
+.allotment-splitter[data-type="vertical"] {
+  height: 1px !important;
+}
+
+/* Give allotment splitter a larger hit area */
+.allotment-splitter::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: -3px;
+  right: -3px;
+}
