@@ -57,11 +57,11 @@ export async function getSession(id: string): Promise<SessionDetail> {
   return res.json();
 }
 
-export async function createSession(title?: string): Promise<SessionDetail> {
+export async function createSession(title?: string, workingDir?: string): Promise<SessionDetail> {
   const res = await fetch(`${API_BASE}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, workingDir }),
   });
   if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
   return res.json();

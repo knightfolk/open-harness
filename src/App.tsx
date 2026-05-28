@@ -97,10 +97,7 @@ function App() {
       if (!folderPath) return; // user cancelled
 
       // Create a new session with this working dir
-      const session = await api.createSession(basename(folderPath));
-      // Update the session's workingDir on the server side is done at creation
-      // but our create endpoint accepts workingDir in the body
-      // Let's just set it locally for now
+      const session = await api.createSession(basename(folderPath), folderPath);
       const sessionInfo: api.SessionInfo = {
         id: session.id,
         title: basename(folderPath),
