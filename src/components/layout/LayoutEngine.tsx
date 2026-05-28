@@ -15,6 +15,7 @@ interface Props {
   messages: any;
   isTyping: boolean;
   onSendMessage: (msg: string) => void;
+  workingDir: string | null;
 }
 
 export function LayoutEngine({
@@ -27,8 +28,9 @@ export function LayoutEngine({
   messages,
   isTyping,
   onSendMessage,
+  workingDir,
 }: Props) {
-  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{ subAgents, plan, fileChanges, terminalCommands, messages, isTyping, onSendMessage }} />;
+  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{ subAgents, plan, fileChanges, terminalCommands, messages, isTyping, onSendMessage, workingDir }} />;
 }
 
 interface RenderProps {

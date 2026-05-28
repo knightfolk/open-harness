@@ -3,7 +3,7 @@ import {
   MessageSquare, FileCode, Zap, Brain, Settings, Plus, Clock,
   Sparkles, Globe, Search, FileText,
   Command, Layout, Grid, Layers,
-  ChevronDown, ChevronRight, Loader, CheckCircle2, Circle, Bot, AlertCircle,
+  ChevronDown, ChevronRight, Loader, CheckCircle2, Circle, Bot, AlertCircle, FolderOpen,
 } from 'lucide-react';
 import type { SidebarTab, Session, Skill, Plugin, MemoryEntry, SubAgent } from '../types';
 import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
@@ -15,6 +15,7 @@ interface Props {
   activeSubAgents: SubAgent[];
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  onOpenFolder?: () => void;
 }
 
 const tabConfig = [
@@ -42,7 +43,7 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
@@ -70,6 +71,7 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
             activeSubAgents={activeSubAgents}
             onSelectSession={onSelectSession}
             onNewSession={onNewSession}
+            onOpenFolder={onOpenFolder}
           />
         )}
         {activeTab === 'skills' && <SkillsTab skills={mockSkills} plugins={mockPlugins} />}
@@ -84,12 +86,13 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
 /*  Chat Tab — sessions with nested sub-agents                        */
 /* ------------------------------------------------------------------ */
 
-function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession }: {
+function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder }: {
   sessions: Session[];
   activeSessionId?: string;
   activeSubAgents: SubAgent[];
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  onOpenFolder?: () => void;
 }) {
   return (
     <>
@@ -97,6 +100,12 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
         <Plus size={15} />
         New Session
       </button>
+      {onOpenFolder && (
+        <button className="new-session-btn" onClick={onOpenFolder} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-primary)', color: 'var(--text-secondary)' }}>
+          <FolderOpen size={15} />
+          Open Folder
+        </button>
+      )}
       {sessions.map((session) => {
         const isActive = session.id === activeSessionId;
         const isRunning = isActive && activeSubAgents.length > 0;

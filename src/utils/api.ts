@@ -3,6 +3,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 export interface SessionInfo {
   id: string;
   title: string;
+  workingDir: string | null;
   createdAt: string;
   updatedAt: string;
   preview: string;
@@ -12,6 +13,7 @@ export interface SessionInfo {
 export interface SessionDetail {
   id: string;
   title: string;
+  workingDir: string | null;
   messages: MessageInfo[];
   createdAt: string;
   updatedAt: string;
@@ -139,4 +141,68 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
   }
 
   callbacks.onDone();
+}
+
+// ── Filesystem ─────────────────────────────────────────
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  extension?: string;
+  size: number;
+  modified: string;
+}
+
+export interface DirectoryInfo {
+  path: string;
+  entries: FileEntry[];
+}
+
+export interface FileInfo {
+  path: string;
+  name: string;
+  extension: string;
+  size: number;
+  modified: string;
+  content: string;
+}
+
+export async function listDirectory(dirPath: string): Promise<DirectoryInfo> {
+  const res = await fetch(`${API_BASE}/api/fs/list?path=${encodeURIComponent(dirPath)}`);
+  if (!res.ok) throw new Error(`Failed to list directory: ${res.status}`);
+  return res.json();
+}
+
+export async function readFile(filePath: string): Promise<FileInfo> {
+  const res = await fetch(`${API_BASE}/api/fs/read?path=${encodeURIComponent(filePath)}`);
+  if (!res.ok) throw new Error(`Failed to read file: ${res.status}`);
+  return res.json();
+}
+
+export async function openFolderDialog(): Promise<string | null> {
+  const res = await fetch(`${API_BASE}/api/dialog/open-folder`, { method: 'POST' });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.path;
+}
+
+// ── Terminal ───────────────────────────────────────────
+
+export interface TerminalResult {
+  command: string;
+  output: string;
+  exitCode: number;
+  duration: number;
+  cwd: string;
+}
+
+export async function execCommand(command: string, cwd?: string): Promise<TerminalResult> {
+  const res = await fetch(`${API_BASE}/api/terminal/exec`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command, cwd }),
+  });
+  if (!res.ok) throw new Error(`Command failed: ${res.status}`);
+  return res.json();
 }

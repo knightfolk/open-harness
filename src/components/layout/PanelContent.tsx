@@ -17,6 +17,7 @@ interface Props {
     messages: any[];
     isTyping: boolean;
     onSendMessage: (msg: string) => void;
+    workingDir: string | null;
   };
 }
 
@@ -35,7 +36,7 @@ export function PanelContent({ panelId, context }: Props) {
     case 'plan':
       return context.plan ? <PlanTracker plan={context.plan} /> : <EmptyState text="No active plan" />;
     case 'files':
-      return <FilesPanel fileChanges={context.fileChanges} />;
+      return <FilesPanel workingDir={context.workingDir} />;
     default:
       return <EmptyState text="Unknown panel" />;
   }

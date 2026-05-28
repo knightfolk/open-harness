@@ -17,6 +17,7 @@ function App() {
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [workingDir, setWorkingDir] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
@@ -25,17 +26,17 @@ function App() {
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
 
-  // Load sessions on mount, create one if none exist
+  // Load sessions on mount
   useEffect(() => {
     (async () => {
       try {
         let list = await api.listSessions();
         if (list.length === 0) {
-          // No sessions — create the first one
           const session = await api.createSession();
           list = [{
             id: session.id,
             title: session.title,
+            workingDir: session.workingDir || null,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
             preview: '',
@@ -44,6 +45,7 @@ function App() {
         }
         setSessions(list);
         setActiveSessionId(list[0].id);
+        setWorkingDir(list[0].workingDir);
         const detail = await api.getSession(list[0].id);
         setMessages(detail.messages.map(mapApiMessage));
       } catch (err) {
@@ -60,6 +62,7 @@ function App() {
     setSubAgents([]);
     try {
       const detail = await api.getSession(id);
+      setWorkingDir(detail.workingDir || null);
       setMessages(detail.messages.map(mapApiMessage));
     } catch (err) {
       console.error('Failed to load session:', err);
@@ -73,12 +76,14 @@ function App() {
       setSessions((prev) => [{
         id: session.id,
         title: session.title,
+        workingDir: session.workingDir || null,
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         preview: '',
         messageCount: 0,
       }, ...prev]);
       setActiveSessionId(session.id);
+      setWorkingDir(session.workingDir || null);
       setMessages([]);
       setSubAgents([]);
     } catch (err) {
@@ -86,7 +91,39 @@ function App() {
     }
   }, []);
 
-  /** Ensure we have an active session before sending */
+  const handleOpenFolder = useCallback(async () => {
+    try {
+      const folderPath = await api.openFolderDialog();
+      if (!folderPath) return; // user cancelled
+
+      // Create a new session with this working dir
+      const session = await api.createSession(basename(folderPath));
+      // Update the session's workingDir on the server side is done at creation
+      // but our create endpoint accepts workingDir in the body
+      // Let's just set it locally for now
+      const sessionInfo: api.SessionInfo = {
+        id: session.id,
+        title: basename(folderPath),
+        workingDir: folderPath,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        preview: '',
+        messageCount: 0,
+      };
+      setSessions((prev) => [sessionInfo, ...prev]);
+      setActiveSessionId(session.id);
+      setWorkingDir(folderPath);
+      setMessages([]);
+      setSubAgents([]);
+    } catch (err) {
+      console.error('Failed to open folder:', err);
+    }
+  }, []);
+
+  function basename(p: string) {
+    return p.split('/').filter(Boolean).pop() || p;
+  }
+
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (activeSessionId) return activeSessionId;
     try {
@@ -94,6 +131,7 @@ function App() {
       setSessions((prev) => [{
         id: session.id,
         title: session.title,
+        workingDir: session.workingDir || null,
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         preview: '',
@@ -109,11 +147,9 @@ function App() {
 
   const handleSendMessage = useCallback(async (content: string) => {
     if (isTyping) return;
-
     const sessionId = await ensureSession();
     if (!sessionId) return;
 
-    // Add user message immediately
     const userMsg: Message = {
       id: uid(),
       role: 'user',
@@ -124,7 +160,7 @@ function App() {
     setMessages((prev) => [...prev, userMsg]);
     setIsTyping(true);
 
-    // Spawn sub-agents for visual feedback
+    // Spawn sub-agents
     const agentTasks = ['Analyzing request...', 'Searching for context...', 'Generating response...'];
     const models = ['MiniMax-M2.7', 'o4-mini', 'gpt-4.1'];
     const spawned: SubAgent[] = [];
@@ -155,7 +191,6 @@ function App() {
       );
     }, 500);
 
-    // Streaming assistant message
     const assistantId = uid();
     streamingTextRef.current.set(assistantId, '');
 
@@ -163,14 +198,13 @@ function App() {
       await api.sendMessage(sessionId, content, {
         onUserMessage: () => {},
         onAssistantStart: () => {
-          const placeholder: Message = {
+          setMessages((prev) => [...prev, {
             id: assistantId,
             role: 'assistant',
             content: '',
             timestamp: new Date(),
             status: 'streaming',
-          };
-          setMessages((prev) => [...prev, placeholder]);
+          }]);
         },
         onText: (_id, text) => {
           streamingTextRef.current.set(
@@ -224,7 +258,7 @@ function App() {
     }
   }, [isTyping, ensureSession]);
 
-  // Build visible panel set for top bar
+  // Build visible panel set
   const visiblePanels = new Set<PanelId>();
   const collectPanels = (node: any) => {
     if (typeof node === 'string') visiblePanels.add(node as PanelId);
@@ -255,6 +289,7 @@ function App() {
         activeSubAgents={subAgents}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
+        onOpenFolder={handleOpenFolder}
       />
 
       <main className="main-area">
@@ -265,6 +300,8 @@ function App() {
           onTogglePanel={togglePanel}
           onResetLayout={resetLayout}
           sessionTitle={sessionTitle}
+          workingDir={workingDir}
+          onOpenFolder={handleOpenFolder}
         />
 
         <div className="content-area">
@@ -301,6 +338,7 @@ function App() {
               messages={messages}
               isTyping={isTyping}
               onSendMessage={handleSendMessage}
+              workingDir={workingDir}
             />
           )}
         </div>
@@ -312,6 +350,11 @@ function App() {
             Connected
           </div>
           <div className="status-bar-item">MiniMax-M2.7</div>
+          {workingDir && (
+            <div className="status-bar-item" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>
+              {workingDir}
+            </div>
+          )}
           <div className="status-bar-item">{msgCount} messages</div>
           <div className="status-bar-item">{agentCount} agent{agentCount !== 1 ? 's' : ''} active</div>
           <div style={{ flex: 1 }} />
