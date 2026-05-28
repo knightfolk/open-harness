@@ -25,17 +25,27 @@ function App() {
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
 
-  // Load sessions on mount
+  // Load sessions on mount, create one if none exist
   useEffect(() => {
     (async () => {
       try {
-        const list = await api.listSessions();
-        setSessions(list);
-        if (list.length > 0) {
-          setActiveSessionId(list[0].id);
-          const detail = await api.getSession(list[0].id);
-          setMessages(detail.messages.map(mapApiMessage));
+        let list = await api.listSessions();
+        if (list.length === 0) {
+          // No sessions — create the first one
+          const session = await api.createSession();
+          list = [{
+            id: session.id,
+            title: session.title,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            preview: '',
+            messageCount: 0,
+          }];
         }
+        setSessions(list);
+        setActiveSessionId(list[0].id);
+        const detail = await api.getSession(list[0].id);
+        setMessages(detail.messages.map(mapApiMessage));
       } catch (err) {
         console.error('Failed to load sessions:', err);
       } finally {
@@ -44,7 +54,6 @@ function App() {
     })();
   }, []);
 
-  // Load messages when switching sessions
   const handleSelectSession = useCallback(async (id: string) => {
     if (id === activeSessionId) return;
     setActiveSessionId(id);
@@ -77,8 +86,32 @@ function App() {
     }
   }, []);
 
+  /** Ensure we have an active session before sending */
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    if (activeSessionId) return activeSessionId;
+    try {
+      const session = await api.createSession();
+      setSessions((prev) => [{
+        id: session.id,
+        title: session.title,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        preview: '',
+        messageCount: 0,
+      }, ...prev]);
+      setActiveSessionId(session.id);
+      return session.id;
+    } catch (err) {
+      console.error('Failed to create session:', err);
+      return null;
+    }
+  }, [activeSessionId]);
+
   const handleSendMessage = useCallback(async (content: string) => {
-    if (!activeSessionId || isTyping) return;
+    if (isTyping) return;
+
+    const sessionId = await ensureSession();
+    if (!sessionId) return;
 
     // Add user message immediately
     const userMsg: Message = {
@@ -93,7 +126,7 @@ function App() {
 
     // Spawn sub-agents for visual feedback
     const agentTasks = ['Analyzing request...', 'Searching for context...', 'Generating response...'];
-    const models = ['o3', 'gpt-4.1', 'o4-mini'];
+    const models = ['MiniMax-M2.7', 'o4-mini', 'gpt-4.1'];
     const spawned: SubAgent[] = [];
     const count = 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < count; i++) {
@@ -112,7 +145,6 @@ function App() {
       setTimeout(() => setSubAgents((prev) => [...prev, agent]), 200 + i * 600);
     });
 
-    // Progress simulation for agents
     const progressInterval = setInterval(() => {
       setSubAgents((prev) =>
         prev.map((a) =>
@@ -125,13 +157,12 @@ function App() {
 
     // Streaming assistant message
     const assistantId = uid();
-    const toolCalls: any[] = [];
     streamingTextRef.current.set(assistantId, '');
 
     try {
-      await api.sendMessage(activeSessionId, content, {
-        onUserMessage: (_msg) => { /* already added */ },
-        onAssistantStart: (_id) => {
+      await api.sendMessage(sessionId, content, {
+        onUserMessage: () => {},
+        onAssistantStart: () => {
           const placeholder: Message = {
             id: assistantId,
             role: 'assistant',
@@ -155,11 +186,10 @@ function App() {
           );
         },
         onToolCall: (tc) => {
-          toolCalls.push(tc);
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, toolCalls: [...toolCalls] }
+                ? { ...m, toolCalls: [...(m.toolCalls || []), { id: tc.id, name: tc.name, status: tc.status, input: tc.input, output: tc.output, duration: tc.duration }] }
                 : m
             )
           );
@@ -184,7 +214,6 @@ function App() {
             )
           );
           setIsTyping(false);
-          // Refresh session list to pick up title changes
           api.listSessions().then(setSessions).catch(() => {});
         },
       });
@@ -193,7 +222,7 @@ function App() {
       setIsTyping(false);
       clearInterval(progressInterval);
     }
-  }, [activeSessionId, isTyping]);
+  }, [isTyping, ensureSession]);
 
   // Build visible panel set for top bar
   const visiblePanels = new Set<PanelId>();
@@ -265,7 +294,6 @@ function App() {
               fileChanges={[
                 { id: uid(), filePath: 'src/App.tsx', type: 'modify' as const, additions: 42, deletions: 18 },
                 { id: uid(), filePath: 'src/utils/api.ts', type: 'add' as const, additions: 89, deletions: 0 },
-                { id: uid(), filePath: 'server/index.ts', type: 'add' as const, additions: 156, deletions: 0 },
               ]}
               terminalCommands={[
                 { id: uid(), command: 'npm run build', output: '✓ built in 80ms', exitCode: 0, duration: 800 },
@@ -283,7 +311,7 @@ function App() {
             <div className="status-bar-dot" />
             Connected
           </div>
-          <div className="status-bar-item">o3</div>
+          <div className="status-bar-item">MiniMax-M2.7</div>
           <div className="status-bar-item">{msgCount} messages</div>
           <div className="status-bar-item">{agentCount} agent{agentCount !== 1 ? 's' : ''} active</div>
           <div style={{ flex: 1 }} />
