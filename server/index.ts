@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 const app = express();
 app.use(cors());
@@ -32,12 +35,26 @@ interface ToolCallRow {
   duration?: number;
 }
 
+// ── MiniMax config ─────────────────────────────────────
+const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
+const MINIMAX_MODEL = 'MiniMax-M2.7';
+
+function getMiniMaxApiKey(): string | null {
+  // 1. Check env var
+  if (process.env.MINIMAX_API_KEY) return process.env.MINIMAX_API_KEY;
+  // 2. Check ~/.mmx/config.json
+  try {
+    const config = JSON.parse(readFileSync(join(homedir(), '.mmx', 'config.json'), 'utf-8'));
+    if (config.api_key) return config.api_key;
+  } catch { /* ignore */ }
+  return null;
+}
+
 // ── In-memory store ────────────────────────────────────
 const sessions: Map<string, SessionRow> = new Map();
 
 // ── Routes ─────────────────────────────────────────────
 
-// List sessions
 app.get('/api/sessions', (_req, res) => {
   const list = Array.from(sessions.values())
     .map(({ id, title, createdAt, updatedAt, messages }) => ({
@@ -52,14 +69,12 @@ app.get('/api/sessions', (_req, res) => {
   res.json(list);
 });
 
-// Get single session with messages
 app.get('/api/sessions/:id', (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   res.json(session);
 });
 
-// Create session
 app.post('/api/sessions', (req, res) => {
   const { title } = req.body as { title?: string };
   const session: SessionRow = {
@@ -73,13 +88,12 @@ app.post('/api/sessions', (req, res) => {
   res.status(201).json(session);
 });
 
-// Delete session
 app.delete('/api/sessions/:id', (req, res) => {
   sessions.delete(req.params.id);
   res.status(204).end();
 });
 
-// Send a message and stream the response from OpenAI
+// ── Send message (stream MiniMax response) ─────────────
 app.post('/api/sessions/:id/messages', async (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
@@ -96,129 +110,88 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   };
   session.messages.push(userMsg);
 
-  // Update session title from first message
   if (session.messages.filter((m) => m.role === 'user').length === 1) {
     session.title = content.slice(0, 60);
   }
   session.updatedAt = new Date().toISOString();
 
-  // Stream response
+  // SSE setup
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
   const assistantId = uuid();
-
-  // Send the user message event
   res.write(`event: user_message\ndata: ${JSON.stringify(userMsg)}\n\n`);
-
-  // Send assistant message start
   res.write(`event: assistant_start\ndata: ${JSON.stringify({ id: assistantId, role: 'assistant' })}\n\n`);
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = getMiniMaxApiKey();
 
   if (!apiKey) {
-    // No API key — fall back to a helpful local echo response
-    await streamLocalResponse(content, res, assistantId, session);
+    await streamLocalFallback(content, res, assistantId, session);
   } else {
-    // Real OpenAI streaming
-    await streamOpenAIResponse(apiKey, session.messages, res, assistantId);
+    await streamMiniMax(apiKey, session.messages, res, assistantId, session);
   }
 
-  // Finalize
   res.write(`event: done\ndata: {}\n\n`);
   res.end();
 });
 
-// ── Local fallback (no API key) ────────────────────────
-async function streamLocalResponse(content: string, res: express.Response, assistantId: string, session: SessionRow) {
-  const responses = [
-    `I'll help you with that. Let me analyze your request:\n\n> ${content.slice(0, 100)}\n\nHere's what I'm thinking:\n\n1. First, I'll break down the problem\n2. Then identify the key components\n3. Finally, implement a solution\n\nLet me start by examining the relevant code.\n\n\`\`\`typescript\nconst result = await analyze(content);\nconsole.log(result);\n\`\`\`\n\nThis approach gives us a clear path forward. Want me to continue?`,
-    `Good question! Let me look into this.\n\n**Analysis:**\n\nBased on the context, here's what I recommend:\n\n- Use a modular approach for maximum flexibility\n- Keep the implementation simple and testable\n- Document key decisions along the way\n\n\`\`\`bash\n$ npm run analyze\n\n✓ Found 3 relevant modules\n✓ Dependencies up to date\n✓ No conflicts detected\n\`\`\`\n\nShall I proceed with the implementation?`,
-    `Absolutely, let me work on that right away.\n\nHere's my plan:\n\n1. **Explore** the current state of the codebase\n2. **Design** the solution architecture\n3. **Implement** the changes\n4. **Test** everything works correctly\n\n::code-comment{title="[P1] TODO" body="Need to add error handling here before shipping to production." file="/src/utils/api.ts" start=24 priority=1}\n\nI'll start by examining the existing code structure and then build from there.\n\n\`\`\`tsx\nconst Component = () => {\n  const [state, setState] = useState(initial);\n  // Implementation goes here\n  return <Layout>{content}</Layout>;\n};\n\`\`\``,
+// ── MiniMax streaming ──────────────────────────────────
+async function streamMiniMax(
+  apiKey: string,
+  messages: MessageRow[],
+  res: express.Response,
+  assistantId: string,
+  session: SessionRow,
+) {
+  const apiMessages = [
+    {
+      role: 'system' as const,
+      content: 'You are a helpful AI coding assistant. Respond concisely with code examples where appropriate. Use markdown formatting.',
+    },
+    ...messages.map(({ role, content }) => ({ role: role as string, content })),
   ];
 
-  const response = responses[Math.floor(Math.random() * responses.length)];
-  const words = response.split(' ');
-  let accumulated = '';
-
-  // Simulate tool call
-  res.write(`event: tool_call\ndata: ${JSON.stringify({
-    id: uuid(),
-    name: 'exec_command',
-    status: 'running',
-    input: 'echo "analyzing..."',
-  })}\n\n`);
-
-  await sleep(300);
-
-  res.write(`event: tool_call\ndata: ${JSON.stringify({
-    id: uuid(),
-    name: 'exec_command',
-    status: 'complete',
-    input: 'npm run analyze',
-    output: '✓ Analysis complete\n✓ 3 modules affected\n✓ No issues found',
-    duration: 1200,
-  })}\n\n`);
-
-  // Stream text word by word
-  for (let i = 0; i < words.length; i++) {
-    accumulated += (i > 0 ? ' ' : '') + words[i];
-    res.write(`event: text\ndata: ${JSON.stringify({ id: assistantId, text: i > 0 ? ' ' + words[i] : words[i] })}\n\n`);
-    await sleep(20 + Math.random() * 40);
-  }
-
-  // Save to session
-  const assistantMsg: MessageRow = {
-    id: assistantId,
-    role: 'assistant',
-    content: response,
-    timestamp: new Date().toISOString(),
-    toolCalls: [
-      { id: uuid(), name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete\n✓ 3 modules affected\n✓ No issues found', duration: 1200 },
-    ],
-  };
-  session.messages.push(assistantMsg);
-}
-
-// ── Real OpenAI streaming ──────────────────────────────
-async function streamOpenAIResponse(apiKey: string, messages: MessageRow[], res: express.Response, assistantId: string) {
-  const apiMessages = messages.map(({ role, content }) => ({ role, content }));
-
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch(MINIMAX_API_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4.1-mini',
+        model: MINIMAX_MODEL,
         messages: apiMessages,
         stream: true,
+        max_tokens: 4096,
       }),
     });
 
     if (!response.ok) {
       const err = await response.text();
-      res.write(`event: error\ndata: ${JSON.stringify({ error: err })}\n\n`);
+      res.write(`event: error\ndata: ${JSON.stringify({ error: `MiniMax API error: ${response.status} ${err}` })}\n\n`);
       return;
     }
 
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let accumulated = '';
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n').filter((l) => l.startsWith('data: '));
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
-        const data = line.slice(6);
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+        const data = trimmed.slice(6);
         if (data === '[DONE]') continue;
 
         try {
@@ -228,25 +201,60 @@ async function streamOpenAIResponse(apiKey: string, messages: MessageRow[], res:
             accumulated += delta;
             res.write(`event: text\ndata: ${JSON.stringify({ id: assistantId, text: delta })}\n\n`);
           }
-        } catch { /* skip malformed chunks */ }
+        } catch { /* skip malformed */ }
       }
     }
 
-    // Save to session
-    const session = Array.from(sessions.values()).find((s) =>
-      s.messages.some((m) => m.id === messages[messages.length - 1]?.id)
-    );
-    if (session) {
-      session.messages.push({
-        id: assistantId,
-        role: 'assistant',
-        content: accumulated,
-        timestamp: new Date().toISOString(),
-      });
-    }
+    // Save assistant message to session
+    session.messages.push({
+      id: assistantId,
+      role: 'assistant',
+      content: accumulated,
+      timestamp: new Date().toISOString(),
+    });
+    session.updatedAt = new Date().toISOString();
+
   } catch (err: any) {
     res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
   }
+}
+
+// ── Local fallback (no API key) ────────────────────────
+async function streamLocalFallback(content: string, res: express.Response, assistantId: string, session: SessionRow) {
+  const responses = [
+    `I'll help you with that. Let me analyze your request:\n\n> ${content.slice(0, 100)}\n\nHere's my approach:\n\n1. Break down the problem\n2. Identify key components\n3. Implement a solution\n\n\`\`\`typescript\nconst result = await analyze(content);\nconsole.log(result);\n\`\`\`\n\nWant me to continue?`,
+    `Good question! Let me work on this.\n\n**Analysis:**\n\nBased on the context, I recommend:\n\n- A modular approach for flexibility\n- Simple, testable implementation\n- Document key decisions\n\n\`\`\`bash\n$ npm run analyze\n\n✓ Found 3 relevant modules\n✓ No conflicts detected\n\`\`\``,
+    `Let me look into this right away.\n\nHere's my plan:\n\n1. **Explore** the current codebase\n2. **Design** the solution\n3. **Implement** changes\n4. **Test** everything\n\n\`\`\`tsx\nconst Component = () => {\n  const [state, setState] = useState(initial);\n  return <Layout>{content}</Layout>;\n};\n\`\`\``,
+  ];
+
+  const response = responses[Math.floor(Math.random() * responses.length)];
+  const words = response.split(' ');
+
+  // Simulated tool call
+  res.write(`event: tool_call\ndata: ${JSON.stringify({
+    id: uuid(), name: 'exec_command', status: 'running', input: 'echo "analyzing..."',
+  })}\n\n`);
+  await sleep(300);
+  res.write(`event: tool_call\ndata: ${JSON.stringify({
+    id: uuid(), name: 'exec_command', status: 'complete',
+    input: 'npm run analyze', output: '✓ Analysis complete\n✓ 3 modules affected', duration: 1200,
+  })}\n\n`);
+
+  for (let i = 0; i < words.length; i++) {
+    res.write(`event: text\ndata: ${JSON.stringify({ id: assistantId, text: i > 0 ? ' ' + words[i] : words[i] })}\n\n`);
+    await sleep(20 + Math.random() * 40);
+  }
+
+  session.messages.push({
+    id: assistantId,
+    role: 'assistant',
+    content: response,
+    timestamp: new Date().toISOString(),
+    toolCalls: [
+      { id: uuid(), name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete\n✓ 3 modules affected', duration: 1200 },
+    ],
+  });
+  session.updatedAt = new Date().toISOString();
 }
 
 function sleep(ms: number) {
@@ -256,8 +264,13 @@ function sleep(ms: number) {
 // ── Start ──────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
+  const apiKey = getMiniMaxApiKey();
   console.log(`CMDui server running on http://localhost:${PORT}`);
-  if (!process.env.OPENAI_API_KEY) {
-    console.log('⚠  No OPENAI_API_KEY set — using local fallback responses');
+  console.log(`Model: ${MINIMAX_MODEL}`);
+  if (apiKey) {
+    console.log(`✓ MiniMax API key loaded`);
+  } else {
+    console.log(`⚠  No MiniMax API key found — using local fallback`);
+    console.log(`   Set MINIMAX_API_KEY or add key to ~/.mmx/config.json`);
   }
 });
