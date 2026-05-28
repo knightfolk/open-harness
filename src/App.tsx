@@ -1,61 +1,86 @@
-import { useState, useCallback } from 'react';
-import type { Message, Session, SubAgent } from './types';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import type { Message, SubAgent } from './types';
 import type { PanelId } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { LayoutEngine } from './components/layout/LayoutEngine';
 import { useLayoutState } from './components/layout/useLayoutState';
-import { mockSessions, mockSubAgents, mockPlan, mockFileChanges, mockTerminalCommands } from './utils/mockData';
 import { randomAgentName } from './utils/names';
+import * as api from './utils/api';
 import './styles/global.css';
 import './styles/components.css';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-const mockResponses = [
-  "I've analyzed the codebase and found several optimization opportunities. Let me implement the changes step by step.\n\n```tsx\nconst optimizedComponent = useMemo(() => {\n  return data.filter(item => item.active)\n    .map(item => transform(item));\n}, [data]);\n```\n\nThis reduces unnecessary re-renders by memoizing the computed values.",
-  "Here's what I found during the review:\n\n**Architecture**\n- The current state management uses prop drilling — consider Context or Zustand\n- API calls lack error boundaries\n- Missing loading states for async operations\n\nLet me fix these issues systematically.",
-  "Building the feature now. I'll scaffold the components and wire up the state management.\n\n```typescript\ninterface FeatureConfig {\n  enabled: boolean;\n  theme: 'light' | 'dark';\n  agents: AgentConfig[];\n}\n```\n\nAll tests passing. Ready for review.",
-  "Sure! Here's the implementation plan:\n\n1. **Data Layer** — Set up the store with typed actions\n2. **UI Layer** — Build the component tree with proper composition\n3. **Integration** — Wire up events and side effects\n4. **Testing** — Add unit and integration tests\n\nShall I proceed?",
-];
-
-const namedAgents: SubAgent[] = mockSubAgents.map(a => ({ ...a, name: randomAgentName() }));
-
 function App() {
-  const [sessions, setSessions] = useState<Session[]>(mockSessions);
-  const [activeSessionId, setActiveSessionId] = useState<string>(mockSessions[0].id);
+  const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
-  const [subAgents, setSubAgents] = useState<SubAgent[]>(namedAgents);
+  const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
+  const [loading, setLoading] = useState(true);
   const { layout, togglePanel, removePanel, resetLayout } = useLayoutState();
 
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const streamingTextRef = useRef<Map<string, string>>(new Map());
 
-  const handleNewSession = () => {
-    const newSession: Session = {
-      id: uid(),
-      title: 'New Session',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      messages: [],
-      subAgents: [],
-      plan: undefined,
-      fileChanges: [],
-      terminalCommands: [],
-    };
-    setSessions((prev) => [newSession, ...prev]);
-    setActiveSessionId(newSession.id);
-    setSubAgents([]);
-  };
+  // Load sessions on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await api.listSessions();
+        setSessions(list);
+        if (list.length > 0) {
+          setActiveSessionId(list[0].id);
+          const detail = await api.getSession(list[0].id);
+          setMessages(detail.messages.map(mapApiMessage));
+        }
+      } catch (err) {
+        console.error('Failed to load sessions:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
-  const handleSelectSession = (id: string) => {
+  // Load messages when switching sessions
+  const handleSelectSession = useCallback(async (id: string) => {
+    if (id === activeSessionId) return;
     setActiveSessionId(id);
-  };
+    setSubAgents([]);
+    try {
+      const detail = await api.getSession(id);
+      setMessages(detail.messages.map(mapApiMessage));
+    } catch (err) {
+      console.error('Failed to load session:', err);
+      setMessages([]);
+    }
+  }, [activeSessionId]);
 
-  const handleSendMessage = useCallback((content: string) => {
-    const sessionId = activeSessionId;
+  const handleNewSession = useCallback(async () => {
+    try {
+      const session = await api.createSession();
+      setSessions((prev) => [{
+        id: session.id,
+        title: session.title,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        preview: '',
+        messageCount: 0,
+      }, ...prev]);
+      setActiveSessionId(session.id);
+      setMessages([]);
+      setSubAgents([]);
+    } catch (err) {
+      console.error('Failed to create session:', err);
+    }
+  }, []);
 
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!activeSessionId || isTyping) return;
+
+    // Add user message immediately
     const userMsg: Message = {
       id: uid(),
       role: 'user',
@@ -63,99 +88,114 @@ function App() {
       timestamp: new Date(),
       status: 'complete',
     };
-
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === sessionId
-          ? { ...s, messages: [...s.messages, userMsg], updatedAt: new Date(), title: s.messages.length === 0 ? content.slice(0, 50) : s.title }
-          : s
-      )
-    );
-
+    setMessages((prev) => [...prev, userMsg]);
     setIsTyping(true);
 
-    const models = ['o3', 'gpt-4.1', 'o4-mini', 'gpt-4.1-mini'];
-    const tasks = [
-      'Searching codebase for patterns...',
-      'Analyzing dependencies and imports...',
-      'Running test suite...',
-      'Generating code changes...',
-      'Reviewing for best practices...',
-    ];
-
-    const newAgents: SubAgent[] = [];
-    const agentCount = 1 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < agentCount; i++) {
-      newAgents.push({
+    // Spawn sub-agents for visual feedback
+    const agentTasks = ['Analyzing request...', 'Searching for context...', 'Generating response...'];
+    const models = ['o3', 'gpt-4.1', 'o4-mini'];
+    const spawned: SubAgent[] = [];
+    const count = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {
+      spawned.push({
         id: uid(),
         name: randomAgentName(),
         model: models[Math.floor(Math.random() * models.length)],
         status: 'running',
-        task: tasks[Math.floor(Math.random() * tasks.length)],
+        task: agentTasks[i % agentTasks.length],
         progress: 0,
         startTime: new Date(),
         tokensUsed: 0,
       });
     }
-
-    newAgents.forEach((agent, i) => {
-      setTimeout(() => {
-        setSubAgents((prev) => [...prev, agent]);
-      }, 300 + i * 800);
+    spawned.forEach((agent, i) => {
+      setTimeout(() => setSubAgents((prev) => [...prev, agent]), 200 + i * 600);
     });
 
+    // Progress simulation for agents
     const progressInterval = setInterval(() => {
       setSubAgents((prev) =>
         prev.map((a) =>
           a.status === 'running'
-            ? { ...a, progress: Math.min((a.progress || 0) + Math.random() * 20, 95), tokensUsed: (a.tokensUsed || 0) + Math.floor(Math.random() * 500) }
+            ? { ...a, progress: Math.min((a.progress || 0) + Math.random() * 25, 90) }
             : a
         )
       );
-    }, 600);
+    }, 500);
 
-    const delay = 2000 + Math.random() * 2000;
-    setTimeout(() => {
-      clearInterval(progressInterval);
-      setSubAgents((prev) =>
-        prev.map((a) =>
-          a.status === 'running'
-            ? { ...a, status: 'complete', progress: 100, endTime: new Date() }
-            : a
-        )
-      );
+    // Streaming assistant message
+    const assistantId = uid();
+    const toolCalls: any[] = [];
+    streamingTextRef.current.set(assistantId, '');
 
-      const responseText = mockResponses[Math.floor(Math.random() * mockResponses.length)];
-      const assistantMsg: Message = {
-        id: uid(),
-        role: 'assistant',
-        content: responseText,
-        timestamp: new Date(),
-        status: 'complete',
-        toolCalls: [
-          {
-            id: uid(),
-            name: 'exec_command',
-            status: 'complete',
-            input: 'npm test -- --watch=false',
-            output: 'PASS  src/App.test.tsx\n  ✓ renders correctly (23ms)\n\nTests: 2 passed, 2 total',
-            duration: 3200,
-          },
-        ],
-      };
-
+    try {
+      await api.sendMessage(activeSessionId, content, {
+        onUserMessage: (_msg) => { /* already added */ },
+        onAssistantStart: (_id) => {
+          const placeholder: Message = {
+            id: assistantId,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date(),
+            status: 'streaming',
+          };
+          setMessages((prev) => [...prev, placeholder]);
+        },
+        onText: (_id, text) => {
+          streamingTextRef.current.set(
+            assistantId,
+            (streamingTextRef.current.get(assistantId) || '') + text
+          );
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: streamingTextRef.current.get(assistantId) || '' }
+                : m
+            )
+          );
+        },
+        onToolCall: (tc) => {
+          toolCalls.push(tc);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, toolCalls: [...toolCalls] }
+                : m
+            )
+          );
+        },
+        onError: (error) => {
+          console.error('Stream error:', error);
+        },
+        onDone: () => {
+          clearInterval(progressInterval);
+          setSubAgents((prev) =>
+            prev.map((a) =>
+              a.status === 'running'
+                ? { ...a, status: 'complete', progress: 100, endTime: new Date() }
+                : a
+            )
+          );
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, status: 'complete' as const }
+                : m
+            )
+          );
+          setIsTyping(false);
+          // Refresh session list to pick up title changes
+          api.listSessions().then(setSessions).catch(() => {});
+        },
+      });
+    } catch (err) {
+      console.error('Send failed:', err);
       setIsTyping(false);
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === sessionId
-            ? { ...s, messages: [...s.messages, assistantMsg], updatedAt: new Date() }
-            : s
-        )
-      );
-    }, delay);
-  }, [activeSessionId]);
+      clearInterval(progressInterval);
+    }
+  }, [activeSessionId, isTyping]);
 
-  // Build visible panel set for top bar highlights
+  // Build visible panel set for top bar
   const visiblePanels = new Set<PanelId>();
   const collectPanels = (node: any) => {
     if (typeof node === 'string') visiblePanels.add(node as PanelId);
@@ -163,18 +203,26 @@ function App() {
   };
   collectPanels(layout);
 
-  const msgCount = activeSession?.messages.length || 0;
+  const msgCount = messages.length;
   const agentCount = subAgents.filter((a) => a.status === 'running').length;
-
-  const messages = activeSession?.messages || [];
-  const showWelcome = activeSession && messages.length === 0;
+  const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'CMDui';
+  const showWelcome = activeSessionId && messages.length === 0 && !loading;
 
   return (
     <div className="app-layout">
       <Sidebar
         isOpen={sidebarOpen}
-        sessions={sessions}
-        activeSessionId={activeSessionId}
+        sessions={sessions.map(s => ({
+          id: s.id,
+          title: s.title,
+          createdAt: new Date(s.createdAt),
+          updatedAt: new Date(s.updatedAt),
+          messages: [],
+          subAgents: [],
+          fileChanges: [],
+          terminalCommands: [],
+        }))}
+        activeSessionId={activeSessionId || undefined}
         activeSubAgents={subAgents}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
@@ -187,20 +235,41 @@ function App() {
           visiblePanels={visiblePanels}
           onTogglePanel={togglePanel}
           onResetLayout={resetLayout}
-          sessionTitle={activeSession?.title || 'CMDui'}
+          sessionTitle={sessionTitle}
         />
 
         <div className="content-area">
-          {showWelcome ? (
+          {loading ? (
+            <div className="welcome-screen">
+              <div className="typing-indicator">
+                <div className="typing-dot" />
+                <div className="typing-dot" />
+                <div className="typing-dot" />
+              </div>
+            </div>
+          ) : showWelcome ? (
             <WelcomeScreen onSuggestionClick={handleSendMessage} />
           ) : (
             <LayoutEngine
               layout={layout}
               onRemovePanel={removePanel}
               subAgents={subAgents}
-              plan={mockPlan}
-              fileChanges={mockFileChanges}
-              terminalCommands={mockTerminalCommands}
+              plan={{
+                steps: [
+                  { id: '1', step: 'Explore codebase', status: 'completed' },
+                  { id: '2', step: 'Design solution', status: 'completed' },
+                  { id: '3', step: 'Implement changes', status: 'in_progress' },
+                  { id: '4', step: 'Test and verify', status: 'pending' },
+                ],
+              }}
+              fileChanges={[
+                { id: uid(), filePath: 'src/App.tsx', type: 'modify' as const, additions: 42, deletions: 18 },
+                { id: uid(), filePath: 'src/utils/api.ts', type: 'add' as const, additions: 89, deletions: 0 },
+                { id: uid(), filePath: 'server/index.ts', type: 'add' as const, additions: 156, deletions: 0 },
+              ]}
+              terminalCommands={[
+                { id: uid(), command: 'npm run build', output: '✓ built in 80ms', exitCode: 0, duration: 800 },
+              ]}
               messages={messages}
               isTyping={isTyping}
               onSendMessage={handleSendMessage}
@@ -223,6 +292,24 @@ function App() {
       </main>
     </div>
   );
+}
+
+function mapApiMessage(m: api.MessageInfo): Message {
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    timestamp: new Date(m.timestamp),
+    status: 'complete',
+    toolCalls: m.toolCalls?.map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      status: tc.status,
+      input: tc.input,
+      output: tc.output,
+      duration: tc.duration,
+    })),
+  };
 }
 
 export default App;
