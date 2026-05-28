@@ -95,6 +95,21 @@ function preferredDirection(id: PanelId): 'horizontal' | 'vertical' {
   return 'vertical';
 }
 
+
+/** Swap two panels in the tree */
+function swapPanelsInTree(node: LayoutNode, from: PanelId, to: PanelId): LayoutNode {
+  if (typeof node === 'string') {
+    if (node === from) return to;
+    if (node === to) return from;
+    return node;
+  }
+  const split = node as SplitNode;
+  return {
+    ...split,
+    children: split.children.map((child) => swapPanelsInTree(child, from, to)),
+  };
+}
+
 export function useLayoutState() {
   const [layout, setLayoutState] = useState<LayoutNode>(loadLayout);
 
@@ -139,6 +154,13 @@ export function useLayoutState() {
     });
   }, [setLayout]);
 
+  const swapPanels = useCallback((from: PanelId, to: PanelId) => {
+    setLayout((prev) => {
+      if (!containsPanel(prev, from) || !containsPanel(prev, to)) return prev;
+      return swapPanelsInTree(prev, from, to);
+    });
+  }, [setLayout]);
+
   const resetLayout = useCallback(() => {
     setLayout(structuredClone(DEFAULT_LAYOUT));
   }, [setLayout]);
@@ -147,5 +169,5 @@ export function useLayoutState() {
     return containsPanel(layout, id);
   }, [layout]);
 
-  return { layout, setLayout, addPanel, removePanel: removePanelById, togglePanel, resetLayout, isPanelVisible };
+  return { layout, setLayout, addPanel, removePanel: removePanelById, togglePanel, swapPanels, resetLayout, isPanelVisible };
 }

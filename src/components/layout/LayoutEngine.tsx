@@ -8,6 +8,7 @@ import { PanelContent } from './PanelContent';
 interface Props {
   layout: LayoutNode;
   onRemovePanel: (id: PanelId) => void;
+  onSwapPanels: (from: PanelId, to: PanelId) => void;
   subAgents: any;
   plan: any;
   fileChanges: any;
@@ -21,6 +22,7 @@ interface Props {
 export function LayoutEngine({
   layout,
   onRemovePanel,
+  onSwapPanels,
   subAgents,
   plan,
   fileChanges,
@@ -30,13 +32,13 @@ export function LayoutEngine({
   onSendMessage,
   workingDir,
 }: Props) {
-  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{ subAgents, plan, fileChanges, terminalCommands, messages, isTyping, onSendMessage, workingDir }} />;
+  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{ subAgents, plan, fileChanges, terminalCommands, messages, isTyping, onSendMessage, workingDir, onSwap: onSwapPanels }} />;
 }
 
 interface RenderProps {
   node: LayoutNode;
   onRemovePanel: (id: PanelId) => void;
-  context: any;
+  context: any;  // includes onSwap
 }
 
 function RenderNode({ node, onRemovePanel, context }: RenderProps) {
@@ -45,7 +47,7 @@ function RenderNode({ node, onRemovePanel, context }: RenderProps) {
     const config = getPanelConfig(panelId);
     return (
       <Allotment.Pane minSize={config.minSize} preferredSize={config.defaultSize}>
-        <PanelWrapper panelId={panelId} onClose={onRemovePanel}>
+        <PanelWrapper panelId={panelId} onClose={onRemovePanel} onSwap={context.onSwap}>
           <PanelContent panelId={panelId} context={context} />
         </PanelWrapper>
       </Allotment.Pane>

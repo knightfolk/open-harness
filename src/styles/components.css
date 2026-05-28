@@ -1801,3 +1801,52 @@ button:focus-visible {
   left: -3px;
   right: -3px;
 }
+
+/* ========== Drag & Drop ========== */
+.panel-grip {
+  color: var(--text-tertiary);
+  cursor: grab;
+  opacity: 0.5;
+  transition: opacity 150ms ease;
+  flex-shrink: 0;
+}
+
+.panel-header:hover .panel-grip {
+  opacity: 1;
+  color: var(--text-secondary);
+}
+
+.panel-header[draggable="true"] {
+  cursor: grab;
+}
+
+.panel-header[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Source panel while being dragged */
+.panel-frame.dragging {
+  opacity: 0.4;
+}
+
+/* Drop target highlight */
+.panel-frame.panel-drop-target {
+  position: relative;
+}
+
+.panel-frame.panel-drop-target::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 2px dashed var(--accent-primary);
+  border-radius: var(--radius-md);
+  background: var(--accent-primary-muted);
+  pointer-events: none;
+  z-index: 10;
+  animation: dropPulse 1s ease-in-out infinite;
+}
+
+@keyframes dropPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}

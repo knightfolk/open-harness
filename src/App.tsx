@@ -22,7 +22,7 @@ function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(true);
-  const { layout, togglePanel, removePanel, resetLayout } = useLayoutState();
+  const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
 
@@ -316,6 +316,7 @@ function App() {
             <LayoutEngine
               layout={layout}
               onRemovePanel={removePanel}
+              onSwapPanels={swapPanels}
               subAgents={subAgents}
               plan={{
                 steps: [
