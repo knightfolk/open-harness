@@ -49,14 +49,6 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        <div className="sidebar-logo">C</div>
-        <div>
-          <div className="sidebar-title">CMDui</div>
-          <div className="sidebar-subtitle">Agent Desktop</div>
-        </div>
-      </div>
-
       <div className="sidebar-tabs">
         {tabConfig.map(({ key, icon: Icon, label }) => (
           <button
