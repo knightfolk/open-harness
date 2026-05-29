@@ -1,5 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+// ── Types ──────────────────────────────────────────────
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -45,6 +47,49 @@ export interface StreamCallbacks {
   onDone: () => void;
 }
 
+// ── Provider / Model APIs ──────────────────────────────
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  type: string;
+  apiKey?: string;
+  baseURL?: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  providerID: string;
+  apiModel: string;
+}
+
+export async function getProviders(): Promise<ProviderInfo[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/providers`);
+    if (res.ok) return res.json();
+  } catch { /* not available yet */ }
+  return [];
+}
+
+export async function getModels(): Promise<ModelInfo[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/models`);
+    if (res.ok) return res.json();
+  } catch { /* not available yet */ }
+  return [];
+}
+
+export async function setModel(modelID: string): Promise<void> {
+  await fetch(`${API_BASE}/api/model`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelID }),
+  });
+}
+
+// ── Session APIs ───────────────────────────────────────
+
 export async function listSessions(): Promise<SessionInfo[]> {
   const res = await fetch(`${API_BASE}/api/sessions`);
   if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`);
@@ -71,6 +116,8 @@ export async function deleteSession(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/sessions/${id}`, { method: 'DELETE' });
 }
 
+// ── Send Message (streaming) ───────────────────────────
+
 export async function sendMessage(sessionId: string, content: string, callbacks: StreamCallbacks): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -94,7 +141,6 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
 
     buffer += decoder.decode(value, { stream: true });
 
-    // Process complete SSE blocks (ending with \n\n)
     while (buffer.includes('\n\n')) {
       const blockEnd = buffer.indexOf('\n\n');
       const block = buffer.slice(0, blockEnd);
@@ -104,43 +150,40 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
       let data = '';
 
       for (const line of block.split('\n')) {
-        if (line.startsWith('event: ')) {
-          eventType = line.slice(7).trim();
-        } else if (line.startsWith('data: ')) {
-          data = line.slice(6);
-        }
+        if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+        else if (line.startsWith('data: ')) data = line.slice(6);
       }
 
       if (!data) continue;
 
       try {
         const parsed = JSON.parse(data);
-
         switch (eventType) {
-          case 'user_message':
-            callbacks.onUserMessage(parsed as MessageInfo);
-            break;
-          case 'assistant_start':
-            callbacks.onAssistantStart(parsed.id);
-            break;
-          case 'text':
-            callbacks.onText(parsed.id, parsed.text);
-            break;
-          case 'tool_call':
-            callbacks.onToolCall(parsed as ToolCallInfo);
-            break;
-          case 'error':
-            callbacks.onError(parsed.error || 'Unknown error');
-            break;
-          case 'done':
-            // handled below
-            break;
+          case 'user_message': callbacks.onUserMessage(parsed as MessageInfo); break;
+          case 'assistant_start': callbacks.onAssistantStart(parsed.id); break;
+          case 'text': callbacks.onText(parsed.id, parsed.text); break;
+          case 'tool_call': callbacks.onToolCall(parsed as ToolCallInfo); break;
+          case 'error': callbacks.onError(parsed.error || 'Unknown error'); break;
         }
       } catch { /* skip malformed */ }
     }
   }
 
   callbacks.onDone();
+}
+
+// ── Native Dialog (Electron) ───────────────────────────
+
+export async function openFolderDialog(): Promise<string | null> {
+  // Use Electron's native dialog if available
+  if (typeof window !== 'undefined' && (window as any).CMDuiNative?.openFolderDialog) {
+    return (window as any).CMDuiNative.openFolderDialog();
+  }
+  // Fallback to server-side dialog
+  const res = await fetch(`${API_BASE}/api/dialog/open-folder`, { method: 'POST' });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.path;
 }
 
 // ── Filesystem ─────────────────────────────────────────
@@ -178,13 +221,6 @@ export async function readFile(filePath: string): Promise<FileInfo> {
   const res = await fetch(`${API_BASE}/api/fs/read?path=${encodeURIComponent(filePath)}`);
   if (!res.ok) throw new Error(`Failed to read file: ${res.status}`);
   return res.json();
-}
-
-export async function openFolderDialog(): Promise<string | null> {
-  const res = await fetch(`${API_BASE}/api/dialog/open-folder`, { method: 'POST' });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.path;
 }
 
 // ── Terminal ───────────────────────────────────────────

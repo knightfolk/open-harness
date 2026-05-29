@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @main
 struct CMDuiApp: App {
@@ -29,8 +30,22 @@ struct CMDuiApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     let backend = BackendService.shared
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Set activation policy BEFORE the run loop starts
+        if let app = NSApp {
+            app.setActivationPolicy(.regular)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         backend.initialize()
+
+        // Activate and bring window to front
+        if let app = NSApp {
+            app.activate(ignoringOtherApps: true)
+        }
+
+        fputs("✓ CMDui launched — backend initialized\n", stderr)
     }
 }
 

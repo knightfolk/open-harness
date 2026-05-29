@@ -5,6 +5,7 @@ struct ContentView: View {
     var body: some View {
         WebViewRepresentable()
             .ignoresSafeArea()
+            .frame(minWidth: 900, minHeight: 600)
     }
 }
 
@@ -13,11 +14,9 @@ struct WebViewRepresentable: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         config.preferences = WKPreferences()
 
-        // Register the Swift ↔ JS bridge
         let bridge = WebBridge.shared
         config.userContentController.add(bridge, name: "nativeBridge")
 
-        // Inject bridge setup script
         let bridgeScript = WKUserScript(
             source: """
             window.NativeBridge = {
@@ -37,38 +36,20 @@ struct WebViewRepresentable: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
+        webView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Find the bundled dist/index.html
-        // SPM packages resources into a <target>.bundle with a Resources/ subdirectory
-        var loaded = false
-        guard let exePath = Bundle.main.executablePath else { return webView }
-        let exeDir = URL(fileURLWithPath: exePath).deletingLastPathComponent()
-        let candidateBases = [
-            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle/Resources"),
-            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle"),
-            exeDir.appendingPathComponent("Resources"),
-        ]
-        for base in candidateBases {
-            let htmlURL = base.appendingPathComponent("dist/index.html")
-            if FileManager.default.fileExists(atPath: htmlURL.path) {
-                print("Loading bundled UI from: \(htmlURL.path)")
-                webView.loadFileURL(htmlURL, allowingReadAccessTo: base)
-                loaded = true
-                break
-            }
-        }
+        // Store ref so bridge can call back into it
+        WebBridge.shared.setWebView(webView)
 
-        // Fallback: dev mode from localhost
-        if !loaded {
-            let devURL = URL(string: "http://localhost:5173")!
-            print("Loading dev UI from: \(devURL.absoluteString)")
-            webView.load(URLRequest(url: devURL))
-        }
+        // Load the UI now (WebViewLoader handles bundled dist vs dev fallback)
+        WebViewLoader.load(webView: webView)
 
         return webView
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        // No-op: content loaded once in makeNSView
+    }
 
     func makeCoordinator() -> WebViewCoordinator {
         WebViewCoordinator()
@@ -95,7 +76,17 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        print("WebView finished loading")
+        print("WebView finished loading: \(webView.url?.absoluteString ?? "nil")")
+
+        // Check if React actually mounted
+        webView.evaluateJavaScript("document.getElementById('root').innerHTML.length") { result, error in
+            if let len = result as? Int {
+                print("Root element content length: \(len)")
+            }
+            if let err = error {
+                print("JS eval error: \(err.localizedDescription)")
+            }
+        }
 
         // Inject provider/model data
         let providers = BackendService.shared.providerRegistry.configuredProviders()
@@ -116,5 +107,89 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
             }
             """)
         }
+    }
+}
+
+// Helper to load the page
+class WebViewLoader {
+    static func load(webView: WKWebView) {
+        // Try loading bundled React app via inline HTML (avoids ES module CORS issues with file://)
+        guard let exePath = Bundle.main.executablePath else {
+            print("No executable path — falling back to dev server")
+            _loadDev(webView)
+            return
+        }
+
+        let exeDir = URL(fileURLWithPath: exePath).deletingLastPathComponent()
+        let candidates = [
+            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle/Resources"),
+            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle"),
+            exeDir.appendingPathComponent("Resources"),
+        ]
+
+        for base in candidates {
+            let htmlURL = base.appendingPathComponent("dist/index.html")
+            let jsDir = base.appendingPathComponent("dist/assets")
+
+            if FileManager.default.fileExists(atPath: htmlURL.path) {
+                // Read the JS files and inject them inline to bypass file:// CORS
+                guard let htmlContent = try? String(contentsOf: htmlURL, encoding: .utf8) else {
+                    print("Could not read index.html")
+                    _loadDev(webView)
+                    return
+                }
+
+                // Find JS file
+                let jsFiles = (try? FileManager.default.contentsOfDirectory(atPath: jsDir.path)) ?? []
+                var jsContent = ""
+
+                for file in jsFiles where file.hasSuffix(".js") {
+                    let jsPath = jsDir.appendingPathComponent(file)
+                    if let content = try? String(contentsOf: jsPath, encoding: .utf8) {
+                        jsContent += content + "\n"
+                    }
+                }
+
+                // Read CSS file too
+                var cssHref = ""
+                for file in jsFiles where file.hasSuffix(".css") {
+                    cssHref = "./assets/\(file)"
+                    break
+                }
+
+                // Build a self-contained HTML that doesn't need ES module loading
+                let inlinedHTML = """
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8" />
+                    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>" />
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                    <title>CMDui — Agent Desktop</title>
+                    <style>html { background: #0d0f11; }</style>
+                    <link rel="stylesheet" href="\(cssHref)">
+                </head>
+                <body>
+                    <div id="root"></div>
+                    <script>\(jsContent)</script>
+                </body>
+                </html>
+                """
+
+                // Load with base URL so CSS relative paths resolve
+                webView.loadHTMLString(inlinedHTML, baseURL: base.appendingPathComponent("dist"))
+                print("Loaded inlined React UI from bundle")
+                return
+            }
+        }
+
+        // No bundled dist found — use dev server
+        _loadDev(webView)
+    }
+
+    static func _loadDev(_ webView: WKWebView) {
+        let devURL = URL(string: "http://localhost:5173")!
+        print("Loading dev UI from: \(devURL.absoluteString)")
+        webView.load(URLRequest(url: devURL))
     }
 }

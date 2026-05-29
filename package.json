@@ -3,13 +3,19 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "dotenv -- tsx server/index.ts",
-    "dev:all": "dotenv -- tsx server/index.ts & vite --port 5173"
+    "dev:all": "dotenv -- tsx server/index.ts & vite --port 5173",
+    "electron": "electron .",
+    "start": "node scripts/start.mjs",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
   },
   "dependencies": {
     "allotment": "^1.20.5",
@@ -35,6 +41,8 @@
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^6.0.1",
     "dotenv-cli": "^11.0.0",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -43,5 +51,23 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12"
+  },
+  "build": {
+    "appId": "com.cmdui.desktop",
+    "productName": "CMDui",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "server/**",
+      "package.json",
+      "package-lock.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": "dmg"
+    }
   }
 }
