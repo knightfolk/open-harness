@@ -187,3 +187,40 @@ New endpoints:
 **Deliverable:** A standalone markdown doc (e.g., `docs/MODEL_LANDSCAPE.md`) plus a condensed summary table wired back into `server/providers/models.ts` metadata.
 
 **Priority:** Post-Phase 3. Useful for defaults but not blocking the core provider harness.
+
+---
+
+## Phase 4: Chat-MCP Integration & UI Polish (Remaining)
+
+### 4.1 Wire MCP Tool Calls Into Chat Loop (HIGH PRIORITY)
+- [ ] Modify `streamMiniMax()` in `server/index.ts` to detect tool-call responses from the LLM
+- [ ] When a tool call is detected, invoke it via `mcpManager.callTool(serverId, toolName, args)`
+- [ ] Feed the tool result back to the LLM as a tool result message
+- [ ] Continue the conversation loop until the LLM stops requesting tools
+- [ ] Emit tool-call SSE events to the client for real-time UI feedback
+- [ ] Support both Docker MCP tools and built-in tools (filesystem, terminal)
+
+### 4.2 Fetch Models UI Refresh (MEDIUM)
+- [ ] After `handleFetchModels` completes in `Sidebar.tsx`, verify providers state refreshes
+- [ ] Show loading state during fetch
+- [ ] Show success/error toast after fetch completes
+- [ ] Auto-scroll to the newly fetched models in the provider card
+
+### 4.3 Docker MCP Lifecycle in UI (MEDIUM)
+- [ ] Poll `GET /api/mcp/status` on mount and periodically (every 30s)
+- [ ] Show live tool count badge on Docker MCP card
+- [ ] Add collapsible tool list under each MCP server card
+- [ ] Add start/stop buttons calling the appropriate endpoints
+- [ ] Show running/stopped status with visual indicator
+
+### 4.4 Role Bucket Auto-Suggestions (LOW)
+- [ ] Parse `docs/MODEL_LANDSCAPE.md` into a recommendation map
+- [ ] Highlight recommended models with a "✓ Recommended" badge in role bucket dropdowns
+- [ ] Only suggest models from enabled providers
+- [ ] Show a tooltip explaining why a model is recommended for a role
+
+### 4.5 Polish & Stability
+- [ ] Filter noisy Docker MCP stderr logs (credential helper messages)
+- [ ] Add error recovery if Docker MCP gateway dies mid-session
+- [ ] Persist theme and personality to config immediately on change (already working, verify)
+- [ ] Add "Reset to defaults" button in settings
