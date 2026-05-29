@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
+# Swift build artifacts
+CMDuiApp/.build/
+CMDuiApp/.swiftpm/
+CMDuiApp/Package.resolved

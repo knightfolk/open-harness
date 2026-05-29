@@ -1,137 +1,172 @@
-# Modular Panel Layout — Implementation Plan
+# CMDui Universal Provider Harness — Implementation Plan
 
 ## Goal
-Refactor the fixed 3-column layout into a **tiling panel system** where every section (chat, diffs, browser, terminal, sub-agents, plan, etc.) is a movable tile. Users can rearrange panels by dragging, split views vertically/horizontally, and toggle visibility from the top bar.
+Turn CMDui into a truly open AI harness that supports **every major provider** — closed source (OpenAI, Anthropic, Google, Azure, Bedrock) and open source (Ollama, LM Studio, local endpoints) — through a unified provider abstraction ported from OpenCode's architecture.
 
 ## Architecture
 
-### 1. Panel Registry
-A central registry of all available panel types:
-- **Chat** — main conversation view
-- **Diffs** — file change / diff viewer
-- **Browser** — embedded browser preview (iframe placeholder)
-- **Terminal** — command output / interactive terminal
-- **Sub-Agents** — agent tracker (standalone panel, sidebar keeps its tree too)
-- **Plan** — step progress tracker
-- **Files** — file tree / file changes list
+### 1. Provider Registry
+A unified interface where every provider implements the same contract:
 
-Each panel type defines:
-- `id` — unique key (e.g., `chat`, `diffs`, `terminal`)
-- `label` — display name
-- `icon` — lucide icon
-- `defaultSize` — suggested size in pixels
-- `minSize` — minimum before collapsing
-- `component` — the React component to render
-
-### 2. Layout State (localStorage-persisted)
-A layout tree persisted to localStorage:
-
-```
-LayoutNode = PanelId | [direction, ...LayoutNode[]]
-direction = 'horizontal' | 'vertical'
-PanelId = string  // references Panel Registry
+```typescript
+interface Provider {
+  id: string;                    // e.g., 'openai', 'anthropic', 'local'
+  name: string;                  // e.g., 'OpenAI', 'Anthropic'
+  models: ModelConfig[];         // available models
+  streamResponse(messages, tools): AsyncGenerator<ProviderEvent>;
+}
 ```
 
-**Example default layout:**
+Every provider emits the same `ProviderEvent` stream:
+- `content_delta` — text chunk
+- `tool_use_start` — tool call beginning
+- `tool_use_delta` — tool call input streaming
+- `tool_use_stop` — tool call complete
+- `thinking_delta` — reasoning tokens (for models that support it)
+- `complete` — response finished
+- `error` — something broke
+
+### 2. Supported Providers
+
+| Provider | Type | API Format | Auth |
+|----------|------|-----------|------|
+| **OpenAI** | Closed | OpenAI native | API key |
+| **Anthropic** | Closed | Messages API | API key |
+| **Google Gemini** | Closed | Gemini API | API key |
+| **Azure OpenAI** | Closed | OpenAI-compatible | API key + endpoint |
+| **AWS Bedrock** | Closed | Bedrock Converse | AWS credentials |
+| **MiniMax** | Closed | OpenAI-compatible | API key |
+| **xAI (Grok)** | Closed | OpenAI-compatible | API key |
+| **Groq** | Closed | OpenAI-compatible | API key |
+| **OpenRouter** | Aggregator | OpenAI-compatible | API key |
+| **Copilot** | Closed | OpenAI-compatible | GitHub token |
+| **Ollama** | Open | OpenAI-compatible | Local (no key) |
+| **LM Studio** | Open | OpenAI-compatible | Local (no key) |
+| **Custom** | Any | OpenAI-compatible | User-configured |
+
+**Key insight:** Most providers use the OpenAI-compatible chat completions format with `stream: true`. Only Anthropic and Google need native adapters. Everything else routes through the OpenAI adapter with different base URLs.
+
+### 3. Provider Adapters
+
+Only **3 adapter implementations** needed:
+
+1. **OpenAI adapter** — covers OpenAI, MiniMax, xAI, Groq, OpenRouter, Copilot, Azure, Ollama, LM Studio, and any custom endpoint. Just different `baseURL` + `apiKey`.
+
+2. **Anthropic adapter** — native Messages API with `content` blocks, `tool_use` blocks, and streaming via SSE.
+
+3. **Google Gemini adapter** — native `generateContent` with `streamGenerateContent` for streaming.
+
+### 4. Model Registry
+
+A static catalog of known models (ported from OpenCode's model definitions) with:
+- Model ID, display name, provider
+- Context window, max tokens
+- Cost per million tokens (input/output/cached)
+- Capabilities: reasoning, attachments, tool use
+
+Plus dynamic discovery for local providers (Ollama, LM Studio) via their `/v1/models` endpoint.
+
+### 5. Configuration
+
+```jsonc
+// ~/.cmdui/config.json
+{
+  "providers": {
+    "openai":    { "apiKey": "sk-..." },
+    "anthropic": { "apiKey": "sk-ant-..." },
+    "google":    { "apiKey": "AIza..." },
+    "minimax":   { "apiKey": "sk-cp-..." },
+    "openrouter":{ "apiKey": "sk-or-..." },
+    "local":     { "endpoint": "http://localhost:11434" }  // Ollama
+  },
+  "defaultModel": "minimax.MiniMax-M2.7",
+  "agents": {
+    "coder":      { "model": "minimax.MiniMax-M2.7" },
+    "summarizer": { "model": "minimax.MiniMax-M2.7" },
+    "title":      { "model": "minimax.MiniMax-M2.7" }
+  }
+}
 ```
-['horizontal',
-  ['vertical',
-    'chat',
-    'terminal'
-  ],
-  ['vertical',
-    'sub-agents',
-    'plan'
-  ]
-]
-```
 
-Saved to `localStorage('cmdui-layout')` on every change, restored on boot.
+Config discovery order:
+1. `~/.cmdui/config.json` (primary)
+2. Environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.)
+3. Existing tool configs (`~/.mmx/config.json` for MiniMax, etc.)
+4. Auto-detect local providers (Ollama on :11434, LM Studio on :1234)
 
-### 3. Allotment for Splits
-Uses [allotment](https://github.com/smeijer/allotment) for the split/resize engine:
-- `<Allotment horizontal|vertical>` replaces custom SplitContainer
-- Built-in resize handles, min/max sizes, proportional sizing
-- Nestable for complex layouts
-- Keyboard accessible, touch friendly
+### 6. Frontend Changes
 
-### 4. Panel Chrome
-Every panel gets a consistent wrapper:
-```
-┌─────────────────────────────┐
-│ ⋮⋮  Icon  Panel Title    × │  ← drag handle (deferred), title, close
-├─────────────────────────────┤
-│                             │
-│     (panel content)         │
-│                             │
-└─────────────────────────────┘
-```
+- **Model selector** in top bar becomes a dropdown showing all configured providers + models
+- Models grouped by provider with icons
+- Shows "local" badge for Ollama/LM Studio models
+- "Configure providers" link opens settings panel
+- Status bar shows active model + provider
 
-### 5. Top Bar Panel Toggles
-- Dynamic toggle buttons from the registry
-- Click to add/remove panels from the layout
-- Active toggles are highlighted
+### 7. Server API Changes
 
-### 6. Drag & Swap (DEFERRED — final polish pass)
-- Each panel gets a drag handle in its header
-- On drop onto another panel: swap positions
-- Ghost outline + drop-zone highlights
-- Implemented last, after everything else works
+New endpoints:
+- `GET /api/providers` — list configured providers and available models
+- `POST /api/providers/configure` — save provider config
+- `GET /api/providers/discover` — auto-discover local providers
+- Session model selection: `POST /api/sessions` accepts `modelId`
 
 ## File Changes
 
 ### New Files
 | File | Purpose |
 |------|---------|
-| `src/types/layout.ts` | LayoutNode, PanelConfig types |
-| `src/components/layout/panelRegistry.ts` | Registry of all available panels |
-| `src/components/layout/LayoutEngine.tsx` | Renders layout tree via Allotment |
-| `src/components/layout/PanelWrapper.tsx` | Chrome around any panel (header, close) |
-| `src/components/layout/useLayoutState.ts` | Hook: layout tree state + localStorage persistence |
-| `src/components/DiffViewer.tsx` | New panel: file diff display |
-| `src/components/BrowserPanel.tsx` | New panel: embedded browser placeholder |
+| `server/providers/types.ts` | Provider, ModelConfig, ProviderEvent types |
+| `server/providers/openai.ts` | OpenAI-compatible adapter (covers 10+ providers) |
+| `server/providers/anthropic.ts` | Anthropic Messages API adapter |
+| `server/providers/gemini.ts` | Google Gemini adapter |
+| `server/providers/registry.ts` | Provider registry, config loading, model resolution |
+| `server/providers/models.ts` | Static model catalog (ported from OpenCode) |
+| `server/providers/discover.ts` | Auto-discover Ollama, LM Studio, etc. |
+| `shared/config.ts` | Config loading + validation (shared between server/client) |
 
 ### Modified Files
 | File | Change |
-|------|--------|
-| `src/App.tsx` | Replace fixed layout with LayoutEngine |
-| `src/components/TopBar.tsx` | Dynamic panel toggles from registry |
-| `src/styles/components.css` | Add panel chrome, allotment overrides |
+|------|---------|
+| `server/index.ts` | Use provider registry instead of hardcoded MiniMax |
+| `src/utils/api.ts` | Add provider/model API methods |
+| `src/components/TopBar.tsx` | Model selector dropdown with provider grouping |
+| `src/App.tsx` | Model selection state, pass to chat |
+| `src/components/layout/PanelContent.tsx` | Settings panel for provider config |
 
-### Kept Unchanged
-| File | Reason |
-|------|--------|
-| `src/components/Sidebar.tsx` | Sub-agent tree stays in sidebar |
-
-### Removed Files
-| File | Reason |
-|------|--------|
-| `src/components/RightPanel.tsx` | Replaced by generic panel system |
+### Config Files
+| File | Purpose |
+|------|---------|
+| `~/.cmdui/config.json` | User's provider keys and model preferences |
+| `~/.cmdui/config.example.json` | Example config with all provider templates |
 
 ## Implementation Order
 
-### Phase 1: Core Layout Engine + localStorage
-1. Install allotment
-2. Define layout types (`types/layout.ts`)
-3. Build `panelRegistry` with all panel definitions
-4. Build `useLayoutState` hook with add/remove + localStorage save/restore
-5. Build `PanelWrapper` with header and close button
-6. Build `LayoutEngine` — recursive Allotment renderer
+### Phase 1: Provider Abstraction
+1. Define provider types (`server/providers/types.ts`)
+2. Build model catalog (`server/providers/models.ts`) — port OpenCode's model list
+3. Build config loader (`shared/config.ts`) — reads `~/.cmdui/config.json` + env vars
+4. Build OpenAI adapter — covers all OpenAI-compatible providers
+5. Build Anthropic adapter
+6. Build Gemini adapter
+7. Build provider registry — resolves model IDs to provider + adapter
 
-### Phase 2: Panel Content
-7. Wrap existing Chat view as a panel
-8. Build `DiffViewer` panel
-9. Build `BrowserPanel` placeholder
-10. Wrap existing Terminal output as a panel
-11. Wrap SubAgent tracker as a panel
-12. Wrap Plan tracker as a panel
+### Phase 2: Integration
+8. Wire registry into `server/index.ts` — replace hardcoded MiniMax
+9. Add `GET /api/providers` and `GET /api/providers/discover` endpoints
+10. Add model selection to sessions
+11. Frontend model selector in top bar
+12. Frontend provider config settings panel
 
-### Phase 3: Integration
-13. Update `TopBar` with dynamic panel toggles
-14. Wire everything into `App.tsx`
-15. Clean up removed files (RightPanel)
+### Phase 3: Polish
+13. Auto-discovery for Ollama/LM Studio on startup
+14. Provider health checks
+15. Token usage tracking per-provider
+16. Cost estimation display
 
-### Phase 4: Polish (deferred)
-16. Drag-swap between panels
-17. DragOverlay visual feedback
-18. Layout presets (default, code review, monitoring, etc.)
+## Why This Works
+
+**One adapter covers 80% of providers.** The OpenAI chat completions format with streaming has become the de facto standard. MiniMax, Groq, xAI, OpenRouter, Ollama, LM Studio, Azure OpenAI, and Copilot all use it. Only Anthropic and Google need their own adapters.
+
+**Users bring their own keys.** CMDui doesn't host models — it's a harness. Configure what you have, use what you want. Free local models via Ollama work out of the box with zero config.
+
+**OpenCode proven patterns.** The provider abstraction, model catalog, and config structure are battle-tested from the OpenCode project. We're porting the architecture, not reinventing it.
