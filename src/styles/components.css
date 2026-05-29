@@ -2342,3 +2342,70 @@ button:focus-visible {
   color: var(--accent-primary-hover);
   flex-shrink: 0;
 }
+
+/* ========== Theme Swatches ========== */
+.theme-swatches {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.theme-swatch-group {
+}
+.theme-swatch-group-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+.theme-swatch-row {
+  display: flex;
+  gap: 6px;
+}
+.theme-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+.theme-swatch:hover {
+  transform: scale(1.1);
+  box-shadow: var(--shadow-md);
+}
+.theme-swatch.active {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--text-secondary);
+}
+
+/* ========== Personality Textarea ========== */
+.personality-textarea {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.personality-textarea:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-primary-muted);
+}
+.personality-textarea::placeholder {
+  color: var(--text-tertiary);
+}

@@ -3,6 +3,7 @@ import {
   MessageSquare, FileCode, Zap, Brain, Settings, Plus, Clock,
   Sparkles, Globe, Search, FileText,
   Command, Layout, Grid, Layers, Wrench, Palette, Image, PlayCircle, ShieldCheck, KeyRound, SlidersHorizontal,
+  Server, MessageCircle, Check,
   ChevronDown, ChevronRight, Loader, CheckCircle2, Circle, Bot, AlertCircle, FolderOpen,
 } from 'lucide-react';
 import type { SidebarTab, Session, Skill, Plugin, MemoryEntry, SubAgent, ProviderConfig, CodingRoleAssignment } from '../types';
@@ -18,9 +19,13 @@ interface Props {
   activeModel: string;
   providers: ProviderConfig[];
   roleAssignments: CodingRoleAssignment[];
+  activeTheme: string;
+  personalityText: string;
   onSelectModel: (modelId: string) => void;
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
+  onSelectTheme: (themeId: string) => void;
+  onPersonalityChange: (text: string) => void;
   onOpenFolder?: () => void;
 }
 
@@ -49,7 +54,7 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, providers, roleAssignments, onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectSession, onNewSession, onOpenFolder }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, providers, roleAssignments, activeTheme, personalityText, onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme, onPersonalityChange, onSelectSession, onNewSession, onOpenFolder }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
@@ -87,9 +92,13 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, ac
             activeModel={activeModel}
             providers={providers}
             roleAssignments={roleAssignments}
+            activeTheme={activeTheme}
+            personalityText={personalityText}
             onSelectModel={onSelectModel}
             onToggleProviderModel={onToggleProviderModel}
             onAssignRoleModel={onAssignRoleModel}
+            onSelectTheme={onSelectTheme}
+            onPersonalityChange={onPersonalityChange}
           />
         )}
       </div>
@@ -110,9 +119,13 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
   activeModel: string;
   providers: ProviderConfig[];
   roleAssignments: CodingRoleAssignment[];
+  activeTheme: string;
+  personalityText: string;
   onSelectModel: (modelId: string) => void;
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
+  onSelectTheme: (themeId: string) => void;
+  onPersonalityChange: (text: string) => void;
   onOpenFolder?: () => void;
 }) {
   return (
@@ -322,25 +335,33 @@ function SettingsTab({
   activeModel,
   providers,
   roleAssignments,
+  activeTheme,
+  personalityText,
   onSelectModel,
   onToggleProviderModel,
   onAssignRoleModel,
+  onSelectTheme,
+  onPersonalityChange,
 }: {
   activeModel: string;
   providers: ProviderConfig[];
   roleAssignments: CodingRoleAssignment[];
+  activeTheme: string;
+  personalityText: string;
   onSelectModel: (modelId: string) => void;
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
+  onSelectTheme: (themeId: string) => void;
+  onPersonalityChange: (text: string) => void;
 }) {
   const [settings, setSettings] = useState({
     streamResponses: true,
     showToolCalls: true,
     autoScroll: true,
     soundEffects: false,
-    theme: 'dark',
   });
   const [showAddProvider, setShowAddProvider] = useState(false);
+  const [showAddMcp, setShowAddMcp] = useState(false);
 
   const toggle = (key: keyof typeof settings) => {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -353,8 +374,31 @@ function SettingsTab({
   );
   const activeModelMeta = enabledModels.find((model) => model.id === activeModel) || enabledModels[0];
 
+  // Theme swatch data
+  const themes = [
+    { id: 'midnight', label: 'Midnight', color: '#6366f1', group: 'dark' as const },
+    { id: 'charcoal', label: 'Charcoal', color: '#a1a1aa', group: 'dark' as const },
+    { id: 'forest', label: 'Forest', color: '#10b981', group: 'dark' as const },
+    { id: 'crimson', label: 'Crimson', color: '#f43f5e', group: 'dark' as const },
+    { id: 'daylight', label: 'Daylight', color: '#6366f1', group: 'light' as const },
+    { id: 'silver', label: 'Silver', color: '#3b82f6', group: 'light' as const },
+    { id: 'sage', label: 'Sage', color: '#10b981', group: 'light' as const },
+    { id: 'blush', label: 'Blush', color: '#f43f5e', group: 'light' as const },
+  ];
+  const darkThemes = themes.filter((t) => t.group === 'dark');
+  const lightThemes = themes.filter((t) => t.group === 'light');
+
+  // Personality presets
+  const personalityPresets = [
+    { id: 'professional', label: 'Professional', text: 'You are a professional software engineering assistant. Be thorough, well-structured, and prioritize code quality and best practices.' },
+    { id: 'concise', label: 'Concise', text: 'Be brief and direct. Show code, skip preamble. Focus on what changed and why.' },
+    { id: 'detailed', label: 'Detailed', text: 'Explain your reasoning step by step. Include context, alternatives considered, and tradeoffs. Teach while you code.' },
+    { id: 'creative', label: 'Creative', text: 'Think outside the box. Suggest unconventional approaches when appropriate. Prioritize elegance and developer experience.' },
+  ];
+
   return (
     <>
+      {/* ── Hero ── */}
       <div className="settings-hero">
         <div>
           <div className="settings-hero-kicker">Model routing</div>
@@ -366,6 +410,7 @@ function SettingsTab({
         <div className="settings-hero-pill">{providers.length} provider{providers.length !== 1 ? 's' : ''}</div>
       </div>
 
+      {/* ── Active Chat Model ── */}
       <div className="settings-section">
         <div className="settings-section-title">Active chat model</div>
         <div className="settings-card settings-current-model">
@@ -387,6 +432,7 @@ function SettingsTab({
         </div>
       </div>
 
+      {/* ── Providers ── */}
       <div className="settings-section">
         <div className="settings-section-header">
           <div className="settings-section-title">Providers</div>
@@ -409,7 +455,6 @@ function SettingsTab({
                 <div className="provider-meta">{provider.type} • {provider.endpointLabel}</div>
               </div>
             </div>
-
             <div className="provider-model-list">
               {provider.models.map((model) => (
                 <div key={model.id} className="provider-model-row">
@@ -417,11 +462,8 @@ function SettingsTab({
                     <div className="provider-model-name">{model.name}</div>
                     <div className="provider-model-id">{model.id}</div>
                   </div>
-                  {model.id === activeModel && (
-                    <span className="provider-model-active">Active</span>
-                  )}
                   <div
-                    className={`provider-model-toggle ${model.enabled ? 'active' : ''}`}
+                    className={`toggle ${model.enabled ? 'active' : ''}`}
                     onClick={() => onToggleProviderModel(provider.id, model.id)}
                     title={model.enabled ? 'Hide this model from selectors' : 'Enable this model'}
                   />
@@ -435,24 +477,10 @@ function SettingsTab({
           <div className="add-provider-card">
             <div className="add-provider-title"><SlidersHorizontal size={14} /> Add Provider skeleton</div>
             <div className="add-provider-grid">
-              <label>
-                Provider name
-                <input value="" placeholder="OpenAI, Z.AI, DeepSeek, local Ollama..." readOnly />
-              </label>
-              <label>
-                API key
-                <input value="" placeholder="Paste key when secure storage is wired" readOnly />
-              </label>
-              <label>
-                Endpoint
-                <input value="" placeholder="https://api.example.com/v1" readOnly />
-              </label>
-              <label>
-                Type
-                <select value="openai-compatible" disabled>
-                  <option value="openai-compatible">OpenAI-compatible</option>
-                </select>
-              </label>
+              <label>Provider name<input value="" placeholder="OpenAI, Z.AI, DeepSeek, local Ollama..." readOnly /></label>
+              <label>API key<input value="" placeholder="Paste key when secure storage is wired" readOnly /></label>
+              <label>Endpoint<input value="" placeholder="https://api.example.com/v1" readOnly /></label>
+              <label>Type<select value="openai-compatible" disabled><option value="openai-compatible">OpenAI-compatible</option></select></label>
             </div>
             <div className="settings-note">
               Next wiring step: save providers securely, test the connection, then fetch or enter available models.
@@ -461,6 +489,7 @@ function SettingsTab({
         )}
       </div>
 
+      {/* ── Coding Role Buckets ── */}
       <div className="settings-section">
         <div className="settings-section-title">Coding role buckets</div>
         <div className="settings-note">
@@ -491,6 +520,136 @@ function SettingsTab({
         </div>
       </div>
 
+      {/* ── MCP Servers ── */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <div className="settings-section-title">MCP Servers</div>
+          <button className="settings-mini-button" onClick={() => setShowAddMcp((value) => !value)}>
+            <Plus size={12} /> Add Server
+          </button>
+        </div>
+        <div className="settings-note" style={{ marginBottom: 8 }}>
+          Model Context Protocol servers give the agent tools, resources, and prompts. DOCK_MPC is the built-in server.
+        </div>
+
+        {/* DOCK_MPC preset card */}
+        <div className="provider-card">
+          <div className="provider-card-header">
+            <div className="provider-logo"><Server size={14} /></div>
+            <div className="provider-title-block">
+              <div className="provider-title-row">
+                <span className="provider-name">DOCK_MPC</span>
+                <span className="provider-status ready">Built-in</span>
+              </div>
+              <div className="provider-meta">mcp • stdio://dock-mpc</div>
+            </div>
+          </div>
+          <div style={{ padding: '6px 0 2px', borderTop: '1px solid var(--border-primary)' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+              Provides filesystem access, terminal commands, code search, and git operations.
+              Enabled by default — no configuration needed.
+            </div>
+          </div>
+        </div>
+
+        {/* Custom server list placeholder */}
+        <div className="settings-card" style={{ textAlign: 'center', padding: '12px 8px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            No custom MCP servers configured
+          </div>
+        </div>
+
+        {/* Add server skeleton */}
+        {showAddMcp && (
+          <div className="add-provider-card">
+            <div className="add-provider-title"><Server size={14} /> Add MCP Server</div>
+            <div className="add-provider-grid">
+              <label>Server name<input value="" placeholder="my-tools-server" readOnly /></label>
+              <label>Endpoint<input value="" placeholder="stdio://./my-server or http://..." readOnly /></label>
+              <label>Auth type<select value="none" disabled><option value="none">None</option><option value="bearer">Bearer token</option></select></label>
+              <label>Status<select value="disabled" disabled><option value="disabled">Disabled</option><option value="enabled">Enabled</option></select></label>
+            </div>
+            <div className="settings-note">
+              Future: test connection, auto-discover tools, persist config.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Personality ── */}
+      <div className="settings-section">
+        <div className="settings-section-title">Agent personality</div>
+        <div className="settings-note" style={{ marginBottom: 6 }}>
+          Customize how the agent communicates with you.
+        </div>
+        {/* Preset pills */}
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+          {personalityPresets.map((preset) => (
+            <button
+              key={preset.id}
+              className="settings-mini-button"
+              style={personalityText === preset.text ? { background: 'var(--accent-primary)', color: 'white' } : {}}
+              onClick={() => onPersonalityChange(personalityText === preset.text ? '' : preset.text)}
+            >
+              <MessageCircle size={11} /> {preset.label}
+            </button>
+          ))}
+        </div>
+        <textarea
+          className="personality-textarea"
+          placeholder="E.g., Be concise and direct. Focus on code quality over explanation."
+          value={personalityText}
+          onChange={(e) => onPersonalityChange(e.target.value)}
+          rows={3}
+        />
+      </div>
+
+      {/* ── Theme ── */}
+      <div className="settings-section">
+        <div className="settings-section-title">Theme</div>
+        <div className="settings-note" style={{ marginBottom: 8 }}>
+          Choose a colorway. Dark themes are on the left, light themes on the right.
+        </div>
+        <div className="theme-swatches">
+          <div className="theme-swatch-group">
+            <div className="theme-swatch-group-label">Dark</div>
+            <div className="theme-swatch-row">
+              {darkThemes.map((t) => (
+                <button
+                  key={t.id}
+                  className={`theme-swatch ${activeTheme === t.id ? 'active' : ''}`}
+                  style={{ background: t.color }}
+                  onClick={() => onSelectTheme(t.id)}
+                  title={t.label}
+                >
+                  {activeTheme === t.id && <Check size={10} />}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="theme-swatch-group">
+            <div className="theme-swatch-group-label">Light</div>
+            <div className="theme-swatch-row">
+              {lightThemes.map((t) => (
+                <button
+                  key={t.id}
+                  className={`theme-swatch ${activeTheme === t.id ? 'active' : ''}`}
+                  style={{ background: t.color }}
+                  onClick={() => onSelectTheme(t.id)}
+                  title={t.label}
+                >
+                  {activeTheme === t.id && <Check size={10} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 4, textTransform: 'capitalize' }}>
+          Active: {themes.find((t) => t.id === activeTheme)?.label}
+        </div>
+      </div>
+
+      {/* ── Chat settings ── */}
       <div className="settings-section">
         <div className="settings-section-title">Chat</div>
         <div className="settings-item">
@@ -523,6 +682,7 @@ function SettingsTab({
         </div>
       </div>
 
+      {/* ── Future research ── */}
       <div className="settings-section">
         <div className="settings-section-title">Future research task</div>
         <div className="research-task-card">
@@ -536,6 +696,7 @@ function SettingsTab({
         </div>
       </div>
 
+      {/* ── About ── */}
       <div className="settings-section">
         <div className="settings-section-title">About</div>
         <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
@@ -547,6 +708,7 @@ function SettingsTab({
     </>
   );
 }
+
 
 const roleIconMap: Record<string, typeof Bot> = {
   planning: Brain,

@@ -44,9 +44,16 @@ function App() {
     { id: 'toolrunning', name: 'Tool Runner', description: 'Executing tools, shell commands, file operations', modelId: 'MiniMax-M2.7' },
     { id: 'review', name: 'Code Reviewer', description: 'Reviewing PRs, suggesting improvements, security audits', modelId: 'MiniMax-M2.7' },
   ]);
+  const [activeTheme, setActiveTheme] = useState('midnight');
+  const [personalityText, setPersonalityText] = useState('');
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
+
+  // Apply theme on mount
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', activeTheme);
+  }, []);
 
   // ── Provider / model handlers ──────────────────────
   const handleSelectModel = useCallback((modelId: string) => {
@@ -72,6 +79,15 @@ function App() {
     setRoleAssignments((prev) =>
       prev.map((r) => (r.id === roleId ? { ...r, modelId } : r))
     );
+  }, []);
+
+  const handleSelectTheme = useCallback((themeId: string) => {
+    setActiveTheme(themeId);
+    document.documentElement.setAttribute('data-theme', themeId);
+  }, []);
+
+  const handlePersonalityChange = useCallback((text: string) => {
+    setPersonalityText(text);
   }, []);
 
   // Load sessions on mount
@@ -335,9 +351,13 @@ function App() {
         activeModel={activeModel}
         providers={providers}
         roleAssignments={roleAssignments}
+        activeTheme={activeTheme}
+        personalityText={personalityText}
         onSelectModel={handleSelectModel}
         onToggleProviderModel={handleToggleProviderModel}
         onAssignRoleModel={handleAssignRoleModel}
+        onSelectTheme={handleSelectTheme}
+        onPersonalityChange={handlePersonalityChange}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onOpenFolder={handleOpenFolder}
