@@ -8,6 +8,7 @@ import { LayoutEngine } from './components/layout/LayoutEngine';
 import { useLayoutState } from './components/layout/useLayoutState';
 import { randomAgentName } from './utils/names';
 import * as api from './utils/api';
+import type { ProviderConfig, CodingRoleAssignment } from './types';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -46,23 +47,56 @@ function App() {
   ]);
   const [activeTheme, setActiveTheme] = useState('midnight');
   const [personalityText, setPersonalityText] = useState('');
+  const [mcpServers, setMcpServers] = useState<any[]>([]);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
 
-  // Apply theme on mount
+  // Load config from server on mount
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', activeTheme);
+    (async () => {
+      try {
+        const config = await api.getConfig();
+        if (config) {
+          setActiveModel(config.activeModel || 'MiniMax-M2.7');
+          setActiveTheme(config.activeTheme || 'midnight');
+          setPersonalityText(config.personality || '');
+          document.documentElement.setAttribute('data-theme', config.activeTheme || 'midnight');
+          if (config.providers?.length > 0) {
+            setProviders(config.providers.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              type: p.type || 'openai-compatible',
+              endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
+              configured: !!p.hasKey || p.type === 'local',
+              models: p.models || [],
+            })));
+          }
+          if (config.roleAssignments) {
+            setRoleAssignments((prev) =>
+              prev.map((r) => ({
+                ...r,
+                modelId: config.roleAssignments?.[r.id] || r.modelId,
+              }))
+            );
+          }
+        }
+        const servers = await api.getMCPServers();
+        if (servers.length > 0) setMcpServers(servers);
+      } catch { /* use defaults */ }
+    })();
   }, []);
 
   // ── Provider / model handlers ──────────────────────
   const handleSelectModel = useCallback((modelId: string) => {
     setActiveModel(modelId);
+    api.updateConfig({ activeModel: modelId }).catch(() => {});
   }, []);
 
   const handleToggleProviderModel = useCallback((providerId: string, modelId: string) => {
-    setProviders((prev) =>
-      prev.map((prov) =>
+    setProviders((prev) => {
+      const next = prev.map((prov) =>
         prov.id === providerId
           ? {
               ...prov,
@@ -71,23 +105,35 @@ function App() {
               ),
             }
           : prov
-      )
-    );
+      );
+      // Persist the updated models list
+      const serverProvider = next.find((p) => p.id === providerId);
+      if (serverProvider) {
+        api.updateProvider(providerId, { models: serverProvider.models } as any).catch(() => {});
+      }
+      return next;
+    });
   }, []);
 
   const handleAssignRoleModel = useCallback((roleId: string, modelId: string) => {
-    setRoleAssignments((prev) =>
-      prev.map((r) => (r.id === roleId ? { ...r, modelId } : r))
-    );
+    setRoleAssignments((prev) => {
+      const next = prev.map((r) => (r.id === roleId ? { ...r, modelId } : r));
+      const map: Record<string, string> = {};
+      next.forEach((r) => { map[r.id] = r.modelId; });
+      api.updateConfig({ roleAssignments: map }).catch(() => {});
+      return next;
+    });
   }, []);
 
   const handleSelectTheme = useCallback((themeId: string) => {
     setActiveTheme(themeId);
     document.documentElement.setAttribute('data-theme', themeId);
+    api.updateConfig({ activeTheme: themeId }).catch(() => {});
   }, []);
 
   const handlePersonalityChange = useCallback((text: string) => {
     setPersonalityText(text);
+    api.updateConfig({ personality: text }).catch(() => {});
   }, []);
 
   // Load sessions on mount

@@ -5,6 +5,9 @@ import { readFileSync, readdirSync, statSync, readlinkSync, existsSync, lstatSyn
 import { join, basename, extname, relative, dirname } from 'path';
 import { homedir } from 'os';
 import { execSync, spawn } from 'child_process';
+import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer } from './config';
+import type { StoredProvider, StoredMCPServer } from './config';
+import { testProviderConnection, fetchProviderModels } from './providers';
 
 const app = express();
 app.use(cors());
@@ -37,17 +40,29 @@ interface ToolCallRow {
   duration?: number;
 }
 
-// ── MiniMax config ─────────────────────────────────────
+// ── Config ─────────────────────────────────────────────
+let appConfig = loadConfig();
+
+// Legacy MiniMax helpers (still used for streaming)
 const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
-const MINIMAX_MODEL = 'MiniMax-M2.7';
 
 function getMiniMaxApiKey(): string | null {
+  const minimaxProvider = appConfig.providers.find((p) => p.id === 'minimax');
+  if (minimaxProvider?.apiKey) return minimaxProvider.apiKey;
   if (process.env.MINIMAX_API_KEY) return process.env.MINIMAX_API_KEY;
   try {
     const config = JSON.parse(readFileSync(join(homedir(), '.mmx', 'config.json'), 'utf-8'));
     if (config.api_key) return config.api_key;
   } catch { /* ignore */ }
   return null;
+}
+
+function getActiveModel(): string {
+  return appConfig.activeModel || 'MiniMax-M2.7';
+}
+
+function getPersonality(): string {
+  return appConfig.personality || '';
 }
 
 // ── In-memory store ────────────────────────────────────
@@ -103,6 +118,184 @@ app.post('/api/sessions', (req, res) => {
 app.delete('/api/sessions/:id', (req, res) => {
   sessions.delete(req.params.id);
   res.status(204).end();
+});
+
+// ── Config endpoints ───────────────────────────────────
+
+app.get('/api/config', (_req, res) => {
+  const safeConfig = {
+    ...appConfig,
+    providers: appConfig.providers.map((p) => ({
+      ...p,
+      apiKey: p.apiKey ? '••••' + p.apiKey.slice(-4) : '', // mask the key
+    })),
+    mcpServers: appConfig.mcpServers.map((s) => ({
+      ...s,
+      authToken: s.authToken ? '••••' + s.authToken.slice(-4) : '',
+    })),
+  };
+  res.json(safeConfig);
+});
+
+app.put('/api/config', (req, res) => {
+  const updates = req.body;
+  // Only allow updating safe fields
+  if (updates.personality !== undefined) appConfig.personality = updates.personality;
+  if (updates.activeModel !== undefined) appConfig.activeModel = updates.activeModel;
+  if (updates.activeTheme !== undefined) appConfig.activeTheme = updates.activeTheme;
+  if (updates.roleAssignments !== undefined) appConfig.roleAssignments = updates.roleAssignments;
+  saveConfig(appConfig);
+  res.json({ ok: true });
+});
+
+// ── Provider endpoints ─────────────────────────────────
+
+app.get('/api/providers', (_req, res) => {
+  const providers = appConfig.providers.map((p) => ({
+    ...p,
+    apiKey: p.apiKey ? '••••' + p.apiKey.slice(-4) : '',
+    hasKey: !!p.apiKey,
+  }));
+  res.json(providers);
+});
+
+app.post('/api/providers', (req, res) => {
+  const { id, name, type, apiKey, baseURL, models } = req.body as Partial<StoredProvider>;
+  if (!name || !type || !baseURL) {
+    return res.status(400).json({ error: 'name, type, and baseURL are required' });
+  }
+  const provider: StoredProvider = {
+    id: id || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    name,
+    type: type as StoredProvider['type'],
+    apiKey: apiKey || '',
+    baseURL,
+    models: models || [],
+  };
+  appConfig = upsertProvider(appConfig, provider);
+  saveConfig(appConfig);
+  res.status(201).json({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey });
+});
+
+app.put('/api/providers/:id', (req, res) => {
+  const existing = appConfig.providers.find((p) => p.id === req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Provider not found' });
+
+  const updates = req.body as Partial<StoredProvider>;
+  // Merge selectively — don't allow clearing the apiKey with a masked value
+  if (updates.name !== undefined) existing.name = updates.name;
+  if (updates.type !== undefined) existing.type = updates.type;
+  if (updates.baseURL !== undefined) existing.baseURL = updates.baseURL;
+  if (updates.apiKey && !updates.apiKey.startsWith('••••')) existing.apiKey = updates.apiKey;
+  if (updates.models !== undefined) existing.models = updates.models;
+
+  appConfig = upsertProvider(appConfig, existing);
+  saveConfig(appConfig);
+  res.json({ ...existing, apiKey: '••••', hasKey: !!existing.apiKey });
+});
+
+app.delete('/api/providers/:id', (req, res) => {
+  appConfig = removeProvider(appConfig, req.params.id);
+  saveConfig(appConfig);
+  res.status(204).end();
+});
+
+// ── Test provider connection ───────────────────────────
+
+app.post('/api/providers/:id/test', async (req, res) => {
+  const provider = appConfig.providers.find((p) => p.id === req.params.id);
+  if (!provider) return res.status(404).json({ error: 'Provider not found' });
+
+  // If a new apiKey/baseURL is provided in the test request, use it
+  const testProvider = { ...provider };
+  if (req.body?.apiKey && !req.body.apiKey.startsWith('••••')) testProvider.apiKey = req.body.apiKey;
+  if (req.body?.baseURL) testProvider.baseURL = req.body.baseURL;
+
+  const result = await testProviderConnection(testProvider);
+  res.json(result);
+});
+
+// ── Fetch models from provider ─────────────────────────
+
+app.post('/api/providers/:id/models', async (req, res) => {
+  const provider = appConfig.providers.find((p) => p.id === req.params.id);
+  if (!provider) return res.status(404).json({ error: 'Provider not found' });
+
+  // Allow passing temp credentials for the fetch
+  const fetchProvider = { ...provider };
+  if (req.body?.apiKey && !req.body.apiKey.startsWith('••••')) fetchProvider.apiKey = req.body.apiKey;
+  if (req.body?.baseURL) fetchProvider.baseURL = req.body.baseURL;
+
+  try {
+    const models = await fetchProviderModels(fetchProvider);
+    res.json(models);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ── MCP Server endpoints ───────────────────────────────
+
+app.get('/api/mcp-servers', (_req, res) => {
+  const servers = appConfig.mcpServers.map((s) => ({
+    ...s,
+    authToken: s.authToken ? '••••' + s.authToken.slice(-4) : '',
+  }));
+  // Include Docker MCP as a built-in
+  const builtIn = {
+    id: 'docker-mcp',
+    name: 'Docker MCP',
+    endpoint: 'stdio://mcp-docker',
+    authType: 'none',
+    authToken: '',
+    enabled: true,
+    builtIn: true,
+    description: 'Containerized tool execution via Docker MCP server',
+  };
+  res.json([builtIn, ...servers]);
+});
+
+app.post('/api/mcp-servers', (req, res) => {
+  const { name, endpoint, authType, authToken, enabled } = req.body as Partial<StoredMCPServer>;
+  if (!name || !endpoint) {
+    return res.status(400).json({ error: 'name and endpoint are required' });
+  }
+  const server: StoredMCPServer = {
+    id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    name,
+    endpoint,
+    authType: authType || 'none',
+    authToken: authToken || '',
+    enabled: enabled !== false,
+  };
+  appConfig = upsertMCPServer(appConfig, server);
+  saveConfig(appConfig);
+  res.status(201).json({ ...server, authToken: '••••' });
+});
+
+app.delete('/api/mcp-servers/:id', (req, res) => {
+  appConfig = removeMCPServer(appConfig, req.params.id);
+  saveConfig(appConfig);
+  res.status(204).end();
+});
+
+// ── Models endpoint (all enabled models across providers) ──
+
+app.get('/api/models', (_req, res) => {
+  const models = appConfig.providers
+    .filter((p) => p.apiKey || p.type === 'local')
+    .flatMap((p) =>
+      p.models
+        .filter((m) => m.enabled)
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          providerId: p.id,
+          providerName: p.name,
+          type: p.type,
+        }))
+    );
+  res.json(models);
 });
 
 // ── Filesystem Routes ──────────────────────────────────
@@ -268,8 +461,10 @@ async function streamMiniMax(
   assistantId: string,
   session: SessionRow,
 ) {
-  // Build system prompt with working directory context
-  let systemPrompt = 'You are a helpful AI coding assistant. Respond concisely with code examples where appropriate. Use markdown formatting.';
+  // Build system prompt with personality + working directory context
+  const personality = getPersonality();
+  let systemPrompt = personality
+    || 'You are a helpful AI coding assistant. Respond concisely with code examples where appropriate. Use markdown formatting.';
   if (session.workingDir) {
     systemPrompt += `\n\nThe user has a project open at: ${session.workingDir}`;
     systemPrompt += '\nYou can reference files by their paths. When showing code, always use proper file paths in code blocks.';
@@ -288,7 +483,7 @@ async function streamMiniMax(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: MINIMAX_MODEL,
+        model: getActiveModel(),
         messages: apiMessages,
         stream: true,
         max_tokens: 4096,
@@ -380,11 +575,13 @@ function sleep(ms: number) {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   const apiKey = getMiniMaxApiKey();
-  console.log(`CMDui server running on http://localhost:${PORT}`);
-  console.log(`Model: ${MINIMAX_MODEL}`);
+  console.log(`Open-Harness server running on http://localhost:${PORT}`);
+  console.log(`Model: ${getActiveModel()}`);
+  console.log(`Providers: ${appConfig.providers.length} configured`);
   if (apiKey) {
     console.log(`✓ MiniMax API key loaded`);
   } else {
     console.log(`⚠  No MiniMax API key found — using local fallback`);
   }
+  console.log(`✓ Config loaded from ~/.open-harness/config.json`);
 });

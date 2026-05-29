@@ -47,21 +47,58 @@ export interface StreamCallbacks {
   onDone: () => void;
 }
 
-// ── Provider / Model APIs ──────────────────────────────
+// ── Config API ─────────────────────────────────────────
+
+export interface AppConfig {
+  version: number;
+  providers: ProviderInfo[];
+  mcpServers: MCPServerInfo[];
+  personality: string;
+  activeModel: string;
+  activeTheme: string;
+  roleAssignments: Record<string, string>;
+}
+
+export async function getConfig(): Promise<AppConfig | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/config`);
+    if (res.ok) return res.json();
+  } catch { /* server not available */ }
+  return null;
+}
+
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments'>>): Promise<void> {
+  await fetch(`${API_BASE}/api/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+}
+
+// ── Provider APIs ──────────────────────────────────────
 
 export interface ProviderInfo {
   id: string;
   name: string;
   type: string;
-  apiKey?: string;
-  baseURL?: string;
+  apiKey: string;
+  hasKey?: boolean;
+  baseURL: string;
+  models: ProviderModelInfo[];
+}
+
+export interface ProviderModelInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
 }
 
 export interface ModelInfo {
   id: string;
   name: string;
-  providerID: string;
-  apiModel: string;
+  providerId: string;
+  providerName: string;
+  type: string;
 }
 
 export async function getProviders(): Promise<ProviderInfo[]> {
@@ -70,6 +107,62 @@ export async function getProviders(): Promise<ProviderInfo[]> {
     if (res.ok) return res.json();
   } catch { /* not available yet */ }
   return [];
+}
+
+export async function addProvider(provider: { id?: string; name: string; type: string; apiKey: string; baseURL: string; models?: ProviderModelInfo[] }): Promise<ProviderInfo> {
+  const res = await fetch(`${API_BASE}/api/providers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(provider),
+  });
+  if (!res.ok) throw new Error(`Failed to add provider: ${res.status}`);
+  return res.json();
+}
+
+export async function updateProvider(id: string, updates: Partial<ProviderInfo>): Promise<ProviderInfo> {
+  const res = await fetch(`${API_BASE}/api/providers/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(`Failed to update provider: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteProvider(id: string): Promise<void> {
+  await fetch(`${API_BASE}/api/providers/${id}`, { method: 'DELETE' });
+}
+
+export interface TestConnectionResult {
+  ok: boolean;
+  error?: string;
+  latencyMs?: number;
+  modelsCount?: number;
+}
+
+export async function testProviderConnection(providerId: string, tempKey?: string, tempURL?: string): Promise<TestConnectionResult> {
+  const res = await fetch(`${API_BASE}/api/providers/${providerId}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey: tempKey, baseURL: tempURL }),
+  });
+  if (!res.ok) throw new Error(`Test failed: ${res.status}`);
+  return res.json();
+}
+
+export interface FetchedModel {
+  id: string;
+  name: string;
+}
+
+export async function fetchProviderModels(providerId: string, tempKey?: string, tempURL?: string): Promise<FetchedModel[]> {
+  const res = await fetch(`${API_BASE}/api/providers/${providerId}/models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey: tempKey, baseURL: tempURL }),
+  });
+  if (!res.ok) throw new Error(`Fetch models failed: ${res.status}`);
+  return res.json();
 }
 
 export async function getModels(): Promise<ModelInfo[]> {
@@ -81,11 +174,43 @@ export async function getModels(): Promise<ModelInfo[]> {
 }
 
 export async function setModel(modelID: string): Promise<void> {
-  await fetch(`${API_BASE}/api/model`, {
+  await updateConfig({ activeModel: modelID });
+}
+
+// ── MCP Server APIs ────────────────────────────────────
+
+export interface MCPServerInfo {
+  id: string;
+  name: string;
+  endpoint: string;
+  authType: 'none' | 'bearer';
+  authToken: string;
+  enabled: boolean;
+  builtIn?: boolean;
+  description?: string;
+  toolCount?: number;
+}
+
+export async function getMCPServers(): Promise<MCPServerInfo[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/mcp-servers`);
+    if (res.ok) return res.json();
+  } catch { /* not available yet */ }
+  return [];
+}
+
+export async function addMCPServer(server: { name: string; endpoint: string; authType?: string; authToken?: string; enabled?: boolean }): Promise<MCPServerInfo> {
+  const res = await fetch(`${API_BASE}/api/mcp-servers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ modelID }),
+    body: JSON.stringify(server),
   });
+  if (!res.ok) throw new Error(`Failed to add MCP server: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteMCPServer(id: string): Promise<void> {
+  await fetch(`${API_BASE}/api/mcp-servers/${id}`, { method: 'DELETE' });
 }
 
 // ── Session APIs ───────────────────────────────────────
