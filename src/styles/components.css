@@ -182,9 +182,20 @@
   border-bottom: 1px solid var(--border-primary);
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 16px 0 78px;  /* left inset clears macOS traffic lights */
   gap: 12px;
   z-index: 10;
+  -webkit-app-region: drag;  /* entire top bar is a window drag handle */
+}
+
+/* All interactive elements in the top bar must opt out of drag */
+.top-bar button,
+.top-bar select,
+.top-bar input,
+.top-bar a,
+.top-bar .top-bar-actions,
+.top-bar .top-bar-model {
+  -webkit-app-region: no-drag;
 }
 
 .top-bar-toggle {

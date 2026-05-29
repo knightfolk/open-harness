@@ -50,9 +50,23 @@ function App() {
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
+
+  // Listen for Electron IPC events (snap zones, menu actions)
+  useEffect(() => {
+    const native = (window as any).CMDuiNative;
+    if (!native?.onMenuAction) return;
+    native.onMenuAction((action: string, data?: any) => {
+      if (action === 'show-snap-zones') {
+        setSnapOverlayVisible(true);
+        setTimeout(() => setSnapOverlayVisible(false), 3000);
+      }
+      if (action === 'open-preferences') setSettingsOpen(true);
+    });
+  }, []);
 
   // Poll MCP status
   useEffect(() => {
@@ -570,6 +584,9 @@ function App() {
         </div>
       </main>
 
+      {/* Snap Zone Overlay */}
+      {snapOverlayVisible && <SnapZoneOverlay onSnap={(zone) => { (window as any).CMDuiNative?.snapToZone(zone); setSnapOverlayVisible(false); }} onClose={() => setSnapOverlayVisible(false)} />}
+
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -612,6 +629,53 @@ function mapApiMessage(m: api.MessageInfo): Message {
       duration: tc.duration,
     })),
   };
+}
+
+// ── Snap Zone Overlay (FancyZones-style) ──
+function SnapZoneOverlay({ onSnap, onClose }: { onSnap: (zone: string) => void; onClose: () => void }) {
+  const zones = [
+    { id: 'top-left', label: '1', gridArea: '1 / 1' },
+    { id: 'top-half', label: '2', gridArea: '1 / 2' },
+    { id: 'top-right', label: '3', gridArea: '1 / 3' },
+    { id: 'left-half', label: '4', gridArea: '2 / 1' },
+    { id: 'maximize', label: '5', gridArea: '2 / 2' },
+    { id: 'right-half', label: '6', gridArea: '2 / 3' },
+    { id: 'bottom-left', label: '7', gridArea: '3 / 1' },
+    { id: 'bottom-half', label: '8', gridArea: '3 / 2' },
+    { id: 'bottom-right', label: '9', gridArea: '3 / 3' },
+  ];
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}
+    >
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr 1fr',
+        gap: 8, width: '80vw', maxWidth: 700, height: '70vh', maxHeight: 500, padding: 8,
+      }} onClick={(e) => e.stopPropagation()}>
+        {zones.map((zone) => (
+          <button key={zone.id}
+            onClick={() => onSnap(zone.id)}
+            style={{
+              gridArea: zone.gridArea,
+              background: 'rgba(99, 102, 241, 0.15)', border: '2px dashed rgba(99, 102, 241, 0.5)',
+              borderRadius: 12, cursor: 'pointer', color: 'rgba(255,255,255,0.6)',
+              fontSize: 24, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.35)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.8)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(99,102,241,0.15)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)'; }}
+          >
+            {zone.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ position: 'absolute', bottom: 24, color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
+        Click a zone to snap — or press Escape to cancel — ⌘⇧1-9 for direct snap
+      </div>
+    </div>
+  );
 }
 
 export default App;

@@ -6,6 +6,7 @@ import { DiffViewer } from '../DiffViewer';
 import { BrowserPanel } from '../BrowserPanel';
 import { TerminalPanel } from '../TerminalPanel';
 import { FilesPanel } from '../FilesPanel';
+import { SideChatPanel } from '../SideChatPanel';
 
 interface Props {
   panelId: PanelId;
@@ -25,6 +26,8 @@ export function PanelContent({ panelId, context }: Props) {
   switch (panelId) {
     case 'chat':
       return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} />;
+    case 'side-chat':
+      return <SideChatPanel />;
     case 'diffs':
       return <DiffViewer fileChanges={context.fileChanges} />;
     case 'browser':
