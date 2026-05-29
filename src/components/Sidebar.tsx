@@ -529,19 +529,19 @@ function SettingsTab({
           </button>
         </div>
         <div className="settings-note" style={{ marginBottom: 8 }}>
-          Model Context Protocol servers give the agent tools, resources, and prompts. DOCK_MPC is the built-in server.
+          Model Context Protocol servers give the agent tools, resources, and prompts. Docker MCP is the built-in server.
         </div>
 
-        {/* DOCK_MPC preset card */}
+        {/* Docker MCP preset card */}
         <div className="provider-card">
           <div className="provider-card-header">
             <div className="provider-logo"><Server size={14} /></div>
             <div className="provider-title-block">
               <div className="provider-title-row">
-                <span className="provider-name">DOCK_MPC</span>
+                <span className="provider-name">Docker MCP</span>
                 <span className="provider-status ready">Built-in</span>
               </div>
-              <div className="provider-meta">mcp • stdio://dock-mpc</div>
+              <div className="provider-meta">mcp • stdio://mcp-docker</div>
             </div>
           </div>
           <div style={{ padding: '6px 0 2px', borderTop: '1px solid var(--border-primary)' }}>
