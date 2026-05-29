@@ -170,3 +170,20 @@ New endpoints:
 **Users bring their own keys.** CMDui doesn't host models — it's a harness. Configure what you have, use what you want. Free local models via Ollama work out of the box with zero config.
 
 **OpenCode proven patterns.** The provider abstraction, model catalog, and config structure are battle-tested from the OpenCode project. We're porting the architecture, not reinventing it.
+
+---
+
+## Future Tasks
+
+### AI Model Landscape Research (Top 30)
+
+**Goal:** Produce a research artifact covering the top ~30 AI models relevant to CMDui's provider harness — summarizing each model's strengths, known weaknesses/boundaries, and a suggested coding-role bucket (e.g., coder, summarizer, planner, reviewer, title-generator, lightweight-chat) to inform sensible defaults and agent-role mappings.
+
+**Scope:**
+- Cover models across all configured providers: OpenAI (GPT-4.1, o3, o4-mini, …), Anthropic (Claude 4 / Sonnet / Haiku), Google (Gemini 2.5 Pro/Flash), MiniMax (M2), xAI (Grok 3), Groq-hosted (Llama, Mixtral), OpenRouter meta-models, and popular local models (Llama 3, Qwen, DeepSeek).
+- For each model: context window, speed tier, cost tier, reasoning support, tool-use quality, and known failure modes or context limits.
+- Map each to a coding-role bucket so the `agents` config in `~/.cmdui/config.json` can ship informed defaults.
+
+**Deliverable:** A standalone markdown doc (e.g., `docs/MODEL_LANDSCAPE.md`) plus a condensed summary table wired back into `server/providers/models.ts` metadata.
+
+**Priority:** Post-Phase 3. Useful for defaults but not blocking the core provider harness.

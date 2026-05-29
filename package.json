@@ -53,8 +53,8 @@
     "vite": "^8.0.12"
   },
   "build": {
-    "appId": "com.cmdui.desktop",
-    "productName": "CMDui",
+    "appId": "com.open-harness.desktop",
+    "productName": "Open-Harness",
     "directories": {
       "output": "release"
     },

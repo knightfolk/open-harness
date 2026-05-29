@@ -2,10 +2,10 @@ import { useState } from 'react';
 import {
   MessageSquare, FileCode, Zap, Brain, Settings, Plus, Clock,
   Sparkles, Globe, Search, FileText,
-  Command, Layout, Grid, Layers,
+  Command, Layout, Grid, Layers, Wrench, Palette, Image, PlayCircle, ShieldCheck, KeyRound, SlidersHorizontal,
   ChevronDown, ChevronRight, Loader, CheckCircle2, Circle, Bot, AlertCircle, FolderOpen,
 } from 'lucide-react';
-import type { SidebarTab, Session, Skill, Plugin, MemoryEntry, SubAgent } from '../types';
+import type { SidebarTab, Session, Skill, Plugin, MemoryEntry, SubAgent, ProviderConfig, CodingRoleAssignment } from '../types';
 import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
 
 interface Props {
@@ -16,6 +16,11 @@ interface Props {
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   activeModel: string;
+  providers: ProviderConfig[];
+  roleAssignments: CodingRoleAssignment[];
+  onSelectModel: (modelId: string) => void;
+  onToggleProviderModel: (providerId: string, modelId: string) => void;
+  onAssignRoleModel: (roleId: string, modelId: string) => void;
   onOpenFolder?: () => void;
 }
 
@@ -44,7 +49,7 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, onSelectSession, onNewSession, onOpenFolder }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, providers, roleAssignments, onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectSession, onNewSession, onOpenFolder }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
@@ -77,7 +82,16 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, ac
         )}
         {activeTab === 'skills' && <SkillsTab skills={mockSkills} plugins={mockPlugins} />}
         {activeTab === 'memory' && <MemoryTab entries={mockMemoryEntries} />}
-        {activeTab === 'settings' && <SettingsTab activeModel={activeModel} />}
+        {activeTab === 'settings' && (
+          <SettingsTab
+            activeModel={activeModel}
+            providers={providers}
+            roleAssignments={roleAssignments}
+            onSelectModel={onSelectModel}
+            onToggleProviderModel={onToggleProviderModel}
+            onAssignRoleModel={onAssignRoleModel}
+          />
+        )}
       </div>
     </aside>
   );
@@ -94,6 +108,11 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   activeModel: string;
+  providers: ProviderConfig[];
+  roleAssignments: CodingRoleAssignment[];
+  onSelectModel: (modelId: string) => void;
+  onToggleProviderModel: (providerId: string, modelId: string) => void;
+  onAssignRoleModel: (roleId: string, modelId: string) => void;
   onOpenFolder?: () => void;
 }) {
   return (
@@ -299,7 +318,21 @@ function MemoryTab({ entries }: { entries: MemoryEntry[] }) {
 /*  Settings Tab                                                       */
 /* ------------------------------------------------------------------ */
 
-function SettingsTab({ activeModel }: { activeModel: string }) {
+function SettingsTab({
+  activeModel,
+  providers,
+  roleAssignments,
+  onSelectModel,
+  onToggleProviderModel,
+  onAssignRoleModel,
+}: {
+  activeModel: string;
+  providers: ProviderConfig[];
+  roleAssignments: CodingRoleAssignment[];
+  onSelectModel: (modelId: string) => void;
+  onToggleProviderModel: (providerId: string, modelId: string) => void;
+  onAssignRoleModel: (roleId: string, modelId: string) => void;
+}) {
   const [settings, setSettings] = useState({
     streamResponses: true,
     showToolCalls: true,
@@ -307,65 +340,154 @@ function SettingsTab({ activeModel }: { activeModel: string }) {
     soundEffects: false,
     theme: 'dark',
   });
+  const [showAddProvider, setShowAddProvider] = useState(false);
 
   const toggle = (key: keyof typeof settings) => {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const availableModels = [
-    { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', provider: 'MiniMax' },
-    { id: 'o3', name: 'o3', provider: 'OpenAI' },
-    { id: 'o4-mini', name: 'o4-mini', provider: 'OpenAI' },
-    { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'OpenAI' },
-    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', provider: 'OpenAI' },
-    { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', provider: 'OpenAI' },
-    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'Anthropic' },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Google' },
-  ];
-
-  // Group models by provider
-  const grouped = availableModels.reduce((acc, m) => {
-    if (!acc[m.provider]) acc[m.provider] = [];
-    acc[m.provider].push(m);
-    return acc;
-  }, {} as Record<string, typeof availableModels>);
+  const enabledModels = providers.flatMap((provider) =>
+    provider.models
+      .filter((model) => model.enabled)
+      .map((model) => ({ ...model, providerId: provider.id, providerName: provider.name }))
+  );
+  const activeModelMeta = enabledModels.find((model) => model.id === activeModel) || enabledModels[0];
 
   return (
     <>
+      <div className="settings-hero">
+        <div>
+          <div className="settings-hero-kicker">Model routing</div>
+          <div className="settings-hero-title">Configured providers only</div>
+          <div className="settings-hero-copy">
+            Open-Harness will only show models from providers you have actually added and enabled.
+          </div>
+        </div>
+        <div className="settings-hero-pill">{providers.length} provider{providers.length !== 1 ? 's' : ''}</div>
+      </div>
+
       <div className="settings-section">
-        <div className="settings-section-title">General</div>
-        <div className="settings-item">
+        <div className="settings-section-title">Active chat model</div>
+        <div className="settings-card settings-current-model">
           <div>
-            <div className="settings-item-label">Model</div>
-            <div className="settings-item-desc" style={{ color: 'var(--accent-primary)', fontSize: 10, marginTop: 2 }}>
-              Active: {activeModel}
+            <div className="settings-item-label">{activeModelMeta?.name || activeModel}</div>
+            <div className="settings-item-desc">
+              {activeModelMeta ? `${activeModelMeta.providerName} • enabled for chat` : 'No enabled provider model found'}
             </div>
           </div>
           <select
-            className="settings-select"
+            className="settings-select settings-select-wide"
             value={activeModel}
-            onChange={(e) => {
-              // TODO: wire to server API when providers endpoint is ready
-              console.log('Switch model to:', e.target.value);
-            }}
+            onChange={(e) => onSelectModel(e.target.value)}
           >
-            {Object.entries(grouped).map(([provider, models]) => (
-              <optgroup key={provider} label={provider}>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </optgroup>
+            {enabledModels.map((model) => (
+              <option key={`${model.providerId}:${model.id}`} value={model.id}>{model.providerName} — {model.name}</option>
             ))}
           </select>
         </div>
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label">Theme</div>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <div className="settings-section-title">Providers</div>
+          <button className="settings-mini-button" onClick={() => setShowAddProvider((value) => !value)}>
+            <Plus size={12} /> Add Provider
+          </button>
+        </div>
+
+        {providers.map((provider) => (
+          <div key={provider.id} className="provider-card">
+            <div className="provider-card-header">
+              <div className="provider-logo"><KeyRound size={14} /></div>
+              <div className="provider-title-block">
+                <div className="provider-title-row">
+                  <span className="provider-name">{provider.name}</span>
+                  <span className={`provider-status ${provider.configured ? 'ready' : 'missing'}`}>
+                    {provider.configured ? 'Configured' : 'Needs key'}
+                  </span>
+                </div>
+                <div className="provider-meta">{provider.type} • {provider.endpointLabel}</div>
+              </div>
+            </div>
+
+            <div className="provider-model-list">
+              {provider.models.map((model) => (
+                <div key={model.id} className="provider-model-row">
+                  <div>
+                    <div className="provider-model-name">{model.name}</div>
+                    <div className="provider-model-id">{model.id}</div>
+                  </div>
+                  {model.id === activeModel && (
+                    <span className="provider-model-active">Active</span>
+                  )}
+                  <div
+                    className={`provider-model-toggle ${model.enabled ? 'active' : ''}`}
+                    onClick={() => onToggleProviderModel(provider.id, model.id)}
+                    title={model.enabled ? 'Hide this model from selectors' : 'Enable this model'}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
-          <select className="settings-select" value={settings.theme} onChange={(e) => setSettings((s) => ({ ...s, theme: e.target.value }))}>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </select>
+        ))}
+
+        {showAddProvider && (
+          <div className="add-provider-card">
+            <div className="add-provider-title"><SlidersHorizontal size={14} /> Add Provider skeleton</div>
+            <div className="add-provider-grid">
+              <label>
+                Provider name
+                <input value="" placeholder="OpenAI, Z.AI, DeepSeek, local Ollama..." readOnly />
+              </label>
+              <label>
+                API key
+                <input value="" placeholder="Paste key when secure storage is wired" readOnly />
+              </label>
+              <label>
+                Endpoint
+                <input value="" placeholder="https://api.example.com/v1" readOnly />
+              </label>
+              <label>
+                Type
+                <select value="openai-compatible" disabled>
+                  <option value="openai-compatible">OpenAI-compatible</option>
+                </select>
+              </label>
+            </div>
+            <div className="settings-note">
+              Next wiring step: save providers securely, test the connection, then fetch or enter available models.
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-title">Coding role buckets</div>
+        <div className="settings-note">
+          Assign enabled models to the roles Open-Harness will use for efficient coding work. Recommendations will come from the model research task.
+        </div>
+        <div className="role-bucket-list">
+          {roleAssignments.map((role) => {
+            const Icon = roleIconMap[role.id] || Bot;
+            return (
+              <div key={role.id} className="role-bucket-card">
+                <div className="role-bucket-icon"><Icon size={15} /></div>
+                <div className="role-bucket-body">
+                  <div className="role-bucket-name">{role.name}</div>
+                  <div className="role-bucket-desc">{role.description}</div>
+                  <select
+                    className="settings-select settings-select-wide"
+                    value={role.modelId}
+                    onChange={(e) => onAssignRoleModel(role.id, e.target.value)}
+                  >
+                    {enabledModels.map((model) => (
+                      <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>{model.providerName} — {model.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -402,16 +524,39 @@ function SettingsTab({ activeModel }: { activeModel: string }) {
       </div>
 
       <div className="settings-section">
+        <div className="settings-section-title">Future research task</div>
+        <div className="research-task-card">
+          <Sparkles size={15} />
+          <div>
+            <div className="research-task-title">Top 30 coding model map</div>
+            <div className="research-task-copy">
+              Research model strengths, weaknesses, pricing boundaries, context limits, tool-use quality, and best-fit coding buckets before showing suggestions here.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-section">
         <div className="settings-section-title">About</div>
         <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
           Open-Harness v1.0.0<br />
           A universal AI provider harness<br />
-          inspired by Codex Desktop
+          Current live provider: MiniMax
         </div>
       </div>
     </>
   );
 }
+
+const roleIconMap: Record<string, typeof Bot> = {
+  planning: Brain,
+  implementation: FileCode,
+  bugfix: Wrench,
+  design: Palette,
+  image: Image,
+  toolrunning: PlayCircle,
+  review: ShieldCheck,
+};
 function formatRelativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
   const mins = Math.floor(diff / 60000);

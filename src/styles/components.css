@@ -2000,3 +2000,345 @@ button:focus-visible {
   color: var(--text-primary);
   background: var(--accent-primary-muted);
 }
+
+/* ========== Settings — Provider Cards ========== */
+.settings-hero {
+  padding: 12px 14px;
+  background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+}
+.settings-hero-kicker {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--accent-primary);
+  margin-bottom: 2px;
+}
+.settings-hero-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.settings-hero-copy {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+.settings-hero-pill {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 2px 10px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+}
+
+.settings-current-model {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-select-wide {
+  min-width: 160px;
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+.settings-section-header .settings-section-title {
+  margin-bottom: 0;
+}
+
+.settings-mini-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.settings-mini-button:hover {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.settings-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 6px;
+}
+
+/* Provider card */
+.provider-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.provider-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.provider-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.provider-title-block {
+  flex: 1;
+  min-width: 0;
+}
+.provider-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.provider-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.provider-status {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 99px;
+}
+.provider-status.ready {
+  background: rgba(34,197,94,0.15);
+  color: var(--accent-success);
+}
+.provider-status.missing {
+  background: rgba(239,68,68,0.15);
+  color: var(--accent-error);
+}
+.provider-meta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.provider-model-list {
+  border-top: 1px solid var(--border-primary);
+  padding-top: 6px;
+}
+.provider-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+.provider-model-row:hover {
+  background: var(--bg-hover);
+}
+.provider-model-name {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.provider-model-id {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Add provider skeleton */
+.add-provider-card {
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin-bottom: 8px;
+}
+.add-provider-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.add-provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.add-provider-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.add-provider-grid input,
+.add-provider-grid select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.settings-note {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1.45;
+  padding: 6px 0;
+  font-style: italic;
+}
+
+/* Role bucket cards */
+.role-bucket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.role-bucket-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.role-bucket-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.role-bucket-body {
+  flex: 1;
+  min-width: 0;
+}
+.role-bucket-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 1px;
+}
+.role-bucket-desc {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+  line-height: 1.35;
+}
+
+/* Research task card */
+.research-task-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.research-task-card svg {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.research-task-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.research-task-copy {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+
+/* Compact toggle for provider model rows */
+.provider-model-toggle {
+  width: 32px;
+  height: 18px;
+  background: var(--bg-active);
+  border-radius: 9px;
+  cursor: pointer;
+  position: relative;
+  transition: background var(--transition-fast);
+  border: 1px solid var(--border-accent);
+  flex-shrink: 0;
+}
+
+.provider-model-toggle.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.provider-model-toggle::after {
+  content: '';
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform var(--transition-fast);
+}
+
+.provider-model-toggle.active::after {
+  transform: translateX(14px);
+}
+
+/* Active model badge inside provider model rows */
+.provider-model-active {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary-hover);
+  flex-shrink: 0;
+}

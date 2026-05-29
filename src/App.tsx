@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { Message, SubAgent } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment } from './types';
 import type { PanelId } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -22,10 +22,57 @@ function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeModel] = useState('MiniMax-M2.7');
+  const [activeModel, setActiveModel] = useState('MiniMax-M2.7');
+  const [providers, setProviders] = useState<ProviderConfig[]>([
+    {
+      id: 'minimax',
+      name: 'MiniMax',
+      type: 'openai-compatible' as const,
+      endpointLabel: 'api.minimax.io/v1',
+      configured: true,
+      models: [
+        { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', enabled: true },
+      ],
+    },
+  ]);
+  const [roleAssignments, setRoleAssignments] = useState<CodingRoleAssignment[]>([
+    { id: 'planning', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'MiniMax-M2.7' },
+    { id: 'implementation', name: 'Code Implementer', description: 'Writing new code, scaffolding, refactoring', modelId: 'MiniMax-M2.7' },
+    { id: 'bugfix', name: 'Bug Fixer', description: 'Debugging, tracing errors, regression testing', modelId: 'MiniMax-M2.7' },
+    { id: 'design', name: 'Design Specialist', description: 'UI/UX patterns, styling, component layout', modelId: 'MiniMax-M2.7' },
+    { id: 'image', name: 'Image Generator', description: 'Generating images, diagrams, visual assets', modelId: 'MiniMax-M2.7' },
+    { id: 'toolrunning', name: 'Tool Runner', description: 'Executing tools, shell commands, file operations', modelId: 'MiniMax-M2.7' },
+    { id: 'review', name: 'Code Reviewer', description: 'Reviewing PRs, suggesting improvements, security audits', modelId: 'MiniMax-M2.7' },
+  ]);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
+
+  // ── Provider / model handlers ──────────────────────
+  const handleSelectModel = useCallback((modelId: string) => {
+    setActiveModel(modelId);
+  }, []);
+
+  const handleToggleProviderModel = useCallback((providerId: string, modelId: string) => {
+    setProviders((prev) =>
+      prev.map((prov) =>
+        prov.id === providerId
+          ? {
+              ...prov,
+              models: prov.models.map((m) =>
+                m.id === modelId ? { ...m, enabled: !m.enabled } : m
+              ),
+            }
+          : prov
+      )
+    );
+  }, []);
+
+  const handleAssignRoleModel = useCallback((roleId: string, modelId: string) => {
+    setRoleAssignments((prev) =>
+      prev.map((r) => (r.id === roleId ? { ...r, modelId } : r))
+    );
+  }, []);
 
   // Load sessions on mount
   useEffect(() => {
@@ -286,6 +333,11 @@ function App() {
         activeSessionId={activeSessionId || undefined}
         activeSubAgents={subAgents}
         activeModel={activeModel}
+        providers={providers}
+        roleAssignments={roleAssignments}
+        onSelectModel={handleSelectModel}
+        onToggleProviderModel={handleToggleProviderModel}
+        onAssignRoleModel={handleAssignRoleModel}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onOpenFolder={handleOpenFolder}

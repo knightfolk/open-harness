@@ -26,6 +26,29 @@ export interface CodeBlock {
   endLine?: number;
 }
 
+
+export interface ProviderModel {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface ProviderConfig {
+  id: string;
+  name: string;
+  type: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom';
+  endpointLabel: string;
+  configured: boolean;
+  models: ProviderModel[];
+}
+
+export interface CodingRoleAssignment {
+  id: string;
+  name: string;
+  description: string;
+  modelId: string;
+}
+
 export interface SubAgent {
   id: string;
   name: string;
