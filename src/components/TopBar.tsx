@@ -1,6 +1,7 @@
+import { useState, useRef, useEffect } from 'react';
 import {
-  PanelLeftClose, PanelLeftOpen, MoreHorizontal, RotateCcw,
-  FolderOpen,
+  PanelLeftClose, PanelLeftOpen, RotateCcw, FolderOpen,
+  ChevronDown, Check, LayoutGrid,
 } from 'lucide-react';
 import type { PanelId } from '../types/layout';
 import { ALL_PANELS } from '../types/layout';
@@ -18,6 +19,51 @@ interface Props {
 }
 
 export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout, sessionTitle, workingDir, onOpenFolder }: Props) {
+  const [panelMenuOpen, setPanelMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const visibleCount = visiblePanels.size;
+
+  useEffect(() => {
+    if (!panelMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setPanelMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [panelMenuOpen]);
+
+  const panelToggles = ALL_PANELS.map((id) => {
+    const Icon = getPanelIcon(id);
+    const config = getPanelConfig(id);
+    const active = visiblePanels.has(id);
+    const label = (active ? 'Hide ' : 'Show ') + config.label;
+    const cls = 'top-bar-action' + (active ? ' active' : '');
+    return (
+      <button key={id} className={cls} onClick={() => onTogglePanel(id)} title={label}>
+        <Icon size={16} />
+      </button>
+    );
+  });
+
+  const panelMenuItems = ALL_PANELS.map((id) => {
+    const Icon = getPanelIcon(id);
+    const config = getPanelConfig(id);
+    const active = visiblePanels.has(id);
+    return (
+      <button
+        key={id}
+        className={'panel-menu-item' + (active ? ' active' : '')}
+        onClick={() => { onTogglePanel(id); setPanelMenuOpen(false); }}
+      >
+        <Icon size={14} />
+        <span className="panel-menu-item-label">{config.label}</span>
+        {active && <Check size={14} className="panel-menu-check" />}
+      </button>
+    );
+  });
+
   return (
     <div className="top-bar">
       <button className="top-bar-toggle" onClick={onToggleSidebar} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
@@ -39,40 +85,40 @@ export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePa
       </div>
 
       <div className="top-bar-actions">
-        <button
-          className="top-bar-action"
-          onClick={onOpenFolder}
-          title="Open folder"
-        >
+        <button className="top-bar-action" onClick={onOpenFolder} title="Open folder">
           <FolderOpen size={16} />
         </button>
 
         <div style={{ width: 1, height: 20, background: 'var(--border-primary)', margin: '0 4px' }} />
 
-        {ALL_PANELS.map((id) => {
-          const Icon = getPanelIcon(id);
-          const config = getPanelConfig(id);
-          const active = visiblePanels.has(id);
-          return (
-            <button
-              key={id}
-              className={`top-bar-action ${active ? 'active' : ''}`}
-              onClick={() => onTogglePanel(id)}
-              title={config.label}
-            >
-              <Icon size={16} />
-            </button>
-          );
-        })}
+        {panelToggles}
 
-        <div style={{ width: 1, height: 20, background: 'var(--border-primary)', margin: '0 4px' }} />
+        <div ref={menuRef} style={{ position: 'relative' }}>
+          <button
+            className={'top-bar-action top-bar-panels-btn' + (panelMenuOpen ? ' active' : '')}
+            onClick={() => setPanelMenuOpen(!panelMenuOpen)}
+            title="Manage panels"
+          >
+            <LayoutGrid size={16} />
+            <span className="top-bar-panels-label">Panels</span>
+            <ChevronDown size={12} />
+          </button>
 
-        <button className="top-bar-action" onClick={onResetLayout} title="Reset layout">
-          <RotateCcw size={16} />
-        </button>
-        <button className="top-bar-action" title="More options">
-          <MoreHorizontal size={16} />
-        </button>
+          {panelMenuOpen && (
+            <div className="panel-menu">
+              <div className="panel-menu-header">
+                <span>Panels</span>
+                <span className="panel-menu-count">{visibleCount} active</span>
+              </div>
+              {panelMenuItems}
+              <div className="panel-menu-separator" />
+              <button className="panel-menu-item" onClick={() => { onResetLayout(); setPanelMenuOpen(false); }}>
+                <RotateCcw size={14} />
+                <span className="panel-menu-item-label">Reset to default layout</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
