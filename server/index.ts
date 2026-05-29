@@ -8,6 +8,7 @@ import { execSync, spawn } from 'child_process';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer } from './config';
 import type { StoredProvider, StoredMCPServer } from './config';
 import { testProviderConnection, fetchProviderModels } from './providers';
+import { mcpManager } from './mcp';
 
 const app = express();
 app.use(cors());
@@ -276,7 +277,48 @@ app.post('/api/mcp-servers', (req, res) => {
 app.delete('/api/mcp-servers/:id', (req, res) => {
   appConfig = removeMCPServer(appConfig, req.params.id);
   saveConfig(appConfig);
+  // Also stop the process if running
+  mcpManager.stopServer(req.params.id).catch(() => {});
   res.status(204).end();
+});
+
+// ── MCP runtime endpoints ─────────────────────────────
+
+app.get('/api/mcp/status', (_req, res) => {
+  res.json(mcpManager.getStatus());
+});
+
+app.post('/api/mcp/:serverId/tools/:toolName', async (req, res) => {
+  const { serverId, toolName } = req.params;
+  const args = req.body || {};
+  try {
+    const result = await mcpManager.callTool(serverId, toolName, args);
+    res.json({ result });
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/mcp/:serverId/start', async (req, res) => {
+  const { serverId } = req.params;
+  const server = appConfig.mcpServers.find((s) => s.id === serverId);
+  if (!server) return res.status(404).json({ error: 'Server not found' });
+  try {
+    const client = await mcpManager.startServer(server.id, server.name, server.endpoint);
+    res.json({
+      id: client.id,
+      name: client.name,
+      running: client.isConnected(),
+      toolCount: client.getTools().length,
+    });
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/mcp/:serverId/stop', async (req, res) => {
+  await mcpManager.stopServer(req.params.id);
+  res.json({ ok: true });
 });
 
 // ── Models endpoint (all enabled models across providers) ──
@@ -584,4 +626,12 @@ app.listen(PORT, () => {
     console.log(`⚠  No MiniMax API key found — using local fallback`);
   }
   console.log(`✓ Config loaded from ~/.open-harness/config.json`);
+
+  // Auto-start Docker MCP if docker is available
+  try {
+    execSync('which docker', { encoding: 'utf-8' });
+    console.log('✓ Docker found — Docker MCP available');
+  } catch {
+    console.log('  Docker not found — Docker MCP will show as unavailable');
+  }
 });

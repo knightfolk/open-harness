@@ -42,6 +42,16 @@ export interface ProviderConfig {
   models: ProviderModel[];
 }
 
+export interface MCPServerItem {
+  id: string;
+  name: string;
+  endpoint: string;
+  authType: 'none' | 'bearer';
+  enabled: boolean;
+  builtIn?: boolean;
+  description?: string;
+}
+
 export interface CodingRoleAssignment {
   id: string;
   name: string;

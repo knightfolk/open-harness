@@ -47,7 +47,7 @@ function App() {
   ]);
   const [activeTheme, setActiveTheme] = useState('midnight');
   const [personalityText, setPersonalityText] = useState('');
-  const [mcpServers, setMcpServers] = useState<any[]>([]);
+  const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
@@ -134,6 +134,70 @@ function App() {
   const handlePersonalityChange = useCallback((text: string) => {
     setPersonalityText(text);
     api.updateConfig({ personality: text }).catch(() => {});
+  }, []);
+
+  // ── Provider management handlers ─────────────────────
+  const handleAddProvider = useCallback(async (provider: { name: string; type: string; apiKey: string; baseURL: string }) => {
+    const result = await api.addProvider(provider);
+    // Re-fetch providers from server
+    const fresh = await api.getProviders();
+    setProviders(fresh.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      type: p.type || 'openai-compatible',
+      endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
+      configured: !!p.hasKey || p.type === 'local',
+      models: p.models || [],
+    })));
+    return result;
+  }, []);
+
+  const handleTestProvider = useCallback(async (providerId: string) => {
+    return await api.testProviderConnection(providerId);
+  }, []);
+
+  const handleFetchModels = useCallback(async (providerId: string) => {
+    const models = await api.fetchProviderModels(providerId);
+    // Update the provider's model list by saving to server then refreshing
+    const fresh = await api.getProviders();
+    setProviders(fresh.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      type: p.type || 'openai-compatible',
+      endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
+      configured: !!p.hasKey || p.type === 'local',
+      models: p.models || [],
+    })));
+    return models;
+  }, []);
+
+  const handleRemoveProvider = useCallback((providerId: string) => {
+    api.deleteProvider(providerId).then(async () => {
+      const fresh = await api.getProviders();
+      setProviders(fresh.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        type: p.type || 'openai-compatible',
+        endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
+        configured: !!p.hasKey || p.type === 'local',
+        models: p.models || [],
+      })));
+    }).catch(() => {});
+  }, []);
+
+  // ── MCP server management handlers ───────────────────
+  const handleAddMCPServer = useCallback(async (server: { name: string; endpoint: string; authType: string; authToken: string }) => {
+    const result = await api.addMCPServer(server);
+    const servers = await api.getMCPServers();
+    setMcpServers(servers);
+    return result;
+  }, []);
+
+  const handleRemoveMCPServer = useCallback((serverId: string) => {
+    api.deleteMCPServer(serverId).then(async () => {
+      const servers = await api.getMCPServers();
+      setMcpServers(servers);
+    }).catch(() => {});
   }, []);
 
   // Load sessions on mount
@@ -399,6 +463,13 @@ function App() {
         roleAssignments={roleAssignments}
         activeTheme={activeTheme}
         personalityText={personalityText}
+        mcpServers={mcpServers}
+        onAddProvider={handleAddProvider}
+        onTestProvider={handleTestProvider}
+        onFetchModels={handleFetchModels}
+        onRemoveProvider={handleRemoveProvider}
+        onAddMCPServer={handleAddMCPServer}
+        onRemoveMCPServer={handleRemoveMCPServer}
         onSelectModel={handleSelectModel}
         onToggleProviderModel={handleToggleProviderModel}
         onAssignRoleModel={handleAssignRoleModel}

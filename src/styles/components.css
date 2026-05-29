@@ -2409,3 +2409,56 @@ button:focus-visible {
 .personality-textarea::placeholder {
   color: var(--text-tertiary);
 }
+
+/* ========== Provider Action Row ========== */
+.provider-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-primary);
+}
+
+.provider-actions-row .settings-mini-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ========== Test Result ========== */
+.test-result {
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  margin: 4px 0;
+  line-height: 1.4;
+}
+.test-result.success {
+  background: var(--accent-success-muted);
+  color: var(--accent-success);
+}
+.test-result.error {
+  background: var(--accent-error-muted);
+  color: var(--accent-error);
+}
+
+/* ========== Add Provider Actions ========== */
+.add-provider-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.add-provider-actions .settings-mini-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ========== Spin animation for loaders ========== */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 1s linear infinite;
+}

@@ -3,10 +3,10 @@ import {
   MessageSquare, FileCode, Zap, Brain, Settings, Plus, Clock,
   Sparkles, Globe, Search, FileText,
   Command, Layout, Grid, Layers, Wrench, Palette, Image, PlayCircle, ShieldCheck, KeyRound, SlidersHorizontal,
-  Server, MessageCircle, Check,
-  ChevronDown, ChevronRight, Loader, CheckCircle2, Circle, Bot, AlertCircle, FolderOpen,
+  Server, MessageCircle, Check, Trash2, RefreshCw, Loader, Wifi,
+  ChevronDown, ChevronRight, CheckCircle2, Circle, Bot, AlertCircle, FolderOpen,
 } from 'lucide-react';
-import type { SidebarTab, Session, Skill, Plugin, MemoryEntry, SubAgent, ProviderConfig, CodingRoleAssignment } from '../types';
+import type { SidebarTab, Session, Skill, Plugin, MemoryEntry, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
 import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
 
 interface Props {
@@ -21,6 +21,13 @@ interface Props {
   roleAssignments: CodingRoleAssignment[];
   activeTheme: string;
   personalityText: string;
+  mcpServers: MCPServerItem[];
+  onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string }) => Promise<any>;
+  onTestProvider: (providerId: string) => Promise<any>;
+  onFetchModels: (providerId: string) => Promise<any>;
+  onRemoveProvider: (providerId: string) => void;
+  onAddMCPServer: (server: { name: string; endpoint: string; authType: string; authToken: string }) => Promise<any>;
+  onRemoveMCPServer: (serverId: string) => void;
   onSelectModel: (modelId: string) => void;
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
@@ -54,7 +61,7 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, providers, roleAssignments, activeTheme, personalityText, onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme, onPersonalityChange, onSelectSession, onNewSession, onOpenFolder }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, providers, roleAssignments, activeTheme, personalityText, mcpServers, onAddProvider, onTestProvider, onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer, onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme, onPersonalityChange, onSelectSession, onNewSession, onOpenFolder }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
@@ -94,6 +101,13 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, ac
             roleAssignments={roleAssignments}
             activeTheme={activeTheme}
             personalityText={personalityText}
+            mcpServers={mcpServers}
+            onAddProvider={onAddProvider}
+            onTestProvider={onTestProvider}
+            onFetchModels={onFetchModels}
+            onRemoveProvider={onRemoveProvider}
+            onAddMCPServer={onAddMCPServer}
+            onRemoveMCPServer={onRemoveMCPServer}
             onSelectModel={onSelectModel}
             onToggleProviderModel={onToggleProviderModel}
             onAssignRoleModel={onAssignRoleModel}
@@ -121,6 +135,13 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
   roleAssignments: CodingRoleAssignment[];
   activeTheme: string;
   personalityText: string;
+  mcpServers: MCPServerItem[];
+  onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string }) => Promise<any>;
+  onTestProvider: (providerId: string) => Promise<any>;
+  onFetchModels: (providerId: string) => Promise<any>;
+  onRemoveProvider: (providerId: string) => void;
+  onAddMCPServer: (server: { name: string; endpoint: string; authType: string; authToken: string }) => Promise<any>;
+  onRemoveMCPServer: (serverId: string) => void;
   onSelectModel: (modelId: string) => void;
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
@@ -337,6 +358,13 @@ function SettingsTab({
   roleAssignments,
   activeTheme,
   personalityText,
+  mcpServers,
+  onAddProvider,
+  onTestProvider,
+  onFetchModels,
+  onRemoveProvider,
+  onAddMCPServer,
+  onRemoveMCPServer,
   onSelectModel,
   onToggleProviderModel,
   onAssignRoleModel,
@@ -348,29 +376,48 @@ function SettingsTab({
   roleAssignments: CodingRoleAssignment[];
   activeTheme: string;
   personalityText: string;
+  mcpServers: MCPServerItem[];
+  onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string }) => Promise<any>;
+  onTestProvider: (providerId: string) => Promise<any>;
+  onFetchModels: (providerId: string) => Promise<any>;
+  onRemoveProvider: (providerId: string) => void;
+  onAddMCPServer: (server: { name: string; endpoint: string; authType: string; authToken: string }) => Promise<any>;
+  onRemoveMCPServer: (serverId: string) => void;
   onSelectModel: (modelId: string) => void;
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
   onSelectTheme: (themeId: string) => void;
   onPersonalityChange: (text: string) => void;
 }) {
-  const [settings, setSettings] = useState({
-    streamResponses: true,
-    showToolCalls: true,
-    autoScroll: true,
-    soundEffects: false,
-  });
+  const [settings, setSettings] = useState({ streamResponses: true, showToolCalls: true, autoScroll: true, soundEffects: false });
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddMcp, setShowAddMcp] = useState(false);
 
-  const toggle = (key: keyof typeof settings) => {
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  // Add Provider form state
+  const [newProvName, setNewProvName] = useState('');
+  const [newProvKey, setNewProvKey] = useState('');
+  const [newProvURL, setNewProvURL] = useState('');
+  const [newProvType, setNewProvType] = useState('openai-compatible');
+  const [provSaving, setProvSaving] = useState(false);
+  const [provError, setProvError] = useState('');
+
+  // Provider test/fetch state: providerId -> status
+  const [testingProvider, setTestingProvider] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; latencyMs?: number; modelsCount?: number; error?: string }>>({});
+  const [fetchingModels, setFetchingModels] = useState<string | null>(null);
+
+  // Add MCP form state
+  const [newMcpName, setNewMcpName] = useState('');
+  const [newMcpEndpoint, setNewMcpEndpoint] = useState('');
+  const [newMcpAuthType, setNewMcpAuthType] = useState('none');
+  const [newMcpAuthToken, setNewMcpAuthToken] = useState('');
+  const [mcpSaving, setMcpSaving] = useState(false);
+  const [mcpError, setMcpError] = useState('');
+
+  const toggle = (key: keyof typeof settings) => setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const enabledModels = providers.flatMap((provider) =>
-    provider.models
-      .filter((model) => model.enabled)
-      .map((model) => ({ ...model, providerId: provider.id, providerName: provider.name }))
+    provider.models.filter((model) => model.enabled).map((model) => ({ ...model, providerId: provider.id, providerName: provider.name }))
   );
   const activeModelMeta = enabledModels.find((model) => model.id === activeModel) || enabledModels[0];
 
@@ -388,13 +435,57 @@ function SettingsTab({
   const darkThemes = themes.filter((t) => t.group === 'dark');
   const lightThemes = themes.filter((t) => t.group === 'light');
 
-  // Personality presets
   const personalityPresets = [
     { id: 'professional', label: 'Professional', text: 'You are a professional software engineering assistant. Be thorough, well-structured, and prioritize code quality and best practices.' },
     { id: 'concise', label: 'Concise', text: 'Be brief and direct. Show code, skip preamble. Focus on what changed and why.' },
     { id: 'detailed', label: 'Detailed', text: 'Explain your reasoning step by step. Include context, alternatives considered, and tradeoffs. Teach while you code.' },
     { id: 'creative', label: 'Creative', text: 'Think outside the box. Suggest unconventional approaches when appropriate. Prioritize elegance and developer experience.' },
   ];
+
+  // ── Handler: save new provider ──
+  const handleSaveProvider = async () => {
+    if (!newProvName.trim() || !newProvURL.trim()) { setProvError('Name and endpoint are required'); return; }
+    setProvSaving(true); setProvError('');
+    try {
+      await onAddProvider({ name: newProvName.trim(), type: newProvType, apiKey: newProvKey, baseURL: newProvURL.trim() });
+      setNewProvName(''); setNewProvKey(''); setNewProvURL(''); setShowAddProvider(false);
+    } catch (e: any) {
+      setProvError(e.message || 'Failed to add provider');
+    } finally { setProvSaving(false); }
+  };
+
+  // ── Handler: test provider ──
+  const handleTestProvider = async (providerId: string) => {
+    setTestingProvider(providerId);
+    try {
+      const result = await onTestProvider(providerId);
+      setTestResults((prev) => ({ ...prev, [providerId]: result }));
+    } catch (e: any) {
+      setTestResults((prev) => ({ ...prev, [providerId]: { ok: false, error: e.message || 'Test failed' } }));
+    } finally { setTestingProvider(null); }
+  };
+
+  // ── Handler: fetch models ──
+  const handleFetchModels = async (providerId: string) => {
+    setFetchingModels(providerId);
+    try { await onFetchModels(providerId); } catch { /* error shown in UI via provider.models */ }
+    finally { setFetchingModels(null); }
+  };
+
+  // ── Handler: save new MCP server ──
+  const handleSaveMcp = async () => {
+    if (!newMcpName.trim() || !newMcpEndpoint.trim()) { setMcpError('Name and endpoint are required'); return; }
+    setMcpSaving(true); setMcpError('');
+    try {
+      await onAddMCPServer({ name: newMcpName.trim(), endpoint: newMcpEndpoint.trim(), authType: newMcpAuthType, authToken: newMcpAuthToken });
+      setNewMcpName(''); setNewMcpEndpoint(''); setNewMcpAuthToken(''); setShowAddMcp(false);
+    } catch (e: any) {
+      setMcpError(e.message || 'Failed to add server');
+    } finally { setMcpSaving(false); }
+  };
+
+  const customMcpServers = mcpServers.filter((s) => !s.builtIn);
+  const dockerMcp = mcpServers.find((s) => s.builtIn);
 
   return (
     <>
@@ -403,9 +494,7 @@ function SettingsTab({
         <div>
           <div className="settings-hero-kicker">Model routing</div>
           <div className="settings-hero-title">Configured providers only</div>
-          <div className="settings-hero-copy">
-            Open-Harness will only show models from providers you have actually added and enabled.
-          </div>
+          <div className="settings-hero-copy">Open-Harness will only show models from providers you have actually added and enabled.</div>
         </div>
         <div className="settings-hero-pill">{providers.length} provider{providers.length !== 1 ? 's' : ''}</div>
       </div>
@@ -416,15 +505,9 @@ function SettingsTab({
         <div className="settings-card settings-current-model">
           <div>
             <div className="settings-item-label">{activeModelMeta?.name || activeModel}</div>
-            <div className="settings-item-desc">
-              {activeModelMeta ? `${activeModelMeta.providerName} • enabled for chat` : 'No enabled provider model found'}
-            </div>
+            <div className="settings-item-desc">{activeModelMeta ? `${activeModelMeta.providerName} • enabled for chat` : 'No enabled model found'}</div>
           </div>
-          <select
-            className="settings-select settings-select-wide"
-            value={activeModel}
-            onChange={(e) => onSelectModel(e.target.value)}
-          >
+          <select className="settings-select settings-select-wide" value={activeModel} onChange={(e) => onSelectModel(e.target.value)}>
             {enabledModels.map((model) => (
               <option key={`${model.providerId}:${model.id}`} value={model.id}>{model.providerName} — {model.name}</option>
             ))}
@@ -436,54 +519,94 @@ function SettingsTab({
       <div className="settings-section">
         <div className="settings-section-header">
           <div className="settings-section-title">Providers</div>
-          <button className="settings-mini-button" onClick={() => setShowAddProvider((value) => !value)}>
+          <button className="settings-mini-button" onClick={() => setShowAddProvider((v) => !v)}>
             <Plus size={12} /> Add Provider
           </button>
         </div>
 
-        {providers.map((provider) => (
-          <div key={provider.id} className="provider-card">
-            <div className="provider-card-header">
-              <div className="provider-logo"><KeyRound size={14} /></div>
-              <div className="provider-title-block">
-                <div className="provider-title-row">
-                  <span className="provider-name">{provider.name}</span>
-                  <span className={`provider-status ${provider.configured ? 'ready' : 'missing'}`}>
-                    {provider.configured ? 'Configured' : 'Needs key'}
-                  </span>
-                </div>
-                <div className="provider-meta">{provider.type} • {provider.endpointLabel}</div>
-              </div>
-            </div>
-            <div className="provider-model-list">
-              {provider.models.map((model) => (
-                <div key={model.id} className="provider-model-row">
-                  <div>
-                    <div className="provider-model-name">{model.name}</div>
-                    <div className="provider-model-id">{model.id}</div>
+        {providers.map((provider) => {
+          const testResult = testResults[provider.id];
+          return (
+            <div key={provider.id} className="provider-card">
+              <div className="provider-card-header">
+                <div className="provider-logo"><KeyRound size={14} /></div>
+                <div className="provider-title-block">
+                  <div className="provider-title-row">
+                    <span className="provider-name">{provider.name}</span>
+                    <span className={`provider-status ${provider.configured ? 'ready' : 'missing'}`}>
+                      {provider.configured ? 'Configured' : 'Needs key'}
+                    </span>
                   </div>
-                  <div
-                    className={`toggle ${model.enabled ? 'active' : ''}`}
-                    onClick={() => onToggleProviderModel(provider.id, model.id)}
-                    title={model.enabled ? 'Hide this model from selectors' : 'Enable this model'}
-                  />
+                  <div className="provider-meta">{provider.type} • {provider.endpointLabel}</div>
                 </div>
-              ))}
-            </div>
-          </div>
-        ))}
+              </div>
 
+              {/* Test / Fetch / Remove row */}
+              <div className="provider-actions-row">
+                <button className="settings-mini-button" onClick={() => handleTestProvider(provider.id)} disabled={testingProvider === provider.id}>
+                  {testingProvider === provider.id ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
+                  {testingProvider === provider.id ? 'Testing...' : 'Test'}
+                </button>
+                <button className="settings-mini-button" onClick={() => handleFetchModels(provider.id)} disabled={fetchingModels === provider.id}>
+                  {fetchingModels === provider.id ? <Loader size={11} className="spin" /> : <RefreshCw size={11} />}
+                  {fetchingModels === provider.id ? 'Fetching...' : 'Fetch Models'}
+                </button>
+                <button className="settings-mini-button" style={{ marginLeft: 'auto', color: 'var(--accent-error)', background: 'var(--accent-error-muted)' }} onClick={() => onRemoveProvider(provider.id)}>
+                  <Trash2 size={11} /> Remove
+                </button>
+              </div>
+
+              {/* Test result */}
+              {testResult && (
+                <div className={`test-result ${testResult.ok ? 'success' : 'error'}`}>
+                  {testResult.ok
+                    ? `✓ Connected in ${testResult.latencyMs}ms — ${testResult.modelsCount} models available`
+                    : `✗ ${testResult.error || 'Connection failed'}`}
+                </div>
+              )}
+
+              {/* Model list */}
+              {provider.models.length > 0 && (
+                <div className="provider-model-list">
+                  {provider.models.map((model) => (
+                    <div key={model.id} className="provider-model-row">
+                      <div>
+                        <div className="provider-model-name">{model.name}</div>
+                        <div className="provider-model-id">{model.id}</div>
+                      </div>
+                      <div className={`toggle ${model.enabled ? 'active' : ''}`} onClick={() => onToggleProviderModel(provider.id, model.id)} title={model.enabled ? 'Hide from selectors' : 'Enable'} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Add Provider form */}
         {showAddProvider && (
           <div className="add-provider-card">
-            <div className="add-provider-title"><SlidersHorizontal size={14} /> Add Provider skeleton</div>
+            <div className="add-provider-title"><SlidersHorizontal size={14} /> Add new provider</div>
             <div className="add-provider-grid">
-              <label>Provider name<input value="" placeholder="OpenAI, Z.AI, DeepSeek, local Ollama..." readOnly /></label>
-              <label>API key<input value="" placeholder="Paste key when secure storage is wired" readOnly /></label>
-              <label>Endpoint<input value="" placeholder="https://api.example.com/v1" readOnly /></label>
-              <label>Type<select value="openai-compatible" disabled><option value="openai-compatible">OpenAI-compatible</option></select></label>
+              <label>Provider name<input value={newProvName} onChange={(e) => setNewProvName(e.target.value)} placeholder="OpenAI, Z.AI, DeepSeek, Ollama..." /></label>
+              <label>API key<input type="password" value={newProvKey} onChange={(e) => setNewProvKey(e.target.value)} placeholder="Paste your API key" /></label>
+              <label>Endpoint<input value={newProvURL} onChange={(e) => setNewProvURL(e.target.value)} placeholder="https://api.example.com/v1" /></label>
+              <label>Type
+                <select value={newProvType} onChange={(e) => setNewProvType(e.target.value)}>
+                  <option value="openai-compatible">OpenAI-compatible</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google</option>
+                  <option value="local">Local (Ollama, LM Studio)</option>
+                </select>
+              </label>
             </div>
-            <div className="settings-note">
-              Next wiring step: save providers securely, test the connection, then fetch or enter available models.
+            {provError && <div className="test-result error">{provError}</div>}
+            <div className="add-provider-actions">
+              <button className="settings-mini-button" onClick={() => { setShowAddProvider(false); setProvError(''); }}>Cancel</button>
+              <button className="settings-mini-button" style={{ background: 'var(--accent-primary)', color: 'white' }} onClick={handleSaveProvider} disabled={provSaving}>
+                {provSaving ? <Loader size={11} className="spin" /> : <Check size={11} />}
+                {provSaving ? 'Saving...' : 'Save & Test'}
+              </button>
             </div>
           </div>
         )}
@@ -492,9 +615,7 @@ function SettingsTab({
       {/* ── Coding Role Buckets ── */}
       <div className="settings-section">
         <div className="settings-section-title">Coding role buckets</div>
-        <div className="settings-note">
-          Assign enabled models to the roles Open-Harness will use for efficient coding work. Recommendations will come from the model research task.
-        </div>
+        <div className="settings-note">Assign enabled models to coding-specific roles for efficient task routing.</div>
         <div className="role-bucket-list">
           {roleAssignments.map((role) => {
             const Icon = roleIconMap[role.id] || Bot;
@@ -504,11 +625,7 @@ function SettingsTab({
                 <div className="role-bucket-body">
                   <div className="role-bucket-name">{role.name}</div>
                   <div className="role-bucket-desc">{role.description}</div>
-                  <select
-                    className="settings-select settings-select-wide"
-                    value={role.modelId}
-                    onChange={(e) => onAssignRoleModel(role.id, e.target.value)}
-                  >
+                  <select className="settings-select settings-select-wide" value={role.modelId} onChange={(e) => onAssignRoleModel(role.id, e.target.value)}>
                     {enabledModels.map((model) => (
                       <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>{model.providerName} — {model.name}</option>
                     ))}
@@ -524,53 +641,88 @@ function SettingsTab({
       <div className="settings-section">
         <div className="settings-section-header">
           <div className="settings-section-title">MCP Servers</div>
-          <button className="settings-mini-button" onClick={() => setShowAddMcp((value) => !value)}>
+          <button className="settings-mini-button" onClick={() => setShowAddMcp((v) => !v)}>
             <Plus size={12} /> Add Server
           </button>
         </div>
         <div className="settings-note" style={{ marginBottom: 8 }}>
-          Model Context Protocol servers give the agent tools, resources, and prompts. Docker MCP is the built-in server.
+          Model Context Protocol servers provide tools, resources, and prompts to the agent.
         </div>
 
-        {/* Docker MCP preset card */}
-        <div className="provider-card">
-          <div className="provider-card-header">
-            <div className="provider-logo"><Server size={14} /></div>
-            <div className="provider-title-block">
-              <div className="provider-title-row">
-                <span className="provider-name">Docker MCP</span>
-                <span className="provider-status ready">Built-in</span>
+        {/* Docker MCP built-in */}
+        {dockerMcp && (
+          <div className="provider-card">
+            <div className="provider-card-header">
+              <div className="provider-logo"><Server size={14} /></div>
+              <div className="provider-title-block">
+                <div className="provider-title-row">
+                  <span className="provider-name">{dockerMcp.name}</span>
+                  <span className="provider-status ready">Built-in</span>
+                </div>
+                <div className="provider-meta">mcp • {dockerMcp.endpoint}</div>
               </div>
-              <div className="provider-meta">mcp • stdio://mcp-docker</div>
+            </div>
+            <div style={{ padding: '6px 0 2px', borderTop: '1px solid var(--border-primary)' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                Containerized tool execution via Docker MCP. Enabled by default.
+              </div>
             </div>
           </div>
-          <div style={{ padding: '6px 0 2px', borderTop: '1px solid var(--border-primary)' }}>
-            <div style={{ fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-              Provides filesystem access, terminal commands, code search, and git operations.
-              Enabled by default — no configuration needed.
+        )}
+
+        {/* Custom servers */}
+        {customMcpServers.map((server) => (
+          <div key={server.id} className="provider-card">
+            <div className="provider-card-header">
+              <div className="provider-logo"><Server size={14} /></div>
+              <div className="provider-title-block">
+                <div className="provider-title-row">
+                  <span className="provider-name">{server.name}</span>
+                  <span className={`provider-status ${server.enabled ? 'ready' : 'missing'}`}>
+                    {server.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+                <div className="provider-meta">{server.authType} • {server.endpoint}</div>
+              </div>
+            </div>
+            <div className="provider-actions-row">
+              <button className="settings-mini-button" style={{ marginLeft: 'auto', color: 'var(--accent-error)', background: 'var(--accent-error-muted)' }} onClick={() => onRemoveMCPServer(server.id)}>
+                <Trash2 size={11} /> Remove
+              </button>
             </div>
           </div>
-        </div>
+        ))}
 
-        {/* Custom server list placeholder */}
-        <div className="settings-card" style={{ textAlign: 'center', padding: '12px 8px' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-            No custom MCP servers configured
+        {customMcpServers.length === 0 && !showAddMcp && (
+          <div className="settings-card" style={{ textAlign: 'center', padding: '12px 8px' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>No custom MCP servers configured</div>
           </div>
-        </div>
+        )}
 
-        {/* Add server skeleton */}
+        {/* Add MCP server form */}
         {showAddMcp && (
           <div className="add-provider-card">
             <div className="add-provider-title"><Server size={14} /> Add MCP Server</div>
             <div className="add-provider-grid">
-              <label>Server name<input value="" placeholder="my-tools-server" readOnly /></label>
-              <label>Endpoint<input value="" placeholder="stdio://./my-server or http://..." readOnly /></label>
-              <label>Auth type<select value="none" disabled><option value="none">None</option><option value="bearer">Bearer token</option></select></label>
-              <label>Status<select value="disabled" disabled><option value="disabled">Disabled</option><option value="enabled">Enabled</option></select></label>
+              <label>Server name<input value={newMcpName} onChange={(e) => setNewMcpName(e.target.value)} placeholder="my-tools-server" /></label>
+              <label>Endpoint<input value={newMcpEndpoint} onChange={(e) => setNewMcpEndpoint(e.target.value)} placeholder="stdio://./my-server or http://..." /></label>
+              <label>Auth type
+                <select value={newMcpAuthType} onChange={(e) => setNewMcpAuthType(e.target.value)}>
+                  <option value="none">None</option>
+                  <option value="bearer">Bearer token</option>
+                </select>
+              </label>
+              {newMcpAuthType === 'bearer' && (
+                <label>Auth token<input type="password" value={newMcpAuthToken} onChange={(e) => setNewMcpAuthToken(e.target.value)} placeholder="Paste bearer token" /></label>
+              )}
             </div>
-            <div className="settings-note">
-              Future: test connection, auto-discover tools, persist config.
+            {mcpError && <div className="test-result error">{mcpError}</div>}
+            <div className="add-provider-actions">
+              <button className="settings-mini-button" onClick={() => { setShowAddMcp(false); setMcpError(''); }}>Cancel</button>
+              <button className="settings-mini-button" style={{ background: 'var(--accent-primary)', color: 'white' }} onClick={handleSaveMcp} disabled={mcpSaving}>
+                {mcpSaving ? <Loader size={11} className="spin" /> : <Check size={11} />}
+                {mcpSaving ? 'Saving...' : 'Add Server'}
+              </button>
             </div>
           </div>
         )}
@@ -579,130 +731,52 @@ function SettingsTab({
       {/* ── Personality ── */}
       <div className="settings-section">
         <div className="settings-section-title">Agent personality</div>
-        <div className="settings-note" style={{ marginBottom: 6 }}>
-          Customize how the agent communicates with you.
-        </div>
-        {/* Preset pills */}
+        <div className="settings-note" style={{ marginBottom: 6 }}>Customize how the agent communicates with you.</div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
           {personalityPresets.map((preset) => (
-            <button
-              key={preset.id}
-              className="settings-mini-button"
-              style={personalityText === preset.text ? { background: 'var(--accent-primary)', color: 'white' } : {}}
-              onClick={() => onPersonalityChange(personalityText === preset.text ? '' : preset.text)}
-            >
+            <button key={preset.id} className="settings-mini-button" style={personalityText === preset.text ? { background: 'var(--accent-primary)', color: 'white' } : {}} onClick={() => onPersonalityChange(personalityText === preset.text ? '' : preset.text)}>
               <MessageCircle size={11} /> {preset.label}
             </button>
           ))}
         </div>
-        <textarea
-          className="personality-textarea"
-          placeholder="E.g., Be concise and direct. Focus on code quality over explanation."
-          value={personalityText}
-          onChange={(e) => onPersonalityChange(e.target.value)}
-          rows={3}
-        />
+        <textarea className="personality-textarea" placeholder="E.g., Be concise and direct. Focus on code quality over explanation." value={personalityText} onChange={(e) => onPersonalityChange(e.target.value)} rows={3} />
       </div>
 
       {/* ── Theme ── */}
       <div className="settings-section">
         <div className="settings-section-title">Theme</div>
-        <div className="settings-note" style={{ marginBottom: 8 }}>
-          Choose a colorway. Dark themes are on the left, light themes on the right.
-        </div>
+        <div className="settings-note" style={{ marginBottom: 8 }}>Choose a colorway. Dark on the left, light on the right.</div>
         <div className="theme-swatches">
           <div className="theme-swatch-group">
             <div className="theme-swatch-group-label">Dark</div>
             <div className="theme-swatch-row">
-              {darkThemes.map((t) => (
-                <button
-                  key={t.id}
-                  className={`theme-swatch ${activeTheme === t.id ? 'active' : ''}`}
-                  style={{ background: t.color }}
-                  onClick={() => onSelectTheme(t.id)}
-                  title={t.label}
-                >
-                  {activeTheme === t.id && <Check size={10} />}
-                </button>
-              ))}
+              {darkThemes.map((t) => (<button key={t.id} className={`theme-swatch ${activeTheme === t.id ? 'active' : ''}`} style={{ background: t.color }} onClick={() => onSelectTheme(t.id)} title={t.label}>{activeTheme === t.id && <Check size={10} />}</button>))}
             </div>
           </div>
           <div className="theme-swatch-group">
             <div className="theme-swatch-group-label">Light</div>
             <div className="theme-swatch-row">
-              {lightThemes.map((t) => (
-                <button
-                  key={t.id}
-                  className={`theme-swatch ${activeTheme === t.id ? 'active' : ''}`}
-                  style={{ background: t.color }}
-                  onClick={() => onSelectTheme(t.id)}
-                  title={t.label}
-                >
-                  {activeTheme === t.id && <Check size={10} />}
-                </button>
-              ))}
+              {lightThemes.map((t) => (<button key={t.id} className={`theme-swatch ${activeTheme === t.id ? 'active' : ''}`} style={{ background: t.color }} onClick={() => onSelectTheme(t.id)} title={t.label}>{activeTheme === t.id && <Check size={10} />}</button>))}
             </div>
           </div>
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 4, textTransform: 'capitalize' }}>
-          Active: {themes.find((t) => t.id === activeTheme)?.label}
-        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 4, textTransform: 'capitalize' }}>Active: {themes.find((t) => t.id === activeTheme)?.label}</div>
       </div>
 
-      {/* ── Chat settings ── */}
+      {/* ── Chat ── */}
       <div className="settings-section">
         <div className="settings-section-title">Chat</div>
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label">Stream responses</div>
-            <div className="settings-item-desc">Show text as it generates</div>
-          </div>
-          <div className={`toggle ${settings.streamResponses ? 'active' : ''}`} onClick={() => toggle('streamResponses')} />
-        </div>
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label">Show tool calls</div>
-            <div className="settings-item-desc">Display agent tool usage inline</div>
-          </div>
-          <div className={`toggle ${settings.showToolCalls ? 'active' : ''}`} onClick={() => toggle('showToolCalls')} />
-        </div>
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label">Auto-scroll</div>
-            <div className="settings-item-desc">Follow new messages automatically</div>
-          </div>
-          <div className={`toggle ${settings.autoScroll ? 'active' : ''}`} onClick={() => toggle('autoScroll')} />
-        </div>
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label">Sound effects</div>
-            <div className="settings-item-desc">Play sounds on completion</div>
-          </div>
-          <div className={`toggle ${settings.soundEffects ? 'active' : ''}`} onClick={() => toggle('soundEffects')} />
-        </div>
-      </div>
-
-      {/* ── Future research ── */}
-      <div className="settings-section">
-        <div className="settings-section-title">Future research task</div>
-        <div className="research-task-card">
-          <Sparkles size={15} />
-          <div>
-            <div className="research-task-title">Top 30 coding model map</div>
-            <div className="research-task-copy">
-              Research model strengths, weaknesses, pricing boundaries, context limits, tool-use quality, and best-fit coding buckets before showing suggestions here.
-            </div>
-          </div>
-        </div>
+        <div className="settings-item"><div><div className="settings-item-label">Stream responses</div><div className="settings-item-desc">Show text as it generates</div></div><div className={`toggle ${settings.streamResponses ? 'active' : ''}`} onClick={() => toggle('streamResponses')} /></div>
+        <div className="settings-item"><div><div className="settings-item-label">Show tool calls</div><div className="settings-item-desc">Display agent tool usage inline</div></div><div className={`toggle ${settings.showToolCalls ? 'active' : ''}`} onClick={() => toggle('showToolCalls')} /></div>
+        <div className="settings-item"><div><div className="settings-item-label">Auto-scroll</div><div className="settings-item-desc">Follow new messages automatically</div></div><div className={`toggle ${settings.autoScroll ? 'active' : ''}`} onClick={() => toggle('autoScroll')} /></div>
+        <div className="settings-item"><div><div className="settings-item-label">Sound effects</div><div className="settings-item-desc">Play sounds on completion</div></div><div className={`toggle ${settings.soundEffects ? 'active' : ''}`} onClick={() => toggle('soundEffects')} /></div>
       </div>
 
       {/* ── About ── */}
       <div className="settings-section">
         <div className="settings-section-title">About</div>
         <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-          Open-Harness v1.0.0<br />
-          A universal AI provider harness<br />
-          Current live provider: MiniMax
+          Open-Harness v1.0.0<br />A universal AI provider harness<br />Current live provider: MiniMax
         </div>
       </div>
     </>
