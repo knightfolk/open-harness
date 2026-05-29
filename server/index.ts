@@ -627,10 +627,31 @@ app.listen(PORT, () => {
   }
   console.log(`✓ Config loaded from ~/.open-harness/config.json`);
 
-  // Auto-start Docker MCP if docker is available
+  // Auto-start Docker MCP gateway via stdio (keeps process alive as child)
   try {
     execSync('which docker', { encoding: 'utf-8' });
-    console.log('✓ Docker found — Docker MCP available');
+    const mcpGateway = spawn('docker', [
+      'mcp', 'gateway', 'run',
+      '--transport', 'stdio',
+      '--profile', 'ai_coding',
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    mcpGateway.on('error', (err: Error) => console.log('[mcp-gw] Failed:', err.message));
+    mcpGateway.on('exit', (code: number | null) => console.log('[mcp-gw] exited with code', code));
+    mcpGateway.stderr?.on('data', (d: Buffer) => console.log('[mcp-gw:err]', d.toString().trim()));
+
+    // Connect via stdio using the MCP client after the gateway initializes
+    setTimeout(async () => {
+      try {
+        await mcpManager.startStdioClient('docker-mcp', 'Docker MCP', mcpGateway);
+        const c = mcpManager.getClient('docker-mcp');
+        console.log('✓ Docker MCP connected — tools:', c?.getTools?.()?.length || 0);
+      } catch (err: any) {
+        console.log('⚠  Docker MCP stdio connection failed:', err.message);
+      }
+    }, 5000);
+    console.log('✓ Docker MCP gateway starting (stdio)');
   } catch {
     console.log('  Docker not found — Docker MCP will show as unavailable');
   }
