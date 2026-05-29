@@ -228,8 +228,21 @@ app.post('/api/providers/:id/models', async (req, res) => {
   if (req.body?.baseURL) fetchProvider.baseURL = req.body.baseURL;
 
   try {
-    const models = await fetchProviderModels(fetchProvider);
-    res.json(models);
+    const fetchedModels = await fetchProviderModels(fetchProvider);
+
+    // Merge with existing models, preserving enabled state
+    const existingMap = new Map(provider.models.map((m) => [m.id, m]));
+    const merged = fetchedModels.map((fm) => {
+      const existing = existingMap.get(fm.id);
+      return { id: fm.id, name: fm.name, enabled: existing ? existing.enabled : true };
+    });
+
+    // Persist to config
+    provider.models = merged;
+    appConfig = upsertProvider(appConfig, provider);
+    saveConfig(appConfig);
+
+    res.json(merged);
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
@@ -495,7 +508,99 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   res.end();
 });
 
-// ── MiniMax streaming ──────────────────────────────────
+// ── MCP tool helpers for chat ──────────────────────────
+
+function gatherMCPToolsForAPI(): { tools: any[]; toolServerMap: Record<string, string> } {
+  const status = mcpManager.getStatus();
+  const tools: any[] = [];
+  const toolServerMap: Record<string, string> = {};
+  for (const server of status) {
+    if (!server.running) continue;
+    const client = mcpManager.getClient(server.id);
+    if (!client) continue;
+    const mcpTools = client.getTools();
+    for (const tool of mcpTools) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description || '',
+          parameters: tool.inputSchema || { type: 'object', properties: {} },
+        },
+      });
+      toolServerMap[tool.name] = server.id;
+    }
+  }
+  return { tools, toolServerMap };
+}
+
+async function invokeMCPTool(
+  toolName: string,
+  args: Record<string, any>,
+  toolServerMap: Record<string, string>,
+): Promise<any> {
+  const serverId = toolServerMap[toolName];
+  if (!serverId) throw new Error('No MCP server for tool: ' + toolName);
+  return mcpManager.callTool(serverId, toolName, args);
+}
+
+async function parseStreamForContentAndTools(
+  response: Response,
+  res: express.Response,
+  assistantId: string,
+): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; arguments: string }> }> {
+  const reader = (response as any).body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      const data = trimmed.slice(6);
+      if (data === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed.choices?.[0]?.delta;
+        if (!delta) continue;
+
+        // Handle text content
+        if (delta.content) {
+          content += delta.content;
+          res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: delta.content }) + '\n\n');
+        }
+
+        // Handle tool calls (OpenAI-compatible streaming format)
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            if (!toolCallMap.has(idx)) {
+              toolCallMap.set(idx, { id: tc.id || '', name: '', arguments: '' });
+            }
+            const existing = toolCallMap.get(idx)!;
+            if (tc.id) existing.id = tc.id;
+            if (tc.function?.name) existing.name = tc.function.name;
+            if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+          }
+        }
+      } catch { /* skip malformed chunks */ }
+    }
+  }
+
+  const toolCalls = Array.from(toolCallMap.values()).filter((tc) => tc.name);
+  return { content, toolCalls };
+}
+
+// ── MiniMax streaming (with MCP tool-calling loop) ────
 async function streamMiniMax(
   apiKey: string,
   messages: MessageRow[],
@@ -508,76 +613,111 @@ async function streamMiniMax(
   let systemPrompt = personality
     || 'You are a helpful AI coding assistant. Respond concisely with code examples where appropriate. Use markdown formatting.';
   if (session.workingDir) {
-    systemPrompt += `\n\nThe user has a project open at: ${session.workingDir}`;
+    systemPrompt += '\n\nThe user has a project open at: ' + session.workingDir;
     systemPrompt += '\nYou can reference files by their paths. When showing code, always use proper file paths in code blocks.';
   }
+  systemPrompt += '\n\nWhen you need to execute commands, read files, search code, or perform actions, use the available tools. Do not just describe what to do — call the tool.';
 
-  const apiMessages = [
-    { role: 'system' as const, content: systemPrompt },
+  // Gather MCP tools from all connected servers
+  const { tools: mcpApiTools, toolServerMap } = gatherMCPToolsForAPI();
+
+  // Build messages array (grows with tool results each round)
+  const apiMessages: any[] = [
+    { role: 'system', content: systemPrompt },
     ...messages.map(({ role, content }) => ({ role: role as string, content })),
   ];
 
+  const MAX_TOOL_ROUNDS = 10;
+  let finalContent = '';
+  const sessionToolCalls: ToolCallRow[] = [];
+
   try {
-    const response = await fetch(MINIMAX_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const requestBody: any = {
         model: getActiveModel(),
         messages: apiMessages,
         stream: true,
         max_tokens: 4096,
-      }),
-    });
+      };
+      // Include tools if any MCP servers are connected
+      if (mcpApiTools.length > 0) {
+        requestBody.tools = mcpApiTools;
+      }
 
-    if (!response.ok) {
-      const err = await response.text();
-      res.write(`event: error\ndata: ${JSON.stringify({ error: `MiniMax API error: ${response.status} ${err}` })}\n\n`);
-      return;
-    }
+      const response = await fetch(MINIMAX_API_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
 
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let accumulated = '';
-    let buffer = '';
+      if (!response.ok) {
+        const err = await response.text();
+        res.write('event: error\ndata: ' + JSON.stringify({ error: 'MiniMax API error: ' + response.status + ' ' + err }) + '\n\n');
+        return;
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      // Parse streaming response — extracts both text deltas and tool calls
+      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId);
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      // No tool calls → we're done, this is the final text answer
+      if (toolCalls.length === 0) {
+        finalContent = content;
+        break;
+      }
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') continue;
+      // Add the assistant message with tool calls to the conversation context
+      apiMessages.push({
+        role: 'assistant',
+        content: content || null,
+        tool_calls: toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      });
+
+      // Invoke each tool call via MCP
+      for (const tc of toolCalls) {
+        const tcId = tc.id || uuid();
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: tc.arguments }) + '\n\n');
+
+        const startTime = Date.now();
+        let output: string;
+        let parsedArgs: any = {};
+        try { parsedArgs = JSON.parse(tc.arguments); } catch { parsedArgs = {}; }
 
         try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            accumulated += delta;
-            res.write(`event: text\ndata: ${JSON.stringify({ id: assistantId, text: delta })}\n\n`);
-          }
-        } catch { /* skip */ }
+          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap);
+          output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
+        } catch (err: any) {
+          output = 'Error: ' + err.message;
+        }
+        const duration = Date.now() - startTime;
+
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 500), duration }) + '\n\n');
+
+        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 2000), duration });
+
+        // Add tool result to conversation for next round
+        apiMessages.push({ role: 'tool', tool_call_id: tcId, content: output });
       }
     }
 
+    // Save the final assistant message
     session.messages.push({
       id: assistantId,
       role: 'assistant',
-      content: accumulated,
+      content: finalContent,
       timestamp: new Date().toISOString(),
+      toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
     });
     session.updatedAt = new Date().toISOString();
 
   } catch (err: any) {
-    res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+    res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
   }
 }
 

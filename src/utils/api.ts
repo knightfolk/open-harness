@@ -199,6 +199,40 @@ export async function getMCPServers(): Promise<MCPServerInfo[]> {
   return [];
 }
 
+export interface MCPToolStatus {
+  name: string;
+  description: string;
+  inputSchema: any;
+}
+
+export interface MCPServerStatus {
+  id: string;
+  name: string;
+  running: boolean;
+  toolCount: number;
+  resourceCount: number;
+  tools?: MCPToolStatus[];
+  error?: string;
+}
+
+export async function getMCPStatus(): Promise<MCPServerStatus[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/mcp/status`);
+    if (res.ok) return res.json();
+  } catch { /* not available yet */ }
+  return [];
+}
+
+export async function startMCPServer(serverId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/mcp/${serverId}/start`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to start MCP server: ${res.status}`);
+  return res.json();
+}
+
+export async function stopMCPServer(serverId: string): Promise<void> {
+  await fetch(`${API_BASE}/api/mcp/${serverId}/stop`, { method: 'POST' });
+}
+
 export async function addMCPServer(server: { name: string; endpoint: string; authType?: string; authToken?: string; enabled?: boolean }): Promise<MCPServerInfo> {
   const res = await fetch(`${API_BASE}/api/mcp-servers`, {
     method: 'POST',

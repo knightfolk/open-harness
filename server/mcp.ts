@@ -26,6 +26,7 @@ export interface MCPServerStatus {
   running: boolean;
   toolCount: number;
   resourceCount: number;
+  tools?: MCPTool[];
   error?: string;
 }
 
@@ -459,6 +460,7 @@ class MCPManager {
       name: c.name,
       running: c.isConnected(),
       toolCount: c.getTools().length,
+      tools: c.getTools(),
       resourceCount: c.getResources().length,
       error: c.lastError,
     }));

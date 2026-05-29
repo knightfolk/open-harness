@@ -5,10 +5,10 @@ import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { LayoutEngine } from './components/layout/LayoutEngine';
+import { SettingsModal } from './components/SettingsModal';
 import { useLayoutState } from './components/layout/useLayoutState';
 import { randomAgentName } from './utils/names';
 import * as api from './utils/api';
-import type { ProviderConfig, CodingRoleAssignment } from './types';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -48,9 +48,25 @@ function App() {
   const [activeTheme, setActiveTheme] = useState('midnight');
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
+  const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
+
+  // Poll MCP status
+  useEffect(() => {
+    let mounted = true;
+    const poll = async () => {
+      try {
+        const status = await api.getMCPStatus();
+        if (mounted) setMcpStatus(status);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
 
   // Load config from server on mount
   useEffect(() => {
@@ -464,6 +480,8 @@ function App() {
         activeTheme={activeTheme}
         personalityText={personalityText}
         mcpServers={mcpServers}
+        mcpStatus={mcpStatus}
+        onOpenSettings={() => setSettingsOpen(true)}
         onAddProvider={handleAddProvider}
         onTestProvider={handleTestProvider}
         onFetchModels={handleFetchModels}
@@ -551,6 +569,29 @@ function App() {
           <div className="status-bar-item">Open-Harness v1.0.0</div>
         </div>
       </main>
+
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        activeModel={activeModel}
+        providers={providers}
+        roleAssignments={roleAssignments}
+        activeTheme={activeTheme}
+        personalityText={personalityText}
+        mcpServers={mcpServers}
+        mcpStatus={mcpStatus}
+        onAddProvider={handleAddProvider}
+        onTestProvider={handleTestProvider}
+        onFetchModels={handleFetchModels}
+        onRemoveProvider={handleRemoveProvider}
+        onAddMCPServer={handleAddMCPServer}
+        onRemoveMCPServer={handleRemoveMCPServer}
+        onSelectModel={handleSelectModel}
+        onToggleProviderModel={handleToggleProviderModel}
+        onAssignRoleModel={handleAssignRoleModel}
+        onSelectTheme={handleSelectTheme}
+        onPersonalityChange={handlePersonalityChange}
+      />
     </div>
   );
 }

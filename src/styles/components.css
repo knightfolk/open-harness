@@ -2462,3 +2462,375 @@ button:focus-visible {
 .spin {
   animation: spin 1s linear infinite;
 }
+
+/* ========== Settings Modal ========== */
+.settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: settings-fade-in 0.15s ease;
+}
+@keyframes settings-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.settings-modal {
+  width: 820px;
+  max-width: 90vw;
+  height: 600px;
+  max-height: 85vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: settings-scale-in 0.15s ease;
+}
+@keyframes settings-scale-in {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.settings-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+.settings-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.settings-modal-close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+.settings-modal-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.settings-modal-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Left nav ── */
+.settings-nav {
+  width: 220px;
+  min-width: 220px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-primary);
+  padding: 12px 0;
+  overflow-y: auto;
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 16px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+.settings-nav-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.settings-nav-item.active {
+  color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+  font-weight: 600;
+}
+.settings-nav-item.has-children {
+  /* just to give room for the chevron */
+}
+.settings-nav-chevron {
+  margin-left: auto;
+  color: var(--text-tertiary);
+}
+.settings-nav-sub {
+  display: block;
+  width: 100%;
+  padding: 7px 16px 7px 46px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+.settings-nav-sub:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.settings-nav-sub.active {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+/* ── Right content pane ── */
+.settings-content {
+  flex: 1;
+  padding: 24px 28px;
+  overflow-y: auto;
+}
+.settings-pane-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.settings-pane-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+/* ========== Provider Cards (scalable) ========== */
+.prov-card {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  transition: border-color var(--transition-fast);
+}
+.prov-card:hover {
+  border-color: var(--border-accent);
+}
+.prov-card[data-expanded] {
+  border-color: var(--accent-primary-muted);
+}
+.prov-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  min-height: 52px;
+}
+.prov-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.prov-card-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.prov-card-status.ok {
+  background: var(--accent-success);
+}
+.prov-card-status.warn {
+  background: var(--accent-error);
+}
+.prov-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prov-card-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prov-card-chevron {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  padding: 4px;
+}
+.prov-card-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--border-primary);
+}
+.prov-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0 6px;
+  flex-wrap: wrap;
+}
+.prov-card-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.active-badge {
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+}
+
+/* Model rows inside expanded provider */
+.prov-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+.prov-model-row:hover {
+  background: var(--bg-hover);
+}
+.prov-model-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.prov-model-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.prov-model-id {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prov-model-active {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+.compact-toggle {
+  width: 30px;
+  height: 17px;
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+
+/* Show more/less button */
+.prov-show-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 0;
+  margin-top: 4px;
+  background: none;
+  border: 1px dashed var(--border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.prov-show-more:hover {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+}
+
+/* ========== Provider Preset Gallery ========== */
+.prov-preset-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.prov-preset-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+  width: 100%;
+}
+.prov-preset-card:hover:not(.added) {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+}
+.prov-preset-card.added {
+  opacity: 0.5;
+  cursor: default;
+}
+.prov-preset-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.prov-preset-info {
+  flex: 1;
+  min-width: 0;
+}
+.prov-preset-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.prov-preset-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+.prov-preset-added {
+  font-size: 10px;
+  color: var(--accent-success);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.prov-preset-arrow {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+.prov-preset-card:hover .prov-preset-arrow {
+  color: var(--accent-primary);
+  transform: translateX(2px);
+}

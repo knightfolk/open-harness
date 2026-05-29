@@ -22,6 +22,8 @@ interface Props {
   activeTheme: string;
   personalityText: string;
   mcpServers: MCPServerItem[];
+  mcpStatus: any[];
+  onOpenSettings: () => void;
   onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string }) => Promise<any>;
   onTestProvider: (providerId: string) => Promise<any>;
   onFetchModels: (providerId: string) => Promise<any>;
@@ -40,7 +42,6 @@ const tabConfig = [
   { key: 'chat' as SidebarTab, icon: MessageSquare, label: 'Chat' },
   { key: 'skills' as SidebarTab, icon: Zap, label: 'Skills' },
   { key: 'memory' as SidebarTab, icon: Brain, label: 'Memory' },
-  { key: 'settings' as SidebarTab, icon: Settings, label: 'Settings' },
 ];
 
 const skillCategoryIcons: Record<string, typeof Sparkles> = {
@@ -61,7 +62,7 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, providers, roleAssignments, activeTheme, personalityText, mcpServers, onAddProvider, onTestProvider, onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer, onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme, onPersonalityChange, onSelectSession, onNewSession, onOpenFolder }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, providers, roleAssignments, activeTheme, personalityText, mcpServers, mcpStatus, onOpenSettings, onAddProvider, onTestProvider, onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer, onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme, onPersonalityChange, onSelectSession, onNewSession, onOpenFolder }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
@@ -94,27 +95,23 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, ac
         )}
         {activeTab === 'skills' && <SkillsTab skills={mockSkills} plugins={mockPlugins} />}
         {activeTab === 'memory' && <MemoryTab entries={mockMemoryEntries} />}
-        {activeTab === 'settings' && (
-          <SettingsTab
-            activeModel={activeModel}
-            providers={providers}
-            roleAssignments={roleAssignments}
-            activeTheme={activeTheme}
-            personalityText={personalityText}
-            mcpServers={mcpServers}
-            onAddProvider={onAddProvider}
-            onTestProvider={onTestProvider}
-            onFetchModels={onFetchModels}
-            onRemoveProvider={onRemoveProvider}
-            onAddMCPServer={onAddMCPServer}
-            onRemoveMCPServer={onRemoveMCPServer}
-            onSelectModel={onSelectModel}
-            onToggleProviderModel={onToggleProviderModel}
-            onAssignRoleModel={onAssignRoleModel}
-            onSelectTheme={onSelectTheme}
-            onPersonalityChange={onPersonalityChange}
-          />
-        )}
+      </div>
+
+      {/* Settings button pinned to sidebar bottom */}
+      <div style={{ borderTop: '1px solid var(--border-primary)', padding: '8px 12px' }}>
+        <button
+          onClick={onOpenSettings}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+            background: 'var(--bg-elevated)', border: '1px solid var(--border-primary)',
+            borderRadius: 'var(--radius-sm)', padding: '8px 12px', cursor: 'pointer',
+            color: 'var(--text-secondary)', fontSize: 12, fontWeight: 500,
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          <Settings size={14} />
+          Settings
+        </button>
       </div>
     </aside>
   );
@@ -359,6 +356,7 @@ function SettingsTab({
   activeTheme,
   personalityText,
   mcpServers,
+  mcpStatus,
   onAddProvider,
   onTestProvider,
   onFetchModels,
@@ -377,6 +375,7 @@ function SettingsTab({
   activeTheme: string;
   personalityText: string;
   mcpServers: MCPServerItem[];
+  mcpStatus: any[];
   onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string }) => Promise<any>;
   onTestProvider: (providerId: string) => Promise<any>;
   onFetchModels: (providerId: string) => Promise<any>;
@@ -615,7 +614,7 @@ function SettingsTab({
       {/* ── Coding Role Buckets ── */}
       <div className="settings-section">
         <div className="settings-section-title">Coding role buckets</div>
-        <div className="settings-note">Assign enabled models to coding-specific roles for efficient task routing.</div>
+        <div className="settings-note">Assign enabled models to coding-specific roles. Models marked ✓ Recommended are good fits based on their capabilities.</div>
         <div className="role-bucket-list">
           {roleAssignments.map((role) => {
             const Icon = roleIconMap[role.id] || Bot;
@@ -626,9 +625,14 @@ function SettingsTab({
                   <div className="role-bucket-name">{role.name}</div>
                   <div className="role-bucket-desc">{role.description}</div>
                   <select className="settings-select settings-select-wide" value={role.modelId} onChange={(e) => onAssignRoleModel(role.id, e.target.value)}>
-                    {enabledModels.map((model) => (
-                      <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>{model.providerName} — {model.name}</option>
-                    ))}
+                    {enabledModels.map((model) => {
+                      const recommended = isModelRecommended(role.id, model.id);
+                      return (
+                        <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>
+                          {recommended ? '✓ ' : ''}{model.providerName} — {model.name}{recommended ? ' (Recommended)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
@@ -651,23 +655,7 @@ function SettingsTab({
 
         {/* Docker MCP built-in */}
         {dockerMcp && (
-          <div className="provider-card">
-            <div className="provider-card-header">
-              <div className="provider-logo"><Server size={14} /></div>
-              <div className="provider-title-block">
-                <div className="provider-title-row">
-                  <span className="provider-name">{dockerMcp.name}</span>
-                  <span className="provider-status ready">Built-in</span>
-                </div>
-                <div className="provider-meta">mcp • {dockerMcp.endpoint}</div>
-              </div>
-            </div>
-            <div style={{ padding: '6px 0 2px', borderTop: '1px solid var(--border-primary)' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                Containerized tool execution via Docker MCP. Enabled by default.
-              </div>
-            </div>
-          </div>
+          <DockerMCPCard dockerMcp={dockerMcp} mcpStatus={mcpStatus} />
         )}
 
         {/* Custom servers */}
@@ -793,6 +781,101 @@ const roleIconMap: Record<string, typeof Bot> = {
   toolrunning: PlayCircle,
   review: ShieldCheck,
 };
+
+// ── Model recommendation map (from docs/MODEL_LANDSCAPE.md) ──
+const MODEL_RECOMMENDATIONS: Record<string, string[]> = {
+  planning: ['o3', 'claude-opus-4', 'gemini-2.5-pro', 'glm-5.1', 'deepseek-r2', 'deepseek-v4', 'llama-4-scout', 'kimi-k2.5', 'gpt-5.4', 'MiniMax-M2.7'],
+  implementation: ['claude-sonnet-4', 'deepseek-v4', 'gpt-4.1', 'llama-4-maverick', 'MiniMax-M2.7', 'qwen-3-235b', 'glm-5', 'kimi-k2.6', 'grok-3', 'codestral', 'gpt-5.3-codex'],
+  bugfix: ['claude-sonnet-4', 'gpt-4.1-mini', 'o4-mini', 'deepseek-v4-flash', 'deepseek-v3', 'qwen-3-32b', 'codestral'],
+  design: ['grok-3', 'gemini-2.5-pro', 'gpt-4.1', 'grok-3-mini'],
+  image: ['gpt-4.1', 'gemini-2.5-pro', 'grok-3'],
+  toolrunning: ['gpt-4.1-nano', 'gemini-2.5-flash', 'glm-4.7', 'deepseek-v4-flash', 'qwen-3-32b'],
+  review: ['o3', 'claude-opus-4', 'mistral-large', 'o4-mini', 'deepseek-r2', 'qwen-3-235b', 'mimo-v2.5-pro'],
+};
+
+function isModelRecommended(roleId: string, modelId: string): boolean {
+  const recs = MODEL_RECOMMENDATIONS[roleId];
+  if (!recs) return false;
+  // Match case-insensitively on model ID substrings
+  const lower = modelId.toLowerCase();
+  return recs.some((rec) => lower.includes(rec.toLowerCase().replace(/[-\s]/g, '')));
+}
+
+// ── Docker MCP Lifecycle Card ──────────────────────────
+function DockerMCPCard({ dockerMcp, mcpStatus }: { dockerMcp: any; mcpStatus: any[] }) {
+  const [toolsExpanded, setToolsExpanded] = useState(false);
+  const dockerStatus = mcpStatus.find((s: any) => s.id === 'docker-mcp');
+  const isRunning = dockerStatus?.running ?? false;
+  const toolCount = dockerStatus?.toolCount ?? 0;
+  const tools = dockerStatus?.tools ?? [];
+
+  return (
+    <div className="provider-card">
+      <div className="provider-card-header">
+        <div className="provider-logo"><Server size={14} /></div>
+        <div className="provider-title-block">
+          <div className="provider-title-row">
+            <span className="provider-name">{dockerMcp.name}</span>
+            <span className={`provider-status ${isRunning ? 'ready' : 'missing'}`}>
+              {isRunning ? 'Running' : 'Stopped'}
+            </span>
+          </div>
+          <div className="provider-meta">
+            mcp • {dockerMcp.endpoint}
+            {toolCount > 0 && <span style={{ marginLeft: 8, color: 'var(--accent-primary)', fontWeight: 600 }}>{toolCount} tools</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div style={{ padding: '6px 0 2px', borderTop: '1px solid var(--border-primary)' }}>
+        {isRunning ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-secondary)' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-success)' }} />
+            <span>Connected — {toolCount} tools available</span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-tertiary)' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--text-tertiary)' }} />
+            <span>Not connected — start Docker MCP to enable tools in chat</span>
+          </div>
+        )}
+      </div>
+
+      {/* Collapsible tool list */}
+      {isRunning && toolCount > 0 && (
+        <div style={{ borderTop: '1px solid var(--border-primary)', paddingTop: 4 }}>
+          <button
+            onClick={() => setToolsExpanded(!toolsExpanded)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, width: '100%',
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 10, color: 'var(--text-tertiary)', padding: '2px 0',
+            }}
+          >
+            {toolsExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+            {toolsExpanded ? 'Hide tools' : 'Show tools'}
+          </button>
+          {toolsExpanded && (
+            <div style={{ maxHeight: 200, overflowY: 'auto', marginTop: 4 }}>
+              {tools.map((tool: any) => (
+                <div key={tool.name} style={{ padding: '2px 0', fontSize: 10, display: 'flex', gap: 4 }}>
+                  <span style={{ color: 'var(--accent-primary)', fontFamily: 'monospace', flexShrink: 0 }}>{tool.name}</span>
+                  {tool.description && (
+                    <span style={{ color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      — {tool.description}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatRelativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
   const mins = Math.floor(diff / 60000);

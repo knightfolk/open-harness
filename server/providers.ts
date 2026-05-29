@@ -101,13 +101,18 @@ function buildModelsURL(provider: StoredProvider): string {
 
   // OpenAI-compatible providers use /models or /v1/models
   if (provider.type === 'openai-compatible') {
-    // If baseURL already ends with /v1, just append /models
-    if (base.endsWith('/v1')) {
+    // If baseURL already ends with a versioned path like /v1, /v4, etc., just append /models
+    if (/\/v\d+$/.test(base)) {
       return `${base}/models`;
     }
-    // If baseURL ends with /v1/chat/completions or similar, strip back to /v1
+    // If baseURL contains /v1/ mid-path (e.g. /v1/chat/completions), strip back to /v1
     if (base.includes('/v1/')) {
       return `${base.split('/v1/')[0]}/v1/models`;
+    }
+    // If baseURL contains another versioned path mid-path (e.g. /v4/chat), strip back
+    const versionMatch = base.match(/(.*)\/v\d+\/.*/);
+    if (versionMatch) {
+      return `${versionMatch[1]}/models`;
     }
     return `${base}/v1/models`;
   }
@@ -135,7 +140,7 @@ function parseModelsResponse(data: any, provider: StoredProvider): FetchedModel[
         id: m.id,
         name: m.id, // Use ID as name; can be refined later
       }))
-      .sort((a: FetchedModel, b: FetchedModel) => a.id.localeCompare(b.id));
+      .sort((a: FetchedModel, b: FetchedModel) => b.id.localeCompare(a.id));
   }
 
   // Google format: { models: [{ name, displayName, ... }] }
@@ -146,7 +151,7 @@ function parseModelsResponse(data: any, provider: StoredProvider): FetchedModel[
         id: m.name.split('/').pop() || m.name,
         name: m.displayName || m.name.split('/').pop() || m.name,
       }))
-      .sort((a: FetchedModel, b: FetchedModel) => a.id.localeCompare(b.id));
+      .sort((a: FetchedModel, b: FetchedModel) => b.id.localeCompare(a.id));
   }
 
   // Anthropic format: { data: [{ id, type, ... }] } (same as OpenAI)
@@ -157,7 +162,7 @@ function parseModelsResponse(data: any, provider: StoredProvider): FetchedModel[
         id: m.id || m.name,
         name: m.id || m.name,
       }))
-      .sort((a: FetchedModel, b: FetchedModel) => a.id.localeCompare(b.id));
+      .sort((a: FetchedModel, b: FetchedModel) => b.id.localeCompare(a.id));
   }
 
   return [];
