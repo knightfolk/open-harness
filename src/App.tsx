@@ -22,6 +22,7 @@ function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeModel] = useState('MiniMax-M2.7');
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
@@ -159,7 +160,7 @@ function App() {
 
     // Spawn sub-agents
     const agentTasks = ['Analyzing request...', 'Searching for context...', 'Generating response...'];
-    const models = ['MiniMax-M2.7', 'o4-mini', 'gpt-4.1'];
+    const models = [activeModel, 'o4-mini', 'gpt-4.1'];
     const spawned: SubAgent[] = [];
     const count = 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < count; i++) {
@@ -265,7 +266,7 @@ function App() {
 
   const msgCount = messages.length;
   const agentCount = subAgents.filter((a) => a.status === 'running').length;
-  const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'CMDui';
+  const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Open-Harness';
   const showWelcome = activeSessionId && messages.length === 0 && !loading;
 
   return (
@@ -284,6 +285,7 @@ function App() {
         }))}
         activeSessionId={activeSessionId || undefined}
         activeSubAgents={subAgents}
+        activeModel={activeModel}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onOpenFolder={handleOpenFolder}
@@ -297,6 +299,7 @@ function App() {
           onTogglePanel={togglePanel}
           onResetLayout={resetLayout}
           sessionTitle={sessionTitle}
+          activeModel={activeModel}
           workingDir={workingDir}
           onOpenFolder={handleOpenFolder}
         />
@@ -347,7 +350,7 @@ function App() {
             <div className="status-bar-dot" />
             Connected
           </div>
-          <div className="status-bar-item">MiniMax-M2.7</div>
+          <div className="status-bar-item">{activeModel}</div>
           {workingDir && (
             <div className="status-bar-item" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>
               {workingDir}
@@ -356,7 +359,7 @@ function App() {
           <div className="status-bar-item">{msgCount} messages</div>
           <div className="status-bar-item">{agentCount} agent{agentCount !== 1 ? 's' : ''} active</div>
           <div style={{ flex: 1 }} />
-          <div className="status-bar-item">CMDui v1.0.0</div>
+          <div className="status-bar-item">Open-Harness v1.0.0</div>
         </div>
       </main>
     </div>

@@ -14,11 +14,12 @@ interface Props {
   onTogglePanel: (id: PanelId) => void;
   onResetLayout: () => void;
   sessionTitle: string;
+  activeModel: string;
   workingDir: string | null;
   onOpenFolder: () => void;
 }
 
-export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout, sessionTitle, workingDir, onOpenFolder }: Props) {
+export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout, sessionTitle, activeModel, workingDir, onOpenFolder }: Props) {
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const visibleCount = visiblePanels.size;
@@ -71,7 +72,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePa
       </button>
 
       <div className="top-bar-title">
-        {sessionTitle || 'CMDui'}
+        {sessionTitle || 'Open-Harness'}
         {workingDir && (
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: "'JetBrains Mono', monospace", marginLeft: 8 }}>
             {workingDir}
@@ -81,7 +82,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePa
 
       <div className="top-bar-model">
         <span className="top-bar-model-dot" />
-        MiniMax-M2.7
+        {activeModel}
       </div>
 
       <div className="top-bar-actions">

@@ -15,6 +15,7 @@ interface Props {
   activeSubAgents: SubAgent[];
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  activeModel: string;
   onOpenFolder?: () => void;
 }
 
@@ -43,7 +44,7 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, activeModel, onSelectSession, onNewSession, onOpenFolder }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
@@ -76,7 +77,7 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
         )}
         {activeTab === 'skills' && <SkillsTab skills={mockSkills} plugins={mockPlugins} />}
         {activeTab === 'memory' && <MemoryTab entries={mockMemoryEntries} />}
-        {activeTab === 'settings' && <SettingsTab />}
+        {activeTab === 'settings' && <SettingsTab activeModel={activeModel} />}
       </div>
     </aside>
   );
@@ -92,6 +93,7 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
   activeSubAgents: SubAgent[];
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  activeModel: string;
   onOpenFolder?: () => void;
 }) {
   return (
@@ -297,19 +299,36 @@ function MemoryTab({ entries }: { entries: MemoryEntry[] }) {
 /*  Settings Tab                                                       */
 /* ------------------------------------------------------------------ */
 
-function SettingsTab() {
+function SettingsTab({ activeModel }: { activeModel: string }) {
   const [settings, setSettings] = useState({
     streamResponses: true,
     showToolCalls: true,
     autoScroll: true,
     soundEffects: false,
-    model: 'o3',
     theme: 'dark',
   });
 
   const toggle = (key: keyof typeof settings) => {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  const availableModels = [
+    { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', provider: 'MiniMax' },
+    { id: 'o3', name: 'o3', provider: 'OpenAI' },
+    { id: 'o4-mini', name: 'o4-mini', provider: 'OpenAI' },
+    { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'OpenAI' },
+    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', provider: 'OpenAI' },
+    { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', provider: 'OpenAI' },
+    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'Anthropic' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Google' },
+  ];
+
+  // Group models by provider
+  const grouped = availableModels.reduce((acc, m) => {
+    if (!acc[m.provider]) acc[m.provider] = [];
+    acc[m.provider].push(m);
+    return acc;
+  }, {} as Record<string, typeof availableModels>);
 
   return (
     <>
@@ -318,13 +337,25 @@ function SettingsTab() {
         <div className="settings-item">
           <div>
             <div className="settings-item-label">Model</div>
+            <div className="settings-item-desc" style={{ color: 'var(--accent-primary)', fontSize: 10, marginTop: 2 }}>
+              Active: {activeModel}
+            </div>
           </div>
-          <select className="settings-select" value={settings.model} onChange={(e) => setSettings((s) => ({ ...s, model: e.target.value }))}>
-            <option value="o3">o3</option>
-            <option value="o4-mini">o4-mini</option>
-            <option value="gpt-4.1">gpt-4.1</option>
-            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-            <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+          <select
+            className="settings-select"
+            value={activeModel}
+            onChange={(e) => {
+              // TODO: wire to server API when providers endpoint is ready
+              console.log('Switch model to:', e.target.value);
+            }}
+          >
+            {Object.entries(grouped).map(([provider, models]) => (
+              <optgroup key={provider} label={provider}>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </optgroup>
+            ))}
           </select>
         </div>
         <div className="settings-item">
@@ -373,19 +404,14 @@ function SettingsTab() {
       <div className="settings-section">
         <div className="settings-section-title">About</div>
         <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-          CMDui v1.0.0<br />
-          A polished, modern agent desktop UI<br />
-          Inspired by Codex Desktop
+          Open-Harness v1.0.0<br />
+          A universal AI provider harness<br />
+          inspired by Codex Desktop
         </div>
       </div>
     </>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
 function formatRelativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
   const mins = Math.floor(diff / 60000);

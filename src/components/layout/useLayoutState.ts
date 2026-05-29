@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
 import { DEFAULT_LAYOUT } from '../../types/layout';
 
-const STORAGE_KEY = 'cmdui-layout';
+const STORAGE_KEY = 'openharness-layout';
 
 /** Panels that prefer to split vertically (top/bottom) when added */
 const VERTICAL_PANELS: Set<PanelId> = new Set(['terminal', 'plan']);

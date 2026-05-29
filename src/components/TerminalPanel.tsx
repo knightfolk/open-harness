@@ -15,7 +15,7 @@ export function TerminalPanel({ commands }: Props) {
         color: 'var(--text-tertiary)',
       }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-success)' }} />
-        bash — /Users/kevink/Projects/CMDui
+        bash — open-harness
       </div>
 
       {/* Terminal body */}

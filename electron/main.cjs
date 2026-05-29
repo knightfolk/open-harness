@@ -19,7 +19,7 @@ const template = [
   {
     label: app.name,
     submenu: [
-      { role: 'about', label: 'About CMDui' },
+      { role: 'about', label: 'About Open-Harness' },
       { type: 'separator' },
       { label: 'Preferences...', accelerator: 'Cmd+,', click: () => send('open-preferences') },
       { type: 'separator' },
@@ -74,7 +74,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'CMDui — Agent Desktop',
+    title: 'Open-Harness — Universal AI Harness',
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0d0f11',
     webPreferences: {
