@@ -27,3 +27,5 @@ dist-ssr
 CMDuiApp/.build/
 CMDuiApp/.swiftpm/
 CMDuiApp/Package.resolved
+release/
+CMDuiApp/Sources/CMDuiApp/Resources/dist/
