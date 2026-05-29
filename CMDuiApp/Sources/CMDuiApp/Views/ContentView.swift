@@ -8,13 +8,10 @@ struct ContentView: View {
     }
 }
 
-// MARK: - WKWebView Wrapper
-
 struct WebViewRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.preferences = WKPreferences()
-        config.preferences.isElementFullscreenEnabled = true
 
         // Register the Swift ↔ JS bridge
         let bridge = WebBridge.shared
@@ -41,17 +38,31 @@ struct WebViewRepresentable: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
 
-        // Load the bundled React app
-        if let resourceURL = Bundle.main.resourceURL {
-            let htmlURL = resourceURL.appendingPathComponent("dist/index.html")
+        // Find the bundled dist/index.html
+        // SPM packages resources into a <target>.bundle with a Resources/ subdirectory
+        var loaded = false
+        guard let exePath = Bundle.main.executablePath else { return webView }
+        let exeDir = URL(fileURLWithPath: exePath).deletingLastPathComponent()
+        let candidateBases = [
+            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle/Resources"),
+            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle"),
+            exeDir.appendingPathComponent("Resources"),
+        ]
+        for base in candidateBases {
+            let htmlURL = base.appendingPathComponent("dist/index.html")
             if FileManager.default.fileExists(atPath: htmlURL.path) {
-                webView.loadFileURL(htmlURL, allowingReadAccessTo: resourceURL)
-            } else {
-                // Dev mode: load from localhost
-                if let url = URL(string: "http://localhost:5173") {
-                    webView.load(URLRequest(url: url))
-                }
+                print("Loading bundled UI from: \(htmlURL.path)")
+                webView.loadFileURL(htmlURL, allowingReadAccessTo: base)
+                loaded = true
+                break
             }
+        }
+
+        // Fallback: dev mode from localhost
+        if !loaded {
+            let devURL = URL(string: "http://localhost:5173")!
+            print("Loading dev UI from: \(devURL.absoluteString)")
+            webView.load(URLRequest(url: devURL))
         }
 
         return webView
@@ -66,7 +77,6 @@ struct WebViewRepresentable: NSViewRepresentable {
 
 class WebViewCoordinator: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        // Open external links in the default browser
         if let url = navigationAction.request.url,
            navigationAction.targetFrame == nil {
             NSWorkspace.shared.open(url)
@@ -76,8 +86,18 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
         decisionHandler(.allow)
     }
 
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        print("WebView navigation failed: \(error.localizedDescription)")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation: WKNavigation!, withError error: Error) {
+        print("WebView provisional navigation failed: \(error.localizedDescription)")
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Inject provider/model data once the page loads
+        print("WebView finished loading")
+
+        // Inject provider/model data
         let providers = BackendService.shared.providerRegistry.configuredProviders()
         let models = BackendService.shared.providerRegistry.allModels()
 
