@@ -6,7 +6,7 @@ import { join, basename, extname, relative, dirname } from 'path';
 import { homedir } from 'os';
 import { execSync, spawn } from 'child_process';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer } from './config';
-import type { StoredProvider, StoredMCPServer } from './config';
+// Types from config used inline
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
 
@@ -161,7 +161,7 @@ app.get('/api/providers', (_req, res) => {
 });
 
 app.post('/api/providers', (req, res) => {
-  const { id, name, type, apiKey, baseURL, models } = req.body as Partial<StoredProvider>;
+  const { id, name, type, apiKey, baseURL, models } = req.body as any;
   if (!name || !type || !baseURL) {
     return res.status(400).json({ error: 'name, type, and baseURL are required' });
   }
@@ -182,7 +182,7 @@ app.put('/api/providers/:id', (req, res) => {
   const existing = appConfig.providers.find((p) => p.id === req.params.id);
   if (!existing) return res.status(404).json({ error: 'Provider not found' });
 
-  const updates = req.body as Partial<StoredProvider>;
+  const updates = req.body as any;
   // Merge selectively — don't allow clearing the apiKey with a masked value
   if (updates.name !== undefined) existing.name = updates.name;
   if (updates.type !== undefined) existing.type = updates.type;
@@ -257,7 +257,7 @@ app.get('/api/mcp-servers', (_req, res) => {
 });
 
 app.post('/api/mcp-servers', (req, res) => {
-  const { name, endpoint, authType, authToken, enabled } = req.body as Partial<StoredMCPServer>;
+  const { name, endpoint, authType, authToken, enabled } = req.body as any;
   if (!name || !endpoint) {
     return res.status(400).json({ error: 'name and endpoint are required' });
   }
