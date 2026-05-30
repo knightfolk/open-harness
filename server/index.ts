@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
-import { readFileSync, readdirSync, statSync, readlinkSync, existsSync, lstatSync } from 'fs';
-import { join, basename, extname, relative, dirname } from 'path';
+import { readFileSync, readdirSync, statSync, existsSync, lstatSync } from 'fs';
+import { join, basename, extname } from 'path';
 import { homedir } from 'os';
 import { execSync, spawn } from 'child_process';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer } from './config';
@@ -68,15 +68,6 @@ function getPersonality(): string {
 
 // ── In-memory store ────────────────────────────────────
 const sessions: Map<string, SessionRow> = new Map();
-
-// ── Helpers ────────────────────────────────────────────
-function safePath(base: string, sub: string): string | null {
-  const resolved = join(base, sub);
-  // Ensure the resolved path is within the base
-  if (!resolved.startsWith(base)) return null;
-  if (!existsSync(resolved)) return null;
-  return resolved;
-}
 
 // ── Session Routes ─────────────────────────────────────
 
@@ -314,7 +305,9 @@ app.post('/api/mcp/:serverId/tools/:toolName', async (req, res) => {
 
 app.post('/api/mcp/:serverId/start', async (req, res) => {
   const { serverId } = req.params;
-  const server = appConfig.mcpServers.find((s) => s.id === serverId);
+  const server = serverId === 'docker-mcp'
+    ? { id: 'docker-mcp', name: 'Docker MCP', endpoint: 'stdio://docker mcp gateway run --transport stdio --profile ai_coding' }
+    : appConfig.mcpServers.find((s) => s.id === serverId);
   if (!server) return res.status(404).json({ error: 'Server not found' });
   try {
     const client = await mcpManager.startServer(server.id, server.name, server.endpoint);
@@ -330,7 +323,7 @@ app.post('/api/mcp/:serverId/start', async (req, res) => {
 });
 
 app.post('/api/mcp/:serverId/stop', async (req, res) => {
-  await mcpManager.stopServer(req.params.id);
+  await mcpManager.stopServer(req.params.serverId);
   res.json({ ok: true });
 });
 
@@ -616,7 +609,7 @@ async function streamMiniMax(
     systemPrompt += '\n\nThe user has a project open at: ' + session.workingDir;
     systemPrompt += '\nYou can reference files by their paths. When showing code, always use proper file paths in code blocks.';
   }
-  systemPrompt += '\n\nWhen you need to execute commands, read files, search code, or perform actions, use the available tools. Do not just describe what to do — call the tool.';
+  systemPrompt += '\n\nUse tools only when they are necessary and directly useful. Do not narrate tool calls to the user. After using tools, always provide a clear final answer with findings and next steps. Do not output hidden reasoning tags such as <think>.';
 
   // Gather MCP tools from all connected servers
   const { tools: mcpApiTools, toolServerMap } = gatherMCPToolsForAPI();
@@ -627,7 +620,7 @@ async function streamMiniMax(
     ...messages.map(({ role, content }) => ({ role: role as string, content })),
   ];
 
-  const MAX_TOOL_ROUNDS = 10;
+  const MAX_TOOL_ROUNDS = 6;
   let finalContent = '';
   const sessionToolCalls: ToolCallRow[] = [];
 
@@ -639,9 +632,11 @@ async function streamMiniMax(
         stream: true,
         max_tokens: 4096,
       };
-      // Include tools if any MCP servers are connected
-      if (mcpApiTools.length > 0) {
+      // Leave the final round tool-free so the model must produce a user-facing answer.
+      if (round < MAX_TOOL_ROUNDS - 1 && mcpApiTools.length > 0) {
         requestBody.tools = mcpApiTools;
+      } else if (round === MAX_TOOL_ROUNDS - 1) {
+        apiMessages.push({ role: 'system', content: 'No more tool calls. Based on the available context and tool results, provide the final answer now.' });
       }
 
       const response = await fetch(MINIMAX_API_URL, {
@@ -662,11 +657,13 @@ async function streamMiniMax(
       // Parse streaming response — extracts both text deltas and tool calls
       const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId);
 
-      // No tool calls → we're done, this is the final text answer
+      // No tool calls → we're done, this is the final text answer.
       if (toolCalls.length === 0) {
         finalContent = content;
         break;
       }
+
+      if (content.trim()) finalContent = content;
 
       // Add the assistant message with tool calls to the conversation context
       apiMessages.push({
@@ -704,6 +701,11 @@ async function streamMiniMax(
         // Add tool result to conversation for next round
         apiMessages.push({ role: 'tool', tool_call_id: tcId, content: output });
       }
+    }
+
+    if (!finalContent.trim()) {
+      finalContent = 'I used the available tools but did not receive a final model response. Please try again, or narrow the request and I will continue from there.';
+      res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: finalContent }) + '\n\n');
     }
 
     // Save the final assistant message

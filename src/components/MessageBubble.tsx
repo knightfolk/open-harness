@@ -1,10 +1,12 @@
-import { Bot, User, Cpu } from 'lucide-react';
-import type { Message } from '../types';
+import { useMemo, useState } from 'react';
+import { Bot, User, Cpu, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
+import type { Message, ToolCall } from '../types';
 import { ToolCallComponent } from './ToolCall';
 import { CodeBlockComponent } from './CodeBlock';
 
 interface Props {
   message: Message;
+  assistantName: string;
 }
 
 function parseContent(content: string) {
@@ -31,7 +33,7 @@ function parseContent(content: string) {
 function renderText(text: string) {
   // Parse inline code-comment directives
   const commentRegex = /::code-comment\{title="([^"]*)" body="([^"]*)" file="([^"]*)" start=(\d+)(?: end=(\d+))? priority=(\d+)\}/g;
-  const parts: any[] = [];
+  const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match;
 
@@ -57,19 +59,38 @@ function renderText(text: string) {
 }
 
 function simpleMarkdown(text: string): string {
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-    .replace(/^### (.+)$/gm, '<h4 style="font-size:14px;font-weight:600;margin:12px 0 6px">$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3 style="font-size:15px;font-weight:600;margin:14px 0 8px">$1</h3>')
-    .replace(/^# (.+)$/gm, '<h2 style="font-size:17px;font-weight:700;margin:16px 0 8px">$1</h2>')
-    .replace(/^(\d+)\. (.+)$/gm, '<div style="padding-left:16px;margin:2px 0">$1. $2</div>')
-    .replace(/^- (.+)$/gm, '<div style="padding-left:16px;margin:2px 0">• $1</div>')
-    .replace(/\n\n/g, '<br/><br/>')
-    .replace(/\n/g, '<br/>');
+  // Escape HTML first
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Block-level: headers (must come before list items)
+  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+
+  // Block-level: blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // Block-level: unordered list items
+  html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
+
+  // Block-level: ordered list items
+  html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
+
+  // Paragraphs: double newlines become paragraph breaks
+  html = html.replace(/\n\n/g, '</p><p>');
+  // Single newlines become line breaks (but not inside block elements)
+  html = html.replace(/\n/g, '<br/>');
+
+  // Inline: bold, italic, code, links (after escaping)
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');
+  html = html.replace(/`([^`]+?)`/g, '<code>$1</code>');
+  html = html.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  return '<p>' + html + '</p>';
 }
 
 const avatarIcons = {
@@ -80,12 +101,65 @@ const avatarIcons = {
 
 const senderNames = {
   user: 'You',
-  assistant: 'Codex',
   system: 'System',
 };
 
-export function MessageBubble({ message }: Props) {
-  const parts = parseContent(message.content);
+
+function stripThinking(content: string): string {
+  return content
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/gi, '')
+    .trimStart();
+}
+
+function toolVerb(status: ToolCall['status']) {
+  if (status === 'running') return 'using';
+  if (status === 'error') return 'had trouble with';
+  return 'used';
+}
+
+function ToolCallSummary({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const uniqueTools = useMemo(() => {
+    const map = new Map<string, ToolCall>();
+    for (const tool of toolCalls) map.set(tool.id, tool);
+    return Array.from(map.values());
+  }, [toolCalls]);
+  const running = uniqueTools.filter((tool) => tool.status === 'running').length;
+  const errors = uniqueTools.filter((tool) => tool.status === 'error').length;
+  const primaryStatus = running > 0 ? 'running' : errors > 0 ? 'error' : 'complete';
+  const label = running > 0
+    ? `Using ${running} tool${running === 1 ? '' : 's'}…`
+    : `Used ${uniqueTools.length} tool${uniqueTools.length === 1 ? '' : 's'}`;
+
+  return (
+    <div className={`tool-summary ${primaryStatus}`}>
+      <button className="tool-summary-button" onClick={() => setExpanded((value) => !value)}>
+        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <Wrench size={13} />
+        <span>{label}</span>
+        {errors > 0 && <span className="tool-summary-error">{errors} failed</span>}
+      </button>
+      {expanded && (
+        <div className="tool-summary-details">
+          {uniqueTools.map((tool) => (
+            <div key={tool.id} className="tool-summary-item">
+              <span>{toolVerb(tool.status)} {tool.name}</span>
+              {tool.duration != null && <span>{(tool.duration / 1000).toFixed(1)}s</span>}
+            </div>
+          ))}
+          <div className="tool-summary-advanced">
+            {uniqueTools.map((tool) => <ToolCallComponent key={tool.id} toolCall={tool} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MessageBubble({ message, assistantName }: Props) {
+  const visibleContent = stripThinking(message.content);
+  const parts = parseContent(visibleContent);
   const isStreaming = message.status === 'streaming';
 
   return (
@@ -96,7 +170,7 @@ export function MessageBubble({ message }: Props) {
         </div>
         <div className="message-body">
           <div className="message-sender">
-            {senderNames[message.role]}
+            {message.role === 'assistant' ? assistantName : senderNames[message.role]}
             <span className="timestamp">
               {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
@@ -118,11 +192,7 @@ export function MessageBubble({ message }: Props) {
             )}
           </div>
           {message.toolCalls && message.toolCalls.length > 0 && (
-            <div className="tool-calls">
-              {message.toolCalls.map((tc) => (
-                <ToolCallComponent key={tc.id} toolCall={tc} />
-              ))}
-            </div>
+            <ToolCallSummary toolCalls={message.toolCalls} />
           )}
         </div>
       </div>

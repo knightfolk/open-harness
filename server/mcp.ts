@@ -3,8 +3,6 @@
  * Manages MCP server processes, tool discovery, and invocation
  */
 import { spawn, ChildProcess } from 'child_process';
-import { createInterface } from 'readline';
-import { createInterface } from 'readline';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -108,7 +106,7 @@ class MCPClient {
           protocolVersion: '2024-11-05',
           capabilities: {},
           clientInfo: { name: 'open-harness', version: '1.0.0' },
-        }).then((result) => {
+        }).then(() => {
           this.connected = true;
           // Send initialized notification
           this.sendNotification('notifications/initialized', {});
@@ -242,7 +240,7 @@ class MCPHttpTransport {
 
   async connect(): Promise<void> {
     try {
-      const result = await this.sendRequest('initialize', {
+      await this.sendRequest('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: {},
         clientInfo: { name: 'open-harness', version: '1.0.0' },
@@ -356,7 +354,7 @@ class StdioMCPClient {
         protocolVersion: '2024-11-05',
         capabilities: {},
         clientInfo: { name: 'open-harness', version: '1.0.0' },
-      }).then((result) => {
+      }).then(() => {
         this.connected = true;
         this.sendNotification('notifications/initialized', {});
         this.discover().then(() => resolve()).catch(() => resolve());

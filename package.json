@@ -13,9 +13,9 @@
     "dev:all": "dotenv -- tsx server/index.ts & vite --port 5173",
     "electron": "electron .",
     "start": "node scripts/start.mjs",
-    "start": "npm run build && electron .",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "electron:prod": "npm run build && electron ."
   },
   "dependencies": {
     "allotment": "^1.20.5",

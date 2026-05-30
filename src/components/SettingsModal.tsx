@@ -3,8 +3,8 @@ import {
   X, KeyRound, Brain, FileCode, Wrench, Palette, Image,
   PlayCircle, ShieldCheck, Server, MessageCircle, Palette as ThemeIcon,
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
-  Check, ChevronDown, ChevronRight, CheckCircle2, Circle, Bot, AlertCircle,
-  Search, ArrowRight, Globe, Cpu, Sparkles,
+  Check, ChevronDown, ChevronRight, CheckCircle2, Bot,
+  ArrowRight,
 } from 'lucide-react';
 import type { ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
 
@@ -371,9 +371,6 @@ function ModelList({ models, providerId, activeModel, onToggle }: any) {
   );
 }
 
-function ChevronUp({ size }: { size: number }) {
-  return <ChevronDown size={size} style={{ transform: 'rotate(180deg)' }} />;
-}
 
 /* ================================================================== */
 /*  ADD PROVIDER — preset gallery + custom form                       */

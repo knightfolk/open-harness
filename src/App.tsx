@@ -1,9 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, Plan } from './types';
 import type { PanelId } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
-import { WelcomeScreen } from './components/WelcomeScreen';
 import { LayoutEngine } from './components/layout/LayoutEngine';
 import { SettingsModal } from './components/SettingsModal';
 import { useLayoutState } from './components/layout/useLayoutState';
@@ -13,6 +12,10 @@ import './styles/global.css';
 import './styles/components.css';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+function basename(p: string) {
+  return p.split('/').filter(Boolean).pop() || p;
+}
 
 function App() {
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
@@ -59,7 +62,7 @@ function App() {
   useEffect(() => {
     const native = (window as any).CMDuiNative;
     if (!native?.onMenuAction) return;
-    native.onMenuAction((action: string, data?: any) => {
+    native.onMenuAction((action: string) => {
       if (action === 'show-snap-zones') {
         setSnapOverlayVisible(true);
         setTimeout(() => setSnapOverlayVisible(false), 3000);
@@ -84,7 +87,7 @@ function App() {
 
   // Load config from server on mount
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', activeTheme);
+    document.documentElement.setAttribute('data-theme', 'midnight');
     (async () => {
       try {
         const config = await api.getConfig();
@@ -321,9 +324,6 @@ function App() {
     }
   }, []);
 
-  function basename(p: string) {
-    return p.split('/').filter(Boolean).pop() || p;
-  }
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (activeSessionId) return activeSessionId;
@@ -422,11 +422,16 @@ function App() {
         },
         onToolCall: (tc) => {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, toolCalls: [...(m.toolCalls || []), { id: tc.id, name: tc.name, status: tc.status, input: tc.input, output: tc.output, duration: tc.duration }] }
-                : m
-            )
+            prev.map((m) => {
+              if (m.id !== assistantId) return m;
+              const existing = m.toolCalls || [];
+              const index = existing.findIndex((tool) => tool.id === tc.id);
+              const nextTool = { id: tc.id, name: tc.name, status: tc.status, input: tc.input, output: tc.output, duration: tc.duration };
+              const toolCalls = index >= 0
+                ? existing.map((tool, i) => (i === index ? { ...tool, ...nextTool } : tool))
+                : [...existing, nextTool];
+              return { ...m, toolCalls };
+            })
           );
         },
         onError: (error) => {
@@ -457,7 +462,7 @@ function App() {
       setIsTyping(false);
       clearInterval(progressInterval);
     }
-  }, [isTyping, ensureSession]);
+  }, [isTyping, ensureSession, activeModel]);
 
   // Build visible panel set
   const visiblePanels = new Set<PanelId>();
@@ -470,7 +475,31 @@ function App() {
   const msgCount = messages.length;
   const agentCount = subAgents.filter((a) => a.status === 'running').length;
   const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Open-Harness';
-  const showWelcome = activeSessionId && messages.length === 0 && !loading;
+  const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
+  const latestToolCalls = latestAssistantMessage?.toolCalls || [];
+  const hasRunningTools = latestToolCalls.some((tool) => tool.status === 'running');
+  const hasToolCalls = latestToolCalls.length > 0;
+  const chatPlan: Plan | null = messages.length === 0 ? null : {
+    explanation: isTyping ? 'Current response progress' : 'Last response completed',
+    steps: [
+      { id: 'request', step: 'Receive user request', status: 'completed' },
+      {
+        id: 'response',
+        step: 'Generate model response',
+        status: isTyping && !hasToolCalls ? 'in_progress' : 'completed',
+      },
+      {
+        id: 'tools',
+        step: hasToolCalls ? `Use ${latestToolCalls.length} tool${latestToolCalls.length === 1 ? '' : 's'} as needed` : 'Use tools only if needed',
+        status: hasRunningTools ? 'in_progress' : hasToolCalls ? 'completed' : isTyping ? 'pending' : 'completed',
+      },
+      {
+        id: 'final',
+        step: 'Deliver final answer',
+        status: isTyping ? 'pending' : 'completed',
+      },
+    ],
+  };
 
   return (
     <div className="app-layout">
@@ -534,32 +563,19 @@ function App() {
                 <div className="typing-dot" />
               </div>
             </div>
-          ) : showWelcome ? (
-            <WelcomeScreen onSuggestionClick={handleSendMessage} />
           ) : (
             <LayoutEngine
               layout={layout}
               onRemovePanel={removePanel}
               onSwapPanels={swapPanels}
               subAgents={subAgents}
-              plan={{
-                steps: [
-                  { id: '1', step: 'Explore codebase', status: 'completed' },
-                  { id: '2', step: 'Design solution', status: 'completed' },
-                  { id: '3', step: 'Implement changes', status: 'in_progress' },
-                  { id: '4', step: 'Test and verify', status: 'pending' },
-                ],
-              }}
-              fileChanges={[
-                { id: uid(), filePath: 'src/App.tsx', type: 'modify' as const, additions: 42, deletions: 18 },
-                { id: uid(), filePath: 'src/utils/api.ts', type: 'add' as const, additions: 89, deletions: 0 },
-              ]}
-              terminalCommands={[
-                { id: uid(), command: 'npm run build', output: '✓ built in 80ms', exitCode: 0, duration: 800 },
-              ]}
+              plan={chatPlan}
+              fileChanges={[]}
+              terminalCommands={[]}
               messages={messages}
               isTyping={isTyping}
               onSendMessage={handleSendMessage}
+              activeModel={activeModel}
               workingDir={workingDir}
             />
           )}

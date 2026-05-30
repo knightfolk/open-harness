@@ -18,6 +18,7 @@ interface Props {
     messages: any[];
     isTyping: boolean;
     onSendMessage: (msg: string) => void;
+    activeModel: string;
     workingDir: string | null;
   };
 }
@@ -25,7 +26,7 @@ interface Props {
 export function PanelContent({ panelId, context }: Props) {
   switch (panelId) {
     case 'chat':
-      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} />;
+      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} />;
     case 'side-chat':
       return <SideChatPanel />;
     case 'diffs':

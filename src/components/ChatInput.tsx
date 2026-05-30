@@ -40,7 +40,7 @@ export function ChatInput({ onSend, disabled }: Props) {
           <textarea
             ref={textareaRef}
             className="input-textarea"
-            placeholder="Ask Codex anything... (Enter to send, Shift+Enter for new line)"
+            placeholder="Ask anything... (Enter to send, Shift+Enter for new line)"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}

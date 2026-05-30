@@ -14,11 +14,6 @@ export function FilesPanel({ workingDir }: Props) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!workingDir) { setEntries([]); return; }
-    loadDir(workingDir);
-  }, [workingDir]);
-
   const loadDir = useCallback(async (dirPath: string) => {
     setLoading(true);
     try {
@@ -30,6 +25,13 @@ export function FilesPanel({ workingDir }: Props) {
       setLoading(false);
     }
   }, []);
+
+
+
+  useEffect(() => {
+    if (!workingDir) { setEntries([]); return; }
+    loadDir(workingDir);
+  }, [workingDir, loadDir]);
 
   const toggleDir = useCallback(async (dirPath: string) => {
     setExpandedDirs((prev) => {

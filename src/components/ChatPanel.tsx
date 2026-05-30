@@ -1,40 +1,78 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { Send, Paperclip, Image, AtSign, Command } from 'lucide-react';
 import type { Message } from '../types';
 import { MessageBubble } from './MessageBubble';
-import { useState } from 'react';
+import { shortModelName } from '../utils/modelDisplay';
 
 interface Props {
   messages: Message[];
   isTyping: boolean;
   onSendMessage: (msg: string) => void;
+  activeModel: string;
 }
 
-export function ChatPanel({ messages, isTyping, onSendMessage }: Props) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
+  const userScrolledUpRef = useRef(false);
+  const previousMessageCountRef = useRef(0);
+  const previousLastContentLengthRef = useRef(0);
+  const assistantName = shortModelName(activeModel);
+  const showTypingPlaceholder = isTyping && messages[messages.length - 1]?.status !== 'streaming';
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const isNearBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }, []);
 
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // Keep the latest response pinned to the bottom unless the user has intentionally scrolled up.
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    const lastMsg = messages[messages.length - 1];
+    const contentLength = lastMsg?.content?.length || 0;
+    const messageAdded = messages.length > previousMessageCountRef.current;
+    const streamingGrew = lastMsg?.status === 'streaming' && contentLength > previousLastContentLengthRef.current;
+    const shouldFollow = messageAdded || (!userScrolledUpRef.current && (streamingGrew || isTyping));
+
+    previousMessageCountRef.current = messages.length;
+    previousLastContentLengthRef.current = contentLength;
+
+    if (shouldFollow) requestAnimationFrame(scrollToBottom);
+  }, [messages, isTyping, scrollToBottom]);
+
+  const handleScroll = useCallback(() => {
+    const atBottom = isNearBottom();
+    userScrolledUpRef.current = !atBottom;
+    setUserScrolledUp(!atBottom);
+  }, [isNearBottom]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="messages" style={{ flex: 1 }}>
+    <div className="chat-panel-root">
+      <div className="messages" ref={scrollRef} onScroll={handleScroll}>
+        {messages.length === 0 && !isTyping && (
+          <div className="chat-empty-state">
+            <div className="chat-empty-logo">⌘</div>
+            <div className="chat-empty-title">Start a new chat</div>
+            <div className="chat-empty-subtitle">The message box stays available here, even before the first message.</div>
+          </div>
+        )}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble key={msg.id} message={msg} assistantName={assistantName} />
         ))}
-        {isTyping && (
+        {showTypingPlaceholder && (
           <div className="message-wrapper">
             <div className="message">
               <div className="message-avatar assistant" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', color: 'white' }}>
                 <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
               </div>
               <div className="message-body">
-                <div className="message-sender">Codex</div>
+                <div className="message-sender">{assistantName}</div>
                 <div className="typing-indicator">
                   <div className="typing-dot" />
                   <div className="typing-dot" />
@@ -44,8 +82,13 @@ export function ChatPanel({ messages, isTyping, onSendMessage }: Props) {
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
+      {/* Scroll-to-bottom pill */}
+      {userScrolledUp && (
+        <button className="scroll-to-bottom-pill" onClick={() => { setUserScrolledUp(false); scrollToBottom(); }}>
+          ↓ New messages below
+        </button>
+      )}
       <ChatInputInline onSend={onSendMessage} disabled={isTyping} />
     </div>
   );
@@ -54,6 +97,18 @@ export function ChatPanel({ messages, isTyping, onSendMessage }: Props) {
 function ChatInputInline({ onSend, disabled }: { onSend: (msg: string) => void; disabled?: boolean }) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const resizeTextarea = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+  }, []);
+
+  const handleChange = (nextValue: string) => {
+    setValue(nextValue);
+    requestAnimationFrame(resizeTextarea);
+  };
 
   const handleSend = () => {
     if (!value.trim() || disabled) return;
@@ -70,7 +125,7 @@ function ChatInputInline({ onSend, disabled }: { onSend: (msg: string) => void; 
   };
 
   return (
-    <div className="input-area" style={{ padding: '8px 12px 12px' }}>
+    <div className="input-area">
       <div className="input-container">
         <div className="input-top">
           <textarea
@@ -78,7 +133,7 @@ function ChatInputInline({ onSend, disabled }: { onSend: (msg: string) => void; 
             className="input-textarea"
             placeholder="Ask anything... (Enter to send)"
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => handleChange(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
             disabled={disabled}

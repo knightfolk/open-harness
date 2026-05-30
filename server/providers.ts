@@ -97,7 +97,7 @@ export async function fetchProviderModels(provider: StoredProvider): Promise<Fet
 // ── Helpers ────────────────────────────────────────────
 
 function buildModelsURL(provider: StoredProvider): string {
-  let base = provider.baseURL.replace(/\/+$/, '');
+  const base = provider.baseURL.replace(/\/+$/, '');
 
   // OpenAI-compatible providers use /models or /v1/models
   if (provider.type === 'openai-compatible') {
@@ -131,7 +131,7 @@ function buildModelsURL(provider: StoredProvider): string {
   return `${base}/models`;
 }
 
-function parseModelsResponse(data: any, provider: StoredProvider): FetchedModel[] {
+function parseModelsResponse(data: any, _provider: StoredProvider): FetchedModel[] {
   // OpenAI-compatible format: { data: [{ id, object, ... }] }
   if (Array.isArray(data?.data)) {
     return data.data

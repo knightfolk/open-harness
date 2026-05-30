@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, MessageSquare, Trash2, X } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Send, MessageSquare, Trash2 } from 'lucide-react';
 import * as api from '../utils/api';
 
 interface SideMessage {
@@ -8,7 +8,16 @@ interface SideMessage {
   content: string;
   timestamp: Date;
   status?: 'streaming' | 'complete' | 'error';
-  toolCalls?: any[];
+  toolCalls?: SideToolCall[];
+}
+
+interface SideToolCall {
+  id: string;
+  name: string;
+  status: 'running' | 'complete' | 'error';
+  input?: string;
+  output?: string;
+  duration?: number;
 }
 
 export function SideChatPanel() {
@@ -149,7 +158,7 @@ export function SideChatPanel() {
               border: msg.role === 'assistant' ? '1px solid var(--border-primary)' : 'none',
             }}>
               {/* Tool calls */}
-              {msg.toolCalls?.map((tc: any) => (
+              {msg.toolCalls?.map((tc) => (
                 <div key={tc.id} style={{
                   fontSize: 10, padding: '3px 6px', marginBottom: 4,
                   borderRadius: 4, background: 'var(--bg-secondary)',
