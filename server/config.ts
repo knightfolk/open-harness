@@ -155,3 +155,27 @@ function tryReadMmxKey(): string {
     return '';
   }
 }
+
+// ── Provider resolution ───────────────────────────────
+
+export interface ResolvedProvider {
+  provider: StoredProvider;
+  apiKey: string;
+  chatURL: string;
+}
+
+/** Find the provider that owns a given model, and build its chat completions URL. */
+export function getProviderForModel(config: StoredConfig, modelId: string): ResolvedProvider | null {
+  for (const provider of config.providers) {
+    const match = provider.models.find((m) => m.id === modelId && m.enabled);
+    if (match) {
+      const base = provider.baseURL.replace(/\/+$/, '');
+      return {
+        provider,
+        apiKey: provider.apiKey,
+        chatURL: `${base}/chat/completions`,
+      };
+    }
+  }
+  return null;
+}

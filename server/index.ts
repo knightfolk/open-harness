@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, statSync, existsSync, lstatSync } from 'fs';
 import { join, basename, extname } from 'path';
 import { homedir } from 'os';
 import { execSync, spawn } from 'child_process';
-import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer } from './config';
+import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel } from './config';
 // Types from config used inline
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
@@ -46,18 +46,12 @@ interface ToolCallRow {
 // ── Config ─────────────────────────────────────────────
 let appConfig = loadConfig();
 
-// Legacy MiniMax helpers (still used for streaming)
-const MINIMAX_API_URL = 'https://api.minimax.io/v1/chat/completions';
-
-function getMiniMaxApiKey(): string | null {
-  const minimaxProvider = appConfig.providers.find((p) => p.id === 'minimax');
-  if (minimaxProvider?.apiKey) return minimaxProvider.apiKey;
-  if (process.env.MINIMAX_API_KEY) return process.env.MINIMAX_API_KEY;
-  try {
-    const config = JSON.parse(readFileSync(join(homedir(), '.mmx', 'config.json'), 'utf-8'));
-    if (config.api_key) return config.api_key;
-  } catch { /* ignore */ }
-  return null;
+// ── Provider resolution ─────────────────────────────
+function resolveActiveProvider(): { chatURL: string; apiKey: string; providerId: string } | null {
+  const modelId = appConfig.activeModel || 'MiniMax-M2.7';
+  const resolved = getProviderForModel(appConfig, modelId);
+  if (!resolved) return null;
+  return { chatURL: resolved.chatURL, apiKey: resolved.apiKey, providerId: resolved.provider.id };
 }
 
 function getActiveModel(): string {
@@ -492,11 +486,11 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   res.write(`event: user_message\ndata: ${JSON.stringify(userMsg)}\n\n`);
   res.write(`event: assistant_start\ndata: ${JSON.stringify({ id: assistantId, role: 'assistant' })}\n\n`);
 
-  const apiKey = getMiniMaxApiKey();
-  if (!apiKey) {
+  const resolved = resolveActiveProvider();
+  if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session);
   } else {
-    await streamMiniMax(apiKey, session.messages, res, assistantId, session);
+    await streamModel(resolved.chatURL, resolved.apiKey, resolved.providerId, session.messages, res, assistantId, session);
   }
 
   res.write(`event: done\ndata: {}\n\n`);
@@ -595,9 +589,11 @@ async function parseStreamForContentAndTools(
   return { content, toolCalls };
 }
 
-// ── MiniMax streaming (with MCP tool-calling loop) ────
-async function streamMiniMax(
+// ── Universal model streaming (with MCP tool-calling loop) ─
+async function streamModel(
+  chatURL: string,
   apiKey: string,
+  providerId: string,
   messages: MessageRow[],
   res: express.Response,
   assistantId: string,
@@ -657,7 +653,7 @@ async function streamMiniMax(
         apiMessages.push({ role: 'system', content: 'No more tool calls. Based on the available context and tool results, provide the final answer now.' });
       }
 
-      const response = await fetch(MINIMAX_API_URL, {
+      const response = await fetch(chatURL, {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + apiKey,
@@ -668,7 +664,7 @@ async function streamMiniMax(
 
       if (!response.ok) {
         const err = await response.text();
-        res.write('event: error\ndata: ' + JSON.stringify({ error: 'MiniMax API error: ' + response.status + ' ' + err }) + '\n\n');
+        res.write('event: error\ndata: ' + JSON.stringify({ error: `${providerId} API error: ${response.status} ${err}` }) + '\n\n');
         return;
       }
 
@@ -776,17 +772,17 @@ function sleep(ms: number) {
 // ── Start ──────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  const apiKey = getMiniMaxApiKey();
   console.log(`Open-Harness server running on http://localhost:${PORT}`);
-  const _activeModel = getActiveModel();
+  const _activeModel = appConfig.activeModel || 'MiniMax-M2.7';
   const _family = detectModelFamily(_activeModel);
   const _cfg = getModelConfig(_activeModel);
+  const _resolved = resolveActiveProvider();
   console.log(`Model: ${_activeModel} (family: ${_family}, style: ${_cfg.systemPromptStyle}, tool quality: ${_cfg.toolCallQuality})`);
   console.log(`Providers: ${appConfig.providers.length} configured`);
-  if (apiKey) {
-    console.log(`✓ MiniMax API key loaded`);
+  if (_resolved) {
+    console.log(`✓ Active provider: ${_resolved.providerId} (${_resolved.chatURL})`);
   } else {
-    console.log(`⚠  No MiniMax API key found — using local fallback`);
+    console.log(`⚠  No provider found for model ${_activeModel} — using local fallback`);
   }
   console.log(`✓ Config loaded from ~/.open-harness/config.json`);
 
