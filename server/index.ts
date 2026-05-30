@@ -9,6 +9,8 @@ import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer
 // Types from config used inline
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
+import { getModelConfig, isReasoningModel, detectModelFamily } from './modelProfiles';
+import { buildPromptForModel, toolsAsText } from './promptBuilder';
 
 const app = express();
 app.use(cors());
@@ -601,18 +603,33 @@ async function streamMiniMax(
   assistantId: string,
   session: SessionRow,
 ) {
-  // Build system prompt with personality + working directory context
+  // ── Model-aware prompt building ─────────────────────
+  // Use the promptBuilder to generate a system prompt, tool config, and
+  // generation parameters adapted to the active model's family profile.
+  const activeModel = getActiveModel();
+  const modelConfig = getModelConfig(activeModel);
   const personality = getPersonality();
-  let systemPrompt = personality
-    || 'You are a helpful AI coding assistant. Respond concisely with code examples where appropriate. Use markdown formatting.';
-  if (session.workingDir) {
-    systemPrompt += '\n\nThe user has a project open at: ' + session.workingDir;
-    systemPrompt += '\nYou can reference files by their paths. When showing code, always use proper file paths in code blocks.';
-  }
-  systemPrompt += '\n\nUse tools only when they are necessary and directly useful. Do not narrate tool calls to the user. After using tools, always provide a clear final answer with findings and next steps. Do not output hidden reasoning tags such as <think>.';
 
-  // Gather MCP tools from all connected servers
+  // Gather MCP tools from all connected servers first
   const { tools: mcpApiTools, toolServerMap } = gatherMCPToolsForAPI();
+
+  // Build the complete prompt configuration for this model
+  const promptResult = buildPromptForModel({
+    modelId: activeModel,
+    role: 'coder',
+    personality: personality || undefined,
+    workingDir: session.workingDir || undefined,
+    tools: mcpApiTools.length > 0 ? mcpApiTools : undefined,
+    enableThinking: isReasoningModel(activeModel),
+  });
+
+  // If the model doesn't support native tool calls, append tool descriptions as text
+  let systemPrompt = promptResult.systemPrompt;
+  if (!promptResult.useNativeToolCalls && mcpApiTools.length > 0) {
+    systemPrompt += toolsAsText(mcpApiTools);
+  }
+  systemPrompt += '\n\nDo not output hidden reasoning tags such as <think).';
+
 
   // Build messages array (grows with tool results each round)
   const apiMessages: any[] = [
@@ -627,13 +644,14 @@ async function streamMiniMax(
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const requestBody: any = {
-        model: getActiveModel(),
+        model: activeModel,
         messages: apiMessages,
         stream: true,
-        max_tokens: 4096,
+        max_tokens: promptResult.generationConfig.max_tokens,
+        temperature: promptResult.generationConfig.temperature,
       };
       // Leave the final round tool-free so the model must produce a user-facing answer.
-      if (round < MAX_TOOL_ROUNDS - 1 && mcpApiTools.length > 0) {
+      if (round < MAX_TOOL_ROUNDS - 1 && mcpApiTools.length > 0 && promptResult.useNativeToolCalls) {
         requestBody.tools = mcpApiTools;
       } else if (round === MAX_TOOL_ROUNDS - 1) {
         apiMessages.push({ role: 'system', content: 'No more tool calls. Based on the available context and tool results, provide the final answer now.' });
@@ -760,7 +778,10 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   const apiKey = getMiniMaxApiKey();
   console.log(`Open-Harness server running on http://localhost:${PORT}`);
-  console.log(`Model: ${getActiveModel()}`);
+  const _activeModel = getActiveModel();
+  const _family = detectModelFamily(_activeModel);
+  const _cfg = getModelConfig(_activeModel);
+  console.log(`Model: ${_activeModel} (family: ${_family}, style: ${_cfg.systemPromptStyle}, tool quality: ${_cfg.toolCallQuality})`);
   console.log(`Providers: ${appConfig.providers.length} configured`);
   if (apiKey) {
     console.log(`✓ MiniMax API key loaded`);

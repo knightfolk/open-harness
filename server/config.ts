@@ -66,7 +66,15 @@ const DEFAULT_CONFIG: StoredConfig = {
   personality: '',
   activeModel: 'MiniMax-M2.7',
   activeTheme: 'midnight',
-  roleAssignments: {},
+  roleAssignments: {
+    coder: 'MiniMax-M2.7',       // Primary coding agent
+    reasoner: 'MiniMax-M2.7',    // Complex reasoning / planning
+    summarizer: 'MiniMax-M2.7',  // Text summarization
+    title: 'MiniMax-M2.7',       // Short title generation
+    planner: 'MiniMax-M2.7',     // Task decomposition
+    reviewer: 'MiniMax-M2.7',    // Code review
+    worker: 'MiniMax-M2.7',      // Fast parallel tasks
+  },
 };
 
 // ── Read / Write ───────────────────────────────────────
