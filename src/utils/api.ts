@@ -657,3 +657,98 @@ export async function applyPatch(patch: string): Promise<{ files: string[]; erro
   if (!res.ok) throw new Error(`Patch apply failed: ${res.status}`);
   return res.json();
 }
+
+// ── Eval / Model Lab APIs ─────────────────────────────
+
+export interface PromptCase {
+  id: string;
+  name: string;
+  prompt: string;
+  category: string;
+  expectedBehavior?: string;
+}
+
+export interface EvalScores {
+  usedTools: boolean;
+  answeredUser: boolean;
+  referencedRealFiles: boolean;
+  avoidedHallucinatedPaths: boolean;
+  producedSummary: boolean;
+  latencyMs: number;
+  toolCount: number;
+  overallScore: number;
+}
+
+export interface EvalResult {
+  modelId: string;
+  promptId: string;
+  promptName: string;
+  status: 'ok' | 'error';
+  response: string;
+  responseLength: number;
+  toolCallCount: number;
+  toolCalls: Array<{ name: string; status: string }>;
+  wallMs: number;
+  scores: EvalScores;
+}
+
+export interface EvalSummary {
+  byModel: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }>;
+  bestModel: string;
+  recommendations: Array<{ role: string; modelId: string; reason: string }>;
+}
+
+export interface EvalReport {
+  id: string;
+  configId: string;
+  name: string;
+  status: 'running' | 'complete' | 'error';
+  total: number;
+  completed: number;
+  results: EvalResult[];
+  createdAt: string;
+  completedAt?: string;
+  summary?: EvalSummary;
+}
+
+export interface EvalReportSummary {
+  id: string;
+  name: string;
+  status: string;
+  createdAt: string;
+  completedAt?: string;
+  total: number;
+}
+
+export async function getEvalPrompts(): Promise<PromptCase[]> {
+  const res = await fetch(`${API_BASE}/api/evals/prompts`);
+  if (!res.ok) throw new Error(`Failed to get prompts: ${res.status}`);
+  return res.json();
+}
+
+export async function getEvalReports(): Promise<EvalReportSummary[]> {
+  const res = await fetch(`${API_BASE}/api/evals/reports`);
+  if (!res.ok) throw new Error(`Failed to get reports: ${res.status}`);
+  return res.json();
+}
+
+export async function getEvalReport(id: string): Promise<EvalReport> {
+  const res = await fetch(`${API_BASE}/api/evals/reports/${id}`);
+  if (!res.ok) throw new Error(`Failed to get report: ${res.status}`);
+  return res.json();
+}
+
+export async function runEval(params: {
+  name?: string;
+  promptIds: string[];
+  modelIds: string[];
+  workingDir?: string;
+}): Promise<{ id: string; status: string; total: number }> {
+  const res = await fetch(`${API_BASE}/api/evals/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(`Eval run failed: ${res.status}`);
+  return res.json();
+}

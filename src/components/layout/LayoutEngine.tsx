@@ -23,6 +23,7 @@ interface Props {
   onReviewDiff?: (diffText: string) => void;
   onExplainChange?: (filePath: string) => void;
   onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
+  models?: Array<{ id: string; name: string }>;
 }
 
 export function LayoutEngine({
@@ -43,11 +44,13 @@ export function LayoutEngine({
   onReviewDiff,
   onExplainChange,
   onAskAboutScreenshot,
+  models,
 }: Props) {
   return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{
     subAgents, plan, fileChanges, terminalCommands, messages, isTyping,
     onSendMessage, activeModel, workingDir, projectProfile, onSwap: onSwapPanels,
     onSendToChat, onReviewDiff, onExplainChange, onAskAboutScreenshot,
+    models,
   }} />;
 }
 

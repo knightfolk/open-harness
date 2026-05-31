@@ -1,0 +1,305 @@
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import { v4 as uuid } from 'uuid';
+
+// ── Types ──────────────────────────────────────────────
+
+export interface PromptCase {
+  id: string;
+  name: string;
+  prompt: string;
+  category: string;
+  expectedBehavior?: string;
+}
+
+export interface EvalRunConfig {
+  id: string;
+  name: string;
+  promptIds: string[];
+  modelIds: string[];
+  workingDir?: string;
+  createdAt: string;
+}
+
+export interface EvalResult {
+  modelId: string;
+  promptId: string;
+  promptName: string;
+  status: 'ok' | 'error';
+  response: string;
+  responseLength: number;
+  toolCallCount: number;
+  toolCalls: Array<{ name: string; status: string }>;
+  wallMs: number;
+  scores: EvalScores;
+}
+
+export interface EvalScores {
+  usedTools: boolean;
+  answeredUser: boolean;
+  referencedRealFiles: boolean;
+  avoidedHallucinatedPaths: boolean;
+  producedSummary: boolean;
+  latencyMs: number;
+  toolCount: number;
+  overallScore: number; // 0-10
+}
+
+export interface EvalReport {
+  id: string;
+  configId: string;
+  name: string;
+  status: 'running' | 'complete' | 'error';
+  total: number;
+  completed: number;
+  results: EvalResult[];
+  createdAt: string;
+  completedAt?: string;
+  summary?: EvalSummary;
+}
+
+export interface EvalSummary {
+  byModel: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }>;
+  bestModel: string;
+  recommendations: Array<{ role: string; modelId: string; reason: string }>;
+}
+
+// ── Storage ────────────────────────────────────────────
+
+const EVALS_DIR = join(homedir(), '.open-harness', 'evals');
+const SUITES_DIR = join(EVALS_DIR, 'suites');
+const REPORTS_DIR = join(EVALS_DIR, 'reports');
+
+function ensureDirs() {
+  mkdirSync(SUITES_DIR, { recursive: true });
+  mkdirSync(REPORTS_DIR, { recursive: true });
+}
+
+ensureDirs();
+
+// ── Built-in Prompt Suites ─────────────────────────────
+
+const BUILTIN_PROMPTS: PromptCase[] = [
+  {
+    id: 'review-project',
+    name: 'Review this project',
+    prompt: 'Review this project. What is it? What does it do? What are its strengths and weaknesses?',
+    category: 'analysis',
+    expectedBehavior: 'Should read key files and provide a structured review',
+  },
+  {
+    id: 'what-changed',
+    name: 'What changed?',
+    prompt: 'What changed in the working tree? Summarize the changes.',
+    category: 'git',
+    expectedBehavior: 'Should inspect git status/diff and summarize',
+  },
+  {
+    id: 'fix-failing-build',
+    name: 'Fix failing build',
+    prompt: 'Run the build command and fix any errors you find.',
+    category: 'coding',
+    expectedBehavior: 'Should run build, identify errors, and suggest fixes',
+  },
+  {
+    id: 'summarize-readme',
+    name: 'Summarize README',
+    prompt: 'Read the README and summarize it in 3-5 bullet points.',
+    category: 'analysis',
+    expectedBehavior: 'Should read README.md and produce a summary',
+  },
+  {
+    id: 'inspect-package-json',
+    name: 'Inspect package.json',
+    prompt: 'Look at package.json and tell me about the project dependencies and scripts.',
+    category: 'analysis',
+    expectedBehavior: 'Should read package.json and describe deps/scripts',
+  },
+  {
+    id: 'debug-empty-response',
+    name: 'Debug empty response',
+    prompt: 'When I send a message, sometimes I get an empty response. Help me debug this.',
+    category: 'debugging',
+    expectedBehavior: 'Should investigate code and suggest debugging steps',
+  },
+  {
+    id: 'compare-route-decisions',
+    name: 'Compare route decisions',
+    prompt: 'How does this project route different types of user requests? Explain the routing logic.',
+    category: 'analysis',
+    expectedBehavior: 'Should examine router code and explain routing decisions',
+  },
+];
+
+// ── Prompt Suite CRUD ──────────────────────────────────
+
+export function getAllPrompts(): PromptCase[] {
+  return BUILTIN_PROMPTS;
+}
+
+export function getPromptById(id: string): PromptCase | undefined {
+  return BUILTIN_PROMPTS.find(p => p.id === id);
+}
+
+export function getPromptsByCategory(category: string): PromptCase[] {
+  return BUILTIN_PROMPTS.filter(p => p.category === category);
+}
+
+// ── Scoring ────────────────────────────────────────────
+
+function scoreResult(result: { response: string; toolCalls: Array<{ name: string; status: string }>; wallMs: number; workingDir?: string }): EvalScores {
+  const response = result.response.toLowerCase();
+  const toolCalls = result.toolCalls;
+  const toolNames = toolCalls.map(tc => tc.name);
+
+  const usedTools = toolCalls.length > 0;
+  const answeredUser = result.response.length > 100;
+  const referencedRealFiles = toolNames.some(n => n === 'read_file' || n === 'list_directory');
+  const avoidedHallucinatedPaths = !response.includes('file not found') && !response.includes('no such file');
+  const producedSummary = response.includes('summary') || response.includes('conclusion') || response.includes('in summary') || response.includes('key findings') || response.includes('here are') || response.length > 300;
+
+  // Calculate overall score (0-10)
+  let score = 0;
+  if (usedTools) score += 2;
+  if (answeredUser) score += 2;
+  if (referencedRealFiles) score += 2;
+  if (avoidedHallucinatedPaths) score += 1;
+  if (producedSummary) score += 1;
+  // Latency bonus
+  if (result.wallMs < 10000) score += 1;
+  else if (result.wallMs < 30000) score += 0.5;
+  // Tool efficiency (not too many, not too few)
+  if (toolCalls.length >= 1 && toolCalls.length <= 10) score += 0.5;
+
+  return {
+    usedTools,
+    answeredUser,
+    referencedRealFiles,
+    avoidedHallucinatedPaths,
+    producedSummary,
+    latencyMs: result.wallMs,
+    toolCount: toolCalls.length,
+    overallScore: Math.min(10, Math.round(score * 10) / 10),
+  };
+}
+
+// ── Report Persistence ─────────────────────────────────
+
+export function saveReport(report: EvalReport): void {
+  const path = join(REPORTS_DIR, `${report.id}.json`);
+  writeFileSync(path, JSON.stringify(report, null, 2), 'utf-8');
+}
+
+export function loadReport(id: string): EvalReport | null {
+  const path = join(REPORTS_DIR, `${id}.json`);
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, 'utf-8'));
+}
+
+export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number }> {
+  if (!existsSync(REPORTS_DIR)) return [];
+  const files = readdirSync(REPORTS_DIR).filter(f => f.endsWith('.json'));
+  return files.map(f => {
+    try {
+      const report: EvalReport = JSON.parse(readFileSync(join(REPORTS_DIR, f), 'utf-8'));
+      return {
+        id: report.id,
+        name: report.name,
+        status: report.status,
+        createdAt: report.createdAt,
+        completedAt: report.completedAt,
+        total: report.total,
+      };
+    } catch {
+      return null;
+    }
+  }).filter(Boolean) as Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number }>;
+}
+
+// ── Summary Generation ─────────────────────────────────
+
+export function generateSummary(results: EvalResult[]): EvalSummary {
+  const byModel: Record<string, { scores: number[]; latencies: number[]; toolCounts: number[] }> = {};
+
+  for (const r of results) {
+    if (r.status !== 'ok') continue;
+    if (!byModel[r.modelId]) byModel[r.modelId] = { scores: [], latencies: [], toolCounts: [] };
+    byModel[r.modelId].scores.push(r.scores.overallScore);
+    byModel[r.modelId].latencies.push(r.scores.latencyMs);
+    byModel[r.modelId].toolCounts.push(r.scores.toolCount);
+  }
+
+  const byModelSummary: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }> = {};
+  let bestModel = '';
+  let bestScore = -1;
+
+  for (const [modelId, data] of Object.entries(byModel)) {
+    const avgScore = data.scores.reduce((a, b) => a + b, 0) / data.scores.length;
+    const avgLatencyMs = data.latencies.reduce((a, b) => a + b, 0) / data.latencies.length;
+    const avgToolCount = data.toolCounts.reduce((a, b) => a + b, 0) / data.toolCounts.length;
+    byModelSummary[modelId] = { avgScore: Math.round(avgScore * 10) / 10, avgLatencyMs: Math.round(avgLatencyMs), avgToolCount: Math.round(avgToolCount * 10) / 10, totalRuns: data.scores.length };
+    if (avgScore > bestScore) {
+      bestScore = avgScore;
+      bestModel = modelId;
+    }
+  }
+
+  // Generate recommendations
+  const recommendations: Array<{ role: string; modelId: string; reason: string }> = [];
+  const roles = ['coder', 'planner', 'reviewer', 'summarizer', 'worker', 'reasoner'];
+
+  for (const role of roles) {
+    // Pick best model for this role based on available data
+    let bestForRole = bestModel;
+    let reason = 'Highest overall score';
+    if (role === 'summarizer') {
+      const summarizer = Object.entries(byModelSummary).sort((a, b) => b[1].avgScore - a[1].avgScore)[0];
+      if (summarizer) { bestForRole = summarizer[0]; reason = 'Best summary quality'; }
+    } else if (role === 'coder') {
+      const coder = Object.entries(byModelSummary).sort((a, b) => b[1].avgToolCount - a[1].avgToolCount)[0];
+      if (coder) { bestForRole = coder[0]; reason = 'Most effective tool usage'; }
+    }
+    recommendations.push({ role, modelId: bestForRole, reason });
+  }
+
+  return {
+    byModel: byModelSummary,
+    bestModel,
+    recommendations,
+  };
+}
+
+// ── In-memory active runs ──────────────────────────────
+
+const activeRuns = new Map<string, EvalReport>();
+
+export function createReport(name: string, promptIds: string[], modelIds: string[]): EvalReport {
+  const total = promptIds.length * modelIds.length;
+  const report: EvalReport = {
+    id: uuid(),
+    configId: uuid(),
+    name,
+    status: 'running',
+    total,
+    completed: 0,
+    results: [],
+    createdAt: new Date().toISOString(),
+  };
+  activeRuns.set(report.id, report);
+  saveReport(report);
+  return report;
+}
+
+export function getReport(id: string): EvalReport | null {
+  const active = activeRuns.get(id);
+  if (active) return active;
+  return loadReport(id);
+}
+
+export function getActiveRuns(): EvalReport[] {
+  return Array.from(activeRuns.values());
+}
+
+export { scoreResult };

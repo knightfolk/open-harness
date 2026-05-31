@@ -7,6 +7,7 @@ import { BrowserPanel } from '../BrowserPanel';
 import { TerminalPanel } from '../TerminalPanel';
 import { FilesPanel } from '../FilesPanel';
 import { SideChatPanel } from '../SideChatPanel';
+import { ModelLabPanel } from '../ModelLabPanel';
 
 interface Props {
   panelId: PanelId;
@@ -25,6 +26,7 @@ interface Props {
     onReviewDiff?: (diffText: string) => void;
     onExplainChange?: (filePath: string) => void;
     onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
+    models?: Array<{ id: string; name: string }>;
   };
 }
 
@@ -46,6 +48,8 @@ export function PanelContent({ panelId, context }: Props) {
       return context.plan ? <PlanTracker plan={context.plan} /> : <EmptyState text="No active plan" />;
     case 'files':
       return <FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />;
+    case 'model-lab':
+      return <ModelLabPanel workingDir={context.workingDir} models={context.models || []} />;
     default:
       return <EmptyState text="Unknown panel" />;
   }

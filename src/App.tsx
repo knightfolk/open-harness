@@ -724,6 +724,7 @@ function App() {
               onReviewDiff={handleReviewDiff}
               onExplainChange={handleExplainChange}
               onAskAboutScreenshot={handleAskAboutScreenshot}
+              models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
             />
           )}
         </div>

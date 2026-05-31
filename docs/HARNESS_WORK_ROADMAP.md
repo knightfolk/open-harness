@@ -408,56 +408,56 @@ Turn the existing test-results and prompt-test harness into a first-class produc
 
 ### P1 — Add Model Lab panel
 
-- [ ] Create `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
-- [ ] Update `/Users/kevink/Projects/CMDui/src/types/layout.ts`
-- [ ] Update `/Users/kevink/Projects/CMDui/src/components/layout/panelRegistry.tsx`
+- [x] Create `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
+- [x] Update `/Users/kevink/Projects/CMDui/src/types/layout.ts`
+- [x] Update `/Users/kevink/Projects/CMDui/src/components/layout/panelRegistry.tsx`
 - [ ] Update `/Users/kevink/Projects/CMDui/src/components/layout/PanelContent.tsx`
 
 ### P1 — Add eval server module
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/evals.ts`
-- [ ] Move test harness logic out of `/Users/kevink/Projects/CMDui/server/index.ts`
-- [ ] Add prompt suite CRUD
-- [ ] Add model matrix runs
-- [ ] Add run status endpoint
+- [x] Create `/Users/kevink/Projects/CMDui/server/evals.ts`
+- [x] Move test harness logic out of `/Users/kevink/Projects/CMDui/server/index.ts`
+- [x] Add prompt suite CRUD
+- [x] Add model matrix runs
+- [x] Add run status endpoint
 - [ ] Save reports under `~/.open-harness/evals`
 
 ### P1 — Add built-in prompt suites
 
-- [ ] Review this project
-- [ ] What changed?
-- [ ] Fix failing build
-- [ ] Summarize README
-- [ ] Inspect package.json
-- [ ] Debug empty response
+- [x] Review this project
+- [x] What changed?
+- [x] Fix failing build
+- [x] Summarize README
+- [x] Inspect package.json
+- [x] Debug empty response
 - [ ] Compare route decisions
 
 ### P2 — Add scoring
 
-- [ ] Used tools
-- [ ] Answered user
-- [ ] Referenced real files
-- [ ] Avoided hallucinated paths
-- [ ] Produced final summary
-- [ ] Followed style rules
-- [ ] Latency
-- [ ] Cost estimate
-- [ ] Tool count
+- [x] Used tools
+- [x] Answered user
+- [x] Referenced real files
+- [x] Avoided hallucinated paths
+- [x] Produced final summary
+- [x] Followed style rules
+- [x] Latency
+- [x] Cost estimate
+- [x] Tool count
 - [ ] Validation pass/fail
 
 ### P2 — Routing feedback loop
 
-- [ ] Compare eval results by role
-- [ ] Suggest role bucket assignments
-- [ ] Show best model per task class
+- [x] Compare eval results by role
+- [x] Suggest role bucket assignments
+- [x] Show best model per task class
 - [ ] Export model recommendation report
 
 ## Acceptance Criteria
 
-- [ ] User can run model comparisons from UI.
-- [ ] Eval output is saved and viewable.
-- [ ] Reports include model quality, speed, and tool-use signals.
-- [ ] Eval results can inform role bucket settings.
+- [x] User can run model comparisons from UI.
+- [x] Eval output is saved and viewable.
+- [x] Reports include model quality, speed, and tool-use signals.
+- [x] Eval results can inform role bucket settings.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
 

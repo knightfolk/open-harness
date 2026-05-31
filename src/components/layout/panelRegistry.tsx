@@ -1,7 +1,7 @@
 import type { PanelId, PanelConfig } from '../../types/layout';
 import {
   MessageSquare, GitCompare, Globe, Terminal,
-  Bot, ListChecks, FolderOpen,
+  Bot, ListChecks, FolderOpen, FlaskConical,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -9,10 +9,6 @@ export interface PanelDefinition extends PanelConfig {
   component: () => Promise<{ default: ComponentType<any> }>;
 }
 
-/**
- * We store component references here so panels can be lazily loaded.
- * The LayoutEngine will resolve these at render time.
- */
 const iconMap: Record<PanelId, ComponentType<{ size?: number }>> = {
   chat: MessageSquare,
   diffs: GitCompare,
@@ -22,6 +18,7 @@ const iconMap: Record<PanelId, ComponentType<{ size?: number }>> = {
   'sub-agents': Bot,
   plan: ListChecks,
   files: FolderOpen,
+  'model-lab': FlaskConical,
 };
 
 export const panelConfigs: Record<PanelId, PanelConfig> = {
@@ -33,6 +30,7 @@ export const panelConfigs: Record<PanelId, PanelConfig> = {
   'sub-agents':{ id: 'sub-agents',  label: 'Sub-Agents',  icon: 'Bot',           defaultSize: 320, minSize: 200 },
   plan:        { id: 'plan',        label: 'Plan',         icon: 'ListChecks',    defaultSize: 280, minSize: 180 },
   files:       { id: 'files',       label: 'Files',        icon: 'FolderOpen',    defaultSize: 280, minSize: 180 },
+  'model-lab': { id: 'model-lab',   label: 'Model Lab',   icon: 'FlaskConical',  defaultSize: 400, minSize: 260 },
 };
 
 export function getPanelIcon(id: PanelId) {

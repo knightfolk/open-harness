@@ -23,6 +23,7 @@ import { createSession as createTermSession, getHistory as getTermHistory, runCo
 import * as git from './git';
 import { capturePreview, checkServerHealth } from './browserPreview';
 import { applyPatch as nodeApplyPatch } from './patchApply';
+import * as evals from './evals';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -1646,6 +1647,146 @@ app.post('/api/test/batch', async (req, res) => {
 });
 
 // ── Start ──────────────────────────────────────────────
+
+// ── Eval / Model Lab Routes ──────────────────────────
+
+app.get('/api/evals/prompts', (_req, res) => {
+  res.json(evals.getAllPrompts());
+});
+
+app.get('/api/evals/reports', (_req, res) => {
+  res.json(evals.listReports());
+});
+
+app.get('/api/evals/reports/:id', (req, res) => {
+  const report = evals.getReport(req.params.id);
+  if (!report) return res.status(404).json({ error: 'Report not found' });
+  res.json(report);
+});
+
+app.post('/api/evals/run', async (req, res) => {
+  const { name, promptIds, modelIds, workingDir } = req.body as {
+    name?: string;
+    promptIds: string[];
+    modelIds: string[];
+    workingDir?: string;
+  };
+
+  if (!promptIds?.length || !modelIds?.length) {
+    return res.status(400).json({ error: 'promptIds and modelIds are required' });
+  }
+
+  const report = evals.createReport(
+    name || `Eval ${new Date().toLocaleDateString()}`,
+    promptIds,
+    modelIds,
+  );
+
+  // Return immediately with the report ID
+  res.status(201).json({ id: report.id, status: 'running', total: report.total });
+
+  // Run in background
+  const targetDir = workingDir || process.cwd();
+  const prompts = promptIds.map(id => evals.getPromptById(id)).filter(Boolean) as Array<import('./evals').PromptCase>;
+
+  for (const modelId of modelIds) {
+    const resolved = resolveProviderForModel(modelId);
+    if (!resolved) {
+      for (const p of prompts) {
+        report.results.push({
+          modelId,
+          promptId: p.id,
+          promptName: p.name,
+          status: 'error',
+          response: 'No provider for model',
+          responseLength: 0,
+          toolCallCount: 0,
+          toolCalls: [],
+          wallMs: 0,
+          scores: { usedTools: false, answeredUser: false, referencedRealFiles: false, avoidedHallucinatedPaths: false, producedSummary: false, latencyMs: 0, toolCount: 0, overallScore: 0 },
+        });
+        report.completed++;
+      }
+      continue;
+    }
+
+    for (const p of prompts) {
+      const testSession: SessionRow = {
+        id: uuid(),
+        title: `[eval] ${modelId}--${p.id}`,
+        workingDir: targetDir,
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      sessions.set(testSession.id, testSession);
+
+      const chunks: string[] = [];
+      const toolCalls: any[] = [];
+      const writer = {
+        write: (data: string) => {
+          const lines = data.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const payload = line.slice(6);
+              if (payload === '{}' || payload === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed.text) chunks.push(parsed.text);
+                if (parsed.name && parsed.status) toolCalls.push(parsed);
+              } catch { /* skip */ }
+            }
+          }
+          return true;
+        },
+        setHeader: () => {},
+        end: () => {},
+      } as unknown as express.Response;
+
+      testSession.messages.push({
+        id: uuid(), role: 'user', content: p.prompt, timestamp: new Date().toISOString(),
+      });
+
+      const startMs = Date.now();
+      try {
+        await streamModel(
+          resolved.chatURL, resolved.apiKey, resolved.providerId,
+          testSession.messages, writer, uuid(), testSession,
+          modelId,
+        );
+      } catch (err: any) {
+        console.error(`[eval] ${modelId}/${p.id} error:`, err.message);
+      }
+
+      const response = chunks.join('');
+      const wallMs = Date.now() - startMs;
+      const scores = evals.scoreResult({ response, toolCalls, wallMs, workingDir: targetDir });
+
+      report.results.push({
+        modelId,
+        promptId: p.id,
+        promptName: p.name,
+        status: 'ok',
+        response,
+        responseLength: response.length,
+        toolCallCount: toolCalls.length,
+        toolCalls: toolCalls.map(tc => ({ name: tc.name, status: tc.status })),
+        wallMs,
+        scores,
+      });
+      report.completed++;
+
+      // Persist after each result
+      if (report.completed === report.total) {
+        report.status = 'complete';
+        report.completedAt = new Date().toISOString();
+        report.summary = evals.generateSummary(report.results);
+      }
+      evals.saveReport(report);
+    }
+  }
+});
+
 // Prevent SIGPIPE from killing the process (Docker MCP stdio can trigger this)
 process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignoring'); });
 
