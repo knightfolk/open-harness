@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Code, Bug, FileText, Sparkles, Search, Terminal,
-  Zap, ArrowRight, Cpu, Folder,
+  Cpu, Folder,
 } from 'lucide-react';
 
 // ── Project detection ──

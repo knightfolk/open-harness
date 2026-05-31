@@ -163,7 +163,8 @@ class MCPClient {
 
       this.pending.set(id, { resolve, reject });
 
-      const data = `Content-Length: ${JSON.stringify(msg).length}\r\n\r\n${JSON.stringify(msg)}`;
+      const body = JSON.stringify(msg);
+      const data = `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`;
       this.process.stdin.write(data);
 
       // Timeout after 30s
@@ -179,7 +180,8 @@ class MCPClient {
   private sendNotification(method: string, params: any): void {
     if (!this.process?.stdin?.writable) return;
     const msg: MCPMessage = { jsonrpc: '2.0', method, params };
-    const data = `Content-Length: ${JSON.stringify(msg).length}\r\n\r\n${JSON.stringify(msg)}`;
+    const body = JSON.stringify(msg);
+    const data = `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`;
     this.process.stdin.write(data);
   }
 

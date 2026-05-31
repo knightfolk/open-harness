@@ -1,31 +1,20 @@
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
-import { readFileSync, readdirSync, statSync, existsSync, lstatSync } from 'fs';
+import { readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync, mkdirSync as mkdirSyncFs } from 'fs';
 import { join, basename, extname } from 'path';
 import { homedir } from 'os';
 import { execSync, spawn } from 'child_process';
-import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef } from './config';
-import type { StoredMCPServer, StoredProvider } from './config';
+import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel } from './config';
+// Types from config used inline
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
 import { getModelConfig, isReasoningModel, detectModelFamily } from './modelProfiles';
-import { buildContextWindow } from './contextManager';
-import { buildPromptForModel } from './promptBuilder';
+import { buildContextWindow, estimateTokens } from './contextManager';
+import { buildPromptForModel, toolsAsText } from './promptBuilder';
 
 const app = express();
-const allowedOrigins = new Set([
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:3001',
-  'http://127.0.0.1:3001',
-]);
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-    return callback(new Error('Origin not allowed'));
-  },
-}));
+app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // ── Types ──────────────────────────────────────────────
@@ -61,16 +50,11 @@ let appConfig = loadConfig();
 
 // ── Thinking tag stripping ─────────────────────────────
 const THINKING_TAG_PATTERNS: RegExp[] = [
-  /<think\b[^>]*>[\s\S]*?<\/think>/gi,
-  /<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi,
-  /<reasoning\b[^>]*>[\s\S]*?<\/reasoning>/gi,
-  /<QDom\b[^>]*>[\s\S]*?<\/QDom>/gi,
-  /<transitioned\b[^>]*>[\s\S]*?<\/transitioned>/gi,
-  /<think\b[^>]*>[\s\S]*$/gi,
-  /<thinking\b[^>]*>[\s\S]*$/gi,
-  /<reasoning\b[^>]*>[\s\S]*$/gi,
-  /<QDom\b[^>]*>[\s\S]*$/gi,
-  /<transitioned\b[^>]*>[\s\S]*$/gi,
+  /<\/?think>/gs,
+  /<\/?thinking>/gs,
+  /<\/?reasoning>/gs,
+  /<QDom[\s\S]*?<\/QDom>/g,
+  /<transitioned[\s\S]*?<\/transitioned>/gs,
 ];
 
 function stripThinkingTags(text: string): string {
@@ -82,66 +66,13 @@ function stripThinkingTags(text: string): string {
   return cleaned.trimStart();
 }
 
-// ── Streaming-aware thinking tag stripper ────────────────
-// Tags like <transitioned>...</transitioned> can span multiple streaming chunks.
-// Per-chunk regex misses them. This class accumulates raw text, applies
-// stripThinkingTags to the full buffer, and returns only newly-cleaned content.
-
-class StreamingTagStripper {
-  private raw = '';
-  private emitted = 0;
-
-  feed(chunk: string): string | null {
-    this.raw += chunk;
-    const cleaned = stripThinkingTags(this.raw);
-    if (cleaned.length > this.emitted) {
-      const newContent = cleaned.slice(this.emitted);
-      this.emitted = cleaned.length;
-      return newContent;
-    }
-    return null;
-  }
-
-  flush(): string | null {
-    const cleaned = stripThinkingTags(this.raw);
-    const remaining = cleaned.slice(this.emitted);
-    this.emitted = cleaned.length;
-    return remaining || null;
-  }
-}
-
-
 // ── Monologue stripping ──────────────────────────────────
 // Models sometimes narrate their thinking as plain text before the actual answer.
 // "The user wants me to... Let me explore... Now I have a comprehensive view..."
 // This buffer holds initial text and releases it once structured content begins.
 
-/**
- * Filter monologue preamble from a complete text response.
- * Strips initial lines that match narration patterns, keeping the first structured line onward.
- */
-function filterMonologue(text: string): string {
-  if (!text || !text.trim()) return text;
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    // Found the first non-monologue line — drop everything before it
-    if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
-      if (i === 0) return text; // First line is already the answer
-      // Check if everything before was monologue
-      const before = lines.slice(0, i).filter(l => l.trim());
-      const allMonologue = before.every(l => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
-      if (allMonologue) {
-        return lines.slice(i).join('\n');
-      }
-      return text; // Mixed content — keep it all
-    }
-  }
-  return text;
-}
-
 const MONOLOGUE_PATTERNS = /^(The user (wants|asked|is asking)|Let me |I need to |I should |I'll start|I will now|Now I (have|need|will)|First,? I|I'm going to|I should |To (do|answer|complete) this)/i;
+const ANSWER_START = /^(\s*#{1,3}\s|\s*\*\*[^*]+\*\*|\s*---|\s*\|.*\||\s*```|\s*\d+\.\s|\s*[-*]\s|\s*[A-Z][a-z].*:)/;
 
 class MonologueBuffer {
   private buffer = '';
@@ -155,7 +86,7 @@ class MonologueBuffer {
 
     // Check if we've hit structured content (answer started)
     const lines = this.buffer.split('\n');
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
       // A non-monologue line = the answer has started
@@ -166,7 +97,6 @@ class MonologueBuffer {
         // Check if the pre-answer text is all monologue — if so, drop it
         const monologueLines = beforeAnswer.split('\n').filter(l => l.trim());
         const allMonologue = monologueLines.every(l => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
-        this.buffer = '';
         if (allMonologue) {
           // Drop the monologue, return from answer start
           return lines.slice(i).join('\n');
@@ -180,9 +110,7 @@ class MonologueBuffer {
     // Buffer full but no answer detected — flush everything (it's a plain answer)
     if (this.buffer.length > this.maxBuffer) {
       this.flushed = true;
-      const out = filterMonologue(this.buffer);
-      this.buffer = '';
-      return out;
+      return this.buffer;
     }
 
     // Still buffering — don't emit anything yet
@@ -190,9 +118,8 @@ class MonologueBuffer {
   }
 
   flush(): string {
-    if (this.flushed) return '';
     this.flushed = true;
-    const remaining = filterMonologue(this.buffer);
+    const remaining = this.buffer;
     this.buffer = '';
     return remaining;
   }
@@ -246,31 +173,6 @@ function getActiveModel(): string {
 
 function getPersonality(): string {
   return appConfig.personality || '';
-}
-
-function runShellCommand(command: string, cwd: string, timeoutMs = 30000): Promise<{ output: string; exitCode: number }> {
-  return new Promise((resolve) => {
-    const child = spawn('/bin/zsh', ['-lc', command], { cwd });
-    let output = '';
-    const limit = 1024 * 1024;
-    const append = (chunk: Buffer) => {
-      if (output.length < limit) output += chunk.toString().slice(0, limit - output.length);
-    };
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      resolve({ output: output + '\n[command timed out]', exitCode: 124 });
-    }, timeoutMs);
-    child.stdout.on('data', append);
-    child.stderr.on('data', append);
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({ output: err.message, exitCode: 1 });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ output, exitCode: code ?? 0 });
-    });
-  });
 }
 
 // ── In-memory store ────────────────────────────────────
@@ -327,7 +229,6 @@ app.get('/api/config', (_req, res) => {
     providers: appConfig.providers.map((p) => ({
       ...p,
       apiKey: p.apiKey ? '••••' + p.apiKey.slice(-4) : '', // mask the key
-      hasKey: !!p.apiKey,
     })),
     mcpServers: appConfig.mcpServers.map((s) => ({
       ...s,
@@ -539,7 +440,7 @@ app.post('/api/mcp/:serverId/stop', async (req, res) => {
 
 app.get('/api/models', (_req, res) => {
   const models = appConfig.providers
-    .filter((p) => (p.type === 'openai-compatible' || p.type === 'local' || p.type === 'custom') && (p.apiKey || p.type === 'local'))
+    .filter((p) => p.apiKey || p.type === 'local')
     .flatMap((p) =>
       p.models
         .filter((m) => m.enabled)
@@ -625,21 +526,38 @@ app.get('/api/fs/read', (req, res) => {
 
 // ── Terminal Route ─────────────────────────────────────
 
-app.post('/api/terminal/exec', async (req, res) => {
+app.post('/api/terminal/exec', (req, res) => {
   const { command, cwd } = req.body as { command: string; cwd?: string };
   if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
 
   const workingDir = cwd || homedir();
   const start = Date.now();
 
-  const result = await runShellCommand(command, workingDir);
-  res.json({
-    command,
-    output: result.output,
-    exitCode: result.exitCode,
-    duration: Date.now() - start,
-    cwd: workingDir,
-  });
+  try {
+    const output = execSync(command, {
+      cwd: workingDir,
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+      encoding: 'utf-8',
+      shell: '/bin/zsh',
+    });
+
+    res.json({
+      command,
+      output: output || '',
+      exitCode: 0,
+      duration: Date.now() - start,
+      cwd: workingDir,
+    });
+  } catch (err: any) {
+    res.json({
+      command,
+      output: err.stdout || '' + (err.stderr || ''),
+      exitCode: err.status || 1,
+      duration: Date.now() - start,
+      cwd: workingDir,
+    });
+  }
 });
 
 // ── Open Folder (native dialog) ────────────────────────
@@ -821,8 +739,12 @@ async function invokeMCPTool(
         const command = args.command as string;
         const cwd = (args.cwd as string) || homedir();
         if (!command?.trim()) return { error: 'No command' };
-        const result = await runShellCommand(command, cwd);
-        return { output: result.output, exitCode: result.exitCode, cwd };
+        try {
+          const output = execSync(command, { cwd, timeout: 30000, maxBuffer: 1024 * 1024, encoding: 'utf-8', shell: '/bin/zsh' });
+          return { output: output || '', exitCode: 0, cwd };
+        } catch (err: any) {
+          return { output: (err.stdout || '') + (err.stderr || ''), exitCode: err.status || 1, cwd };
+        }
       }
       default:
         return { error: 'Unknown built-in tool: ' + toolName };
@@ -837,24 +759,22 @@ async function parseStreamForContentAndTools(
   response: Response,
   res: express.Response,
   assistantId: string,
-  streamText: boolean = true,
 ): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; arguments: string }> }> {
   const reader = (response as any).body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
-  const tagStripper = new StreamingTagStripper();
   const monologueBuf = new MonologueBuffer();
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const sseLines = buffer.split('\n');
-    buffer = sseLines.pop() || '';
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
 
-    for (const line of sseLines) {
+    for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || !trimmed.startsWith('data: ')) continue;
       const data = trimmed.slice(6);
@@ -865,16 +785,12 @@ async function parseStreamForContentAndTools(
         const delta = parsed.choices?.[0]?.delta;
         if (!delta) continue;
 
-        // Handle text content — use streaming-aware tag stripping
+        // Handle text content (with monologue stripping)
         if (delta.content) {
           content += delta.content;
-          if (streamText) {
-            const cleaned = tagStripper.feed(delta.content);
-            if (cleaned) {
-              const filtered = monologueBuf.feed(cleaned);
-              if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
-            }
-          }
+          const cleaned = stripThinkingTags(delta.content);
+          const filtered = monologueBuf.feed(cleaned);
+          if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
         }
 
         // Handle tool calls (OpenAI-compatible streaming format)
@@ -894,34 +810,12 @@ async function parseStreamForContentAndTools(
     }
   }
 
-  // Flush any remaining tag-stripped content
-  if (streamText) {
-    const remainingClean = tagStripper.flush();
-    if (remainingClean) {
-      const filtered = monologueBuf.feed(remainingClean);
-      if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
-    }
-    const remaining = monologueBuf.flush();
-    if (remaining) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: remaining }) + '\n\n');
-  }
+  // Flush any remaining monologue buffer content
+  const remaining = monologueBuf.flush();
+  if (remaining) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: remaining }) + '\n\n');
 
   const toolCalls = Array.from(toolCallMap.values()).filter((tc) => tc.name);
   return { content, toolCalls };
-}
-
-// ── Prompt role classifier ──────────────────────────────────
-// Classifies a user message into a coding role for prompt adaptation.
-type CodingRole = 'coder' | 'planner' | 'reviewer' | 'summarizer' | 'worker' | 'reasoner';
-
-function classifyRole(content: string): CodingRole {
-  const lower = content.toLowerCase();
-  if (/\b(review|audit|security|vuln|vulnerability)\b/.test(lower)) return 'reviewer';
-  if (/\b(fix|debug|error|broken|crash|bug|issue|problem)\b/.test(lower)) return 'coder';
-  if (/\b(plan|architect|design|roadmap|strategy|approach|how (should|would|do)|what (should|would|can)|investigate|explore|research)\b/.test(lower)) return 'planner';
-  if (/\b(summar|explain|describe|what (is|does|are)|overview|give me)\b/.test(lower)) return 'summarizer';
-  if (/\b(why|reason|analyze|compare|trade.?off|pros? and cons?|better|versus|vs)\b/.test(lower)) return 'reasoner';
-  if (/\b(rename|move|delete|create|add|remove|install|update|bump)\b/.test(lower) && lower.length < 100) return 'worker';
-  return 'coder';
 }
 
 // ── Universal model streaming (with MCP tool-calling loop) ─
@@ -939,42 +833,27 @@ async function streamModel(
   // Use the promptBuilder to generate a system prompt, tool config, and
   // generation parameters adapted to the active model's family profile.
   const activeModel = overrideModelId || getActiveModel();
+  const modelConfig = getModelConfig(activeModel);
   const personality = getPersonality();
 
   // Gather MCP tools from all connected servers first
   const { tools: mcpApiTools, toolServerMap } = gatherMCPToolsForAPI();
 
   // Build the complete prompt configuration for this model
-  // Classify the user's latest message to pick the right role prompt
-  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-  const classifiedRole = lastUserMsg ? classifyRole(lastUserMsg.content) : 'coder';
-  // Check if the user configured a different model for this role
-  const roleModelOverride = appConfig.roleAssignments?.[classifiedRole];
-  const effectiveModel = (roleModelOverride && overrideModelId === undefined) ? roleModelOverride : activeModel;
-  const effectiveResolved = resolveProviderForModel(effectiveModel);
-  if (effectiveResolved) {
-    chatURL = effectiveResolved.chatURL;
-    apiKey = effectiveResolved.apiKey;
-    providerId = effectiveResolved.providerId;
-  }
-  if (effectiveModel !== activeModel) {
-    console.log(`[role-router] ${classifiedRole} → using ${effectiveModel} (override from role bucket)`);
-  }
-  const apiModelId = splitModelRef(effectiveModel).bareModelId;
-
   const promptResult = buildPromptForModel({
-    modelId: effectiveModel,
-    role: classifiedRole,
+    modelId: activeModel,
+    role: 'coder',
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
     tools: mcpApiTools.length > 0 ? mcpApiTools : undefined,
-    enableThinking: isReasoningModel(effectiveModel),
+    enableThinking: isReasoningModel(activeModel),
   });
 
-  // If the model doesn't support native tool calls, do not advertise tools yet.
-  // Text-form tool JSON needs a separate parser/executor, otherwise models emit
-  // JSON that the app cannot act on.
+  // If the model doesn't support native tool calls, append tool descriptions as text
   let systemPrompt = promptResult.systemPrompt;
+  if (!promptResult.useNativeToolCalls && mcpApiTools.length > 0) {
+    systemPrompt += toolsAsText(mcpApiTools);
+  }
   // Prevent model from narrating its thought process before the answer
   systemPrompt += '\n\nRULE: Start your response directly with the answer. Do NOT narrate your planning process. Never say things like The user wants me to or Let me or I need to or I will or Now I. Begin immediately with the substantive response.';
 
@@ -983,7 +862,7 @@ async function streamModel(
   const sessionMsgs: any[] = messages.map(({ role, content }) => ({ role: role as string, content }));
   const ctx = buildContextWindow(
     sessionMsgs,
-    effectiveModel,
+    activeModel,
     systemPrompt,
     promptResult.generationConfig.max_tokens,
   );
@@ -992,7 +871,7 @@ async function streamModel(
     ...ctx.messages,
   ];
   if (ctx.compressedCount > 0 || ctx.summarized) {
-    console.log(`[ctx] ${effectiveModel}: kept ${ctx.keptCount}/${messages.length} msgs, ${ctx.compressedCount} compressed, budget ${ctx.tokensUsed}/${ctx.budget.availableForHistory} tokens`);
+    console.log(`[ctx] ${activeModel}: kept ${ctx.keptCount}/${messages.length} msgs, ${ctx.compressedCount} compressed, budget ${ctx.tokensUsed}/${ctx.budget.availableForHistory} tokens`);
   }
 
   const MAX_TOOL_ROUNDS = 6;
@@ -1003,7 +882,7 @@ async function streamModel(
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const requestBody: any = {
-        model: apiModelId,
+        model: activeModel,
         messages: apiMessages,
         stream: true,
         max_tokens: promptResult.generationConfig.max_tokens,
@@ -1012,13 +891,8 @@ async function streamModel(
       // Leave the final round tool-free so the model must produce a user-facing answer.
       if (round < MAX_TOOL_ROUNDS - 1 && mcpApiTools.length > 0 && promptResult.useNativeToolCalls) {
         requestBody.tools = mcpApiTools;
-      } else if (round === MAX_TOOL_ROUNDS - 1) {
-        // Final round — inject synthesis instruction so the model produces a real answer
-        apiMessages.push({
-          role: 'user',
-          content: 'Based on all the information gathered above, provide your complete answer now. Start directly with the answer using headings, lists, or code blocks. Do not narrate your process.',
-        });
       }
+      // On the last round, tools are simply omitted — the model produces its final answer naturally.
 
       const response = await fetch(chatURL, {
         method: 'POST',
@@ -1036,26 +910,15 @@ async function streamModel(
       }
 
       // Parse streaming response — extracts both text deltas and tool calls
-      // Tool rounds: suppress text output (it's narration, not the answer)
-      // Final round: stream text normally for real-time answer display
-      const isLastRound = round === MAX_TOOL_ROUNDS - 1;
-      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound);
+      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId);
 
-      // No tool calls → model gave a direct answer (or final round completed)
+      // No tool calls → we're done, this is the final text answer.
       if (toolCalls.length === 0) {
-        finalContent = filterMonologue(stripThinkingTags(content));
-        // If this was a suppressed round, the text wasn't streamed — emit it now
-        if (!isLastRound && finalContent.trim()) {
-          const cleaned = finalContent;
-          if (cleaned.trim()) {
-            res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: cleaned }) + '\n\n');
-          }
-        }
+        finalContent = content;
         break;
       }
 
-      // Tool round: narration text is silently discarded (not streamed to client)
-      // DO NOT save tool-round narration as finalContent
+      if (content.trim()) finalContent = content;
 
       // Add the assistant message with tool calls to the conversation context
       apiMessages.push({
@@ -1104,41 +967,8 @@ async function streamModel(
       }
     }
 
-    // Forced answer: if the model never produced a real answer, try one more explicit request
-    if (!finalContent.trim() || /^[\s\n]*$/.test(stripThinkingTags(finalContent))) {
-      console.log('[stream] Empty/whitespace final content — sending forced answer request');
-      // Add explicit instruction to produce the answer
-      const forcedMessages = [...apiMessages, {
-        role: 'user' as const,
-        content: 'Provide your answer now based on all the information above. Write a clear, structured response.',
-      }];
-      try {
-        const forcedBody: any = {
-          model: apiModelId,
-          messages: forcedMessages,
-          stream: true,
-          max_tokens: promptResult.generationConfig.max_tokens,
-          temperature: promptResult.generationConfig.temperature,
-        };
-        const forcedResponse = await fetch(chatURL, {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify(forcedBody),
-        });
-        if (forcedResponse.ok) {
-          const forcedResult = await parseStreamForContentAndTools(forcedResponse, res, assistantId, true);
-          if (forcedResult.content.trim()) {
-            finalContent = filterMonologue(stripThinkingTags(forcedResult.content));
-          }
-        }
-      } catch (forcedErr: any) {
-        console.error('[stream] Forced answer request failed:', forcedErr.message);
-      }
-    }
-
-    // Ultimate fallback if forced answer also failed
     if (!finalContent.trim()) {
-      finalContent = 'I gathered information but could not generate a final answer. Please try again or rephrase your request.';
+      finalContent = 'I used the available tools but did not receive a final model response. Please try again, or narrow the request and I will continue from there.';
       res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: finalContent }) + '\n\n');
     }
 
@@ -1146,7 +976,7 @@ async function streamModel(
     session.messages.push({
       id: assistantId,
       role: 'assistant',
-      content: filterMonologue(stripThinkingTags(finalContent)),
+      content: stripThinkingTags(finalContent),
       timestamp: new Date().toISOString(),
       toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
     });
@@ -1414,9 +1244,6 @@ app.post('/api/test/batch', async (req, res) => {
 });
 
 // ── Start ──────────────────────────────────────────────
-// Prevent SIGPIPE from killing the process (Docker MCP stdio can trigger this)
-process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignoring'); });
-
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Open-Harness server running on http://localhost:${PORT}`);

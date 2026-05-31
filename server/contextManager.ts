@@ -9,7 +9,6 @@
  * 5. Always keep the last N user-assistant pairs intact for coherence
  */
 import { getModelConfig } from './modelProfiles';
-import type { ModelPromptConfig } from './modelProfiles';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -170,7 +169,6 @@ export function buildContextWindow(
   maxOutputTokens: number,
 ): ContextResult {
   const budget = calculateBudget(modelId, systemPrompt, maxOutputTokens);
-  const config = getModelConfig(modelId);
 
   // If no history, return early
   if (messages.length === 0) {
@@ -211,76 +209,73 @@ export function buildContextWindow(
   // Calculate per-message token costs (pre-compute for efficiency)
   const tokenCosts = compressed.map((msg) => estimateMessageTokens(msg));
 
-  // Identify the recent messages we MUST keep (last N user-assistant pairs)
-  const recentSlice = findRecentPairs(compressed, MIN_RECENT_PAIRS);
-  const recentTokens = recentSlice.reduce((sum, idx) => sum + tokenCosts[idx], 0);
+  // Identify the messages we MUST keep:
+  // - the active trailing user prompt, if present
+  // - the most recent complete user/assistant exchanges before it
+  const required = new Set<number>();
+  const trailingUserIdx = compressed[compressed.length - 1]?.role === 'user'
+    ? compressed.length - 1
+    : -1;
+  if (trailingUserIdx >= 0) required.add(trailingUserIdx);
 
-  // Remaining budget after reserving recent messages
-  const remainingBudget = budget.availableForHistory - recentTokens;
+  const pairSearchEnd = trailingUserIdx >= 0 ? trailingUserIdx : compressed.length;
+  for (const idx of findRecentPairs(compressed.slice(0, pairSearchEnd), MIN_RECENT_PAIRS)) {
+    required.add(idx);
+  }
 
-  const result: ContextMessage[] = [];
-  let tokensUsed = 0;
-  let keptCount = 0;
+  if (required.size === 0) {
+    required.add(compressed.length - 1);
+  }
+
+  const requiredIndices = Array.from(required).sort((a, b) => a - b);
+  const requiredTokens = requiredIndices.reduce((sum, idx) => sum + tokenCosts[idx], 0);
+  let remainingBudget = budget.availableForHistory - requiredTokens;
+
+  const include = new Set(requiredIndices);
+  let olderTokens = 0;
   let compressedCount = 0;
   let summarized = false;
   let summary: string | undefined;
 
-  if (remainingBudget >= 0) {
-    // Recent messages fit — now try to include older messages too
-    // Walk backwards from the start of the recent slice
-    const recentStartIdx = recentSlice.length > 0 ? recentSlice[0] : compressed.length;
-
-    // Include older messages from most recent backwards
-    const olderMessages: ContextMessage[] = [];
-    let olderTokens = 0;
-
-    for (let i = recentStartIdx - 1; i >= 0; i--) {
+  if (remainingBudget > 0) {
+    for (let i = compressed.length - 1; i >= 0; i--) {
+      if (include.has(i)) continue;
       const cost = tokenCosts[i];
       if (olderTokens + cost <= remainingBudget) {
-        olderMessages.unshift(compressed[i]);
+        include.add(i);
         olderTokens += cost;
-        keptCount++;
       } else {
-        // Doesn't fit — these messages will be summarized
         compressedCount++;
       }
     }
-
-    // If we dropped messages, summarize them
-    const droppedMessages = compressed.slice(0, recentStartIdx - olderMessages.length);
-    if (droppedMessages.length > 0) {
-      summary = buildStaticSummary(droppedMessages);
-      const summaryTokens = estimateTokens(summary);
-      // Check if summary itself fits
-      if (olderTokens + summaryTokens <= remainingBudget) {
-        result.push({ role: 'system', content: summary });
-        tokensUsed += summaryTokens;
-        summarized = true;
-      }
-      // If summary doesn't fit either, we just drop them silently
-    }
-
-    result.push(...olderMessages);
-    tokensUsed += olderTokens;
   } else {
-    // Even recent messages don't fully fit — truncate recent messages' content
-    // This is the desperation path
-    compressedCount = compressed.length - recentSlice.length;
-    summarized = false;
+    compressedCount = compressed.length - include.size;
+    remainingBudget = 0;
   }
 
-  // Add the reserved recent messages
-  for (const idx of recentSlice) {
+  const droppedMessages = compressed.filter((_, idx) => !include.has(idx));
+  const result: ContextMessage[] = [];
+  let tokensUsed = requiredTokens + olderTokens;
+  if (droppedMessages.length > 0 && remainingBudget > olderTokens) {
+    summary = buildStaticSummary(droppedMessages);
+    const summaryTokens = estimateTokens(summary);
+    if (olderTokens + summaryTokens <= remainingBudget) {
+      result.push({ role: 'system', content: summary });
+      tokensUsed += summaryTokens;
+      summarized = true;
+    }
+  }
+
+  const keptIndices = Array.from(include).sort((a, b) => a - b);
+  for (const idx of keptIndices) {
     result.push(compressed[idx]);
-    tokensUsed += tokenCosts[idx];
-    keptCount++;
   }
 
   return {
     messages: result,
     tokensUsed,
     budget,
-    keptCount,
+    keptCount: keptIndices.length,
     compressedCount,
     summarized,
     summary,
@@ -296,12 +291,10 @@ export function buildContextWindow(
 function findRecentPairs(messages: ContextMessage[], pairCount: number): number[] {
   const indices: number[] = [];
   let pairsFound = 0;
-  let lastAssistantIdx = -1;
 
   // Walk backwards to find assistant messages
   for (let i = messages.length - 1; i >= 0 && pairsFound < pairCount; i--) {
     if (messages[i].role === 'assistant') {
-      lastAssistantIdx = i;
       // Now include everything from the preceding user message to this assistant
       // Include any tool calls/results in between
       let start = i;

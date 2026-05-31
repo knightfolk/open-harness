@@ -1,0 +1,310 @@
+{
+  "timestamp": "2026-05-30T20-09-23-136Z",
+  "targetDir": "/Users/kevink/Projects/Chains",
+  "totalRuns": 3,
+  "completed": 3,
+  "failed": 0,
+  "models": [
+    "MiniMax-M2.7"
+  ],
+  "prompts": [
+    "project-review",
+    "architecture-scan",
+    "readme-summary"
+  ],
+  "results": [
+    {
+      "model": "MiniMax-M2.7",
+      "modelProvider": "forced",
+      "prompt": "project-review",
+      "promptName": "Full Project Review",
+      "status": "ok",
+      "toolCallCount": 24,
+      "toolCalls": [
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        }
+      ],
+      "responseLength": 10837,
+      "responsePreview": "<think>The user wants me to review a project at /Users/kevink/Projects/Chains. I need to:\n1. List the directory structure\n2. Read key files (README, package.json, main source files)\n3. Provide a detailed summary covering what the project does, architecture, code quality, and potential issues\n\nLet me",
+      "response": "<think>The user wants me to review a project at /Users/kevink/Projects/Chains. I need to:\n1. List the directory structure\n2. Read key files (README, package.json, main source files)\n3. Provide a detailed summary covering what the project does, architecture, code quality, and potential issues\n\nLet me start by listing the directory structure.\n</think>\n\nI'll review the project by first exploring its directory structure and then reading the key files.\n<think>Let me explore more directories and read key files to understand the project better.\n</think>\n\n\n<think>Good, I'm getting a picture of the project. Let me now read the main source files to get more details. I'll read the main.js first since it's the largest, and also the AGENTS.md file which seems important for understanding the codebase.\n</think>\n\n\n<think>Let me continue reading the other key files to get a complete picture.\n</think>\n\n\n<think>Now let me check the tests and documentation to complete my review.\n</think>\n\n\n<think>The user asked me to review the Chains project at /Users/kevink/Projects/Chains. I've now read through the key files and have enough information to provide a comprehensive review. Let me compile my findings.\n\n## Project Overview\n\n**Chains** is a browser-based molecule-placement puzzle game with roguelike elements. It's inspired by 1990s atom-link arcade puzzlers but uses entirely new code and generated canvas visuals.\n\n### 1. What the Project Does\n\nChains is a puzzle game where players:\n- Place atoms from a queue onto a 12x12 grid\n- Each atom type has a specific valence (bonds needed): Spark=1, Ember=2, Vine=3, Nova=4, Flux=0 (wild)\n- Connected molecules clear when every atom has exactly the bonds it needs\n- Players can swap atoms (limited to 3 per round) at the cost of a move\n- Goal is to reach a score target before moves run out\n- Roguelike elements: shop phase between rounds, powerup cards, boss rounds, currency (Rachirals)\n- 4 acts with 24+ unique boss mechanics\n\n### 2. Architecture and Tech Stack\n\n**Tech Stack:**\n- Vanilla JavaScript (ES modules)\n- HTML5 Canvas for rendering\n- CSS for styling\n- Web Audio API for sound\n- No external dependencies, no bundler\n- PWA support (manifest.webmanifest)\n\n**Module Structure:**\n- `src/gameLogic.js` (27KB) - Pure game state and rules, no DOM\n- `src/roguelikeContent.js` (28KB) - Data: bosses, cards, grants, story\n- `src/shopLogic.js` (4KB) - Shop mechanics\n- `src/audioEngine.js` - Audio layer\n- `src/main.js` (80KB) - Canvas rendering and DOM wiring\n\n\n- `src/styles.css` (37KB) - Styling\n\n**Testing:**\n- Uses Node.js built-in assert/strict (no test framework)\n- Tests are self-contained .mjs files\n- `tests/game.test.mjs` - Unit tests\n- `tests/sim_balance.mjs` - Balance simulation with CSV output\n\n### 3. Code Quality Observations\n\n**Strengths:**\n- Clean separation of concerns (logic vs. rendering vs. data)\n- Good use of ES modules with explicit imports/exports\n- State management is centralized in `createState()` and `cloneState()`\n- Undo system with full state snapshots\n- Comprehensive boss system with 24+ unique mechanics\n- Extensive card system (21 powerups, 12 consumables, 50+ research grants)\n- Accessibility: color blindness modes (4 palettes), keyboard support\n- Responsive design with DPR handling\n- Performance optimizations: static canvas buffer, needsRebuild flag, state change detection\n\n**Concerns:**\n- main.js is quite large (80KB) - could benefit from some extraction\n- Some global state management could be cleaner\n- Error handling in render() has a `throw error` that might leak\n- No TypeScript or runtime type checking\n- Some magic numbers scattered throughout\n- History/snapshot system could be memory-intensive for deep undo\n\n### 4. Potential Issues or Improvements\n\n**Issues:**\n- Cache busting query strings (?v=boss-polish-1) need manual updates\n- localStorage failures silently caught (acceptable but worth noting)\n- No bundle step means no tree-shaking or dead code elimination\n- PWA manifest exists but no service worker implementation\n- No build optimization for production\n\n**Improvements:**\n- Extract rendering into separate modules\n- Add TypeScript for type safety\n- Implement service worker for PWA\n- Add a proper build step for production optimization\n- Consider WebWorkers for heavy calculations\n- Add error boundary for graceful degradation\n- Optimize memory usage of undo history\n</think>\n\n# Chains Project Review\n\n## 1. What the Project Does\n\n**Chains** is a browser-based molecule-placement puzzle game with roguelike elements, inspired by 1990s atom-link arcade puzzlers. Players place atoms (Spark, Ember, Vine, Nova, Flux) from a queue onto a 12×12 grid, forming molecules where each atom satisfies its exact valence requirement. Completed molecules clear and earn score. The game features:\n\n- **Core puzzle mechanics**: Bond atoms orthogonally; complete molecules (all atoms have exact bonds needed) to clear\n- **Swap system**: Click occupied cells to swap with incoming atom (costs a move + 1 of 3 round swaps)\n- **Roguelike progression**: Shop phases between rounds, powerup cards (standard + consumable), research grants, currency (Rachirals)\n- **Boss rounds** (Round 3 of each level): 24 unique boss mechanics across 4 acts (Mirror Warden, Phage Bloom, Void Collector, Resonance Clerk, Lattice Keeper, Debt Engine, Entropy Saint, Final Exam, etc.)\n- **Accessibility**: 4 color blindness modes, 3 bond color schemes, combo meter, onboarding tutorial\n\n---\n\n## 2. Architecture and Tech Stack\n\n### Tech Stack\n| Component | Technology |\n|-----------|------------|\n| Frontend | Vanilla JS (ES Modules), HTML5 Canvas, CSS |\n| Audio | Web Audio API |\n| Dependencies | **None** - dependency-free |\n| Build | No bundler - direct browser loading |\n| Testing | Node.js built-in `assert/strict` |\n| Platform targets | Web/PWA, iOS/Android (Capacitor), macOS/Windows (Tauri/Electron) |\n\n### Module Organization\n```\nsrc/\n├── gameLogic.js       (27 KB) — Pure state/rules, no DOM. Board math, bond resolution, scoring, boss mechanics.\n├── roguelikeContent.js (28 KB) — Data-only. Boss definitions, 21 powerup cards, 12 consumables, 50+ research grants, story.\n├── shopLogic.js       (4 KB) — Shop mechanics: rolling, pricing, card effects.\n├── audioEngine.js     (17 KB) — Web Audio music/sfx.\n├── main.js            (80 KB) — Canvas renderer + DOM wiring. Imports all modules.\n└── styles.css         (37 KB) — All styling.\n```\n\n**Design Principles** (from AGENTS.md):\n- Dependency-free vanilla JS — no frameworks, no bundler\n- GameLogic is pure state/rules with no DOM references\n- Imports use cache-bust query strings (`?v=boss-polish-1`)\n\n---\n\n## 3. Code Quality Observations\n\n### Strengths\n\n| Aspect | Assessment |\n|--------|------------|\n| **Separation of concerns** | Excellent. GameLogic, ShopLogic, Audio, Content are truly decoupled. Rendering (main.js) imports them cleanly. |\n| **State management** | Centralized via `createState()` with complete snapshots for undo. |\n| **Boss system** | Well-architected: 24 bosses with distinct rules, theme colors, act groupings (1-4). |\n| **Performance optimizations** | Static canvas buffer, `needsRebuild` flag, state change detection with `lastLabelState` signatures. DPR handling in `syncCanvasSize()`. |\n| **Accessibility** | 4 color blindness palettes, 3 bond colors, screen reader support via ARIA attributes. |\n| **Testing** | Comprehensive unit tests covering game logic, boss mechanics, shop, cards. Balance simulation with CSV output. |\n| **Onboarding flow** | 5-step tutorial stored in localStorage, with skip/complete states. |\n| **Progression persistence** | Defeated bosses + unlocked cards persist in localStorage. |\n\n### Areas of Concern\n\n| Issue | Location | Severity |\n|-------|----------|----------|\n| **main.js is monolithic** | 80KB single file handling rendering, effects, shop, UI, audio, events | Medium |\n| **Render loop exception re-throw** | `render()` has `try/catch` that re-throws: `throw error;` — could propagate unexpectedly | Low |\n| **No error boundary** | No try/catch in canvas rendering path; global window errors could crash the game | Medium |\n| **Memory usage of undo history** | Full state snapshots stored; deep undo could be memory-intensive | Low |\n| **No TypeScript** | Runtime type errors only caught via testing | Medium |\n| **Magic numbers** | `pulse * 2.4`, `0.34` consumable chance, `50` for Compound Interest threshold — scattered throughout | Low |\n| **Cache-busting is manual** | `?v=boss-polish-1` requires manual version bumps | Low |\n\n---\n\n## 4. Potential Issues or Improvements\n\n### Critical\n\n1. **No PWA service worker**: `manifest.webmanifest` exists but no `sw.js` for offline capability or caching.\n\n2. **Render exceptions not gracefully handled**: If `drawBoard()`, `updateLabels()`, or any visual method throws, the game hangs with no recovery.\n\n### High Priority\n\n3. **Extract rendering modules**: main.js handles too much — split into `src/renderer/`, `src/effects/`, `src/shop-renderer.js`, `src/ui-widgets.js`.\n\n4. **Add type checking**: At minimum, JSDoc type annotations. Consider TypeScript for state shape, card definitions, and API contracts.\n\n5. **Bundle for production**: No minification, no tree-shaking. Even a simple Rollup step would reduce payload size.\n\n### Medium Priority\n\n6. **Memory optimization for undo**: Consider incremental state diffs instead of full snapshots, or cap history length.\n\n7. **Error boundary component**: Wrap `<canvas>` and UI in a try/catch with fallback rendering + toast message.\n\n8. **Config file for magic numbers**: Extract constants like `SHOP_REROLL_COST`, `BASE_SWAPS_PER_ROUND`, combo thresholds to a `config.js`.\n\n### Low Priority\n\n9. **Asset preloading**: Card SVGs use `loading=\"lazy\"` — consider a preload strategy for first-visit performance.\n\n10. **Mobile gesture support**: Pinch-to-zoom, long-press for swap preview, haptic feedback.\n\n11. **Analytics hook**: No telemetry for balance tuning. A lightweight event system (`onMoleculeClear`, `onBossDefeat`) would help.\n\n---\n\n## Summary\n\n**Chains** is a well-crafted, polished puzzle game with a strong architecture foundation. The separation of concerns is exemplary — game logic is truly pure, content is data-driven, and rendering is decoupled. The roguelike systems (shop, cards, bosses, grants) are extensive and well-documented in the `docs/` folder.\n\nThe main risk is **maintainability** as the codebase grows. At 80KB, the main.js renderer is the largest concern and should be split. The lack of TypeScript and the monolithic render loop also increase the risk of subtle bugs as new features are added.\n\n**Recommendation**: Prioritize extracting the rendering modules and adding TypeScript annotations for state shapes. This would significantly improve long-term maintainability without changing the game's behavior.",
+      "wallMs": 27943,
+      "messageCount": 2
+    },
+    {
+      "model": "MiniMax-M2.7",
+      "modelProvider": "forced",
+      "prompt": "architecture-scan",
+      "promptName": "Architecture Scan",
+      "status": "ok",
+      "toolCallCount": 22,
+      "toolCalls": [
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        }
+      ],
+      "responseLength": 6054,
+      "responsePreview": "<think>The user wants me to analyze the architecture of a project. Let me start by exploring the project structure at the given path.\n</think>\n\n\n<think>Let me explore the src directory and other key files to understand the architecture better.\n</think>\n\n\n<think>Now let me read the main JavaScript fi",
+      "response": "<think>The user wants me to analyze the architecture of a project. Let me start by exploring the project structure at the given path.\n</think>\n\n\n<think>Let me explore the src directory and other key files to understand the architecture better.\n</think>\n\n\n<think>Now let me read the main JavaScript files to understand the architecture better.\n</think>\n\n\n<think>Now I have a comprehensive understanding of the project. Let me summarize the architecture.\n</think>\n\n## Project Architecture Analysis: Chains\n\n### Overview\n**Chains** is a retro arcade molecule-chain roguelike puzzle game built as a vanilla JavaScript single-page application with canvas-based rendering.\n\n---\n\n### 1. Entry Points and Main Modules\n\n| File | Role |\n|------|------|\n| **`/src/main.js`** (80KB) | **Primary entry point** — orchestrates rendering, event handling, UI updates, and game loop (`requestAnimationFrame`). Loads and coordinates all other modules. |\n| **`/src/gameLogic.js`** (27KB) | **Core game engine** — state management, molecule detection, board mechanics, combo/undo systems, boss rule implementations |\n| **`/src/roguelikeContent.js`** (28KB) | **Content definitions** — Bosses (26), powerup cards (22 implemented), consumable cards (12), research grants (50) |\n| **`/src/shopLogic.js`** (4KB) | **Economy system** — shop rolling, card pricing, card effects application |\n| **`/src/audioEngine.js`** (17KB) | **Audio system** — Web Audio API synthesis, SFX playback, procedural music fallback with file-based loop support |\n| **`/src/styles.css`** (37KB) | Visual styles, animations, accessibility color modes |\n\n---\n\n### 2. Data Flow Patterns\n\n```\n┌─────────────────────────────────────────────────────────────────────┐\n│                         GAME STATE OBJECT                            │\n│  { board, queue, score, combo, moves, phase, bossId, history, ... }  │\n└─────────────────────────────────────────────────────────────────────┘\n                               ▲\n                               │ State mutations\n    ┌──────────────────────────┼──────────────────────────┐\n    ▼                          ▼                          ▼\n┌─────────────┐    ┌─────────────────────┐    ┌──────────────────────┐\n│ gameLogic   │───▶│   placeAtom()       │───▶│ clearCompletedMol... │\n│   placeAtom │    │ (validates, swaps,  │    │ (detects, scores,    │\n└─────────────┘    │  decrements moves)  │    │  removes molecules)  │\n                   └─────────────────────┘    └──────────────────────┘\n                               │\n                               ▼\n                   ┌─────────────────────┐\n                   │   UI Re-render      │\n                   │ (main.js render())  │\n                   └─────────────────────┘\n```\n\n**Key data flow characteristics:**\n- Single mutable `state` object passed through function calls\n- State history array enables undo functionality\n- Board represented as flat array (`12×12 = 144` cells)\n- Queue as ordered array (front atom is next placement)\n- Boss rules modify placement/clear penalties via specialized predicate functions\n\n---\n\n### 3. Component Connections\n\n```\n                    ┌─────────────────┐\n                    │   index.html    │\n                    │  (DOM + Canvas) │\n                    └────────┬────────┘\n                             │ DOM queries\n                             ▼\n┌──────────────────────────────────────────────────────────────┐\n│                          main.js                              │\n│  • Event listeners (click, pointer, buttons)                │\n│  • render() → drawBoard(), drawQueue(), updateLabels()       │\n│  • Delegates to other modules for logic                      │\n└──────────────────────────┬───────────────────────────────────┘\n                           │\n         ┌─────────────────┼─────────────────┬─────────────────┐\n         ▼                 ▼                 ▼                 ▼\n   ┌───────────┐    ┌────────────┐    ┌───────────┐    ┌─────────────┐\n   │gameLogic  │    │shopLogic   │    │audioEngine│    │roguelike-   │\n   │           │    │            │    │           │    │Content      │\n   │placeAtom()│◀───│applyCard() │◀───│playCue()  │    │BOSSES,      │\n   │clearMol...│    │rollShop()  │    │           │    │CARDS,       │\n   │undo()     │    │cardPrice() │    │startMusic │    │STORY        │\n   └───────────┘    └────────────┘    └───────────┘    └─────────────┘\n         │                 │                 │\n         │                 │                 └──────► Audio Files\n         └─────────────────┴──────────────────────► (./assets/audio/)\n```\n\n**Module Dependencies:**\n- `main.js` imports from all other modules\n- `gameLogic.js` is pure logic — no imports\n- `shopLogic.js` imports from `gameLogic.js` and `roguelikeContent.js`\n- `roguelikeContent.js` is pure data export\n\n---\n\n### 4. External Dependencies and Their Roles\n\n| Dependency | Role in Project |\n|------------|-----------------|\n| **No npm packages** | Vanilla JS only — runs directly in browser |\n| **Web Audio API** | Audio synthesis, SFX, procedural music |\n| **Canvas 2D API** | Game board rendering, atom visualization |\n| **localStorage** | Persists: color mode, bond color, progression (defeated bosses, unlocked cards), onboarding |\n| **fetch API** | Loads audio files (`.m4a`, `.wav`) from `assets/audio/` |\n| **requestAnimationFrame** | Smooth 60fps render loop |\n\n**Asset Structure:**\n```\n/assets/\n├── audio/\n│   ├── music/      (gameplay, shop, boss loops)\n│   └── sfx/         (placement, clears, UI feedback)\n├── cards/           (SVG card artwork)\n└── icons/           (favicon, touch icons)\n```\n\n---\n\n### Architecture Summary\n\nThe project follows a **monolithic SPA pattern** with clear separation between:\n- **State layer** (`gameLogic.js`) — pure game rules\n- **Content layer** (`roguelikeContent.js`) — data definitions\n- **Presentation layer** (`main.js`) — DOM/Canvas rendering\n- **Subsystem layers** — Audio, Shop economy\n\nThe roguelike loop is: **Play Round → Reach Score Target → Shop → New Round → Repeat with escalating boss rules**",
+      "wallMs": 26079,
+      "messageCount": 2
+    },
+    {
+      "model": "MiniMax-M2.7",
+      "modelProvider": "forced",
+      "prompt": "readme-summary",
+      "promptName": "README + Config Summary",
+      "status": "ok",
+      "toolCallCount": 16,
+      "toolCalls": [
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "read_file",
+          "status": "running"
+        },
+        {
+          "name": "read_file",
+          "status": "complete"
+        },
+        {
+          "name": "list_directory",
+          "status": "running"
+        },
+        {
+          "name": "list_directory",
+          "status": "complete"
+        }
+      ],
+      "responseLength": 3435,
+      "responsePreview": "<think>\nThe user wants me to read the README.md and configuration files from a project at /Users/kevink/Projects/Chains. Let me start by listing the directory and reading the relevant files.\n</think>\n\n\n<think>\nGood, I've read the README. Now let me read the package.json and also check if there's a t",
+      "response": "<think>\nThe user wants me to read the README.md and configuration files from a project at /Users/kevink/Projects/Chains. Let me start by listing the directory and reading the relevant files.\n</think>\n\n\n<think>\nGood, I've read the README. Now let me read the package.json and also check if there's a tsconfig or other config files. The list_directory output doesn't show a tsconfig, so let me check for any other config files and also explore the source structure.\n</think>\n\n\n<think>\nI now have a good picture of this project. Let me also check the docs for any additional architecture info and the roguelike_design.md that was mentioned in the README.\n</think>\n\n\n<think>\nI now have a comprehensive picture of this project. Let me compile a summary.\n</think>\n\n## Project Summary: Chains\n\n### 1. Purpose and Goals\n\n**Chains** is a chemistry-themed roguelike puzzle game inspired by 1990s atom-link arcade puzzlers. Players place atoms on a 12×12 board to form bonded molecules that clear when complete. The game features:\n\n- **Core mechanic**: Build stable molecules where each atom type has a specific valence (number of bonds required)\n- **Roguelike elements**: Rachirals (currency), between-round shops, powerup cards, boss rounds, and run-based progression\n- **Platform goal**: Dependency-free HTML/CSS/JS that can be wrapped for iOS/Android (Capacitor), desktop (Tauri/Electron), or deployed as a PWA\n\n---\n\n### 2. Installation and Running\n\n```bash\n# No install needed — just serve the folder\npython3 -m http.server 4173\n# Or via npm (defined in package.json)\nnpm start\n```\n\nOpen `http://localhost:4173` in a browser.\n\n**Testing:**\n```bash\nnode tests/game.test.mjs\n# Or via npm\nnpm test\n```\n\n---\n\n### 3. Key Dependencies and Scripts\n\n**No external dependencies** — vanilla JS only, no frameworks, no bundler.\n\n| Script | Command | Purpose |\n|--------|---------|---------|\n| `start` | `python3 -m http.server 4173` | Serve the game |\n| `test` | `node tests/game.test.mjs` | Run unit tests |\n\n**Source files** (`src/`):\n| File | Purpose |\n|------|---------|\n| `main.js` | Canvas renderer, DOM wiring, imports everything |\n| `gameLogic.js` | Pure state/rules: atoms, board math, bonds, scoring, boss logic |\n| `roguelikeContent.js` | Data: boss definitions, shop cards, story text |\n| `shopLogic.js` | Shop mechanics: rolling, pricing, card effects |\n| `audioEngine.js` | Web Audio API music/sfx layer |\n| `styles.css` | All styling |\n\n---\n\n### 4. Architecture Decisions\n\n**Dependency-free approach**: All source loads via `<script type=\"module\">` in `index.html`. No build step required.\n\n**Module organization**:\n- `gameLogic.js` is pure (no DOM), making it unit-testable\n- `roguelikeContent.js` is data-only, importing nothing\n- `audioEngine.js` is self-contained\n- `main.js` is the orchestration layer\n\n**Testing**: Uses Node's built-in `node:assert/strict` with no test framework. Tests are self-contained `.mjs` files.\n\n**Versioning**: Cache-bust query strings (`?v=boss-polish-1`) instead of versioned filenames.\n\n**Game rules** (from `docs/rules.md`):\n- **Board**: 12×12 assay plate\n- **Atoms**: Spark (1), Ember (2), Vine (3), Nova (4), Flux (0, wild)\n- **Clearing**: Complete molecules when all non-Flux atoms have exact valence bonds\n- **Progression**: 3 rounds per level; round 3 is a boss fight (Mirror Warden currently implemented)\n- **Economy**: Rachirals earned on clears, spent in shop for powerups and single-use cards",
+      "wallMs": 28534,
+      "messageCount": 2
+    }
+  ]
+}

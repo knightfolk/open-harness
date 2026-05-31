@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import {
-  X, KeyRound, Brain, FileCode,
+  X, KeyRound, Brain, FileCode, Wrench, Palette, Image,
   PlayCircle, ShieldCheck, Server, MessageCircle, Palette as ThemeIcon,
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
-  Check, ChevronDown, ChevronRight, CheckCircle2, Bot,
-  ArrowRight,
+  Check, ChevronDown, ChevronRight, CheckCircle2, Circle, Bot, AlertCircle,
+  Search, ArrowRight, Globe, Cpu, Sparkles,
 } from 'lucide-react';
 import type { ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
 
@@ -47,6 +47,8 @@ interface ProviderPreset {
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'openai', name: 'OpenAI', type: 'openai-compatible', baseURL: 'https://api.openai.com/v1', description: 'GPT-4.1, o3, o4-mini, GPT-5', color: '#10a37f', featured: true },
+  { id: 'anthropic', name: 'Anthropic', type: 'anthropic', baseURL: 'https://api.anthropic.com/v1', description: 'Claude Sonnet 4, Claude Opus 4', color: '#d4a574', featured: true },
+  { id: 'google', name: 'Google', type: 'google', baseURL: 'https://generativelanguage.googleapis.com/v1beta', description: 'Gemini 2.5 Pro, Gemini 2.5 Flash', color: '#4285f4', featured: true },
   { id: 'minimax', name: 'MiniMax', type: 'openai-compatible', baseURL: 'https://api.minimax.io/v1', description: 'MiniMax M2.7', color: '#6366f1', featured: true },
   { id: 'deepseek', name: 'DeepSeek', type: 'openai-compatible', baseURL: 'https://api.deepseek.com/v1', description: 'DeepSeek V4, V4 Flash, R2', color: '#4a9eff', featured: true },
   { id: 'xai', name: 'xAI', type: 'openai-compatible', baseURL: 'https://api.x.ai/v1', description: 'Grok 3, Grok 3 Mini', color: '#1d9bf0', featured: true },
@@ -89,12 +91,13 @@ interface Props {
 
 // ── Model recommendation map ──
 const MODEL_RECOMMENDATIONS: Record<string, string[]> = {
-  planner: ['o3', 'glm-5.1', 'deepseek-r2', 'deepseek-v4', 'llama-4-scout', 'kimi-k2.5', 'gpt-5.4', 'MiniMax-M2.7'],
-  coder: ['deepseek-v4', 'gpt-4.1', 'llama-4-maverick', 'MiniMax-M2.7', 'qwen-3-235b', 'glm-5', 'kimi-k2.6', 'grok-3', 'codestral', 'gpt-5.3-codex'],
-  reviewer: ['o3', 'mistral-large', 'o4-mini', 'deepseek-r2', 'qwen-3-235b', 'mimo-v2.5-pro'],
-  reasoner: ['o3', 'deepseek-r2', 'qwen-3-235b', 'grok-3', 'MiniMax-M2.7'],
-  summarizer: ['gpt-4.1-mini', 'deepseek-v4-flash', 'qwen-3-32b', 'mistral-small', 'MiniMax-M2.7'],
-  worker: ['gpt-4.1-nano', 'glm-4.7', 'deepseek-v4-flash', 'qwen-3-32b', 'MiniMax-M2.7'],
+  planning: ['o3', 'claude-opus-4', 'gemini-2.5-pro', 'glm-5.1', 'deepseek-r2', 'deepseek-v4', 'llama-4-scout', 'kimi-k2.5', 'gpt-5.4', 'MiniMax-M2.7'],
+  implementation: ['claude-sonnet-4', 'deepseek-v4', 'gpt-4.1', 'llama-4-maverick', 'MiniMax-M2.7', 'qwen-3-235b', 'glm-5', 'kimi-k2.6', 'grok-3', 'codestral', 'gpt-5.3-codex'],
+  bugfix: ['claude-sonnet-4', 'gpt-4.1-mini', 'o4-mini', 'deepseek-v4-flash', 'deepseek-v3', 'qwen-3-32b', 'codestral'],
+  design: ['grok-3', 'gemini-2.5-pro', 'gpt-4.1', 'grok-3-mini'],
+  image: ['gpt-4.1', 'gemini-2.5-pro', 'grok-3'],
+  toolrunning: ['gpt-4.1-nano', 'gemini-2.5-flash', 'glm-4.7', 'deepseek-v4-flash', 'qwen-3-32b'],
+  review: ['o3', 'claude-opus-4', 'mistral-large', 'o4-mini', 'deepseek-r2', 'qwen-3-235b', 'mimo-v2.5-pro'],
 };
 
 function isModelRecommended(roleId: string, modelId: string): boolean {
@@ -105,8 +108,8 @@ function isModelRecommended(roleId: string, modelId: string): boolean {
 }
 
 const roleIconMap: Record<string, typeof Bot> = {
-  planner: Brain, coder: FileCode, reviewer: ShieldCheck,
-  reasoner: Brain, summarizer: MessageCircle, worker: PlayCircle,
+  planning: Brain, implementation: FileCode, bugfix: Wrench, design: Palette,
+  image: Image, toolrunning: PlayCircle, review: ShieldCheck,
 };
 
 // ── Main component ─────────────────────────────────────
@@ -368,6 +371,9 @@ function ModelList({ models, providerId, activeModel, onToggle }: any) {
   );
 }
 
+function ChevronUp({ size }: { size: number }) {
+  return <ChevronDown size={size} style={{ transform: 'rotate(180deg)' }} />;
+}
 
 /* ================================================================== */
 /*  ADD PROVIDER — preset gallery + custom form                       */

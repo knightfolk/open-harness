@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-05-30T20-07-15-368Z",
+  "targetDir": "/Users/kevink/Projects/Chains",
+  "totalRuns": 3,
+  "completed": 3,
+  "failed": 3,
+  "models": [
+    "MiniMax-M2.7"
+  ],
+  "prompts": [
+    "project-review",
+    "architecture-scan",
+    "readme-summary"
+  ],
+  "results": [
+    {
+      "model": "MiniMax-M2.7",
+      "prompt": "project-review",
+      "status": "fail",
+      "error": "Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+    },
+    {
+      "model": "MiniMax-M2.7",
+      "prompt": "architecture-scan",
+      "status": "fail",
+      "error": "Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+    },
+    {
+      "model": "MiniMax-M2.7",
+      "prompt": "readme-summary",
+      "status": "fail",
+      "error": "Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+    }
+  ]
+}

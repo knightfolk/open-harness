@@ -39,7 +39,7 @@ const FAMILY_PATTERNS: Array<[RegExp, string]> = [
   [/\bglm\b|\bz-?ai\b/i, 'glm'],
   [/\bjamba\b|\bai21\b/i, 'jamba'],
   [/phi[\d._-]?/i, 'phi'],
-  [/\bminimax\b|\bm2[\.\-]?7?\b/i, 'minimax'],
+  [/\bminimax\b|\bm2[.-]?7?\b/i, 'minimax'],
 ];
 
 /**

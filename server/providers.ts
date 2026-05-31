@@ -112,7 +112,8 @@ function buildModelsURL(provider: StoredProvider): string {
     // If baseURL contains another versioned path mid-path (e.g. /v4/chat), strip back
     const versionMatch = base.match(/(.*)\/v\d+\/.*/);
     if (versionMatch) {
-      return `${versionMatch[1]}/models`;
+      const versionBase = base.match(/(.*\/v\d+)\/.*/)?.[1] || versionMatch[1];
+      return `${versionBase}/models`;
     }
     return `${base}/v1/models`;
   }

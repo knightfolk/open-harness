@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-05-30T20-07-30-181Z",
+  "targetDir": "/Users/kevink/Projects/Chains",
+  "totalRuns": 3,
+  "completed": 3,
+  "failed": 3,
+  "models": [
+    "MiniMax-M2.7"
+  ],
+  "prompts": [
+    "project-review",
+    "architecture-scan",
+    "readme-summary"
+  ],
+  "results": [
+    {
+      "model": "MiniMax-M2.7",
+      "prompt": "project-review",
+      "status": "fail",
+      "error": "HTTP 500: <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>TypeError: prompt?.trim is not a function<br> &nbsp; &nbsp;at &lt;anonymous&gt; (/Users/kevink/P"
+    },
+    {
+      "model": "MiniMax-M2.7",
+      "prompt": "architecture-scan",
+      "status": "fail",
+      "error": "HTTP 500: <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>TypeError: prompt?.trim is not a function<br> &nbsp; &nbsp;at &lt;anonymous&gt; (/Users/kevink/P"
+    },
+    {
+      "model": "MiniMax-M2.7",
+      "prompt": "readme-summary",
+      "status": "fail",
+      "error": "HTTP 500: <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>TypeError: prompt?.trim is not a function<br> &nbsp; &nbsp;at &lt;anonymous&gt; (/Users/kevink/P"
+    }
+  ]
+}

@@ -6,10 +6,8 @@ import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
 import { SettingsModal } from './components/SettingsModal';
 import { OnboardingWizard } from './components/OnboardingWizard';
-import { SmartWelcome } from './components/SmartWelcome';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
-import { randomAgentName } from './utils/names';
 import * as api from './utils/api';
 import './styles/global.css';
 import './styles/components.css';
@@ -18,6 +16,25 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 
 function basename(p: string) {
   return p.split('/').filter(Boolean).pop() || p;
+}
+
+const DEFAULT_ROLE_ASSIGNMENTS: CodingRoleAssignment[] = [
+  { id: 'planner', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'MiniMax-M2.7' },
+  { id: 'coder', name: 'Code Implementer', description: 'Writing code, fixes, debugging, and refactoring', modelId: 'MiniMax-M2.7' },
+  { id: 'reviewer', name: 'Code Reviewer', description: 'Reviewing PRs, finding correctness and security issues', modelId: 'MiniMax-M2.7' },
+  { id: 'reasoner', name: 'Reasoner', description: 'Complex analysis, comparisons, and tradeoffs', modelId: 'MiniMax-M2.7' },
+  { id: 'summarizer', name: 'Summarizer', description: 'Condensing files, threads, and long outputs', modelId: 'MiniMax-M2.7' },
+  { id: 'worker', name: 'Tool Runner', description: 'Fast shell, file, and utility tasks', modelId: 'MiniMax-M2.7' },
+];
+
+function legacyRoleModel(assignments: Record<string, string>, roleId: string): string | undefined {
+  const currentToLegacy: Record<string, string[]> = {
+    planner: ['planning'],
+    coder: ['implementation', 'bugfix', 'design'],
+    reviewer: ['review'],
+    worker: ['toolrunning', 'image'],
+  };
+  return currentToLegacy[roleId]?.map((legacy) => assignments[legacy]).find(Boolean);
 }
 
 function App() {
@@ -42,15 +59,7 @@ function App() {
       ],
     },
   ]);
-  const [roleAssignments, setRoleAssignments] = useState<CodingRoleAssignment[]>([
-    { id: 'planning', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'MiniMax-M2.7' },
-    { id: 'implementation', name: 'Code Implementer', description: 'Writing new code, scaffolding, refactoring', modelId: 'MiniMax-M2.7' },
-    { id: 'bugfix', name: 'Bug Fixer', description: 'Debugging, tracing errors, regression testing', modelId: 'MiniMax-M2.7' },
-    { id: 'design', name: 'Design Specialist', description: 'UI/UX patterns, styling, component layout', modelId: 'MiniMax-M2.7' },
-    { id: 'image', name: 'Image Generator', description: 'Generating images, diagrams, visual assets', modelId: 'MiniMax-M2.7' },
-    { id: 'toolrunning', name: 'Tool Runner', description: 'Executing tools, shell commands, file operations', modelId: 'MiniMax-M2.7' },
-    { id: 'review', name: 'Code Reviewer', description: 'Reviewing PRs, suggesting improvements, security audits', modelId: 'MiniMax-M2.7' },
-  ]);
+  const [roleAssignments, setRoleAssignments] = useState<CodingRoleAssignment[]>(DEFAULT_ROLE_ASSIGNMENTS);
   const [activeTheme, setActiveTheme] = useState('midnight');
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
@@ -68,12 +77,44 @@ function App() {
   useEffect(() => {
     const native = (window as any).CMDuiNative;
     if (!native?.onMenuAction) return;
-    native.onMenuAction((action: string) => {
+    native.onMenuAction(async (action: string, path?: string) => {
       if (action === 'show-snap-zones') {
         setSnapOverlayVisible(true);
         setTimeout(() => setSnapOverlayVisible(false), 3000);
       }
       if (action === 'open-preferences') setSettingsOpen(true);
+      if (action === 'new-session') {
+        const session = await api.createSession();
+        setSessions((prev) => [{
+          id: session.id,
+          title: session.title,
+          workingDir: session.workingDir || null,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          preview: '',
+          messageCount: 0,
+        }, ...prev]);
+        setActiveSessionId(session.id);
+        setWorkingDir(session.workingDir || null);
+        setMessages([]);
+        setSubAgents([]);
+      }
+      if (action === 'open-folder' && path) {
+        const session = await api.createSession(basename(path), path);
+        setSessions((prev) => [{
+          id: session.id,
+          title: basename(path),
+          workingDir: path,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          preview: '',
+          messageCount: 0,
+        }, ...prev]);
+        setActiveSessionId(session.id);
+        setWorkingDir(path);
+        setMessages([]);
+        setSubAgents([]);
+      }
     });
   }, []);
 
@@ -116,7 +157,7 @@ function App() {
             setRoleAssignments((prev) =>
               prev.map((r) => ({
                 ...r,
-                modelId: config.roleAssignments?.[r.id] || r.modelId,
+                modelId: config.roleAssignments?.[r.id] || legacyRoleModel(config.roleAssignments, r.id) || r.modelId,
               }))
             );
           }
@@ -131,7 +172,7 @@ function App() {
         }
 
         // Show onboarding if no providers have keys
-        const hasKey = (config.providers || []).some((p: any) =>
+        const hasKey = (config?.providers || []).some((p: any) =>
           p.hasKey || p.type === 'local' || (p.apiKey && p.apiKey.startsWith('••••'))
         );
         if (!hasKey) setShowOnboarding(true);
@@ -489,7 +530,6 @@ function App() {
   collectPanels(layout);
 
   const msgCount = messages.length;
-  const agentCount = subAgents.filter((a) => a.status === 'running').length;
   const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Open-Harness';
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
   const latestToolCalls = latestAssistantMessage?.toolCalls || [];

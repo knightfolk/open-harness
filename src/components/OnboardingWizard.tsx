@@ -6,12 +6,30 @@ import {
 import * as api from '../utils/api';
 
 // ── Provider presets for quick connect ──
-const QUICK_PROVIDERS = [
+interface OnboardingProvider {
+  id: string;
+  name: string;
+  color: string;
+  desc: string;
+  baseURL: string;
+  placeholder: string;
+  isLocal?: boolean;
+}
+
+const QUICK_PROVIDERS: OnboardingProvider[] = [
   { id: 'openai', name: 'OpenAI', color: '#10a37f', desc: 'GPT-4.1, o3, o4-mini', baseURL: 'https://api.openai.com/v1', placeholder: 'sk-...' },
-  { id: 'anthropic', name: 'Anthropic', color: '#d4a574', desc: 'Claude Sonnet 4, Opus 4', baseURL: 'https://api.anthropic.com/v1', placeholder: 'sk-ant-...' },
   { id: 'minimax', name: 'MiniMax', color: '#6366f1', desc: 'M2.7 — fast & affordable', baseURL: 'https://api.minimax.io/v1', placeholder: 'sk-cp-...' },
   { id: 'deepseek', name: 'DeepSeek', color: '#4a9eff', desc: 'V4, V4 Flash, R2', baseURL: 'https://api.deepseek.com/v1', placeholder: 'sk-...' },
   { id: 'ollama', name: 'Ollama', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:11434/v1', placeholder: '(no key needed)', isLocal: true },
+];
+
+const EXTENDED_PROVIDERS: OnboardingProvider[] = [
+  { id: 'xai', name: 'xAI', color: '#1d9bf0', desc: 'Grok models via OpenAI-compatible API', baseURL: 'https://api.x.ai/v1', placeholder: 'xai-...' },
+  { id: 'mistral', name: 'Mistral', color: '#f54e42', desc: 'Mistral Large, Codestral', baseURL: 'https://api.mistral.ai/v1', placeholder: '...' },
+  { id: 'zhipu', name: 'Z.AI / Zhipu', color: '#3b5998', desc: 'GLM coding models', baseURL: 'https://api.z.ai/api/coding/paas/v4', placeholder: '...' },
+  { id: 'openrouter', name: 'OpenRouter', color: '#6d28d9', desc: 'Gateway to many OpenAI-compatible models', baseURL: 'https://openrouter.ai/api/v1', placeholder: 'sk-or-...' },
+  { id: 'qwen', name: 'Alibaba Qwen', color: '#ff6a00', desc: 'Qwen models via DashScope compatible mode', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', placeholder: 'sk-...' },
+  { id: 'lmstudio', name: 'LM Studio', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:1234/v1', placeholder: '(no key needed)', isLocal: true },
 ];
 
 interface Props {

@@ -84,7 +84,7 @@ export function loadConfig(): StoredConfig {
     if (!existsSync(CONFIG_PATH)) {
       // Try to bootstrap MiniMax key from existing mmx config
       const mmxKey = tryReadMmxKey();
-      const config = { ...DEFAULT_CONFIG };
+      const config = cloneDefaultConfig();
       if (mmxKey) {
         config.providers[0].apiKey = mmxKey;
       }
@@ -94,9 +94,18 @@ export function loadConfig(): StoredConfig {
     const raw = readFileSync(CONFIG_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as StoredConfig;
     // Merge with defaults for forward-compat
-    return { ...DEFAULT_CONFIG, ...parsed };
+    return {
+      ...cloneDefaultConfig(),
+      ...parsed,
+      providers: parsed.providers || cloneDefaultConfig().providers,
+      mcpServers: parsed.mcpServers || [],
+      roleAssignments: {
+        ...DEFAULT_CONFIG.roleAssignments,
+        ...normalizeRoleAssignments(parsed.roleAssignments || {}),
+      },
+    };
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return cloneDefaultConfig();
   }
 }
 
@@ -166,16 +175,58 @@ export interface ResolvedProvider {
 
 /** Find the provider that owns a given model, and build its chat completions URL. */
 export function getProviderForModel(config: StoredConfig, modelId: string): ResolvedProvider | null {
+  const { providerId, bareModelId } = splitModelRef(modelId);
   for (const provider of config.providers) {
-    const match = provider.models.find((m) => m.id === modelId && m.enabled);
+    if (providerId && provider.id !== providerId) continue;
+    const match = provider.models.find((m) => m.id === bareModelId && m.enabled);
     if (match) {
-      const base = provider.baseURL.replace(/\/+$/, '');
       return {
         provider,
         apiKey: provider.apiKey,
-        chatURL: `${base}/chat/completions`,
+        chatURL: buildChatURL(provider),
       };
     }
   }
   return null;
+}
+
+export function splitModelRef(modelRef: string): { providerId?: string; bareModelId: string } {
+  const idx = modelRef.indexOf(':');
+  if (idx <= 0) return { bareModelId: modelRef };
+  return {
+    providerId: modelRef.slice(0, idx),
+    bareModelId: modelRef.slice(idx + 1),
+  };
+}
+
+function buildChatURL(provider: StoredProvider): string {
+  const base = provider.baseURL.replace(/\/+$/, '');
+  if (/\/chat\/completions$/i.test(base)) return base;
+  if (/\/v\d+$/i.test(base)) return `${base}/chat/completions`;
+  if (base.includes('/v1/')) return `${base.split('/v1/')[0]}/v1/chat/completions`;
+  const versionMatch = base.match(/(.*\/v\d+)\/.*/i);
+  if (versionMatch) return `${versionMatch[1]}/chat/completions`;
+  return `${base}/v1/chat/completions`;
+}
+
+function cloneDefaultConfig(): StoredConfig {
+  return structuredClone(DEFAULT_CONFIG);
+}
+
+function normalizeRoleAssignments(assignments: Record<string, string>): Record<string, string> {
+  const legacyToCurrent: Record<string, string> = {
+    planning: 'planner',
+    implementation: 'coder',
+    bugfix: 'coder',
+    design: 'coder',
+    image: 'worker',
+    toolrunning: 'worker',
+    review: 'reviewer',
+  };
+
+  const normalized: Record<string, string> = {};
+  for (const [role, modelId] of Object.entries(assignments)) {
+    normalized[legacyToCurrent[role] || role] = modelId;
+  }
+  return normalized;
 }

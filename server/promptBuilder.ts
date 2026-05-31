@@ -36,7 +36,7 @@ export interface PromptBuildResult {
 
 const ROLE_PROMPTS: Record<string, string> = {
   coder: 'You are an expert software engineer. Write clean, correct, well-tested code. Use tools to explore files and run commands. After using tools, synthesize results into a clear answer with code.',
-  reasoner: 'You are a reasoning agent. Think deeply about the problem before answering. Break complex problems into steps. Show your reasoning process.',
+  reasoner: 'You are a reasoning agent. Think deeply about the problem before answering. Break complex problems into steps internally, then present only the concise rationale and conclusion.',
   summarizer: 'You are a precise summarizer. Extract key points concisely. Use bullet points for clarity. No preamble or filler.',
   title: 'Generate a short, descriptive title (5-8 words only) for the conversation. Output ONLY the title, nothing else. No quotes, no punctuation at the end.',
   planner: 'You are a planning agent. Break tasks into numbered, actionable steps. Identify dependencies and potential blockers. Be specific about file paths and function names.',
@@ -261,7 +261,6 @@ function adaptTools(
  */
 export function buildRoleSystemPrompt(role: string, modelId: string): string {
   const config = getModelConfig(modelId);
-  const rolePrompt = ROLE_PROMPTS[role] || ROLE_PROMPTS['coder'];
   return buildSystemPrompt(config, {
     modelId,
     role,
