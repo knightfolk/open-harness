@@ -1,3 +1,17 @@
+export interface ProjectProfile {
+  root: string;
+  name: string;
+  git: { branch: string; dirty: boolean; changedFiles: string[] };
+  packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';
+  languages: string[];
+  frameworks: string[];
+  scripts: Record<string, string>;
+  validation: { build?: string; test?: string; lint?: string; typecheck?: string };
+  instructions: { agentsMd?: string; readme?: string };
+  importantFiles: string[];
+  todoCount: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -5,8 +19,34 @@ export interface Message {
   timestamp: Date;
   status?: 'sending' | 'streaming' | 'complete' | 'error';
   toolCalls?: ToolCall[];
+  runTrace?: HarnessRun;
   codeBlocks?: CodeBlock[];
 }
+
+export interface HarnessRun {
+  id: string;
+  sessionId: string;
+  userMessageId: string;
+  role: 'coder' | 'planner' | 'reviewer' | 'summarizer' | 'worker' | 'reasoner';
+  requestedModel: string;
+  effectiveModel: string;
+  providerId: string;
+  status: 'running' | 'complete' | 'error';
+  startedAt: string;
+  completedAt?: string;
+  context: { tokensUsed: number; budget: number; compressedCount: number; summarized: boolean };
+  steps: HarnessRunStep[];
+}
+
+export type HarnessRunStep =
+  | { type: 'orchestration'; mode: 'direct' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
+  | { type: 'route'; role: string; model: string; reason?: string }
+  | { type: 'prompt_built'; promptPreview: string; toolCount: number }
+  | { type: 'model_request'; round: number; model: string }
+  | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
+  | { type: 'model_text'; chars: number }
+  | { type: 'final_answer'; chars: number }
+  | { type: 'error'; message: string };
 
 export interface ToolCall {
   id: string;
@@ -71,6 +111,7 @@ export interface SubAgent {
   tokensUsed?: number;
   messages?: Message[];
   children?: SubAgent[];
+  runTrace?: HarnessRun;
 }
 
 export interface PlanStep {

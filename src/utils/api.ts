@@ -2,6 +2,32 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // ── Types ──────────────────────────────────────────────
 
+
+export interface HarnessRun {
+  id: string;
+  sessionId: string;
+  userMessageId: string;
+  role: 'coder' | 'planner' | 'reviewer' | 'summarizer' | 'worker' | 'reasoner';
+  requestedModel: string;
+  effectiveModel: string;
+  providerId: string;
+  status: 'running' | 'complete' | 'error';
+  startedAt: string;
+  completedAt?: string;
+  context: { tokensUsed: number; budget: number; compressedCount: number; summarized: boolean };
+  steps: HarnessRunStep[];
+}
+
+export type HarnessRunStep =
+  | { type: 'orchestration'; mode: 'direct' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
+  | { type: 'route'; role: string; model: string; reason?: string }
+  | { type: 'prompt_built'; promptPreview: string; toolCount: number }
+  | { type: 'model_request'; round: number; model: string }
+  | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
+  | { type: 'model_text'; chars: number }
+  | { type: 'final_answer'; chars: number }
+  | { type: 'error'; message: string };
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -27,6 +53,7 @@ export interface MessageInfo {
   content: string;
   timestamp: string;
   toolCalls?: ToolCallInfo[];
+  runTrace?: HarnessRun;
 }
 
 export interface ToolCallInfo {
@@ -43,6 +70,9 @@ export interface StreamCallbacks {
   onAssistantStart: (id: string) => void;
   onText: (id: string, text: string) => void;
   onToolCall: (toolCall: ToolCallInfo) => void;
+  onRunStart?: (run: HarnessRun) => void;
+  onRunStep?: (runId: string, step: HarnessRunStep) => void;
+  onRunComplete?: (run: HarnessRun) => void;
   onError: (error: string) => void;
   onDone: () => void;
 }
@@ -249,6 +279,27 @@ export async function deleteMCPServer(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/mcp-servers/${id}`, { method: 'DELETE' });
 }
 
+
+export interface ProjectProfile {
+  root: string;
+  name: string;
+  git: { branch: string; dirty: boolean; changedFiles: string[] };
+  packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';
+  languages: string[];
+  frameworks: string[];
+  scripts: Record<string, string>;
+  validation: { build?: string; test?: string; lint?: string; typecheck?: string };
+  instructions: { agentsMd?: string; readme?: string };
+  importantFiles: string[];
+  todoCount: number;
+}
+
+export async function getProjectProfile(path: string): Promise<ProjectProfile> {
+  const res = await fetch(`${API_BASE}/api/project/profile?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error(`Failed to get project profile: ${res.status}`);
+  return res.json();
+}
+
 // ── Session APIs ───────────────────────────────────────
 
 export async function listSessions(): Promise<SessionInfo[]> {
@@ -324,6 +375,9 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
           case 'assistant_start': callbacks.onAssistantStart(parsed.id); break;
           case 'text': callbacks.onText(parsed.id, parsed.text); break;
           case 'tool_call': callbacks.onToolCall(parsed as ToolCallInfo); break;
+          case 'run_start': callbacks.onRunStart?.(parsed as HarnessRun); break;
+          case 'run_step': callbacks.onRunStep?.(parsed.runId, parsed.step as HarnessRunStep); break;
+          case 'run_complete': callbacks.onRunComplete?.(parsed as HarnessRun); break;
           case 'error': callbacks.onError(parsed.error || 'Unknown error'); break;
         }
       } catch { /* skip malformed */ }

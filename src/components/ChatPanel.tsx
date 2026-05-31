@@ -4,6 +4,7 @@ import type { Message } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { shortModelName } from '../utils/modelDisplay';
 import { SmartWelcome } from './SmartWelcome';
+import type { ProjectProfile } from '../types';
 
 interface Props {
   messages: Message[];
@@ -11,9 +12,10 @@ interface Props {
   onSendMessage: (msg: string) => void;
   activeModel: string;
   workingDir?: string | null;
+  projectProfile?: ProjectProfile | null;
 }
 
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir }: Props) {
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const userScrolledUpRef = useRef(false);
@@ -58,7 +60,7 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
     <div className="chat-panel-root">
       <div className="messages" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && !isTyping && (
-          <SmartWelcome workingDir={workingDir || null} onSuggestionClick={onSendMessage} />
+          <SmartWelcome workingDir={workingDir || null} projectProfile={projectProfile || null} onSuggestionClick={onSendMessage} />
         )}
         {messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} assistantName={assistantName} />

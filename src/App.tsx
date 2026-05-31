@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, Plan } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, Plan, HarnessRunStep, ProjectProfile } from './types';
 import type { PanelId } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -13,6 +13,20 @@ import './styles/global.css';
 import './styles/components.css';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+
+function describeRunStep(step: HarnessRunStep): string {
+  switch (step.type) {
+    case 'orchestration': return `${step.label}: ${step.detail || step.mode}`;
+    case 'route': return `Routed to ${step.role} using ${step.model}${step.reason ? ` (${step.reason})` : ''}`;
+    case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
+    case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
+    case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
+    case 'model_text': return `Received ${step.chars} characters from model`;
+    case 'final_answer': return `Final answer ready (${step.chars} characters)`;
+    case 'error': return `Error: ${step.message}`;
+  }
+}
 
 function basename(p: string) {
   return p.split('/').filter(Boolean).pop() || p;
@@ -42,6 +56,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [workingDir, setWorkingDir] = useState<string | null>(null);
+  const [projectProfile, setProjectProfile] = useState<ProjectProfile | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
@@ -131,6 +146,17 @@ function App() {
     const interval = setInterval(poll, 15000);
     return () => { mounted = false; clearInterval(interval); };
   }, []);
+
+
+  // Load project profile whenever the active folder changes.
+  useEffect(() => {
+    let cancelled = false;
+    if (!workingDir) { setProjectProfile(null); return; }
+    api.getProjectProfile(workingDir)
+      .then((profile) => { if (!cancelled) setProjectProfile(profile as ProjectProfile); })
+      .catch((err) => { console.error('Failed to load project profile:', err); if (!cancelled) setProjectProfile(null); });
+    return () => { cancelled = true; };
+  }, [workingDir]);
 
   // Load config from server on mount
   useEffect(() => {
@@ -493,6 +519,48 @@ function App() {
             );
           }
         },
+        onRunStart: (run) => {
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, runTrace: run } : m)));
+          setSubAgents([{
+            id: run.id,
+            name: `${run.role} run`,
+            model: run.effectiveModel,
+            status: 'running',
+            task: 'Starting run...',
+            progress: 5,
+            startTime: new Date(run.startedAt),
+            messages: [],
+            runTrace: run,
+          }]);
+        },
+        onRunStep: (runId, step) => {
+          const stepText = describeRunStep(step);
+          setMessages((prev) => prev.map((m) => {
+            if (m.id !== assistantId || !m.runTrace) return m;
+            return { ...m, runTrace: { ...m.runTrace, steps: [...m.runTrace.steps, step] } };
+          }));
+          setSubAgents((prev) => prev.map((a) => a.id === runId ? {
+            ...a,
+            task: stepText,
+            status: step.type === 'error' ? 'error' : a.status,
+            progress: step.type === 'final_answer' ? 95 : Math.min(90, (a.progress || 5) + 10),
+            messages: [...(a.messages || []), { id: uid(), role: 'system', content: stepText, timestamp: new Date(), status: 'complete' }],
+            runTrace: a.runTrace ? { ...a.runTrace, steps: [...a.runTrace.steps, step] } : undefined,
+          } : a));
+        },
+        onRunComplete: (run) => {
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, runTrace: run } : m)));
+          setSubAgents((prev) => prev.map((a) => a.id === run.id ? {
+            ...a,
+            model: run.effectiveModel,
+            status: run.status === 'error' ? 'error' : 'complete',
+            progress: 100,
+            endTime: run.completedAt ? new Date(run.completedAt) : new Date(),
+            tokensUsed: run.context.tokensUsed,
+            task: run.status === 'error' ? 'Run ended with an error' : 'Run complete',
+            runTrace: run,
+          } : a));
+        },
         onError: (error) => {
           console.error('Stream error:', error);
         },
@@ -633,6 +701,7 @@ function App() {
               onSendMessage={handleSendMessage}
               activeModel={activeModel}
               workingDir={workingDir}
+              projectProfile={projectProfile}
             />
           )}
         </div>
@@ -742,6 +811,7 @@ function mapApiMessage(m: api.MessageInfo): Message {
       output: tc.output,
       duration: tc.duration,
     })),
+    runTrace: m.runTrace,
   };
 }
 

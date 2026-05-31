@@ -18,6 +18,7 @@ interface Props {
   onSendMessage: (msg: string) => void;
   activeModel: string;
   workingDir: string | null;
+  projectProfile: any;
 }
 
 export function LayoutEngine({
@@ -33,8 +34,9 @@ export function LayoutEngine({
   onSendMessage,
   activeModel,
   workingDir,
+  projectProfile,
 }: Props) {
-  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{ subAgents, plan, fileChanges, terminalCommands, messages, isTyping, onSendMessage, activeModel, workingDir, onSwap: onSwapPanels }} />;
+  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{ subAgents, plan, fileChanges, terminalCommands, messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onSwap: onSwapPanels }} />;
 }
 
 interface RenderProps {

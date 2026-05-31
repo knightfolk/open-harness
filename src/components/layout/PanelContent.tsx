@@ -20,13 +20,14 @@ interface Props {
     onSendMessage: (msg: string) => void;
     activeModel: string;
     workingDir: string | null;
+    projectProfile?: any;
   };
 }
 
 export function PanelContent({ panelId, context }: Props) {
   switch (panelId) {
     case 'chat':
-      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} />;
+      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} />;
     case 'side-chat':
       return <SideChatPanel />;
     case 'diffs':
@@ -40,7 +41,7 @@ export function PanelContent({ panelId, context }: Props) {
     case 'plan':
       return context.plan ? <PlanTracker plan={context.plan} /> : <EmptyState text="No active plan" />;
     case 'files':
-      return <FilesPanel workingDir={context.workingDir} />;
+      return <FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />;
     default:
       return <EmptyState text="Unknown panel" />;
   }

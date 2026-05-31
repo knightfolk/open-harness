@@ -14,6 +14,7 @@ export interface BuildPromptOptions {
   role?: string;
   personality?: string;
   workingDir?: string;
+  projectProfileSummary?: string;
   tools?: any[];
   taskDescription?: string;
   enableThinking?: boolean;
@@ -125,6 +126,7 @@ function buildXMLPrompt(
     parts.push('<context>');
     parts.push(`The user has a project open at: ${options.workingDir}`);
     parts.push('Reference files by their full paths. Use proper file paths in code blocks.');
+    if (options.projectProfileSummary) parts.push(options.projectProfileSummary);
     parts.push('</context>');
   }
 
@@ -169,6 +171,7 @@ function buildStructuredPrompt(
     parts.push(`## Context`);
     parts.push(`The user has a project open at: ${options.workingDir}`);
     parts.push('Reference files by their full paths. Use proper file paths in code blocks.');
+    if (options.projectProfileSummary) parts.push(options.projectProfileSummary);
   }
 
   parts.push('');
@@ -206,6 +209,7 @@ function buildConcisePrompt(
 
   if (options.workingDir) {
     parts.push(`Project: ${options.workingDir}`);
+    if (options.projectProfileSummary) parts.push(options.projectProfileSummary);
   }
 
   parts.push('Rules: Use tools when needed. Give clear answers. Markdown format. English only.');
@@ -228,7 +232,8 @@ function buildMinimalPrompt(
 ): string {
   const base = personality || rolePrompt;
   if (options.workingDir) {
-    return `${base} Project: ${options.workingDir}. Be concise.`;
+    const profile = options.projectProfileSummary ? ` ${options.projectProfileSummary}` : '';
+    return `${base} Project: ${options.workingDir}.${profile} Be concise.`;
   }
   return base;
 }

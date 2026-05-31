@@ -3,6 +3,7 @@ import {
   Code, Bug, FileText, Sparkles, Search, Terminal,
   Cpu, Folder,
 } from 'lucide-react';
+import type { ProjectProfile } from '../types';
 
 // ── Project detection ──
 interface ProjectContext {
@@ -115,15 +116,26 @@ function getSuggestions(ctx: ProjectContext): Suggestion[] {
 
 interface Props {
   workingDir: string | null;
+  projectProfile?: ProjectProfile | null;
   onSuggestionClick: (prompt: string) => void;
 }
 
-export function SmartWelcome({ workingDir, onSuggestionClick }: Props) {
+export function SmartWelcome({ workingDir, projectProfile, onSuggestionClick }: Props) {
   const [ctx, setCtx] = useState<ProjectContext | null>(null);
 
   useEffect(() => {
+    if (projectProfile) {
+      setCtx({
+        type: projectProfile.frameworks.includes('React') ? 'react' : projectProfile.languages.includes('Python') ? 'python' : projectProfile.languages.includes('Go') ? 'go' : projectProfile.languages.includes('Rust') ? 'rust' : 'node',
+        framework: projectProfile.frameworks[0] || projectProfile.languages[0] || 'Project',
+        hasTests: !!projectProfile.validation.test,
+        hasGit: projectProfile.git.branch !== 'unknown',
+        fileCount: projectProfile.importantFiles.length,
+      });
+      return;
+    }
     detectProject(workingDir).then(setCtx);
-  }, [workingDir]);
+  }, [workingDir, projectProfile]);
 
   const suggestions = getSuggestions(ctx || { type: 'unknown', framework: '', hasTests: false, hasGit: false, fileCount: 0 });
 
@@ -138,11 +150,22 @@ export function SmartWelcome({ workingDir, onSuggestionClick }: Props) {
         </h1>
         <p className="smart-welcome-subtitle">
           {workingDir
-            ? `${ctx?.fileCount || 0} files · ${workingDir.split('/').pop()}`
+            ? projectProfile
+              ? `${projectProfile.languages.join(', ') || 'Project'} · ${projectProfile.git.branch} · ${projectProfile.git.dirty ? `${projectProfile.git.changedFiles.length} changed` : 'clean'}`
+              : `${ctx?.fileCount || 0} files · ${workingDir.split('/').pop()}`
             : 'Describe what you want to build and I\'ll help you create it.'
           }
         </p>
       </div>
+
+      {projectProfile && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 12, fontSize: 12, color: 'var(--text-secondary)' }}>
+          {Object.entries(projectProfile.validation).map(([name, command]) => (
+            <span key={name} style={{ padding: '4px 8px', border: '1px solid var(--border-primary)', borderRadius: 999 }}>{name}: {command}</span>
+          ))}
+          {projectProfile.todoCount > 0 && <span style={{ padding: '4px 8px', border: '1px solid var(--border-primary)', borderRadius: 999 }}>{projectProfile.todoCount} TODO/FIXME</span>}
+        </div>
+      )}
 
       <div className="smart-welcome-grid">
         {suggestions.map((s, i) => {

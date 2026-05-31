@@ -12,6 +12,13 @@ import { mcpManager } from './mcp';
 import { getModelConfig, isReasoningModel, detectModelFamily } from './modelProfiles';
 import { buildContextWindow } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
+import { formatProjectProfileForPrompt, getProjectProfile } from './projectProfile';
+import { routeRequest } from './router';
+import type { RouteDecision } from './router';
+import { orchestrationInstruction, orchestrationTraceSteps } from './orchestrator';
+import type { ProjectProfile } from './projectProfile';
+import { appendRunStep, completeHarnessRun, createHarnessRun } from './runTrace';
+import type { HarnessRun, HarnessRunStep } from './runTrace';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -44,6 +51,7 @@ interface MessageRow {
   content: string;
   timestamp: string;
   toolCalls?: ToolCallRow[];
+  runTrace?: HarnessRun;
 }
 
 interface ToolCallRow {
@@ -657,6 +665,32 @@ app.post('/api/dialog/open-folder', (_req, res) => {
   }
 });
 
+
+function writeSSE(res: express.Response, event: string, data: unknown) {
+  res.write(`event: ${event}
+data: ${JSON.stringify(data)}
+
+`);
+}
+
+function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep) {
+  const appended = appendRunStep(run, step);
+  writeSSE(res, 'run_step', { runId: run.id, step: appended });
+}
+
+
+// ── Project Profile ────────────────────────────────────
+app.get('/api/project/profile', (req, res) => {
+  const targetPath = req.query.path as string;
+  if (!targetPath) return res.status(400).json({ error: 'path is required' });
+  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  try {
+    res.json(getProjectProfile(targetPath));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to build project profile' });
+  }
+});
+
 // ── Send message (stream MiniMax response) ─────────────
 app.post('/api/sessions/:id/messages', async (req, res) => {
   const session = sessions.get(req.params.id);
@@ -684,17 +718,31 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
 
   const assistantId = uuid();
-  res.write(`event: user_message\ndata: ${JSON.stringify(userMsg)}\n\n`);
-  res.write(`event: assistant_start\ndata: ${JSON.stringify({ id: assistantId, role: 'assistant' })}\n\n`);
+  writeSSE(res, 'user_message', userMsg);
+  writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
 
+  const requestedModel = getActiveModel();
   const resolved = resolveActiveProvider();
+  const run = createHarnessRun({
+    sessionId: session.id,
+    userMessageId: userMsg.id,
+    requestedModel,
+    providerId: resolved?.providerId || 'local',
+  });
+  writeSSE(res, 'run_start', run);
+
+  const route = routeRequest(content, requestedModel, appConfig.roleAssignments || {});
+  run.role = route.role;
+
   if (!resolved) {
-    await streamLocalFallback(content, res, assistantId, session);
+    await streamLocalFallback(content, res, assistantId, session, run);
   } else {
-    await streamModel(resolved.chatURL, resolved.apiKey, resolved.providerId, session.messages, res, assistantId, session);
+    await streamModel(resolved.chatURL, resolved.apiKey, resolved.providerId, session.messages, res, assistantId, session, undefined, run, route);
   }
 
-  res.write(`event: done\ndata: {}\n\n`);
+  completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
+  writeSSE(res, 'run_complete', run);
+  writeSSE(res, 'done', {});
   res.end();
 });
 
@@ -909,22 +957,8 @@ async function parseStreamForContentAndTools(
   return { content, toolCalls };
 }
 
-// ── Prompt role classifier ──────────────────────────────────
-// Classifies a user message into a coding role for prompt adaptation.
-type CodingRole = 'coder' | 'planner' | 'reviewer' | 'summarizer' | 'worker' | 'reasoner';
-
-function classifyRole(content: string): CodingRole {
-  const lower = content.toLowerCase();
-  if (/\b(review|audit|security|vuln|vulnerability)\b/.test(lower)) return 'reviewer';
-  if (/\b(fix|debug|error|broken|crash|bug|issue|problem)\b/.test(lower)) return 'coder';
-  if (/\b(plan|architect|design|roadmap|strategy|approach|how (should|would|do)|what (should|would|can)|investigate|explore|research)\b/.test(lower)) return 'planner';
-  if (/\b(summar|explain|describe|what (is|does|are)|overview|give me)\b/.test(lower)) return 'summarizer';
-  if (/\b(why|reason|analyze|compare|trade.?off|pros? and cons?|better|versus|vs)\b/.test(lower)) return 'reasoner';
-  if (/\b(rename|move|delete|create|add|remove|install|update|bump)\b/.test(lower) && lower.length < 100) return 'worker';
-  return 'coder';
-}
-
 // ── Universal model streaming (with MCP tool-calling loop) ─
+
 async function streamModel(
   chatURL: string,
   apiKey: string,
@@ -934,6 +968,8 @@ async function streamModel(
   assistantId: string,
   session: SessionRow,
   overrideModelId?: string,
+  run?: HarnessRun,
+  routeOverride?: RouteDecision,
 ) {
   // ── Model-aware prompt building ─────────────────────
   // Use the promptBuilder to generate a system prompt, tool config, and
@@ -944,13 +980,19 @@ async function streamModel(
   // Gather MCP tools from all connected servers first
   const { tools: mcpApiTools, toolServerMap } = gatherMCPToolsForAPI();
 
-  // Build the complete prompt configuration for this model
-  // Classify the user's latest message to pick the right role prompt
+  // Build the complete prompt configuration for this model.
   const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-  const classifiedRole = lastUserMsg ? classifyRole(lastUserMsg.content) : 'coder';
+  const route = routeOverride || routeRequest(lastUserMsg?.content || '', activeModel, appConfig.roleAssignments || {});
+  const classifiedRole = route.role;
   // Check if the user configured a different model for this role
   const roleModelOverride = appConfig.roleAssignments?.[classifiedRole];
   const effectiveModel = (roleModelOverride && overrideModelId === undefined) ? roleModelOverride : activeModel;
+  if (run) {
+    run.role = classifiedRole;
+    run.effectiveModel = effectiveModel;
+    for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
+    emitRunStep(res, run, { type: 'route', role: classifiedRole, model: effectiveModel, reason: `${route.mode} mode · ${route.reason}` });
+  }
   const effectiveResolved = resolveProviderForModel(effectiveModel);
   if (effectiveResolved) {
     chatURL = effectiveResolved.chatURL;
@@ -962,11 +1004,17 @@ async function streamModel(
   }
   const apiModelId = splitModelRef(effectiveModel).bareModelId;
 
+  let projectProfile: ProjectProfile | undefined;
+  if (session.workingDir) {
+    try { projectProfile = getProjectProfile(session.workingDir); } catch { /* profile is best-effort */ }
+  }
+
   const promptResult = buildPromptForModel({
     modelId: effectiveModel,
     role: classifiedRole,
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
+    projectProfileSummary: [projectProfile ? formatProjectProfileForPrompt(projectProfile) : '', orchestrationInstruction(route)].filter(Boolean).join('\n\n') || undefined,
     tools: mcpApiTools.length > 0 ? mcpApiTools : undefined,
     enableThinking: isReasoningModel(effectiveModel),
   });
@@ -991,6 +1039,11 @@ async function streamModel(
     { role: 'system', content: systemPrompt },
     ...ctx.messages,
   ];
+  if (run) {
+    run.context = { tokensUsed: ctx.tokensUsed, budget: ctx.budget.availableForHistory, compressedCount: ctx.compressedCount, summarized: ctx.summarized };
+    emitRunStep(res, run, { type: 'prompt_built', promptPreview: systemPrompt.slice(0, 500), toolCount: mcpApiTools.length });
+  }
+
   if (ctx.compressedCount > 0 || ctx.summarized) {
     console.log(`[ctx] ${effectiveModel}: kept ${ctx.keptCount}/${messages.length} msgs, ${ctx.compressedCount} compressed, budget ${ctx.tokensUsed}/${ctx.budget.availableForHistory} tokens`);
   }
@@ -1002,6 +1055,8 @@ async function streamModel(
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      if (run) emitRunStep(res, run, { type: 'model_request', round: round + 1, model: effectiveModel });
+
       const requestBody: any = {
         model: apiModelId,
         messages: apiMessages,
@@ -1031,6 +1086,7 @@ async function streamModel(
 
       if (!response.ok) {
         const err = await response.text();
+        if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: `${providerId} API error: ${response.status} ${err}` }); }
         res.write('event: error\ndata: ' + JSON.stringify({ error: `${providerId} API error: ${response.status} ${err}` }) + '\n\n');
         return;
       }
@@ -1040,6 +1096,7 @@ async function streamModel(
       // Final round: stream text normally for real-time answer display
       const isLastRound = round === MAX_TOOL_ROUNDS - 1;
       const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound);
+      if (run && content.length > 0) emitRunStep(res, run, { type: 'model_text', chars: content.length });
 
       // No tool calls → model gave a direct answer (or final round completed)
       if (toolCalls.length === 0) {
@@ -1072,6 +1129,7 @@ async function streamModel(
       for (const tc of toolCalls) {
         const tcId = tc.id || uuid();
         res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: tc.arguments }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments });
 
         const startTime = Date.now();
         let output: string;
@@ -1082,6 +1140,7 @@ async function streamModel(
         if (isRedundantToolCall(toolTracker, tc.name, parsedArgs)) {
           const skipMsg = `[Skipped: ${tc.name} already called with same path]`;
           res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: skipMsg, durationMs: 0 });
           apiMessages.push({ role: 'tool', tool_call_id: tcId, content: skipMsg });
           sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 });
           continue;
@@ -1096,6 +1155,7 @@ async function streamModel(
         const duration = Date.now() - startTime;
 
         res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 500), duration }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: output.slice(0, 500), durationMs: duration });
 
         sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 2000), duration });
 
@@ -1143,22 +1203,26 @@ async function streamModel(
     }
 
     // Save the final assistant message
+    if (run) emitRunStep(res, run, { type: 'final_answer', chars: finalContent.length });
+
     session.messages.push({
       id: assistantId,
       role: 'assistant',
       content: filterMonologue(stripThinkingTags(finalContent)),
       timestamp: new Date().toISOString(),
       toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
+      runTrace: run,
     });
     session.updatedAt = new Date().toISOString();
 
   } catch (err: any) {
+    if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
     res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
   }
 }
 
 // ── Local fallback ─────────────────────────────────────
-async function streamLocalFallback(content: string, res: express.Response, assistantId: string, session: SessionRow) {
+async function streamLocalFallback(content: string, res: express.Response, assistantId: string, session: SessionRow, run?: HarnessRun) {
   const responses = [
     `I'll help you with that. Let me analyze your request:\n\n> ${content.slice(0, 100)}\n\nHere's my approach:\n\n1. Break down the problem\n2. Identify key components\n3. Implement a solution\n\n\`\`\`typescript\nconst result = await analyze(content);\nconsole.log(result);\n\`\`\``,
     `Good question! Let me work on this.\n\n**Analysis:**\n\n- A modular approach for flexibility\n- Simple, testable implementation\n- Document key decisions\n\n\`\`\`bash\n$ npm run analyze\n\n✓ Found 3 relevant modules\n✓ No conflicts detected\n\`\`\``,
@@ -1166,21 +1230,30 @@ async function streamLocalFallback(content: string, res: express.Response, assis
   ];
 
   const response = responses[Math.floor(Math.random() * responses.length)];
+  if (run) {
+    emitRunStep(res, run, { type: 'route', role: 'coder', model: run.effectiveModel, reason: 'No configured provider; local fallback' });
+    emitRunStep(res, run, { type: 'prompt_built', promptPreview: content.slice(0, 500), toolCount: 1 });
+  }
   const words = response.split(' ');
 
-  res.write(`event: tool_call\ndata: ${JSON.stringify({ id: uuid(), name: 'exec_command', status: 'running', input: 'echo "analyzing..."' })}\n\n`);
+  const fallbackToolId = uuid();
+  res.write(`event: tool_call\ndata: ${JSON.stringify({ id: fallbackToolId, name: 'exec_command', status: 'running', input: 'echo "analyzing..."' })}\n\n`);
+  if (run) emitRunStep(res, run, { type: 'tool_call', id: fallbackToolId, name: 'exec_command', input: 'echo "analyzing..."' });
   await sleep(300);
-  res.write(`event: tool_call\ndata: ${JSON.stringify({ id: uuid(), name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete', duration: 1200 })}\n\n`);
+  res.write(`event: tool_call\ndata: ${JSON.stringify({ id: fallbackToolId, name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete', duration: 1200 })}\n\n`);
+  if (run) emitRunStep(res, run, { type: 'tool_call', id: fallbackToolId, name: 'exec_command', input: 'npm run analyze', outputPreview: '✓ Analysis complete', durationMs: 1200 });
 
   for (let i = 0; i < words.length; i++) {
     res.write(`event: text\ndata: ${JSON.stringify({ id: assistantId, text: i > 0 ? ' ' + words[i] : words[i] })}\n\n`);
     await sleep(20 + Math.random() * 40);
   }
 
+  if (run) emitRunStep(res, run, { type: 'final_answer', chars: response.length });
   session.messages.push({
     id: assistantId, role: 'assistant', content: response,
     timestamp: new Date().toISOString(),
-    toolCalls: [{ id: uuid(), name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete', duration: 1200 }],
+    toolCalls: [{ id: fallbackToolId, name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete', duration: 1200 }],
+    runTrace: run,
   });
   session.updatedAt = new Date().toISOString();
 }
