@@ -19,6 +19,10 @@ import { orchestrationInstruction, orchestrationTraceSteps } from './orchestrato
 import type { ProjectProfile } from './projectProfile';
 import { appendRunStep, completeHarnessRun, createHarnessRun } from './runTrace';
 import type { HarnessRun, HarnessRunStep } from './runTrace';
+import { createSession as createTermSession, getHistory as getTermHistory, runCommand as runTermCommand, cancelCommand as cancelTermCommand, getEntry as getTermEntry } from './terminalSessions';
+import * as git from './git';
+import { capturePreview, checkServerHealth } from './browserPreview';
+import { applyPatch as nodeApplyPatch } from './patchApply';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -649,6 +653,161 @@ app.post('/api/terminal/exec', async (req, res) => {
     cwd: workingDir,
   });
 });
+
+// ── Terminal Session Routes ────────────────────────────
+
+app.post('/api/terminal/sessions', (req, res) => {
+  const { cwd } = req.body as { cwd?: string };
+  const session = createTermSession(cwd || process.cwd());
+  res.status(201).json(session);
+});
+
+app.get('/api/terminal/sessions/:sessionId/history', (req, res) => {
+  const entries = getTermHistory(req.params.sessionId);
+  res.json(entries);
+});
+
+app.post('/api/terminal/sessions/:sessionId/run', (req, res) => {
+  const { command, cwd } = req.body as { command?: string; cwd?: string };
+  if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
+
+  const entry = runTermCommand({
+    sessionId: req.params.sessionId,
+    command,
+    cwd,
+    timeout: 120_000,
+  });
+  res.status(201).json(entry);
+});
+
+app.post('/api/terminal/commands/:commandId/cancel', (req, res) => {
+  const cancelled = cancelTermCommand(req.params.commandId);
+  res.json({ cancelled });
+});
+
+app.get('/api/terminal/commands/:commandId', (req, res) => {
+  const entry = getTermEntry(req.params.commandId);
+  if (!entry) return res.status(404).json({ error: 'Command not found' });
+  res.json(entry);
+});
+
+// ── Git Routes ─────────────────────────────────────────
+
+app.get('/api/git/status', (req, res) => {
+  const dir = req.query.dir as string;
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  try {
+    res.json(git.getStatus(dir));
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/git/diff', (req, res) => {
+  const dir = req.query.dir as string;
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  try {
+    const opts: { cached?: boolean; path?: string } = {};
+    if (req.query.cached) opts.cached = true;
+    if (req.query.path) opts.path = req.query.path as string;
+    res.json(git.getDiff(dir, opts));
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/git/file-diff', (req, res) => {
+  const dir = req.query.dir as string;
+  const path = req.query.path as string;
+  if (!dir || !path) return res.status(400).json({ error: 'dir and path are required' });
+  try {
+    res.json(git.getFileDiff(dir, path));
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/git/stage', (req, res) => {
+  const { dir, paths } = req.body as { dir: string; paths: string[] };
+  if (!dir || !paths?.length) return res.status(400).json({ error: 'dir and paths are required' });
+  try {
+    git.stageFiles(dir, paths);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/git/unstage', (req, res) => {
+  const { dir, paths } = req.body as { dir: string; paths: string[] };
+  if (!dir || !paths?.length) return res.status(400).json({ error: 'dir and paths are required' });
+  try {
+    git.unstageFiles(dir, paths);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/git/commit', (req, res) => {
+  const { dir, message } = req.body as { dir: string; message: string };
+  if (!dir || !message?.trim()) return res.status(400).json({ error: 'dir and message are required' });
+  try {
+    const result = git.commit(dir, message);
+    res.json(result);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/git/log', (req, res) => {
+  const dir = req.query.dir as string;
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  try {
+    const count = req.query.count ? parseInt(req.query.count as string, 10) : 20;
+    res.json(git.getLog(dir, count));
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ── Browser Preview Routes ────────────────────────────
+
+app.post('/api/browser/preview', async (req, res) => {
+  const { url } = req.body as { url?: string };
+  if (!url?.trim()) return res.status(400).json({ error: 'url is required' });
+  try {
+    const result = await capturePreview(url);
+    res.json(result);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/browser/health', (req, res) => {
+  const url = req.query.url as string;
+  if (!url?.trim()) return res.status(400).json({ error: 'url is required' });
+  try {
+    const result = checkServerHealth(url);
+    res.json(result);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ── Patch Apply Route ─────────────────────────────────
+
+app.post('/api/patches/apply', (req, res) => {
+  const { patch } = req.body as { patch?: string };
+  if (!patch?.trim()) return res.status(400).json({ error: 'patch is required' });
+  try {
+    const result = nodeApplyPatch(patch);
+    res.json(result);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 
 // ── Open Folder (native dialog) ────────────────────────
 app.post('/api/dialog/open-folder', (_req, res) => {

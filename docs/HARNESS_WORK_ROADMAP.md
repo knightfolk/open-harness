@@ -336,42 +336,42 @@ Show real work products: terminal commands, diffs, validation results, browser p
 
 ### P1 — Real terminal panel
 
-- [ ] Update `/Users/kevink/Projects/CMDui/src/components/TerminalPanel.tsx`
-- [ ] Create `/Users/kevink/Projects/CMDui/server/terminalSessions.ts`
-- [ ] Add command input
-- [ ] Add working directory selector
-- [ ] Add run history
-- [ ] Add cancel command
-- [ ] Add copy output
-- [ ] Add “send output to chat”
+- [x] Update `/Users/kevink/Projects/CMDui/src/components/TerminalPanel.tsx`
+- [x] Create `/Users/kevink/Projects/CMDui/server/terminalSessions.ts`
+- [x] Add command input
+- [x] Add working directory selector
+- [x] Add run history
+- [x] Add cancel command
+- [x] Add copy output
+- [x] Add “send output to chat”
 
 ### P1 — Git and diff tracking
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/git.ts`
-- [ ] Add `GET /api/git/status`
-- [ ] Add `GET /api/git/diff`
-- [ ] Add `POST /api/git/stage`
-- [ ] Add `POST /api/git/commit`
+- [x] Create `/Users/kevink/Projects/CMDui/server/git.ts`
+- [x] Add `GET /api/git/status`
+- [x] Add `GET /api/git/diff`
+- [x] Add `POST /api/git/stage`
+- [x] Add `POST /api/git/commit`
 - [ ] Update `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
 - [x] Show changed files
-- [ ] Show inline diff
-- [ ] Add “review this diff”
+- [x] Show inline diff
+- [x] Add “review this diff”
 - [ ] Add “explain this change”
 
 ### P2 — Real browser preview panel
 
-- [ ] Update `/Users/kevink/Projects/CMDui/src/components/BrowserPanel.tsx`
-- [ ] Create `/Users/kevink/Projects/CMDui/server/browserPreview.ts`
-- [ ] Load local dev URL
-- [ ] Show screenshot
-- [ ] Show console errors
+- [x] Update `/Users/kevink/Projects/CMDui/src/components/BrowserPanel.tsx`
+- [x] Create `/Users/kevink/Projects/CMDui/server/browserPreview.ts`
+- [x] Load local dev URL
+- [x] Show screenshot
+- [x] Show console errors
 - [ ] Add “ask model about this screenshot”
 - [ ] Add “run smoke check”
 
 ### P1 — Patch proposal flow
 
-- [ ] Define `ProposedPatch`
-- [ ] Add patch parser
+- [x] Define `ProposedPatch`
+- [x] Add patch parser
 - [ ] Show proposed changes file-by-file
 - [ ] Allow accept/reject per file
 - [ ] Run validation after applying

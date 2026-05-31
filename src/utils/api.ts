@@ -457,3 +457,203 @@ export async function execCommand(command: string, cwd?: string): Promise<Termin
   if (!res.ok) throw new Error(`Command failed: ${res.status}`);
   return res.json();
 }
+
+// ── Terminal Session APIs ─────────────────────────────
+
+export interface TerminalSessionInfo {
+  id: string;
+  cwd: string;
+  createdAt: string;
+}
+
+export interface TerminalCommandInfo {
+  id: string;
+  sessionId: string;
+  command: string;
+  cwd: string;
+  status: 'running' | 'complete' | 'error' | 'cancelled';
+  exitCode: number | null;
+  output: string;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+}
+
+export async function createTerminalSession(cwd: string): Promise<TerminalSessionInfo> {
+  const res = await fetch(`${API_BASE}/api/terminal/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cwd }),
+  });
+  if (!res.ok) throw new Error(`Failed to create terminal session: ${res.status}`);
+  return res.json();
+}
+
+export async function getTerminalHistory(sessionId: string): Promise<TerminalCommandInfo[]> {
+  const res = await fetch(`${API_BASE}/api/terminal/sessions/${sessionId}/history`);
+  if (!res.ok) throw new Error(`Failed to get terminal history: ${res.status}`);
+  return res.json();
+}
+
+export async function runTerminalCommand(sessionId: string, command: string, cwd?: string): Promise<TerminalCommandInfo> {
+  const res = await fetch(`${API_BASE}/api/terminal/sessions/${sessionId}/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command, cwd }),
+  });
+  if (!res.ok) throw new Error(`Command failed: ${res.status}`);
+  return res.json();
+}
+
+export async function cancelTerminalCommand(commandId: string): Promise<{ cancelled: boolean }> {
+  const res = await fetch(`${API_BASE}/api/terminal/commands/${commandId}/cancel`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Cancel failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getTerminalCommand(commandId: string): Promise<TerminalCommandInfo> {
+  const res = await fetch(`${API_BASE}/api/terminal/commands/${commandId}`);
+  if (!res.ok) throw new Error(`Failed to get command: ${res.status}`);
+  return res.json();
+}
+
+// ── Git APIs ──────────────────────────────────────────
+
+export interface GitStatusInfo {
+  branch: string;
+  ahead: number;
+  behind: number;
+  staged: Array<{ path: string; status: string; staged: boolean; insertions: number; deletions: number }>;
+  unstaged: Array<{ path: string; status: string; staged: boolean; insertions: number; deletions: number }>;
+  untracked: string[];
+  clean: boolean;
+  root: string;
+}
+
+export interface GitDiffInfo {
+  path: string;
+  oldPath?: string;
+  status: string;
+  insertions: number;
+  deletions: number;
+  diff: string;
+  binary: boolean;
+}
+
+export async function getGitStatus(dir: string): Promise<GitStatusInfo> {
+  const res = await fetch(`${API_BASE}/api/git/status?dir=${encodeURIComponent(dir)}`);
+  if (!res.ok) throw new Error(`Failed to get git status: ${res.status}`);
+  return res.json();
+}
+
+export async function getGitDiff(dir: string, options?: { cached?: boolean; path?: string }): Promise<GitDiffInfo[]> {
+  const params = new URLSearchParams();
+  params.set('dir', dir);
+  if (options?.cached) params.set('cached', '1');
+  if (options?.path) params.set('path', options.path);
+  const res = await fetch(`${API_BASE}/api/git/diff?${params}`);
+  if (!res.ok) throw new Error(`Failed to get git diff: ${res.status}`);
+  return res.json();
+}
+
+export async function getGitFileDiff(dir: string, filePath: string): Promise<GitDiffInfo | null> {
+  const params = new URLSearchParams();
+  params.set('dir', dir);
+  params.set('path', filePath);
+  const res = await fetch(`${API_BASE}/api/git/file-diff?${params}`);
+  if (!res.ok) throw new Error(`Failed to get file diff: ${res.status}`);
+  return res.json();
+}
+
+export async function gitStage(dir: string, paths: string[]): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/git/stage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, paths }),
+  });
+  if (!res.ok) throw new Error(`Stage failed: ${res.status}`);
+  return res.json();
+}
+
+export async function gitUnstage(dir: string, paths: string[]): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/git/unstage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, paths }),
+  });
+  if (!res.ok) throw new Error(`Unstage failed: ${res.status}`);
+  return res.json();
+}
+
+export async function gitCommit(dir: string, message: string): Promise<{ hash: string }> {
+  const res = await fetch(`${API_BASE}/api/git/commit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, message }),
+  });
+  if (!res.ok) throw new Error(`Commit failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getGitLog(dir: string, count?: number): Promise<Array<{ hash: string; message: string; author: string; date: string }>> {
+  const params = new URLSearchParams();
+  params.set('dir', dir);
+  if (count) params.set('count', String(count));
+  const res = await fetch(`${API_BASE}/api/git/log?${params}`);
+  if (!res.ok) throw new Error(`Failed to get git log: ${res.status}`);
+  return res.json();
+}
+
+// ── Browser Preview APIs ─────────────────────────────
+
+export interface BrowserPreviewInfo {
+  url: string;
+  screenshotPath: string;
+  screenshotBase64?: string;
+  title?: string;
+  timestamp: string;
+  errors: Array<{ type: 'error' | 'warning'; message: string }>;
+}
+
+export interface ServerHealthInfo {
+  reachable: boolean;
+  statusCode?: number;
+  latencyMs: number;
+}
+
+export async function captureBrowserPreview(url: string): Promise<BrowserPreviewInfo> {
+  const res = await fetch(`${API_BASE}/api/browser/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error(`Preview failed: ${res.status}`);
+  return res.json();
+}
+
+export async function checkServerHealth(url: string): Promise<ServerHealthInfo> {
+  const res = await fetch(`${API_BASE}/api/browser/health?url=${encodeURIComponent(url)}`);
+  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+  return res.json();
+}
+
+// ── Patch Proposal APIs ──────────────────────────────
+
+export interface PatchProposalInfo {
+  id: string;
+  file: string;
+  action: 'create' | 'update' | 'delete';
+  diff: string;
+  explanation: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'applied';
+}
+
+export async function applyPatch(patch: string): Promise<{ files: string[]; errors: string[] }> {
+  const res = await fetch(`${API_BASE}/api/patches/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ patch }),
+  });
+  if (!res.ok) throw new Error(`Patch apply failed: ${res.status}`);
+  return res.json();
+}

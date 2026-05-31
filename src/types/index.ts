@@ -190,3 +190,90 @@ export interface Session {
 export type ThemeMode = 'dark' | 'light';
 export type SidebarTab = 'chat' | 'files' | 'skills' | 'memory' | 'settings';
 export type PanelView = 'none' | 'sub-agents' | 'plan' | 'terminal';
+
+// ── Terminal Session Types ──────────────────────────
+
+export interface TerminalSession {
+  id: string;
+  cwd: string;
+  createdAt: string;
+}
+
+export interface TerminalCommandEntry {
+  id: string;
+  sessionId: string;
+  command: string;
+  cwd: string;
+  status: 'running' | 'complete' | 'error' | 'cancelled';
+  exitCode: number | null;
+  output: string;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+}
+
+// ── Git Types ──────────────────────────────────────
+
+export interface GitFileChange {
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type-changed';
+  staged: boolean;
+  insertions: number;
+  deletions: number;
+}
+
+export interface GitStatus {
+  branch: string;
+  ahead: number;
+  behind: number;
+  staged: GitFileChange[];
+  unstaged: GitFileChange[];
+  untracked: string[];
+  clean: boolean;
+  root: string;
+}
+
+export interface GitDiffResult {
+  path: string;
+  oldPath?: string;
+  status: string;
+  insertions: number;
+  deletions: number;
+  diff: string;
+  binary: boolean;
+}
+
+export interface GitLogEntry {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+// ── Patch Proposal Types ──────────────────────────
+
+export interface ProposedPatch {
+  id: string;
+  file: string;
+  action: 'create' | 'update' | 'delete';
+  diff: string;
+  explanation: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'applied';
+}
+
+// ── Browser Preview Types ────────────────────────
+
+export interface BrowserPreviewResult {
+  url: string;
+  screenshotPath: string;
+  screenshotBase64?: string;
+  title?: string;
+  timestamp: string;
+  errors: Array<{ type: 'error' | 'warning'; message: string; source?: string; line?: number }>;
+}
+
+export interface ServerHealthCheck {
+  reachable: boolean;
+  statusCode?: number;
+  latencyMs: number;
+}

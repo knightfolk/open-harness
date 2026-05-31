@@ -21,6 +21,10 @@ interface Props {
     activeModel: string;
     workingDir: string | null;
     projectProfile?: any;
+    onSendToChat?: (text: string) => void;
+    onReviewDiff?: (diffText: string) => void;
+    onExplainChange?: (filePath: string) => void;
+    onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
   };
 }
 
@@ -31,11 +35,11 @@ export function PanelContent({ panelId, context }: Props) {
     case 'side-chat':
       return <SideChatPanel />;
     case 'diffs':
-      return <DiffViewer fileChanges={context.fileChanges} />;
+      return <DiffViewer workingDir={context.workingDir} onReviewDiff={context.onReviewDiff} onExplainChange={context.onExplainChange} />;
     case 'browser':
-      return <BrowserPanel />;
+      return <BrowserPanel workingDir={context.workingDir} onAskAboutScreenshot={context.onAskAboutScreenshot} />;
     case 'terminal':
-      return <TerminalPanel commands={context.terminalCommands} />;
+      return <TerminalPanel workingDir={context.workingDir} onSendToChat={context.onSendToChat} />;
     case 'sub-agents':
       return <SubAgentTracker agents={context.subAgents} />;
     case 'plan':

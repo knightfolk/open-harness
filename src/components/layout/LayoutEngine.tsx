@@ -19,6 +19,10 @@ interface Props {
   activeModel: string;
   workingDir: string | null;
   projectProfile: any;
+  onSendToChat?: (text: string) => void;
+  onReviewDiff?: (diffText: string) => void;
+  onExplainChange?: (filePath: string) => void;
+  onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
 }
 
 export function LayoutEngine({
@@ -35,14 +39,22 @@ export function LayoutEngine({
   activeModel,
   workingDir,
   projectProfile,
+  onSendToChat,
+  onReviewDiff,
+  onExplainChange,
+  onAskAboutScreenshot,
 }: Props) {
-  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{ subAgents, plan, fileChanges, terminalCommands, messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onSwap: onSwapPanels }} />;
+  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{
+    subAgents, plan, fileChanges, terminalCommands, messages, isTyping,
+    onSendMessage, activeModel, workingDir, projectProfile, onSwap: onSwapPanels,
+    onSendToChat, onReviewDiff, onExplainChange, onAskAboutScreenshot,
+  }} />;
 }
 
 interface RenderProps {
   node: LayoutNode;
   onRemovePanel: (id: PanelId) => void;
-  context: any;  // includes onSwap
+  context: any;
 }
 
 function RenderNode({ node, onRemovePanel, context }: RenderProps) {

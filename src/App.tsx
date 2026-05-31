@@ -589,6 +589,24 @@ function App() {
     }
   }, [isTyping, ensureSession, activeModel]);
 
+  // ── Terminal/Diff/Browser action handlers ─────────────
+  const handleSendToChat = useCallback(async (text: string) => {
+    await handleSendMessage(text);
+  }, [handleSendMessage]);
+
+  const handleReviewDiff = useCallback(async (diffText: string) => {
+    await handleSendMessage(`Review this diff and provide feedback:\n\`\`\`diff\n${diffText.slice(0, 5000)}\n\`\`\``);
+  }, [handleSendMessage]);
+
+  const handleExplainChange = useCallback(async (filePath: string) => {
+    await handleSendMessage(`Explain what changed in \`${filePath}\` and why.`);
+  }, [handleSendMessage]);
+
+  const handleAskAboutScreenshot = useCallback(async (_screenshotBase64: string, url: string) => {
+    await handleSendMessage(`I have a screenshot of ${url}. The screenshot shows the current state of the page. What issues or improvements do you see?`);
+  }, [handleSendMessage]);
+
+
   // Build visible panel set
   const visiblePanels = new Set<PanelId>();
   const collectPanels = (node: any) => {
@@ -702,6 +720,10 @@ function App() {
               activeModel={activeModel}
               workingDir={workingDir}
               projectProfile={projectProfile}
+              onSendToChat={handleSendToChat}
+              onReviewDiff={handleReviewDiff}
+              onExplainChange={handleExplainChange}
+              onAskAboutScreenshot={handleAskAboutScreenshot}
             />
           )}
         </div>
