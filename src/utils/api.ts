@@ -753,3 +753,37 @@ export async function runEval(params: {
   if (!res.ok) throw new Error(`Eval run failed: ${res.status}`);
   return res.json();
 }
+
+// ── Project Memory APIs ───────────────────────────────
+
+export interface ProjectMemoryInfo {
+  projectPath: string;
+  profile?: any;
+  memoryMd: string;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export async function getProjectMemory(path: string): Promise<ProjectMemoryInfo> {
+  const res = await fetch(`${API_BASE}/api/project/memory?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error(`Failed to get project memory: ${res.status}`);
+  return res.json();
+}
+
+export async function updateProjectMemory(path: string, content: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/project/memory`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content }),
+  });
+  if (!res.ok) throw new Error(`Failed to update project memory: ${res.status}`);
+}
+
+export async function appendProjectMemory(path: string, content: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/project/memory/append`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content }),
+  });
+  if (!res.ok) throw new Error(`Failed to append project memory: ${res.status}`);
+}

@@ -25,6 +25,8 @@ import { capturePreview, checkServerHealth } from './browserPreview';
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import * as evals from './evals';
 import { filterToolsForTrustMode, checkToolActionPolicy, type TrustMode } from './toolPolicy';
+import * as sessionStore from './sessionStore';
+import * as projectMemory from './projectMemory';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -290,6 +292,16 @@ function runShellCommand(command: string, cwd: string, timeoutMs = 30000): Promi
 // ── In-memory store ────────────────────────────────────
 const sessions: Map<string, SessionRow> = new Map();
 
+
+// Load persisted sessions from disk on startup
+const persisted = sessionStore.loadAllSessions();
+for (const s of persisted) {
+  sessions.set(s.id, {
+    ...s,
+    messages: s.messages || [],
+  });
+}
+if (persisted.length > 0) console.log(`✓ Loaded ${persisted.length} persisted session(s)`);
 // ── Session Routes ─────────────────────────────────────
 
 app.get('/api/sessions', (_req, res) => {
@@ -325,11 +337,13 @@ app.post('/api/sessions', (req, res) => {
     updatedAt: new Date().toISOString(),
   };
   sessions.set(session.id, session);
+  sessionStore.saveSession(session);
   res.status(201).json(session);
 });
 
 app.delete('/api/sessions/:id', (req, res) => {
   sessions.delete(req.params.id);
+  sessionStore.deleteSession(req.params.id);
   res.status(204).end();
 });
 
@@ -876,6 +890,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     session.title = content.slice(0, 60);
   }
   session.updatedAt = new Date().toISOString();
+    sessionStore.saveSession(session);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -1183,7 +1198,7 @@ async function streamModel(
     role: classifiedRole,
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
-    projectProfileSummary: [projectProfile ? formatProjectProfileForPrompt(projectProfile) : '', orchestrationInstruction(route)].filter(Boolean).join('\n\n') || undefined,
+    projectProfileSummary: [projectProfile ? formatProjectProfileForPrompt(projectProfile) : undefined, session.workingDir ? projectMemory.formatMemoryForPrompt(session.workingDir) : undefined, orchestrationInstruction(route)].filter(Boolean).join('\n\n') || undefined,
     tools: filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
     enableThinking: isReasoningModel(effectiveModel),
   });
@@ -1384,6 +1399,7 @@ async function streamModel(
     });
     session.updatedAt = new Date().toISOString();
 
+    sessionStore.saveSession(session);
   } catch (err: any) {
     if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
     res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
@@ -1425,6 +1441,7 @@ async function streamLocalFallback(content: string, res: express.Response, assis
     runTrace: run,
   });
   session.updatedAt = new Date().toISOString();
+  sessionStore.saveSession(session);
 }
 
 function sleep(ms: number) {
@@ -1656,6 +1673,30 @@ app.post('/api/test/batch', async (req, res) => {
 });
 
 // ── Start ──────────────────────────────────────────────
+
+// ── Project Memory Routes ─────────────────────────────
+
+app.get('/api/project/memory', (req, res) => {
+  const path = req.query.path as string;
+  if (!path) return res.status(400).json({ error: 'path is required' });
+  const memory = projectMemory.loadProjectMemory(path);
+  res.json(memory);
+});
+
+app.put('/api/project/memory', (req, res) => {
+  const { path, content } = req.body as { path: string; content: string };
+  if (!path || content == null) return res.status(400).json({ error: 'path and content are required' });
+  projectMemory.saveMemory(path, content);
+  res.json({ ok: true });
+});
+
+app.post('/api/project/memory/append', (req, res) => {
+  const { path, content } = req.body as { path: string; content: string };
+  if (!path || !content) return res.status(400).json({ error: 'path and content are required' });
+  projectMemory.appendToMemory(path, content);
+  res.json({ ok: true });
+});
+
 
 // ── Eval / Model Lab Routes ──────────────────────────
 

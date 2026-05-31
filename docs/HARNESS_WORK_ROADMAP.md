@@ -541,11 +541,11 @@ Make CMDui durable across restarts and able to remember project-specific facts.
 
 ### P1 — Persist sessions to disk
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/sessionStore.ts`
-- [ ] Store sessions under `~/.open-harness/sessions`
-- [ ] Load sessions on server startup
-- [ ] Persist messages and run traces
-- [ ] Add migration support
+- [x] Create `/Users/kevink/Projects/CMDui/server/sessionStore.ts`
+- [x] Store sessions under `~/.open-harness/sessions`
+- [x] Load sessions on server startup
+- [x] Persist messages and run traces
+- [x] Add migration support
 
 Suggested session path:
 
@@ -555,11 +555,11 @@ Suggested session path:
 
 ### P1 — Add project-scoped memory
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/projectMemory.ts`
-- [ ] Store project profiles by path hash
-- [ ] Store memory markdown per project
-- [ ] Load project memory on folder open
-- [ ] Inject compact project memory into prompts
+- [x] Create `/Users/kevink/Projects/CMDui/server/projectMemory.ts`
+- [x] Store project profiles by path hash
+- [x] Store memory markdown per project
+- [x] Load project memory on folder open
+- [x] Inject compact project memory into prompts
 
 Suggested paths:
 
@@ -570,16 +570,16 @@ Suggested paths:
 
 ### P2 — Add “What did we learn?” action
 
-- [ ] Summarize decisions from current session
-- [ ] Summarize repo facts
-- [ ] Summarize commands that worked
-- [ ] Save to project memory
+- [x] Summarize decisions from current session
+- [x] Summarize repo facts
+- [x] Summarize commands that worked
+- [x] Save to project memory
 
 ## Acceptance Criteria
 
-- [ ] Sessions survive server restart.
-- [ ] Project memory survives server restart.
-- [ ] Reopening a repo restores useful context.
+- [x] Sessions survive server restart.
+- [x] Project memory survives server restart.
+- [x] Reopening a repo restores useful context.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
 
