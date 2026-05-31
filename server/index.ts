@@ -27,6 +27,7 @@ import * as evals from './evals';
 import { filterToolsForTrustMode, checkToolActionPolicy, type TrustMode } from './toolPolicy';
 import * as sessionStore from './sessionStore';
 import * as projectMemory from './projectMemory';
+import { getAdapterInfo, discoverLocalProviders } from './providers/registry';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -1673,6 +1674,22 @@ app.post('/api/test/batch', async (req, res) => {
 });
 
 // ── Start ──────────────────────────────────────────────
+
+// ── Provider Adapter Routes ─────────────────────────────
+
+app.get('/api/providers/adapter', (req, res) => {
+  const providerId = req.query.providerId as string;
+  const provider = appConfig.providers.find(p => p.id === providerId);
+  if (!provider) return res.status(404).json({ error: 'Provider not found' });
+  const info = getAdapterInfo(provider.type);
+  res.json(info || { id: 'unknown', name: 'Unknown' });
+});
+
+app.get('/api/providers/local-discovery', async (_req, res) => {
+  const results = await discoverLocalProviders();
+  res.json(results);
+});
+
 
 // ── Project Memory Routes ─────────────────────────────
 

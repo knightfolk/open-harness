@@ -595,10 +595,10 @@ Finish the universal provider harness architecture.
 
 ### P1 — Add provider adapter interface
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/providers/types.ts`
-- [ ] Define `ProviderAdapter`
-- [ ] Define `ProviderChatRequest`
-- [ ] Define `ProviderEvent`
+- [x] Create `/Users/kevink/Projects/CMDui/server/providers/types.ts`
+- [x] Define `ProviderAdapter`
+- [x] Define `ProviderChatRequest`
+- [x] Define `ProviderEvent`
 
 Suggested event type:
 
@@ -614,45 +614,45 @@ type ProviderEvent =
 
 ### P1 — Add OpenAI-compatible adapter
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/providers/openai.ts`
-- [ ] Move current OpenAI-compatible streaming logic into adapter
-- [ ] Support MiniMax, DeepSeek, xAI, Mistral, Z.AI, OpenRouter, Ollama, LM Studio
+- [x] Create `/Users/kevink/Projects/CMDui/server/providers/openai.ts`
+- [x] Move current OpenAI-compatible streaming logic into adapter
+- [x] Support MiniMax, DeepSeek, xAI, Mistral, Z.AI, OpenRouter, Ollama, LM Studio
 
 ### P1 — Add registry
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/providers/registry.ts`
-- [ ] Resolve provider by `{ providerId, modelId }`
-- [ ] Return correct adapter
-- [ ] Normalize model list output
+- [x] Create `/Users/kevink/Projects/CMDui/server/providers/registry.ts`
+- [x] Resolve provider by `{ providerId, modelId }`
+- [x] Return correct adapter
+- [x] Normalize model list output
 
 ### P2 — Add Anthropic adapter
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/providers/anthropic.ts`
-- [ ] Support Messages API
-- [ ] Normalize content blocks
-- [ ] Normalize tool calls
-- [ ] Add provider preset back after working
+- [x] Create `/Users/kevink/Projects/CMDui/server/providers/anthropic.ts`
+- [x] Support Messages API
+- [x] Normalize content blocks
+- [x] Normalize tool calls
+- [x] Add provider preset back after working
 
 ### P2 — Add Gemini adapter
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/providers/gemini.ts`
-- [ ] Support streaming generate content
-- [ ] Normalize tool calls
-- [ ] Add provider preset back after working
+- [x] Create `/Users/kevink/Projects/CMDui/server/providers/gemini.ts`
+- [x] Support streaming generate content
+- [x] Normalize tool calls
+- [x] Add provider preset back after working
 
 ### P2 — Add local discovery
 
-- [ ] Auto-detect Ollama on port `11434`
-- [ ] Auto-detect LM Studio on port `1234`
-- [ ] Offer one-click local provider setup
+- [x] Auto-detect Ollama on port `11434`
+- [x] Auto-detect LM Studio on port `1234`
+- [x] Offer one-click local provider setup
 
 ## Acceptance Criteria
 
 - [ ] Existing MiniMax path still works.
-- [ ] OpenAI-compatible providers use common adapter.
-- [ ] Anthropic works only after native adapter is implemented.
-- [ ] Gemini works only after native adapter is implemented.
-- [ ] Provider settings show accurate capability badges.
+- [x] OpenAI-compatible providers use common adapter.
+- [x] Anthropic works only after native adapter is implemented.
+- [x] Gemini works only after native adapter is implemented.
+- [x] Provider settings show accurate capability badges.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
 
