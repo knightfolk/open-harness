@@ -54,6 +54,7 @@ const THINKING_TAG_PATTERNS: RegExp[] = [
   /<\/?thinking>/gs,
   /<\/?reasoning>/gs,
   /<QDom[\s\S]*?<\/QDom>/g,
+  /<transitioned[\s\S]*?<\/transitioned>/gs,
 ];
 
 function stripThinkingTags(text: string): string {
@@ -63,6 +64,65 @@ function stripThinkingTags(text: string): string {
   }
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
   return cleaned.trimStart();
+}
+
+// ── Monologue stripping ──────────────────────────────────
+// Models sometimes narrate their thinking as plain text before the actual answer.
+// "The user wants me to... Let me explore... Now I have a comprehensive view..."
+// This buffer holds initial text and releases it once structured content begins.
+
+const MONOLOGUE_PATTERNS = /^(The user (wants|asked|is asking)|Let me |I need to |I should |I'll start|I will now|Now I (have|need|will)|First,? I|I'm going to|I should |To (do|answer|complete) this)/i;
+const ANSWER_START = /^(\s*#{1,3}\s|\s*\*\*[^*]+\*\*|\s*---|\s*\|.*\||\s*```|\s*\d+\.\s|\s*[-*]\s|\s*[A-Z][a-z].*:)/;
+
+class MonologueBuffer {
+  private buffer = '';
+  private flushed = false;
+  private readonly maxBuffer = 1500;
+
+  feed(text: string): string | null {
+    if (this.flushed) return text;
+
+    this.buffer += text;
+
+    // Check if we've hit structured content (answer started)
+    const lines = this.buffer.split('\n');
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      // A non-monologue line = the answer has started
+      if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
+        this.flushed = true;
+        // Return everything from this point on
+        const beforeAnswer = lines.slice(0, i).join('\n');
+        // Check if the pre-answer text is all monologue — if so, drop it
+        const monologueLines = beforeAnswer.split('\n').filter(l => l.trim());
+        const allMonologue = monologueLines.every(l => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
+        if (allMonologue) {
+          // Drop the monologue, return from answer start
+          return lines.slice(i).join('\n');
+        } else {
+          // Mixed content — keep it all
+          return this.buffer;
+        }
+      }
+    }
+
+    // Buffer full but no answer detected — flush everything (it's a plain answer)
+    if (this.buffer.length > this.maxBuffer) {
+      this.flushed = true;
+      return this.buffer;
+    }
+
+    // Still buffering — don't emit anything yet
+    return null;
+  }
+
+  flush(): string {
+    this.flushed = true;
+    const remaining = this.buffer;
+    this.buffer = '';
+    return remaining;
+  }
 }
 
 // ── Tool dedup tracking ────────────────────────────────
@@ -705,6 +765,7 @@ async function parseStreamForContentAndTools(
   let buffer = '';
   let content = '';
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+  const monologueBuf = new MonologueBuffer();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -724,11 +785,12 @@ async function parseStreamForContentAndTools(
         const delta = parsed.choices?.[0]?.delta;
         if (!delta) continue;
 
-        // Handle text content
+        // Handle text content (with monologue stripping)
         if (delta.content) {
           content += delta.content;
-          const cleanText = stripThinkingTags(delta.content);
-          if (cleanText) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: cleanText }) + '\n\n');
+          const cleaned = stripThinkingTags(delta.content);
+          const filtered = monologueBuf.feed(cleaned);
+          if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
         }
 
         // Handle tool calls (OpenAI-compatible streaming format)
@@ -747,6 +809,10 @@ async function parseStreamForContentAndTools(
       } catch { /* skip malformed chunks */ }
     }
   }
+
+  // Flush any remaining monologue buffer content
+  const remaining = monologueBuf.flush();
+  if (remaining) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: remaining }) + '\n\n');
 
   const toolCalls = Array.from(toolCallMap.values()).filter((tc) => tc.name);
   return { content, toolCalls };
@@ -788,7 +854,8 @@ async function streamModel(
   if (!promptResult.useNativeToolCalls && mcpApiTools.length > 0) {
     systemPrompt += toolsAsText(mcpApiTools);
   }
-  // Thinking tag leakage is now handled by stripThinkingTags() at output time
+  // Prevent model from narrating its thought process before the answer
+  systemPrompt += '\n\nRULE: Start your response directly with the answer. Do NOT narrate your planning process. Never say things like The user wants me to or Let me or I need to or I will or Now I. Begin immediately with the substantive response.';
 
 
   // ── Context management: fit conversation within model's token budget ──
