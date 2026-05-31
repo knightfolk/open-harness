@@ -1,112 +1,81 @@
-# Next Session — CMDui Universal AI Harness
+# Next Session — Fix Model Response Quality
 
-## Context: What Was Just Shipped
+## Identity
+You are **Friday**, the AI assistant for CMDui. Follow all rules in AGENTS.md.
 
-### Model-Aware Prompt Adaptation Engine (just committed)
+## The Problem
 
-We just built the intelligence layer that adapts prompting behavior per-model. Here's exactly what exists now:
+MiniMax-M2.7 (and likely other models) produce broken/incomplete responses in the chat UI. Here's a real example of a failed interaction:
 
-### New files (committed):
-- `docs/MODEL_PROMPTING_GUIDE.md` — 920-line research doc covering 37 open-source models, 11 families, role recommendations, harness integration guide
-- `server/modelProfiles.ts` — Model family detection (`detectModelFamily()`) + 14 family configs with prompt style, tool quality, temperature, max tokens, stop sequences, quirks
-- `server/promptBuilder.ts` — Runtime prompt adaptation: `buildPromptForModel()` generates model-aware system prompts (4 styles), adapts tool definitions (native vs JSON fallback), sets generation params
-
-### Modified files:
-- `server/index.ts` — `streamMiniMax()` now calls `buildPromptForModel()` instead of hardcoded prompts. Adapts temperature, max_tokens, stop sequences, tool strategy, reasoning support per model.
-- `server/config.ts` — Added role assignment defaults (coder, reasoner, summarizer, title, planner, reviewer, worker)
-
-### Key architecture:
-- **14 model families**: deepseek, llama, qwen, mistral, devstral, codestral, gemma, grok, cohere, nemotron, glm, jamba, phi, minimax (+ unknown fallback)
-- **4 prompt styles**: xml-tagged (Qwen), structured (DeepSeek/Mistral/etc), concise (Gemma/GLM), minimal (Phi)
-- **Tool adaptation**: models with excellent/good tool quality get native tool calls; basic/none get tools-as-text fallback
-- **Reasoning models**: DeepSeek R1, Qwen Thinking, Grok 4.3 capture separate `reasoning_content` stream
-- **Role system**: 7 agent roles (coder, reasoner, summarizer, title, planner, reviewer, worker) each get tailored prompts
-
-### Current config:
-- 3 providers: MiniMax (7 models), Z.AI GLM (7 models), OpenCode Go (16 models = 30 total)
-- Active model: MiniMax-M2.7
-- Docker MCP: context7 + playwright + sequentialthinking (26 tools)
-
----
-
-# Next Steps — Pick Up Here
-
-## Priority 1: Universal Provider Streaming (not just MiniMax)
-Right now `streamMiniMax()` only streams to the MiniMax API endpoint. It needs to route to the correct provider based on the active model.
-
-- [ ] **Resolve provider for active model** — when the model is `glm-5.1`, find that it belongs to the `z-ai` provider, get that provider's `baseURL` and `apiKey`
-- [ ] **Replace `MINIMAX_API_URL` with dynamic URL** — build the chat completions URL from the provider's `baseURL` (e.g., `https://api.z.ai/api/coding/paas/v4/chat/completions`)
-- [ ] **Rename `streamMiniMax()` → `streamModel()`** — it's no longer MiniMax-specific
-- [ ] **Test with Z.AI GLM models** — switch active model to `glm-5.1`, verify streaming works through the Z.AI endpoint
-- [ ] **Test with OpenCode Go models** — switch to `deepseek-v4-flash` via OpenCode Go, verify streaming
-- [ ] **Add provider resolution helper** in `server/config.ts`: `getProviderForModel(modelId)` → returns the StoredProvider + credentials
-
-This is the biggest single unlock. Once streaming works for any provider, the model switcher in the UI becomes fully functional.
-
-## Priority 2: Anthropic Messages API Adapter
-When users add Anthropic as a provider, the streaming format is different (SSE with `content_block_delta` events).
-
-- [ ] **Create `server/anthropicAdapter.ts`** — convert `messages` array to Anthropic format, handle streaming response parsing
-- [ ] **Detect provider type** in the stream function and route to the appropriate adapter
-- [ ] The provider type is already stored as `type: 'anthropic'` in config
-
-## Priority 3: Frontend Model Switcher Enhancement
-The model selector exists but needs to surface the new prompt profiles:
-
-- [ ] **Show model family info** — display detected family, prompt style, tool quality badge in the model dropdown
-- [ ] **Show recommended role** — highlight which models are best for coding vs reasoning vs summarization
-- [ ] **Visual indicator for reasoning models** — badge or icon for models that have native thinking
-- [ ] **Show prompt profile summary** — when hovering a model, show "Structured | 16K output | Excellent tools"
-
-## Priority 4: Subagent System (uses model profiles)
-The types exist (`SubAgent` in `src/types/index.ts`) but the runtime doesn't yet:
-
-- [ ] **Server-side subagent spawning** — `POST /api/sessions/:id/subagents` that creates a child chat session with a different model
-- [ ] **Role-based model selection** — when spawning a subagent, use `getRoleModelRecommendation(role)` to pick the best model from available providers
-- [ ] **Subagent streaming** — child agents stream their results back to the parent session
-- [ ] **Role assignment config** — `roleAssignments` in config maps role → modelId (defaults already set, needs server logic to read them)
-- [ ] **Subagent prompt isolation** — each subagent gets its own `buildPromptForModel()` call with its role-specific prompt
-
-## Priority 5: Tool Result Formatting & UX
-- [ ] Better tool result formatting (currently raw JSON, should be summarized)
-- [ ] Handle tool call errors with retry logic
-- [ ] Support parallel tool calls from a single assistant turn
-- [ ] Add tool call progress indicators in the UI
-- [ ] Streaming tool results for long-running operations
-
-## Priority 6: Model Profile Auto-Tuning
-The profiles are static right now. They should learn from usage:
-- [ ] Track per-model success rates on tool calls, code generation quality, etc.
-- [ ] Adjust temperature/strategy based on observed performance
-- [ ] Surface "model performance" stats in the settings UI
-
-## Future (from PLAN.md)
-- Google Gemini adapter (native `generateContent` format)
-- Auto-discovery for Ollama/LM Studio on startup
-- Provider health checks
-- Token usage tracking per-provider
-- Cost estimation display
-- Role bucket auto-suggestions from MODEL_LANDSCAPE.md
-
----
-
-# Quick Start for Next Session
-1. Read this file and `docs/MODEL_PROMPTING_GUIDE.md` for full context
-2. Pick up **Priority 1** (universal provider streaming) — it's the highest-impact single change
-3. The model profiles (`server/modelProfiles.ts`) and prompt builder (`server/promptBuilder.ts`) are already wired and working — they just need the provider routing layer to shine
-
-The commit is: `feat: add model-aware prompt adaptation engine` (5f833ed)
-
-# File Map
 ```
-server/
-  index.ts          — Express server, streaming chat, all API routes
-  config.ts         — Config loading/saving, provider/MCP helpers
-  providers.ts      — Provider connection testing, model fetching
-  modelProfiles.ts  — Model family detection + per-family prompt configs (NEW)
-  promptBuilder.ts   — Runtime prompt adaptation engine (NEW)
-  mcp.ts            — MCP client manager (Docker MCP, stdio transport)
-docs/
-  MODEL_PROMPTING_GUIDE.md  — 920-line research doc (NEW)
-  MODEL_LANDSCAPE.md        — Older high-level model overview
+User: "please do a full review of the project folder and give a detailed description"
+
+Model response:
+"The user wants a full review of their project folder. I'll start by listing the directory contents to understand the project structure.
+This is a monorepo using pnpm workspaces with Turbo. Let me explore deeper into the apps and packages directories.
+This is a monorepo using pnpm workspaces and Turbo. Let me explore deeper into each package.
+Let me dive deeper into each package to understand the source code and structure better.
+Let me dive deeper into the source files to understand the codebase better.
+Let me read some key files to understand the project better."
+[RESPONSE ENDS HERE — no actual summary, no review, just narration]
 ```
+
+Another example:
+```
+User: "what should be done next? are there any open items or are we ready for testing?"
+Model: <transitioned></transitioned>
+[EMPTY RESPONSE]
+
+User: "are you broken, or Brokeback?"
+Model: [EMPTY RESPONSE]
+```
+
+## Root Causes (as best we can tell)
+
+1. **Monologue narration instead of answers** — The model narrates "Let me explore... Now I have... Let me read..." as plain text between tool rounds, but never actually produces the final summary. The MonologueBuffer in `server/index.ts` tries to strip these, but the model still wastes all its output tokens on narration.
+
+2. **Empty responses after tool rounds** — The model returns `<transitioned></transitioned>` or empty content, especially on follow-up messages. This suggests the model is hitting the MAX_TOOL_ROUNDS limit without ever generating a final answer, OR the streaming parser is not capturing the final response correctly.
+
+3. **Tool-round narration leaks** — Between tool calls, the model outputs sentences like "This is a monorepo using pnpm workspaces with Turbo. Let me explore deeper..." as regular text content. These appear to be mid-investigation monologue that the model doesn't distinguish from its final answer.
+
+## What We've Already Done
+
+- `stripThinkingTags()` — strips `<think/>`, `<QDom/>`, `<transitioned/>` tags from output
+- `MonologueBuffer` class — buffers initial text, drops monologue preamble once structured content starts
+- Anti-monologue system prompt rule — tells model to start directly with the answer
+- Tool dedup tracker — skips redundant `list_directory`/`read_file` calls
+
+These helped but **did NOT fully fix the problem**. The model still:
+- Narrates between tool rounds as plain text
+- Sometimes ends without producing a final answer
+- Sometimes responds with only `<transitioned>` tags
+
+## Key Files
+
+- `server/index.ts` (~1280 lines) — Express server, streaming, tool invocation, MonologueBuffer, test endpoints
+- `server/contextManager.ts` — token budgeting, sliding window
+- `server/promptBuilder.ts` — model-aware system prompt generation
+- `server/modelProfiles.ts` — per-model-family configs (context window, tool quality, prompt style)
+- `AGENTS.md` — project rules
+
+## Your Mission
+
+**Fix the model response quality so users get real answers, not narration or empties.**
+
+### Approach
+
+1. **Read the actual streaming logic carefully** — trace exactly what happens when the model produces text between tool calls vs after the last tool round. The issue may be in how we distinguish "intermediate narration" from "final answer".
+
+2. **Check if the model is running out of rounds** — MAX_TOOL_ROUNDS is 6. If the model uses all 6 rounds doing tool calls and narration, it may never reach the final answer round. Consider: increasing rounds, or detecting when the model is narrating instead of calling tools.
+
+3. **Test with the actual app** — start the server (`npx tsx server/index.ts`), start Vite (`npx vite --port 5173 --host`), open Safari, and send the exact failing prompts. Watch the server logs. See what actually comes back from the API.
+
+4. **Consider a two-pass approach** — after tool rounds complete, if the final content is too short or looks like narration (no headings, no lists, no structured content), send one more request asking for the actual summary based on gathered context.
+
+5. **Look at the raw API response** — add temporary debug logging to see exactly what the model returns in each streaming chunk. The issue might be that we're discarding valid content or not handling the stream correctly.
+
+### Success Criteria
+
+1. Sending "review this project folder and give me a detailed description" produces a real structured answer (headings, tables, bullet points) — not narration
+2. Follow-up messages like "what should be done next?" get real answers, not `<transitioned>` empties
+3. The app is live in Safari and these work verified with real sends
