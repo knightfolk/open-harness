@@ -24,6 +24,7 @@ import * as git from './git';
 import { capturePreview, checkServerHealth } from './browserPreview';
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import * as evals from './evals';
+import { filterToolsForTrustMode, checkToolActionPolicy, type TrustMode } from './toolPolicy';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -355,6 +356,7 @@ app.put('/api/config', (req, res) => {
   // Only allow updating safe fields
   if (updates.personality !== undefined) appConfig.personality = updates.personality;
   if (updates.activeModel !== undefined) appConfig.activeModel = updates.activeModel;
+  if (updates.trustMode !== undefined) appConfig.trustMode = updates.trustMode;
   if (updates.activeTheme !== undefined) appConfig.activeTheme = updates.activeTheme;
   if (updates.roleAssignments !== undefined) appConfig.roleAssignments = updates.roleAssignments;
   saveConfig(appConfig);
@@ -641,6 +643,9 @@ app.get('/api/fs/read', (req, res) => {
 app.post('/api/terminal/exec', async (req, res) => {
   const { command, cwd } = req.body as { command: string; cwd?: string };
   if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
+  const cmdTrustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const cmdPolicy = checkToolActionPolicy('exec_command', { command, cwd }, cmdTrustMode, cwd);
+  if (!cmdPolicy.allowed) return res.status(403).json({ error: cmdPolicy.reason || 'Command not allowed' });
 
   const workingDir = cwd || homedir();
   const start = Date.now();
@@ -1139,6 +1144,10 @@ async function streamModel(
 
   // Gather MCP tools from all connected servers first
   const { tools: mcpApiTools, toolServerMap } = gatherMCPToolsForAPI();
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const toolPolicyResult = filterToolsForTrustMode(mcpApiTools, trustMode);
+  const filteredMcpTools = mcpApiTools.filter((t: any) => toolPolicyResult.filteredTools?.includes(t.function?.name || t.name));
+  if (toolPolicyResult.reason) console.log('[trust]' + toolPolicyResult.reason);
 
   // Build the complete prompt configuration for this model.
   const lastUserMsg = messages.filter(m => m.role === 'user').pop();
@@ -1175,7 +1184,7 @@ async function streamModel(
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
     projectProfileSummary: [projectProfile ? formatProjectProfileForPrompt(projectProfile) : '', orchestrationInstruction(route)].filter(Boolean).join('\n\n') || undefined,
-    tools: mcpApiTools.length > 0 ? mcpApiTools : undefined,
+    tools: filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
     enableThinking: isReasoningModel(effectiveModel),
   });
 
@@ -1201,7 +1210,7 @@ async function streamModel(
   ];
   if (run) {
     run.context = { tokensUsed: ctx.tokensUsed, budget: ctx.budget.availableForHistory, compressedCount: ctx.compressedCount, summarized: ctx.summarized };
-    emitRunStep(res, run, { type: 'prompt_built', promptPreview: systemPrompt.slice(0, 500), toolCount: mcpApiTools.length });
+    emitRunStep(res, run, { type: 'prompt_built', promptPreview: systemPrompt.slice(0, 500), toolCount: filteredMcpTools.length });
   }
 
   if (ctx.compressedCount > 0 || ctx.summarized) {
@@ -1225,8 +1234,8 @@ async function streamModel(
         temperature: promptResult.generationConfig.temperature,
       };
       // Leave the final round tool-free so the model must produce a user-facing answer.
-      if (round < MAX_TOOL_ROUNDS - 1 && mcpApiTools.length > 0 && promptResult.useNativeToolCalls) {
-        requestBody.tools = mcpApiTools;
+      if (round < MAX_TOOL_ROUNDS - 1 && filteredMcpTools.length > 0 && promptResult.useNativeToolCalls) {
+        requestBody.tools = filteredMcpTools;
       } else if (round === MAX_TOOL_ROUNDS - 1) {
         // Final round — inject synthesis instruction so the model produces a real answer
         apiMessages.push({

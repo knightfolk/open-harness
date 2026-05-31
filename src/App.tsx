@@ -81,6 +81,7 @@ function App() {
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
   const [contextWarning, setContextWarning] = useState<string | null>(null);
+  const [trustMode, setTrustMode] = useState('workspace-write');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -186,6 +187,7 @@ function App() {
                 modelId: config.roleAssignments?.[r.id] || legacyRoleModel(config.roleAssignments, r.id) || r.modelId,
               }))
             );
+          if (config.trustMode) setTrustMode(config.trustMode);
           }
         }
         const servers = await api.getMCPServers();
@@ -607,6 +609,10 @@ function App() {
   }, [handleSendMessage]);
 
 
+  const handleTrustModeChange = useCallback((mode: string) => {
+    setTrustMode(mode);
+    api.updateConfig({ trustMode: mode }).catch(() => {});
+  }, []);
   // Build visible panel set
   const visiblePanels = new Set<PanelId>();
   const collectPanels = (node: any) => {
@@ -741,6 +747,8 @@ function App() {
             return { id, name: id, providerName: prov?.name || 'Unknown', contextWindow: ctx };
           })}
           onModelChange={handleSelectModel}
+          trustMode={trustMode}
+          onTrustModeChange={handleTrustModeChange}
         />
       </main>
 

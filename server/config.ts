@@ -41,6 +41,7 @@ export interface StoredConfig {
   activeModel: string;
   activeTheme: string;
   roleAssignments: Record<string, string>; // roleId -> modelId
+  trustMode: string; // TrustMode
 }
 
 // ── Config path ────────────────────────────────────────
@@ -66,6 +67,7 @@ const DEFAULT_CONFIG: StoredConfig = {
   personality: '',
   activeModel: 'MiniMax-M2.7',
   activeTheme: 'midnight',
+  trustMode: 'workspace-write',
   roleAssignments: {
     coder: 'MiniMax-M2.7',       // Primary coding agent
     reasoner: 'MiniMax-M2.7',    // Complex reasoning / planning
@@ -99,7 +101,8 @@ export function loadConfig(): StoredConfig {
       ...parsed,
       providers: parsed.providers || cloneDefaultConfig().providers,
       mcpServers: parsed.mcpServers || [],
-      roleAssignments: {
+      trustMode: 'workspace-write',
+  roleAssignments: {
         ...DEFAULT_CONFIG.roleAssignments,
         ...normalizeRoleAssignments(parsed.roleAssignments || {}),
       },

@@ -473,9 +473,9 @@ Make local agent actions powerful but understandable and controllable.
 
 ### P0 — Add trust modes
 
-- [ ] Update `/Users/kevink/Projects/CMDui/server/config.ts`
-- [ ] Add trust mode to persisted config
-- [ ] Update `/Users/kevink/Projects/CMDui/src/components/SettingsModal.tsx`
+- [x] Update `/Users/kevink/Projects/CMDui/server/config.ts`
+- [x] Add trust mode to persisted config
+- [x] Update `/Users/kevink/Projects/CMDui/src/components/SettingsModal.tsx`
 
 Suggested type:
 
@@ -490,17 +490,17 @@ type TrustMode =
 
 ### P0 — Add tool permission policy
 
-- [ ] Create `/Users/kevink/Projects/CMDui/server/toolPolicy.ts`
-- [ ] Filter model tools by trust mode
-- [ ] Block write/terminal tools in read-only mode
-- [ ] Restrict workspace-write mode to `workingDir`
-- [ ] Add policy checks to built-in tools
+- [x] Create `/Users/kevink/Projects/CMDui/server/toolPolicy.ts`
+- [x] Filter model tools by trust mode
+- [x] Block write/terminal tools in read-only mode
+- [x] Restrict workspace-write mode to `workingDir`
+- [x] Add policy checks to built-in tools
 
 ### P1 — Add command risk classifier
 
-- [ ] Classify safe commands
-- [ ] Classify risky commands
-- [ ] Confirm or block destructive commands
+- [x] Classify safe commands
+- [x] Classify risky commands
+- [x] Confirm or block destructive commands
 - [ ] Add clear error messages
 
 Risky command examples:
@@ -515,16 +515,16 @@ Risky command examples:
 
 ### P1 — Add trust badge to status bar
 
-- [ ] Update `/Users/kevink/Projects/CMDui/src/components/StatusBar.tsx`
-- [ ] Show current trust mode
+- [x] Update `/Users/kevink/Projects/CMDui/src/components/StatusBar.tsx`
+- [x] Show current trust mode
 - [ ] Show enabled tool count
 - [ ] Show active workspace
 
 ## Acceptance Criteria
 
-- [ ] Read-only mode exposes no write/terminal tools.
-- [ ] Workspace-write mode cannot write outside project.
-- [ ] Dangerous shell commands are blocked or require confirmation.
+- [x] Read-only mode exposes no write/terminal tools.
+- [x] Workspace-write mode cannot write outside project.
+- [x] Dangerous shell commands are blocked or require confirmation.
 - [ ] Status bar clearly shows current trust mode.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.

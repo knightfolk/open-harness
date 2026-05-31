@@ -87,6 +87,7 @@ export interface AppConfig {
   activeModel: string;
   activeTheme: string;
   roleAssignments: Record<string, string>;
+  trustMode: string;
 }
 
 export async function getConfig(): Promise<AppConfig | null> {
@@ -97,7 +98,7 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments'>>): Promise<void> {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'trustMode'>>): Promise<void> {
   await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
