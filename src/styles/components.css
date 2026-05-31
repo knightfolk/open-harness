@@ -593,7 +593,7 @@
 
 .input-container:focus-within {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px var(--accent-primary-muted);
+  /* focus ring removed — single border only */
 }
 
 .input-top {
@@ -2436,7 +2436,7 @@ button:focus-visible {
 }
 .personality-textarea:focus {
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px var(--accent-primary-muted);
+  /* focus ring removed — single border only */
 }
 .personality-textarea::placeholder {
   color: var(--text-tertiary);

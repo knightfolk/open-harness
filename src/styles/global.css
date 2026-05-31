@@ -355,3 +355,9 @@ body {
   background: var(--accent-primary-muted);
   color: var(--accent-primary-hover);
 }
+
+/* Context warning toast animation */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

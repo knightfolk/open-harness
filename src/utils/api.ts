@@ -99,6 +99,8 @@ export interface ModelInfo {
   providerId: string;
   providerName: string;
   type: string;
+  family: string;
+  contextWindowTokens: number;
 }
 
 export async function getProviders(): Promise<ProviderInfo[]> {

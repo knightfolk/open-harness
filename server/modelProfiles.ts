@@ -9,6 +9,8 @@ export interface ModelPromptConfig {
   family: string;
   systemPromptStyle: 'structured' | 'concise' | 'xml-tagged' | 'minimal';
   maxSystemPromptTokens: number;
+  /** Total context window in tokens for this model family. */
+  contextWindowTokens: number;
   toolCallQuality: 'excellent' | 'good' | 'basic' | 'none';
   preferNativeToolCalls: boolean;
   reasoningSupport: 'native-thinking' | 'prompt-based-cot' | 'none';
@@ -26,7 +28,7 @@ export interface ModelPromptConfig {
 const FAMILY_PATTERNS: Array<[RegExp, string]> = [
   [/\bdeepseek\b/i, 'deepseek'],
   [/\bllama\b/i, 'llama'],
-  [/\bqwen\b/i, 'qwen'],
+  [/qwen[\d._-]?/i, 'qwen'],
   [/\bdevstral\b/i, 'devstral'],
   [/\bcodestral\b/i, 'codestral'],
   [/\bmistral\b/i, 'mistral'],
@@ -36,7 +38,7 @@ const FAMILY_PATTERNS: Array<[RegExp, string]> = [
   [/\bnemotron\b/i, 'nemotron'],
   [/\bglm\b|\bz-?ai\b/i, 'glm'],
   [/\bjamba\b|\bai21\b/i, 'jamba'],
-  [/\bphi[\-_]?4?\b/i, 'phi'],
+  [/phi[\d._-]?/i, 'phi'],
   [/\bminimax\b|\bm2[\.\-]?7?\b/i, 'minimax'],
 ];
 
@@ -60,6 +62,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'deepseek',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 131072,
     toolCallQuality: 'excellent',
     preferNativeToolCalls: true,
     reasoningSupport: 'native-thinking',
@@ -78,6 +81,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'llama',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 1500,
+    contextWindowTokens: 131072,
     toolCallQuality: 'good',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -96,6 +100,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'qwen',
     systemPromptStyle: 'xml-tagged',
     maxSystemPromptTokens: 3000,
+    contextWindowTokens: 1000000,
     toolCallQuality: 'excellent',
     preferNativeToolCalls: true,
     reasoningSupport: 'native-thinking',
@@ -114,6 +119,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'mistral',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 131072,
     toolCallQuality: 'excellent',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -132,6 +138,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'devstral',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 131072,
     toolCallQuality: 'excellent',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -150,6 +157,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'codestral',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 32768,
     toolCallQuality: 'good',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -167,6 +175,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'gemma',
     systemPromptStyle: 'concise',
     maxSystemPromptTokens: 500,
+    contextWindowTokens: 131072,
     toolCallQuality: 'basic',
     preferNativeToolCalls: false,
     reasoningSupport: 'none',
@@ -185,6 +194,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'grok',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 131072,
     toolCallQuality: 'excellent',
     preferNativeToolCalls: true,
     reasoningSupport: 'native-thinking',
@@ -203,6 +213,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'cohere',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 131072,
     toolCallQuality: 'good',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -221,6 +232,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'nemotron',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 1500,
+    contextWindowTokens: 131072,
     toolCallQuality: 'basic',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -238,6 +250,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'glm',
     systemPromptStyle: 'concise',
     maxSystemPromptTokens: 1000,
+    contextWindowTokens: 131072,
     toolCallQuality: 'good',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -255,6 +268,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'jamba',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 262144,
     toolCallQuality: 'basic',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -273,6 +287,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'phi',
     systemPromptStyle: 'minimal',
     maxSystemPromptTokens: 300,
+    contextWindowTokens: 16384,
     toolCallQuality: 'none',
     preferNativeToolCalls: false,
     reasoningSupport: 'none',
@@ -291,6 +306,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'minimax',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
+    contextWindowTokens: 131072,
     toolCallQuality: 'excellent',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',
@@ -308,6 +324,7 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'unknown',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 1500,
+    contextWindowTokens: 32768,
     toolCallQuality: 'good',
     preferNativeToolCalls: true,
     reasoningSupport: 'prompt-based-cot',

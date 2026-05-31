@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
-import { readFileSync, readdirSync, statSync, existsSync, lstatSync } from 'fs';
+import { readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync, mkdirSync as mkdirSyncFs } from 'fs';
 import { join, basename, extname } from 'path';
 import { homedir } from 'os';
 import { execSync, spawn } from 'child_process';
@@ -10,6 +10,7 @@ import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
 import { getModelConfig, isReasoningModel, detectModelFamily } from './modelProfiles';
+import { buildContextWindow, estimateTokens } from './contextManager';
 import { buildPromptForModel, toolsAsText } from './promptBuilder';
 
 const app = express();
@@ -45,6 +46,58 @@ interface ToolCallRow {
 
 // ── Config ─────────────────────────────────────────────
 let appConfig = loadConfig();
+
+
+// ── Thinking tag stripping ─────────────────────────────
+const THINKING_TAG_PATTERNS: RegExp[] = [
+  /<\/?think>/gs,
+  /<\/?thinking>/gs,
+  /<\/?reasoning>/gs,
+  /<QDom[\s\S]*?<\/QDom>/g,
+];
+
+function stripThinkingTags(text: string): string {
+  let cleaned = text;
+  for (const pattern of THINKING_TAG_PATTERNS) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  return cleaned.trimStart();
+}
+
+// ── Tool dedup tracking ────────────────────────────────
+interface ToolCallTracker {
+  listedDirs: Set<string>;
+  readFiles: Set<string>;
+}
+
+function createToolTracker(): ToolCallTracker {
+  return { listedDirs: new Set(), readFiles: new Set() };
+}
+
+function isRedundantToolCall(tracker: ToolCallTracker, name: string, args: Record<string, any>): boolean {
+  if (name === 'list_directory') {
+    const dir = (args.path as string || '').replace(/\/+$/, '');
+    if (tracker.listedDirs.has(dir)) return true;
+    tracker.listedDirs.add(dir);
+  }
+  if (name === 'read_file') {
+    const file = (args.path as string || '').replace(/\/+$/, '');
+    if (tracker.readFiles.has(file)) return true;
+    tracker.readFiles.add(file);
+  }
+  return false;
+}
+
+// ── Test run status tracking ───────────────────────────
+const activeTestRuns: Map<string, { total: number; completed: number; status: string; results: any[] }> = new Map();
+
+// ── Resolve provider for any model (no global mutation) ──
+function resolveProviderForModel(modelId: string): { chatURL: string; apiKey: string; providerId: string } | null {
+  const resolved = getProviderForModel(appConfig, modelId);
+  if (!resolved) return null;
+  return { chatURL: resolved.chatURL, apiKey: resolved.apiKey, providerId: resolved.provider.id };
+}
 
 // ── Provider resolution ─────────────────────────────
 function resolveActiveProvider(): { chatURL: string; apiKey: string; providerId: string } | null {
@@ -331,13 +384,19 @@ app.get('/api/models', (_req, res) => {
     .flatMap((p) =>
       p.models
         .filter((m) => m.enabled)
-        .map((m) => ({
-          id: m.id,
-          name: m.name,
-          providerId: p.id,
-          providerName: p.name,
-          type: p.type,
-        }))
+        .map((m) => {
+          const family = detectModelFamily(m.id);
+          const profile = getModelConfig(m.id);
+          return {
+            id: m.id,
+            name: m.name,
+            providerId: p.id,
+            providerName: p.name,
+            type: p.type,
+            family,
+            contextWindowTokens: profile.contextWindowTokens,
+          };
+        })
     );
   res.json(models);
 });
@@ -503,6 +562,58 @@ function gatherMCPToolsForAPI(): { tools: any[]; toolServerMap: Record<string, s
   const status = mcpManager.getStatus();
   const tools: any[] = [];
   const toolServerMap: Record<string, string> = {};
+
+  // ── Built-in filesystem tools (always available) ────
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'list_directory',
+      description: 'List files and directories at a given path. Returns name, type (file/directory), size, and extension for each entry.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Absolute directory path to list' },
+        },
+        required: ['path'],
+      },
+    },
+  });
+  toolServerMap['list_directory'] = '__builtin__';
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Read the contents of a file. Returns the file content as text. Max 1MB.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Absolute file path to read' },
+        },
+        required: ['path'],
+      },
+    },
+  });
+  toolServerMap['read_file'] = '__builtin__';
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'exec_command',
+      description: 'Execute a shell command and return stdout/stderr. Use for running git, grep, wc, find, etc. 30s timeout, 1MB max output.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute' },
+          cwd: { type: 'string', description: 'Working directory (optional)' },
+        },
+        required: ['command'],
+      },
+    },
+  });
+  toolServerMap['exec_command'] = '__builtin__';
+
+  // ── MCP tools from Docker/external servers ──────────
   for (const server of status) {
     if (!server.running) continue;
     const client = mcpManager.getClient(server.id);
@@ -529,7 +640,58 @@ async function invokeMCPTool(
   toolServerMap: Record<string, string>,
 ): Promise<any> {
   const serverId = toolServerMap[toolName];
-  if (!serverId) throw new Error('No MCP server for tool: ' + toolName);
+  if (!serverId) throw new Error('No server for tool: ' + toolName);
+
+  // ── Built-in tools (handled locally) ────────────────
+  if (serverId === '__builtin__') {
+    switch (toolName) {
+      case 'list_directory': {
+        const dir = args.path as string;
+        if (!dir || !existsSync(dir)) return { error: 'Invalid path' };
+        try {
+          const stat = statSync(dir);
+          if (!stat.isDirectory()) return { error: 'Not a directory' };
+          const entries = readdirSync(dir)
+            .filter(name => !name.startsWith('.'))
+            .map(name => {
+              try {
+                const full = join(dir, name);
+                const s = lstatSync(full);
+                return { name, type: s.isDirectory() ? 'directory' : 'file', size: s.size, extension: s.isFile() ? extname(name).toLowerCase() : undefined };
+              } catch { return null; }
+            })
+            .filter(Boolean)
+            .sort((a: any, b: any) => a.type !== b.type ? (a.type === 'directory' ? -1 : 1) : a.name.localeCompare(b.name));
+          return { path: dir, entries };
+        } catch (err: any) { return { error: err.message }; }
+      }
+      case 'read_file': {
+        const filePath = args.path as string;
+        if (!filePath || !existsSync(filePath)) return { error: 'Invalid path' };
+        try {
+          const stat = statSync(filePath);
+          if (stat.isDirectory()) return { error: 'Path is a directory' };
+          if (stat.size > 1024 * 1024) return { error: 'File too large (max 1MB)' };
+          return { path: filePath, content: readFileSync(filePath, 'utf-8'), size: stat.size };
+        } catch (err: any) { return { error: err.message }; }
+      }
+      case 'exec_command': {
+        const command = args.command as string;
+        const cwd = (args.cwd as string) || homedir();
+        if (!command?.trim()) return { error: 'No command' };
+        try {
+          const output = execSync(command, { cwd, timeout: 30000, maxBuffer: 1024 * 1024, encoding: 'utf-8', shell: '/bin/zsh' });
+          return { output: output || '', exitCode: 0, cwd };
+        } catch (err: any) {
+          return { output: (err.stdout || '') + (err.stderr || ''), exitCode: err.status || 1, cwd };
+        }
+      }
+      default:
+        return { error: 'Unknown built-in tool: ' + toolName };
+    }
+  }
+
+  // ── MCP tools (handled by MCP manager) ──────────────
   return mcpManager.callTool(serverId, toolName, args);
 }
 
@@ -565,7 +727,8 @@ async function parseStreamForContentAndTools(
         // Handle text content
         if (delta.content) {
           content += delta.content;
-          res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: delta.content }) + '\n\n');
+          const cleanText = stripThinkingTags(delta.content);
+          if (cleanText) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: cleanText }) + '\n\n');
         }
 
         // Handle tool calls (OpenAI-compatible streaming format)
@@ -598,11 +761,12 @@ async function streamModel(
   res: express.Response,
   assistantId: string,
   session: SessionRow,
+  overrideModelId?: string,
 ) {
   // ── Model-aware prompt building ─────────────────────
   // Use the promptBuilder to generate a system prompt, tool config, and
   // generation parameters adapted to the active model's family profile.
-  const activeModel = getActiveModel();
+  const activeModel = overrideModelId || getActiveModel();
   const modelConfig = getModelConfig(activeModel);
   const personality = getPersonality();
 
@@ -624,16 +788,27 @@ async function streamModel(
   if (!promptResult.useNativeToolCalls && mcpApiTools.length > 0) {
     systemPrompt += toolsAsText(mcpApiTools);
   }
-  systemPrompt += '\n\nDo not output hidden reasoning tags such as <think).';
+  // Thinking tag leakage is now handled by stripThinkingTags() at output time
 
 
-  // Build messages array (grows with tool results each round)
+  // ── Context management: fit conversation within model's token budget ──
+  const sessionMsgs: any[] = messages.map(({ role, content }) => ({ role: role as string, content }));
+  const ctx = buildContextWindow(
+    sessionMsgs,
+    activeModel,
+    systemPrompt,
+    promptResult.generationConfig.max_tokens,
+  );
   const apiMessages: any[] = [
     { role: 'system', content: systemPrompt },
-    ...messages.map(({ role, content }) => ({ role: role as string, content })),
+    ...ctx.messages,
   ];
+  if (ctx.compressedCount > 0 || ctx.summarized) {
+    console.log(`[ctx] ${activeModel}: kept ${ctx.keptCount}/${messages.length} msgs, ${ctx.compressedCount} compressed, budget ${ctx.tokensUsed}/${ctx.budget.availableForHistory} tokens`);
+  }
 
   const MAX_TOOL_ROUNDS = 6;
+  const toolTracker = createToolTracker();
   let finalContent = '';
   const sessionToolCalls: ToolCallRow[] = [];
 
@@ -649,9 +824,8 @@ async function streamModel(
       // Leave the final round tool-free so the model must produce a user-facing answer.
       if (round < MAX_TOOL_ROUNDS - 1 && mcpApiTools.length > 0 && promptResult.useNativeToolCalls) {
         requestBody.tools = mcpApiTools;
-      } else if (round === MAX_TOOL_ROUNDS - 1) {
-        apiMessages.push({ role: 'system', content: 'No more tool calls. Based on the available context and tool results, provide the final answer now.' });
       }
+      // On the last round, tools are simply omitted — the model produces its final answer naturally.
 
       const response = await fetch(chatURL, {
         method: 'POST',
@@ -700,6 +874,15 @@ async function streamModel(
         let parsedArgs: any = {};
         try { parsedArgs = JSON.parse(tc.arguments); } catch { parsedArgs = {}; }
 
+        // Skip redundant tool calls (already listed/read this path)
+        if (isRedundantToolCall(toolTracker, tc.name, parsedArgs)) {
+          const skipMsg = `[Skipped: ${tc.name} already called with same path]`;
+          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 }) + '\n\n');
+          apiMessages.push({ role: 'tool', tool_call_id: tcId, content: skipMsg });
+          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 });
+          continue;
+        }
+
         try {
           const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap);
           output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
@@ -726,7 +909,7 @@ async function streamModel(
     session.messages.push({
       id: assistantId,
       role: 'assistant',
-      content: finalContent,
+      content: stripThinkingTags(finalContent),
       timestamp: new Date().toISOString(),
       toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
     });
@@ -768,6 +951,230 @@ async function streamLocalFallback(content: string, res: express.Response, assis
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// ── Test Harness ──────────────────────────────────────
+app.post('/api/test/run', async (req, res) => {
+  const { prompt, modelId, workingDir, testId } = req.body as {
+    prompt: string;
+    modelId?: string;
+    workingDir?: string;
+    testId?: string;
+  };
+
+  if (!prompt?.trim()) return res.status(400).json({ error: 'prompt is required' });
+
+  const tid = testId || 'test-' + Date.now();
+  const targetModel = modelId || appConfig.activeModel;
+  const targetDir = workingDir || '/Users/kevink/Projects/Chains';
+
+  // Create a temporary session for the test
+  const testSession: SessionRow = {
+    id: uuid(),
+    title: `[test] ${tid}`,
+    workingDir: targetDir,
+    messages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  sessions.set(testSession.id, testSession);
+
+  // Resolve provider directly for the target model — no global mutation
+  const resolved = resolveProviderForModel(targetModel);
+  if (!resolved) {
+    res.json({ testId: tid, model: targetModel, error: 'No provider for model', response: '' });
+    return;
+  }
+
+  // Collect full response using a writer callback (no mock res object)
+  const chunks: string[] = [];
+  const toolCalls: any[] = [];
+
+  const writer = {
+    write: (data: string) => {
+      const lines = data.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = line.slice(6);
+          if (payload === '{}' || payload === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.text) chunks.push(parsed.text);
+            if (parsed.name && parsed.status) toolCalls.push(parsed);
+          } catch {}
+        }
+      }
+      return true;
+    },
+    setHeader: () => {},
+    end: () => {},
+  } as unknown as express.Response;
+
+  const userMsg: MessageRow = {
+    id: uuid(),
+    role: 'user',
+    content: prompt,
+    timestamp: new Date().toISOString(),
+  };
+  testSession.messages.push(userMsg);
+
+  // Register this test run for status tracking
+  activeTestRuns.set(tid, { total: 1, completed: 0, status: 'running', results: [] });
+
+  try {
+    await streamModel(
+      resolved.chatURL, resolved.apiKey, resolved.providerId,
+      testSession.messages, writer, uuid(), testSession,
+      targetModel, // pass model directly — no global mutation
+    );
+  } catch (testErr: any) {
+    console.error('[test] streamModel error:', testErr.message);
+  }
+
+  // Update status
+  const runStatus = activeTestRuns.get(tid);
+  if (runStatus) {
+    runStatus.completed = 1;
+    runStatus.status = 'complete';
+  }
+
+  const response = chunks.join('');
+  res.json({
+    testId: tid,
+    model: targetModel,
+    workingDir: targetDir,
+    toolCallCount: toolCalls.length,
+    toolCalls: toolCalls.map(tc => ({ name: tc.name, status: tc.status })),
+    response,
+    messageCount: testSession.messages.length,
+    duration: Date.now() - new Date(testSession.createdAt).getTime(),
+  });
+});
+
+// ── Test status endpoint ──────────────────────────────
+app.get('/api/test/status', (req, res) => {
+  const runId = req.query.runId as string;
+  if (runId) {
+    const run = activeTestRuns.get(runId);
+    if (!run) return res.status(404).json({ error: 'Test run not found' });
+    return res.json({
+      runId,
+      status: run.status,
+      total: run.total,
+      completed: run.completed,
+      results: run.results,
+    });
+  }
+  // Return all active/recent runs
+  const all: any[] = [];
+  for (const [id, run] of activeTestRuns) {
+    all.push({ runId: id, ...run });
+  }
+  res.json(all);
+});
+
+// ── Batch test endpoint (for multi-model testing) ─────
+app.post('/api/test/batch', async (req, res) => {
+  const { prompts, modelIds, workingDir, runId } = req.body as {
+    prompts: Array<{ id: string; name: string; prompt: string }>;
+    modelIds: string[];
+    workingDir?: string;
+    runId?: string;
+  };
+
+  if (!prompts?.length || !modelIds?.length) {
+    return res.status(400).json({ error: 'prompts and modelIds are required' });
+  }
+
+  const tid = runId || 'batch-' + Date.now();
+  const targetDir = workingDir || '/Users/kevink/Projects/Chains';
+  const total = prompts.length * modelIds.length;
+
+  activeTestRuns.set(tid, { total, completed: 0, status: 'running', results: [] });
+
+  // Don't await — stream results as they complete
+  res.json({ runId: tid, total, status: 'running' });
+
+  // Run tests in background
+  const runStatus = activeTestRuns.get(tid)!;
+
+  for (const modelId of modelIds) {
+    const resolved = resolveProviderForModel(modelId);
+    if (!resolved) {
+      for (const p of prompts) {
+        runStatus.results.push({ model: modelId, prompt: p.id, status: 'error', error: 'No provider for model' });
+        runStatus.completed++;
+      }
+      continue;
+    }
+
+    for (const p of prompts) {
+      const testSession: SessionRow = {
+        id: uuid(),
+        title: `[test] ${modelId}--${p.id}`,
+        workingDir: targetDir,
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      sessions.set(testSession.id, testSession);
+
+      const chunks: string[] = [];
+      const toolCalls: any[] = [];
+      const writer = {
+        write: (data: string) => {
+          const lines = data.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const payload = line.slice(6);
+              if (payload === '{}' || payload === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed.text) chunks.push(parsed.text);
+                if (parsed.name && parsed.status) toolCalls.push(parsed);
+              } catch {}
+            }
+          }
+          return true;
+        },
+        setHeader: () => {},
+        end: () => {},
+      } as unknown as express.Response;
+
+      testSession.messages.push({
+        id: uuid(), role: 'user', content: p.prompt, timestamp: new Date().toISOString(),
+      });
+
+      const startMs = Date.now();
+      try {
+        await streamModel(
+          resolved.chatURL, resolved.apiKey, resolved.providerId,
+          testSession.messages, writer, uuid(), testSession,
+          modelId,
+        );
+      } catch (err: any) {
+        console.error(`[test-batch] ${modelId}/${p.id} error:`, err.message);
+      }
+
+      const response = chunks.join('');
+      runStatus.results.push({
+        model: modelId,
+        prompt: p.id,
+        promptName: p.name,
+        status: 'ok',
+        toolCallCount: toolCalls.length,
+        toolCalls: toolCalls.map(tc => ({ name: tc.name, status: tc.status })),
+        responseLength: response.length,
+        response,
+        wallMs: Date.now() - startMs,
+        messageCount: testSession.messages.length,
+        usedTools: toolCalls.some(tc => tc.name === 'list_directory' || tc.name === 'read_file'),
+      });
+      runStatus.completed++;
+    }
+  }
+
+  runStatus.status = 'complete';
+});
 
 // ── Start ──────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;

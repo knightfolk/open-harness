@@ -52,6 +52,8 @@ function App() {
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
+  const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
+  const [contextWarning, setContextWarning] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
@@ -117,15 +119,29 @@ function App() {
         }
         const servers = await api.getMCPServers();
         if (servers.length > 0) setMcpServers(servers);
+        const models = await api.getModels();
+        if (models.length > 0) {
+          const ctxMap = new Map<string, number>();
+          for (const m of models) ctxMap.set(m.id, m.contextWindowTokens);
+          setModelContextWindows(ctxMap);
+        }
       } catch { /* use defaults */ }
     })();
   }, []);
 
   // ── Provider / model handlers ──────────────────────
   const handleSelectModel = useCallback((modelId: string) => {
+    const oldCtx = modelContextWindows.get(activeModel) || 0;
+    const newCtx = modelContextWindows.get(modelId) || 0;
+    if (oldCtx > 0 && newCtx > 0 && newCtx < oldCtx * 0.5) {
+      const oldLabel = oldCtx >= 1_000_000 ? `${(oldCtx / 1_000_000).toFixed(0)}M` : `${Math.round(oldCtx / 1024)}K`;
+      const newLabel = newCtx >= 1_000_000 ? `${(newCtx / 1_000_000).toFixed(0)}M` : `${Math.round(newCtx / 1024)}K`;
+      setContextWarning(`Switching from ${oldLabel} to ${newLabel} context — older messages may be dropped.`);
+      setTimeout(() => setContextWarning(null), 5000);
+    }
     setActiveModel(modelId);
     api.updateConfig({ activeModel: modelId }).catch(() => {});
-  }, []);
+  }, [activeModel, modelContextWindows]);
 
   const handleToggleProviderModel = useCallback((providerId: string, modelId: string) => {
     setProviders((prev) => {
@@ -599,6 +615,20 @@ function App() {
           <div className="status-bar-item">Open-Harness v1.0.0</div>
         </div>
       </main>
+
+      {/* Context Window Warning Toast */}
+      {contextWarning && (
+        <div style={{
+          position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+          border: '1px solid var(--warning, #f59e0b)', borderRadius: 8,
+          padding: '10px 20px', fontSize: 13, zIndex: 10000,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4)', maxWidth: 500, textAlign: 'center',
+          animation: 'fadeSlideUp 0.3s ease',
+        }}>
+          <span style={{ marginRight: 8 }}>⚠️</span>{contextWarning}
+        </div>
+      )}
 
       {/* Snap Zone Overlay */}
       {snapOverlayVisible && <SnapZoneOverlay onSnap={(zone) => { (window as any).CMDuiNative?.snapToZone(zone); setSnapOverlayVisible(false); }} onClose={() => setSnapOverlayVisible(false)} />}
