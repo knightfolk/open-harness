@@ -5,6 +5,9 @@ import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
 import { SettingsModal } from './components/SettingsModal';
+import { OnboardingWizard } from './components/OnboardingWizard';
+import { SmartWelcome } from './components/SmartWelcome';
+import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
 import { randomAgentName } from './utils/names';
 import * as api from './utils/api';
@@ -56,6 +59,7 @@ function App() {
   const [contextWarning, setContextWarning] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
@@ -125,6 +129,12 @@ function App() {
           for (const m of models) ctxMap.set(m.id, m.contextWindowTokens);
           setModelContextWindows(ctxMap);
         }
+
+        // Show onboarding if no providers have keys
+        const hasKey = (config.providers || []).some((p: any) =>
+          p.hasKey || p.type === 'local' || (p.apiKey && p.apiKey.startsWith('••••'))
+        );
+        if (!hasKey) setShowOnboarding(true);
       } catch { /* use defaults */ }
     })();
   }, []);
@@ -377,36 +387,18 @@ function App() {
     setMessages((prev) => [...prev, userMsg]);
     setIsTyping(true);
 
-    // Spawn sub-agents
-    const agentTasks = ['Analyzing request...', 'Searching for context...', 'Generating response...'];
-    const models = [activeModel, 'o4-mini', 'gpt-4.1'];
-    const spawned: SubAgent[] = [];
-    const count = 1 + Math.floor(Math.random() * 2);
-    for (let i = 0; i < count; i++) {
-      spawned.push({
-        id: uid(),
-        name: randomAgentName(),
-        model: models[Math.floor(Math.random() * models.length)],
-        status: 'running',
-        task: agentTasks[i % agentTasks.length],
-        progress: 0,
-        startTime: new Date(),
-        tokensUsed: 0,
-      });
-    }
-    spawned.forEach((agent, i) => {
-      setTimeout(() => setSubAgents((prev) => [...prev, agent]), 200 + i * 600);
-    });
-
-    const progressInterval = setInterval(() => {
-      setSubAgents((prev) =>
-        prev.map((a) =>
-          a.status === 'running'
-            ? { ...a, progress: Math.min((a.progress || 0) + Math.random() * 25, 90) }
-            : a
-        )
-      );
-    }, 500);
+    // Real activity subagent — tracks what the model is actually doing
+    const activityAgent: SubAgent = {
+      id: uid(),
+      name: activeModel,
+      model: activeModel,
+      status: 'running',
+      task: 'Processing your request...',
+      progress: 10,
+      startTime: new Date(),
+      tokensUsed: 0,
+    };
+    setSubAgents([activityAgent]);
 
     const assistantId = uid();
     streamingTextRef.current.set(assistantId, '');
@@ -449,16 +441,25 @@ function App() {
               return { ...m, toolCalls };
             })
           );
+          // Update activity agent with real tool status
+          if (tc.status === 'running') {
+            setSubAgents((prev) =>
+              prev.map((a) =>
+                a.status === 'running'
+                  ? { ...a, task: `Using tool: ${tc.name}`, progress: Math.min(90, (a.progress || 10) + 15) }
+                  : a
+              )
+            );
+          }
         },
         onError: (error) => {
           console.error('Stream error:', error);
         },
         onDone: () => {
-          clearInterval(progressInterval);
           setSubAgents((prev) =>
             prev.map((a) =>
               a.status === 'running'
-                ? { ...a, status: 'complete', progress: 100, endTime: new Date() }
+                ? { ...a, status: 'complete', progress: 100, endTime: new Date(), task: 'Response complete' }
                 : a
             )
           );
@@ -476,7 +477,6 @@ function App() {
     } catch (err) {
       console.error('Send failed:', err);
       setIsTyping(false);
-      clearInterval(progressInterval);
     }
   }, [isTyping, ensureSession, activeModel]);
 
@@ -597,23 +597,19 @@ function App() {
           )}
         </div>
 
-        {/* Status Bar */}
-        <div className="status-bar">
-          <div className="status-bar-item">
-            <div className="status-bar-dot" />
-            Connected
-          </div>
-          <div className="status-bar-item">{activeModel}</div>
-          {workingDir && (
-            <div className="status-bar-item" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>
-              {workingDir}
-            </div>
-          )}
-          <div className="status-bar-item">{msgCount} messages</div>
-          <div className="status-bar-item">{agentCount} agent{agentCount !== 1 ? 's' : ''} active</div>
-          <div style={{ flex: 1 }} />
-          <div className="status-bar-item">Open-Harness v1.0.0</div>
-        </div>
+        {/* Enhanced Status Bar */}
+        <StatusBar
+          activeModel={activeModel}
+          providerName={providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
+          connected={providers.some(p => p.configured)}
+          messageCount={msgCount}
+          workingDir={workingDir}
+          models={Array.from(modelContextWindows.entries()).map(([id, ctx]) => {
+            const prov = providers.find(p => p.models?.some(m => m.id === id));
+            return { id, name: id, providerName: prov?.name || 'Unknown', contextWindow: ctx };
+          })}
+          onModelChange={handleSelectModel}
+        />
       </main>
 
       {/* Context Window Warning Toast */}
@@ -632,6 +628,38 @@ function App() {
 
       {/* Snap Zone Overlay */}
       {snapOverlayVisible && <SnapZoneOverlay onSnap={(zone) => { (window as any).CMDuiNative?.snapToZone(zone); setSnapOverlayVisible(false); }} onClose={() => setSnapOverlayVisible(false)} />}
+
+      {/* Onboarding Wizard */}
+      {showOnboarding && (
+        <OnboardingWizard
+          onComplete={async (provider) => {
+            // Refresh providers after onboarding
+            if (provider) {
+              try {
+                const fresh = await api.getProviders();
+                setProviders(fresh.map((p: any) => ({
+                  id: p.id,
+                  name: p.name,
+                  type: p.type || 'openai-compatible',
+                  endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
+                  configured: !!p.hasKey || p.type === 'local',
+                  models: p.models || [],
+                })));
+                const models = await api.getModels();
+                if (models.length > 0) {
+                  const ctxMap = new Map<string, number>();
+                  for (const m of models) ctxMap.set(m.id, m.contextWindowTokens);
+                  setModelContextWindows(ctxMap);
+                  setActiveModel(models[0].id);
+                  await api.updateConfig({ activeModel: models[0].id });
+                }
+              } catch { /* use what we have */ }
+            }
+            setShowOnboarding(false);
+          }}
+          onSkip={() => setShowOnboarding(false)}
+        />
+      )}
 
       <SettingsModal
         isOpen={settingsOpen}

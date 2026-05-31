@@ -3,15 +3,17 @@ import { Send, Paperclip, Image, AtSign, Command } from 'lucide-react';
 import type { Message } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { shortModelName } from '../utils/modelDisplay';
+import { SmartWelcome } from './SmartWelcome';
 
 interface Props {
   messages: Message[];
   isTyping: boolean;
   onSendMessage: (msg: string) => void;
   activeModel: string;
+  workingDir?: string | null;
 }
 
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel }: Props) {
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const userScrolledUpRef = useRef(false);
@@ -56,11 +58,7 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel }: Pr
     <div className="chat-panel-root">
       <div className="messages" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && !isTyping && (
-          <div className="chat-empty-state">
-            <div className="chat-empty-logo">⌘</div>
-            <div className="chat-empty-title">Start a new chat</div>
-            <div className="chat-empty-subtitle">The message box stays available here, even before the first message.</div>
-          </div>
+          <SmartWelcome workingDir={workingDir || null} onSuggestionClick={onSendMessage} />
         )}
         {messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} assistantName={assistantName} />

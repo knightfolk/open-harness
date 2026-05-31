@@ -66,10 +66,64 @@ function stripThinkingTags(text: string): string {
   return cleaned.trimStart();
 }
 
+// ── Streaming-aware thinking tag stripper ────────────────
+// Tags like <transitioned>...</transitioned> can span multiple streaming chunks.
+// Per-chunk regex misses them. This class accumulates raw text, applies
+// stripThinkingTags to the full buffer, and returns only newly-cleaned content.
+
+class StreamingTagStripper {
+  private raw = '';
+  private emitted = 0;
+
+  feed(chunk: string): string | null {
+    this.raw += chunk;
+    const cleaned = stripThinkingTags(this.raw);
+    if (cleaned.length > this.emitted) {
+      const newContent = cleaned.slice(this.emitted);
+      this.emitted = cleaned.length;
+      return newContent;
+    }
+    return null;
+  }
+
+  flush(): string | null {
+    const cleaned = stripThinkingTags(this.raw);
+    const remaining = cleaned.slice(this.emitted);
+    this.emitted = cleaned.length;
+    return remaining || null;
+  }
+}
+
+
 // ── Monologue stripping ──────────────────────────────────
 // Models sometimes narrate their thinking as plain text before the actual answer.
 // "The user wants me to... Let me explore... Now I have a comprehensive view..."
 // This buffer holds initial text and releases it once structured content begins.
+
+/**
+ * Filter monologue preamble from a complete text response.
+ * Strips initial lines that match narration patterns, keeping the first structured line onward.
+ */
+function filterMonologue(text: string): string {
+  if (!text || !text.trim()) return text;
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    // Found the first non-monologue line — drop everything before it
+    if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
+      if (i === 0) return text; // First line is already the answer
+      // Check if everything before was monologue
+      const before = lines.slice(0, i).filter(l => l.trim());
+      const allMonologue = before.every(l => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
+      if (allMonologue) {
+        return lines.slice(i).join('\n');
+      }
+      return text; // Mixed content — keep it all
+    }
+  }
+  return text;
+}
 
 const MONOLOGUE_PATTERNS = /^(The user (wants|asked|is asking)|Let me |I need to |I should |I'll start|I will now|Now I (have|need|will)|First,? I|I'm going to|I should |To (do|answer|complete) this)/i;
 const ANSWER_START = /^(\s*#{1,3}\s|\s*\*\*[^*]+\*\*|\s*---|\s*\|.*\||\s*```|\s*\d+\.\s|\s*[-*]\s|\s*[A-Z][a-z].*:)/;
@@ -86,7 +140,7 @@ class MonologueBuffer {
 
     // Check if we've hit structured content (answer started)
     const lines = this.buffer.split('\n');
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
       // A non-monologue line = the answer has started
@@ -759,22 +813,24 @@ async function parseStreamForContentAndTools(
   response: Response,
   res: express.Response,
   assistantId: string,
+  streamText: boolean = true,
 ): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; arguments: string }> }> {
   const reader = (response as any).body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+  const tagStripper = new StreamingTagStripper();
   const monologueBuf = new MonologueBuffer();
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    const sseLines = buffer.split('\n');
+    buffer = sseLines.pop() || '';
 
-    for (const line of lines) {
+    for (const line of sseLines) {
       const trimmed = line.trim();
       if (!trimmed || !trimmed.startsWith('data: ')) continue;
       const data = trimmed.slice(6);
@@ -785,12 +841,16 @@ async function parseStreamForContentAndTools(
         const delta = parsed.choices?.[0]?.delta;
         if (!delta) continue;
 
-        // Handle text content (with monologue stripping)
+        // Handle text content — use streaming-aware tag stripping
         if (delta.content) {
           content += delta.content;
-          const cleaned = stripThinkingTags(delta.content);
-          const filtered = monologueBuf.feed(cleaned);
-          if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
+          if (streamText) {
+            const cleaned = tagStripper.feed(delta.content);
+            if (cleaned) {
+              const filtered = monologueBuf.feed(cleaned);
+              if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
+            }
+          }
         }
 
         // Handle tool calls (OpenAI-compatible streaming format)
@@ -810,12 +870,33 @@ async function parseStreamForContentAndTools(
     }
   }
 
-  // Flush any remaining monologue buffer content
-  const remaining = monologueBuf.flush();
-  if (remaining) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: remaining }) + '\n\n');
+  // Flush any remaining tag-stripped content
+  if (streamText) {
+    const remainingClean = tagStripper.flush();
+    if (remainingClean) {
+      const filtered = monologueBuf.feed(remainingClean);
+      if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
+    }
+    const remaining = monologueBuf.flush();
+    if (remaining) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: remaining }) + '\n\n');
+  }
 
   const toolCalls = Array.from(toolCallMap.values()).filter((tc) => tc.name);
   return { content, toolCalls };
+}
+
+// ── Prompt role classifier ──────────────────────────────────
+// Classifies a user message into a coding role for prompt adaptation.
+type CodingRole = 'coder' | 'planner' | 'reviewer' | 'summarizer' | 'worker' | 'reasoner';
+
+function classifyRole(content: string): CodingRole {
+  const lower = content.toLowerCase();
+  if (/\b(review|audit|security|vuln|bug|issue|problem|fix|debug|error|broken|crash)\b/.test(lower)) return 'reviewer';
+  if (/\b(plan|architect|design|roadmap|strategy|approach|how (should|would|do)|what (should|would|can)|investigate|explore|research)\b/.test(lower)) return 'planner';
+  if (/\b(summar|explain|describe|what (is|does|are)|overview|give me)\b/.test(lower)) return 'summarizer';
+  if (/\b(why|reason|analyze|compare|trade.?off|pros? and cons?|better|versus|vs)\b/.test(lower)) return 'reasoner';
+  if (/\b(rename|move|delete|create|add|remove|install|update|bump)\b/.test(lower) && lower.length < 100) return 'worker';
+  return 'coder';
 }
 
 // ── Universal model streaming (with MCP tool-calling loop) ─
@@ -840,9 +921,19 @@ async function streamModel(
   const { tools: mcpApiTools, toolServerMap } = gatherMCPToolsForAPI();
 
   // Build the complete prompt configuration for this model
+  // Classify the user's latest message to pick the right role prompt
+  const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+  const classifiedRole = lastUserMsg ? classifyRole(lastUserMsg.content) : 'coder';
+  // Check if the user configured a different model for this role
+  const roleModelOverride = appConfig.roleAssignments?.[classifiedRole];
+  const effectiveModel = (roleModelOverride && overrideModelId === undefined) ? roleModelOverride : activeModel;
+  if (effectiveModel !== activeModel) {
+    console.log(`[role-router] ${classifiedRole} → using ${effectiveModel} (override from role bucket)`);
+  }
+
   const promptResult = buildPromptForModel({
-    modelId: activeModel,
-    role: 'coder',
+    modelId: effectiveModel,
+    role: classifiedRole,
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
     tools: mcpApiTools.length > 0 ? mcpApiTools : undefined,
@@ -891,8 +982,13 @@ async function streamModel(
       // Leave the final round tool-free so the model must produce a user-facing answer.
       if (round < MAX_TOOL_ROUNDS - 1 && mcpApiTools.length > 0 && promptResult.useNativeToolCalls) {
         requestBody.tools = mcpApiTools;
+      } else if (round === MAX_TOOL_ROUNDS - 1) {
+        // Final round — inject synthesis instruction so the model produces a real answer
+        apiMessages.push({
+          role: 'user',
+          content: 'Based on all the information gathered above, provide your complete answer now. Start directly with the answer using headings, lists, or code blocks. Do not narrate your process.',
+        });
       }
-      // On the last round, tools are simply omitted — the model produces its final answer naturally.
 
       const response = await fetch(chatURL, {
         method: 'POST',
@@ -910,15 +1006,26 @@ async function streamModel(
       }
 
       // Parse streaming response — extracts both text deltas and tool calls
-      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId);
+      // Tool rounds: suppress text output (it's narration, not the answer)
+      // Final round: stream text normally for real-time answer display
+      const isLastRound = round === MAX_TOOL_ROUNDS - 1;
+      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound);
 
-      // No tool calls → we're done, this is the final text answer.
+      // No tool calls → model gave a direct answer (or final round completed)
       if (toolCalls.length === 0) {
         finalContent = content;
+        // If this was a suppressed round, the text wasn't streamed — emit it now
+        if (!isLastRound && content.trim()) {
+          const cleaned = filterMonologue(stripThinkingTags(content));
+          if (cleaned.trim()) {
+            res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: cleaned }) + '\n\n');
+          }
+        }
         break;
       }
 
-      if (content.trim()) finalContent = content;
+      // Tool round: narration text is silently discarded (not streamed to client)
+      // DO NOT save tool-round narration as finalContent
 
       // Add the assistant message with tool calls to the conversation context
       apiMessages.push({
@@ -967,8 +1074,41 @@ async function streamModel(
       }
     }
 
+    // Forced answer: if the model never produced a real answer, try one more explicit request
+    if (!finalContent.trim() || /^[\s\n]*$/.test(stripThinkingTags(finalContent))) {
+      console.log('[stream] Empty/whitespace final content — sending forced answer request');
+      // Add explicit instruction to produce the answer
+      const forcedMessages = [...apiMessages, {
+        role: 'user' as const,
+        content: 'Provide your answer now based on all the information above. Write a clear, structured response.',
+      }];
+      try {
+        const forcedBody: any = {
+          model: activeModel,
+          messages: forcedMessages,
+          stream: true,
+          max_tokens: promptResult.generationConfig.max_tokens,
+          temperature: promptResult.generationConfig.temperature,
+        };
+        const forcedResponse = await fetch(chatURL, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify(forcedBody),
+        });
+        if (forcedResponse.ok) {
+          const forcedResult = await parseStreamForContentAndTools(forcedResponse, res, assistantId, true);
+          if (forcedResult.content.trim()) {
+            finalContent = forcedResult.content;
+          }
+        }
+      } catch (forcedErr: any) {
+        console.error('[stream] Forced answer request failed:', forcedErr.message);
+      }
+    }
+
+    // Ultimate fallback if forced answer also failed
     if (!finalContent.trim()) {
-      finalContent = 'I used the available tools but did not receive a final model response. Please try again, or narrow the request and I will continue from there.';
+      finalContent = 'I gathered information but could not generate a final answer. Please try again or rephrase your request.';
       res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: finalContent }) + '\n\n');
     }
 
@@ -1244,6 +1384,9 @@ app.post('/api/test/batch', async (req, res) => {
 });
 
 // ── Start ──────────────────────────────────────────────
+// Prevent SIGPIPE from killing the process (Docker MCP stdio can trigger this)
+process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignoring'); });
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Open-Harness server running on http://localhost:${PORT}`);
