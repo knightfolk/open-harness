@@ -754,23 +754,212 @@ export async function checkServerHealth(url: string): Promise<ServerHealthInfo> 
 }
 
 // ── Patch Proposal APIs ──────────────────────────────
+//
+// M15 P0 introduced a multi-file / multi-hunk proposal lifecycle on the
+// server. The client wrappers below mirror the routes in
+// server/index.ts. The legacy single-file ProposedPatch view remains as a
+// type-only alias for any consumer that was written before the M15 model
+// landed.
 
-export interface PatchProposalInfo {
+/**
+ * @deprecated Prefer the full {@link PatchProposal} flow. Kept as a type
+ * alias so any code that imported the old name still compiles.
+ */
+export type ApplyPatchProposalInfo = {
   id: string;
   file: string;
   action: 'create' | 'update' | 'delete';
   diff: string;
   explanation: string;
   status: 'pending' | 'accepted' | 'rejected' | 'applied';
+};
+
+/**
+ * @deprecated Use the full {@link PatchProposal} type instead.
+ */
+export type PatchProposalInfo = ApplyPatchProposalInfo;
+
+export interface CreatePatchProposalParams {
+  patch: string;
+  workingDir: string;
+  sessionId: string;
+  runId?: string;
+  explanation?: string;
+  source?: 'model-message' | 'diff-viewer' | 'manual';
+  verificationCommands?: string[];
 }
 
-export async function applyPatch(patch: string): Promise<{ files: string[]; errors: string[] }> {
+export interface CreatePatchProposalResponse {
+  id: string;
+  proposal: import('../types').PatchProposal;
+}
+
+/**
+ * Send a unified diff to the server. The server parses it into a
+ * proposal with one record per file and one per hunk, persists it to
+ * disk, and returns the new proposal id.
+ */
+export async function createPatchProposal(
+  params: CreatePatchProposalParams,
+): Promise<CreatePatchProposalResponse> {
+  const res = await fetch(`${API_BASE}/api/patch-proposals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.error || `Create patch proposal failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Fetch one proposal by id. Returns `null` if the server says 404.
+ */
+export async function getPatchProposal(
+  id: string,
+): Promise<import('../types').PatchProposal | null> {
+  const res = await fetch(`${API_BASE}/api/patch-proposals/${encodeURIComponent(id)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Get patch proposal failed: ${res.status}`);
+  return res.json();
+}
+
+export interface ListPatchProposalsParams {
+  sessionId?: string;
+}
+
+/**
+ * List proposals on the server, optionally scoped to a session.
+ */
+export async function listPatchProposals(
+  params: ListPatchProposalsParams = {},
+): Promise<import('../types').PatchProposal[]> {
+  const qs = params.sessionId ? `?sessionId=${encodeURIComponent(params.sessionId)}` : '';
+  const res = await fetch(`${API_BASE}/api/patch-proposals${qs}`);
+  if (!res.ok) throw new Error(`List patch proposals failed: ${res.status}`);
+  const body = await res.json();
+  return body.proposals ?? [];
+}
+
+export interface SetHunkStatusParams {
+  proposalId: string;
+  fileId: string;
+  hunkId: string;
+  status: 'accepted' | 'rejected';
+}
+
+/**
+ * Accept or reject a single hunk. Returns the updated proposal, or
+ * `null` if the server could not find the proposal / file / hunk.
+ */
+export async function setPatchProposalHunkStatus(
+  params: SetHunkStatusParams,
+): Promise<import('../types').PatchProposal | null> {
+  const action = params.status === 'accepted' ? 'accept' : 'reject';
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(params.proposalId)}/hunks/${encodeURIComponent(params.fileId)}/${action}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hunkId: params.hunkId }),
+    },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.error || `Set hunk status failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Accept every hunk in a proposal. Returns the updated proposal, or
+ * `null` if the server could not find the proposal.
+ */
+export async function acceptAllPatchProposalHunks(
+  id: string,
+): Promise<import('../types').PatchProposal | null> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(id)}/accept-all`,
+    { method: 'POST' },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Accept all failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Reject every hunk in a proposal. Returns the updated proposal, or
+ * `null` if the server could not find the proposal.
+ */
+export async function rejectAllPatchProposalHunks(
+  id: string,
+): Promise<import('../types').PatchProposal | null> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(id)}/reject-all`,
+    { method: 'POST' },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Reject all failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Mark a proposal as discarded. The on-disk record is kept but the
+ * status flips to `discarded` and the apply route will refuse to act
+ * on it. Returns the updated proposal, or `null` if the server could
+ * not find the proposal.
+ */
+export async function discardPatchProposal(
+  id: string,
+): Promise<import('../types').PatchProposal | null> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(id)}/discard`,
+    { method: 'POST' },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Discard failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Apply the proposal: only the accepted hunks are written to disk in
+ * the proposal's `workingDir`. Returns the apply summary.
+ */
+export async function applyPatchProposal(
+  id: string,
+): Promise<import('../types').ApplyPatchProposalResult> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(id)}/apply`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.error || `Apply failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Low-level escape hatch for callers that have a raw patch text and a
+ * workingDir but no proposal record. Forwards `workingDir` so the
+ * hardened M15 P0 server route will accept it.
+ */
+export async function applyPatch(
+  patch: string,
+  workingDir?: string,
+): Promise<{ files: string[]; errors: string[] }> {
   const res = await fetch(`${API_BASE}/api/patches/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patch }),
+    body: JSON.stringify({ patch, workingDir }),
   });
-  if (!res.ok) throw new Error(`Patch apply failed: ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.error || `Patch apply failed: ${res.status}`);
+  }
   return res.json();
 }
 

@@ -267,6 +267,12 @@ export interface GitLogEntry {
 
 // ── Patch Proposal Types ──────────────────────────
 
+/**
+ * Legacy per-file/per-hunk view of a patch proposal. Kept for
+ * backward compatibility with any consumer that was written before
+ * the M15 multi-file / multi-hunk proposal model. New code should
+ * use {@link PatchProposal} instead.
+ */
 export interface ProposedPatch {
   id: string;
   file: string;
@@ -274,6 +280,76 @@ export interface ProposedPatch {
   diff: string;
   explanation: string;
   status: 'pending' | 'accepted' | 'rejected' | 'applied';
+}
+
+export type PatchFileAction = 'create' | 'update' | 'delete' | 'rename';
+export type PatchHunkStatus = 'pending' | 'accepted' | 'rejected';
+export type PatchProposalStatus = 'open' | 'applied' | 'discarded' | 'failed';
+export type PatchProposalSource = 'model-message' | 'diff-viewer' | 'manual';
+
+export type PatchHunkLineKind = 'context' | 'add' | 'del' | 'no-newline';
+
+export interface PatchHunkLine {
+  kind: PatchHunkLineKind;
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+}
+
+export interface PatchHunk {
+  id: string;
+  status: PatchHunkStatus;
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  sectionHeading?: string;
+  lines: PatchHunkLine[];
+}
+
+export interface PatchFile {
+  id: string;
+  filePath: string;
+  oldPath?: string;
+  action: PatchFileAction;
+  binary: boolean;
+  status: PatchHunkStatus; // rollup: accepted iff all hunks accepted, rejected iff all rejected
+  rawHeader: string;
+  hunks: PatchHunk[];
+}
+
+export interface PatchValidationResult {
+  command: string;
+  passed: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+}
+
+export interface PatchProposal {
+  id: string;
+  sessionId: string;
+  runId?: string;
+  workingDir: string;
+  explanation: string;
+  source: PatchProposalSource;
+  files: PatchFile[];
+  verificationCommands: string[];
+  status: PatchProposalStatus;
+  appliedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplyPatchProposalResult {
+  proposalId: string;
+  appliedFiles: string[];
+  skippedFiles: string[];
+  errors: string[];
+  validation: PatchValidationResult[];
+  validationPassed: boolean;
 }
 
 // ── Browser Preview Types ────────────────────────
