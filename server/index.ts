@@ -38,6 +38,10 @@ import * as evals from './evals';
 import * as harnessTasks from './harnessTasks';
 import * as benchRuns from './benchRuns';
 import type { BenchRunResult } from './benchRuns';
+import * as checkpoints from './checkpoints';
+import * as worktrees from './worktrees';
+import * as protectedPaths from './protectedPaths';
+import * as processLedger from './processLedger';
 import { filterToolsForTrustMode, checkToolActionPolicy, type TrustMode } from './toolPolicy';
 import * as sessionStore from './sessionStore';
 import * as projectMemory from './projectMemory';
@@ -2374,11 +2378,250 @@ app.post('/api/evals/run', async (req, res) => {
 });
 
 // Prevent SIGPIPE from killing the process (Docker MCP stdio can trigger this)
+// ── Milestone 12 — Checkpoint Routes ───────────────────
+
+app.post('/api/checkpoints', (req, res) => {
+  const { dir, label } = req.body as { dir: string; label?: string };
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  try {
+    const cp = checkpoints.createCheckpoint(dir, { label });
+    res.status(201).json(cp);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/checkpoints', (req, res) => {
+  const dir = (req.query.dir as string) || '';
+  if (!dir) return res.json([]);
+  try {
+    res.json(checkpoints.listCheckpoints(dir));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/checkpoints/:id', (req, res) => {
+  const dir = (req.query.dir as string) || '';
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const cp = checkpoints.getCheckpoint(dir, req.params.id);
+  if (!cp) return res.status(404).json({ error: 'Checkpoint not found' });
+  res.json(cp);
+});
+
+app.delete('/api/checkpoints/:id', (req, res) => {
+  const dir = (req.query.dir as string) || '';
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  if (!checkpoints.deleteCheckpoint(dir, req.params.id)) {
+    return res.status(404).json({ error: 'Checkpoint not found' });
+  }
+  res.status(204).end();
+});
+
+app.post('/api/checkpoints/:id/restore', (req, res) => {
+  const { dir, mode } = req.body as { dir: string; mode?: 'reset' | 'apply' };
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const op = mode === 'apply' ? checkpoints.applyCheckpointDiff : checkpoints.restoreCheckpoint;
+  try {
+    res.json(op(dir, req.params.id));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/checkpoints/projects', (_req, res) => {
+  res.json(checkpoints.listProjectsWithCheckpoints());
+});
+
+// ── Milestone 12 — Worktree Routes ─────────────────────
+
+app.post('/api/worktrees', (req, res) => {
+  const { dir, label, baseBranch, reuseBranch } = req.body as {
+    dir: string; label?: string; baseBranch?: string; reuseBranch?: boolean;
+  };
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  try {
+    const wt = worktrees.createWorktree(dir, { label, baseBranch, reuseBranch });
+    res.status(201).json(wt);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/worktrees', (req, res) => {
+  const dir = (req.query.dir as string) || '';
+  if (!dir) return res.json([]);
+  try {
+    res.json(worktrees.listWorktrees(dir));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/worktrees/:id', (req, res) => {
+  const dir = (req.query.dir as string) || '';
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const wt = worktrees.getWorktreeStatus(dir, req.params.id);
+  if (!wt) return res.status(404).json({ error: 'Worktree not found' });
+  res.json(wt);
+});
+
+app.get('/api/worktrees/:id/diff', (req, res) => {
+  const dir = (req.query.dir as string) || '';
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  res.json(worktrees.diffWorktreeVsBase(dir, req.params.id));
+});
+
+app.delete('/api/worktrees/:id', (req, res) => {
+  const dir = (req.query.dir as string) || '';
+  const force = req.query.force === '1' || req.query.force === 'true';
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  if (!worktrees.removeWorktree(dir, req.params.id, { force })) {
+    return res.status(404).json({ error: 'Worktree not found' });
+  }
+  res.status(204).end();
+});
+
+app.post('/api/worktrees/:id/promote', (req, res) => {
+  const { dir, targetBranch, force } = req.body as {
+    dir: string; targetBranch?: string; force?: boolean;
+  };
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  try {
+    res.json(worktrees.promoteWorktree(dir, req.params.id, { targetBranch, force }));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/worktrees/auto-clean', (req, res) => {
+  const { dir } = req.body as { dir: string };
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  try {
+    res.json(worktrees.autoCleanEmptyWorktrees(dir));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── Milestone 12 — Protected Path / Secret Routes ──────
+
+app.get('/api/protected/rules', (_req, res) => {
+  res.json(protectedPaths.listDefaultRules());
+});
+
+app.post('/api/protected/check', (req, res) => {
+  const { path: filePath } = req.body as { path: string };
+  if (!filePath) return res.status(400).json({ error: 'path is required' });
+  res.json(protectedPaths.isPathProtected(filePath));
+});
+
+app.post('/api/secrets/scan', (req, res) => {
+  const { text } = req.body as { text: string };
+  if (typeof text !== 'string') return res.status(400).json({ error: 'text is required' });
+  res.json(protectedPaths.scanForSecrets(text));
+});
+
+app.post('/api/secrets/scan-files', (req, res) => {
+  const { root, paths, maxBytes, ignore } = req.body as {
+    root: string; paths: string[]; maxBytes?: number; ignore?: string[];
+  };
+  if (!root || !Array.isArray(paths)) {
+    return res.status(400).json({ error: 'root and paths[] are required' });
+  }
+  res.json(protectedPaths.scanFilesForSecrets(root, paths, { maxBytes, ignore }));
+});
+
+app.post('/api/export/redact', (req, res) => {
+  const { text } = req.body as { text: string };
+  if (typeof text !== 'string') return res.status(400).json({ error: 'text is required' });
+  res.json(protectedPaths.redactForExport(text));
+});
+
+// ── Milestone 12 — Process Ledger Routes ───────────────
+
+app.get('/api/processes', (req, res) => {
+  const includeExited = req.query.includeExited === '1' || req.query.includeExited === 'true';
+  res.json(processLedger.listProcesses({ includeExited }));
+});
+
+app.get('/api/processes/:pid', (req, res) => {
+  const pid = parseInt(req.params.pid, 10);
+  const proc = processLedger.getProcess(pid);
+  if (!proc) return res.status(404).json({ error: 'Process not found' });
+  res.json(proc);
+});
+
+app.get('/api/processes/:pid/log', (req, res) => {
+  const pid = parseInt(req.params.pid, 10);
+  const maxBytes = parseInt((req.query.maxBytes as string) || '32768', 10);
+  const tail = processLedger.tailLog(pid, maxBytes);
+  if (!tail) return res.status(404).json({ error: 'Process not found' });
+  res.json(tail);
+});
+
+app.delete('/api/processes/:pid/log', (req, res) => {
+  const pid = parseInt(req.params.pid, 10);
+  if (!processLedger.clearLog(pid)) return res.status(404).json({ error: 'Process not found' });
+  res.status(204).end();
+});
+
+app.delete('/api/processes/:pid', (req, res) => {
+  const pid = parseInt(req.params.pid, 10);
+  if (!processLedger.killProcess(pid)) return res.status(404).json({ error: 'Process not found' });
+  res.status(204).end();
+});
+
+app.post('/api/processes/kill-all', (req, res) => {
+  const { kinds } = (req.body || {}) as { kinds?: processLedger.ProcessKind[] };
+  res.json(processLedger.killAll({ kinds }));
+});
+
+app.post('/api/processes/prune', (_req, res) => {
+  res.json({ removed: processLedger.pruneExited() });
+});
+
+// ── Health/safety summary (combined) ──────────────────
+
+app.get('/api/safety/summary', (req, res) => {
+  const dir = (req.query.dir as string) || process.cwd();
+  const cps = checkpoints.listCheckpoints(dir);
+  const wts = worktrees.listWorktrees(dir).map(w => worktrees.refreshWorktreeState(w));
+  const procs = processLedger.listProcesses();
+  res.json({
+    checkpoints: { count: cps.length, latest: cps[0] || null },
+    worktrees: {
+      count: wts.length,
+      active: wts.filter(w => w.status === 'active').length,
+      clean: wts.filter(w => w.clean).length,
+      list: wts,
+    },
+    processes: {
+      count: procs.length,
+      byKind: procs.reduce((acc: Record<string, number>, p) => {
+        acc[p.kind] = (acc[p.kind] || 0) + 1;
+        return acc;
+      }, {}),
+    },
+  });
+});
+
+
 process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignoring'); });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Open-Harness server running on http://localhost:${PORT}`);
+
+  // Register this server process in the ledger so the UI can see/kill it.
+  processLedger.registerExternal({
+    pid: process.pid,
+    kind: 'server',
+    name: `Open-Harness server (port ${PORT})`,
+    command: 'node',
+    args: ['server/index.ts'],
+    notes: `Started on port ${PORT}`,
+  });
   const _activeModel = appConfig.activeModel || 'MiniMax-M3';
   const _family = detectModelFamily(_activeModel);
   const _cfg = getModelConfig(_activeModel);

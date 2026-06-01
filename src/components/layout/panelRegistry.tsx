@@ -1,7 +1,7 @@
 import type { PanelId, PanelConfig } from '../../types/layout';
 import {
   MessageSquare, GitCompare, Globe, Terminal,
-  Bot, ListChecks, FolderOpen, FlaskConical,
+  Bot, ListChecks, FolderOpen, FlaskConical, Shield,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -19,6 +19,7 @@ const iconMap: Record<PanelId, ComponentType<{ size?: number }>> = {
   plan: ListChecks,
   files: FolderOpen,
   'model-lab': FlaskConical,
+  'safety': Shield,
 };
 
 export const panelConfigs: Record<PanelId, PanelConfig> = {
@@ -31,6 +32,7 @@ export const panelConfigs: Record<PanelId, PanelConfig> = {
   plan:        { id: 'plan',        label: 'Plan',         icon: 'ListChecks',    defaultSize: 280, minSize: 180 },
   files:       { id: 'files',       label: 'Files',        icon: 'FolderOpen',    defaultSize: 280, minSize: 180 },
   'model-lab': { id: 'model-lab',   label: 'Model Lab',   icon: 'FlaskConical',  defaultSize: 400, minSize: 260 },
+  'safety':     { id: 'safety',       label: 'Safety',      icon: 'Shield',        defaultSize: 420, minSize: 280 },
 };
 
 export function getPanelIcon(id: PanelId) {

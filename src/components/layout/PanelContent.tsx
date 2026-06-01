@@ -8,6 +8,7 @@ import { TerminalPanel } from '../TerminalPanel';
 import { FilesPanel } from '../FilesPanel';
 import { SideChatPanel } from '../SideChatPanel';
 import { ModelLabPanel } from '../ModelLabPanel';
+import { SafetyPanel } from '../SafetyPanel';
 
 interface Props {
   panelId: PanelId;
@@ -26,6 +27,7 @@ interface Props {
     onReviewDiff?: (diffText: string) => void;
     onExplainChange?: (filePath: string) => void;
     onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
+    onCompareModel?: () => void;
     models?: Array<{ id: string; name: string }>;
   };
 }
@@ -33,7 +35,7 @@ interface Props {
 export function PanelContent({ panelId, context }: Props) {
   switch (panelId) {
     case 'chat':
-      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} />;
+      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} />;
     case 'side-chat':
       return <SideChatPanel />;
     case 'diffs':
@@ -50,6 +52,8 @@ export function PanelContent({ panelId, context }: Props) {
       return <FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />;
     case 'model-lab':
       return <ModelLabPanel workingDir={context.workingDir} models={context.models || []} />;
+    case 'safety':
+      return <SafetyPanel workingDir={context.workingDir} />;
     default:
       return <EmptyState text="Unknown panel" />;
   }

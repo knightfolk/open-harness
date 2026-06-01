@@ -1113,3 +1113,250 @@ export async function exportBenchRun(id: string, format: 'json' | 'csv' = 'json'
   if (!res.ok) throw new Error(`Export failed: ${res.status}`);
   return res.text();
 }
+
+// ── Milestone 12 — Checkpoints / Worktrees / Safety ──
+
+export interface CheckpointFile {
+  path: string;
+  kind: 'tracked' | 'untracked';
+  status: string;
+  content: string;
+  size?: number;
+}
+
+export interface Checkpoint {
+  id: string;
+  projectId: string;
+  workingDir: string;
+  root: string;
+  branch: string;
+  head: string;
+  upstream?: string;
+  files: CheckpointFile[];
+  inlineUntracked: string[];
+  untrackedTooLarge: string[];
+  createdAt: string;
+  label: string;
+  status: 'active' | 'restored' | 'discarded';
+  restoredAt?: string;
+}
+
+export async function createCheckpoint(dir: string, label?: string): Promise<Checkpoint> {
+  const res = await fetch(`${API_BASE}/api/checkpoints`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, label }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function listCheckpoints(dir: string): Promise<Checkpoint[]> {
+  const res = await fetch(`${API_BASE}/api/checkpoints?dir=${encodeURIComponent(dir)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteCheckpoint(dir: string, id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/checkpoints/${id}?dir=${encodeURIComponent(dir)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function restoreCheckpoint(dir: string, id: string, mode: 'reset' | 'apply' = 'reset'): Promise<{ ok: boolean; applied: string[]; failed: string[]; warnings: string[]; changed: boolean }> {
+  const res = await fetch(`${API_BASE}/api/checkpoints/${id}/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, mode }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export interface Worktree {
+  id: string;
+  path: string;
+  branch: string;
+  baseRef: string;
+  root: string;
+  createdAt: string;
+  status: 'active' | 'promoted' | 'discarded' | 'error';
+  label?: string;
+  clean: boolean;
+  lastCheckedAt: string;
+  lastError?: string;
+}
+
+export async function createWorktree(dir: string, opts: { label?: string; baseBranch?: string } = {}): Promise<Worktree> {
+  const res = await fetch(`${API_BASE}/api/worktrees`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, ...opts }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function listWorktrees(dir: string): Promise<Worktree[]> {
+  const res = await fetch(`${API_BASE}/api/worktrees?dir=${encodeURIComponent(dir)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteWorktree(dir: string, id: string, force = false): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/worktrees/${id}?dir=${encodeURIComponent(dir)}&force=${force ? 1 : 0}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function getWorktreeDiff(dir: string, id: string): Promise<{ files: Array<{ path: string; status: string; insertions: number; deletions: number }>; commitCount: number; baseRef: string }> {
+  const res = await fetch(`${API_BASE}/api/worktrees/${id}/diff?dir=${encodeURIComponent(dir)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function promoteWorktree(dir: string, id: string, opts: { targetBranch?: string; force?: boolean } = {}): Promise<{ ok: boolean; applied: string[]; failed: string[]; warnings: string[]; targetBranch: string; worktreeClean: boolean }> {
+  const res = await fetch(`${API_BASE}/api/worktrees/${id}/promote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, ...opts }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function autoCleanWorktrees(dir: string): Promise<{ removed: string[]; kept: string[] }> {
+  const res = await fetch(`${API_BASE}/api/worktrees/auto-clean`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export interface ProtectedPathRule {
+  pattern: string;
+  category: string;
+  reason: string;
+  severity: 'block' | 'warn';
+}
+
+export async function listProtectedRules(): Promise<ProtectedPathRule[]> {
+  const res = await fetch(`${API_BASE}/api/protected/rules`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function checkPathProtected(path: string): Promise<{ protected: boolean; rule?: ProtectedPathRule; reason?: string }> {
+  const res = await fetch(`${API_BASE}/api/protected/check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export interface SecretFinding {
+  kind: string;
+  match: string;
+  start: number;
+  end: number;
+  redacted: string;
+}
+
+export async function scanSecrets(text: string): Promise<{ hasSecrets: boolean; findings: SecretFinding[]; redactedText: string }> {
+  const res = await fetch(`${API_BASE}/api/secrets/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function redactForExport(text: string): Promise<{ text: string; hadSecrets: boolean }> {
+  const res = await fetch(`${API_BASE}/api/export/redact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export type ProcessKind = 'server' | 'electron' | 'vite' | 'terminal' | 'browser' | 'worktree-cmd' | 'agent' | 'other';
+
+export interface OwnedProcess {
+  pid: number;
+  id: string;
+  kind: ProcessKind;
+  name: string;
+  command: string;
+  args: string[];
+  cwd?: string;
+  parentPid?: number;
+  startedAt: string;
+  exitedAt?: string;
+  exitCode?: number | null;
+  status: 'running' | 'exited' | 'killed' | 'failed';
+  logFile: string;
+  notes?: string;
+}
+
+export interface LogTail {
+  pid: number;
+  logFile: string;
+  exists: boolean;
+  sizeBytes: number;
+  tail: string;
+}
+
+export async function listProcesses(includeExited = false): Promise<OwnedProcess[]> {
+  const res = await fetch(`${API_BASE}/api/processes?includeExited=${includeExited ? 1 : 0}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function killProcess(pid: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/processes/${pid}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function killAllProcesses(kinds?: ProcessKind[]): Promise<{ killed: number[]; skipped: number[] }> {
+  const res = await fetch(`${API_BASE}/api/processes/kill-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kinds }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getProcessLog(pid: number, maxBytes = 16384): Promise<LogTail> {
+  const res = await fetch(`${API_BASE}/api/processes/${pid}/log?maxBytes=${maxBytes}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function clearProcessLog(pid: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/processes/${pid}/log`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function pruneExitedProcesses(): Promise<{ removed: number }> {
+  const res = await fetch(`${API_BASE}/api/processes/prune`, { method: 'POST' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export interface SafetySummary {
+  checkpoints: { count: number; latest: Checkpoint | null };
+  worktrees: { count: number; active: number; clean: number; list: Worktree[] };
+  processes: { count: number; byKind: Record<string, number> };
+}
+
+export async function getSafetySummary(dir: string): Promise<SafetySummary> {
+  const res = await fetch(`${API_BASE}/api/safety/summary?dir=${encodeURIComponent(dir)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
