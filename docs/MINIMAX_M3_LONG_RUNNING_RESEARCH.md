@@ -180,10 +180,8 @@ Validation for Batch A:
 - `npm run lint`
 - `npm run build`
 - Manual server/API smoke using an existing proposal route or the panel.
-- Relaunch because this changes runtime UI and possibly layout wiring:
-  - kill existing CMDui server/app processes.
-  - `npm start`
-  - verify `http://127.0.0.1:3001` and `http://127.0.0.1:5173`.
+- Restart only if server/runtime code changed. For client-only UI changes, leave the running app/server alone so the user can keep testing; a browser/Electron refresh is enough if needed.
+- If server/runtime code changed, kill existing CMDui server/app processes, run `npm start`, and verify `http://127.0.0.1:3001` plus `http://127.0.0.1:5173`.
 - Manual UI smoke:
   - open the Patch Review panel.
   - paste a one-file create patch.
@@ -395,7 +393,7 @@ export interface ApplyPatchProposalResult {
 
 ### 7.3 App relaunch
 
-Per AGENTS.md rule 1, after runtime code changes the agent must kill the existing app/server processes and relaunch with `npm start`. Then confirm:
+Per AGENTS.md rule 1, restart only after server/runtime code changes. For client-only or documentation changes, leave the running app/server alone so the user can keep testing. If a server/runtime restart is required, kill the existing app/server processes, relaunch with `npm start`, then confirm:
 
 - server is reachable at `http://127.0.0.1:3001`.
 - UI is reachable at `http://127.0.0.1:5173`.
@@ -423,7 +421,7 @@ The roadmap also calls out: "Existing MiniMax compatibility should be verified w
 
 ### 8.4 Runtime processes
 
-- The `start.mjs` script (`scripts/start.mjs`) launches both the server (`tsx server/index.ts`) and Vite. Per AGENTS.md rule 1 and the Global Verification Checklist, after any server change the implementation agent must kill the prior `tsx`/`vite` processes and relaunch. The patch-proposal endpoints are pure HTTP and do not introduce new long-running child processes, so the only new spawns are the short-lived `/bin/zsh -lc <validation-cmd>` ones inside `runValidation` (already capped at 60 s in `server/benchRuns.ts:108`).
+- The `start.mjs` script (`scripts/start.mjs`) launches both the server (`tsx server/index.ts`) and Vite. Per AGENTS.md rule 1 and the Global Verification Checklist, after any server/runtime change the implementation agent must kill the prior server/app processes and relaunch. The patch-proposal endpoints are pure HTTP and do not introduce new long-running child processes, so the only new spawns are the short-lived `/bin/zsh -lc <validation-cmd>` ones inside `runValidation` (already capped at 60 s in `server/benchRuns.ts:108`).
 
 ### 8.5 Rollback plan
 
@@ -462,7 +460,7 @@ Validation required before reporting done:
 - npm run lint
 - npm run build
 - Manual API or UI smoke for create/list/get/hunk status/discard.
-- Because runtime UI changes are made: kill existing CMDui app/server processes, relaunch with npm start, verify http://127.0.0.1:3001 and http://127.0.0.1:5173 are reachable.
+- Restart only if server/runtime code changed. For client-only UI changes, leave the running app/server alone; refresh the UI if needed. If server/runtime code changed, kill existing CMDui app/server processes, relaunch with npm start, and verify http://127.0.0.1:3001 plus http://127.0.0.1:5173 are reachable.
 - Manual UI smoke: open Patch Review panel, paste a harmless one-file patch, create a proposal, reject then accept a hunk, and confirm the state updates. If applying, only apply in a temp/safe workspace or a harmless file.
 
 Deliverable:
@@ -474,7 +472,7 @@ Deliverable:
 Optional longer prompt if the user explicitly wants fewer handoffs and trusts the agent to continue after Batch A:
 
 ```text
-Do Batch A above, and if lint/build/relaunch/manual smoke are clean, continue directly into Batch B — wire proposal generation into existing model/diff flows. For Batch B, add a Review Patch/Create Patch Proposal action wherever existing model output or diff artifacts contain unified diff text, wire DiffViewer to create proposals when appropriate, and route the user into the Patch Review panel. Re-run all validation and relaunch checks after Batch B. Stop before Batch C validation-after-apply server work unless explicitly approved.
+Do Batch A above, and if lint/build/manual smoke are clean, with restart only if server/runtime code changed, continue directly into Batch B — wire proposal generation into existing model/diff flows. For Batch B, add a Review Patch/Create Patch Proposal action wherever existing model output or diff artifacts contain unified diff text, wire DiffViewer to create proposals when appropriate, and route the user into the Patch Review panel. Re-run all validation and relaunch checks after Batch B. Stop before Batch C validation-after-apply server work unless explicitly approved.
 ```
 
 ## 10. Out of scope (explicit)
