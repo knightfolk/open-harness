@@ -584,3 +584,186 @@ Deliverable:
 - Report changed files, validation results, and whether the next best task is Batch B: wiring model/diff outputs into patch proposals.
 ```
 
+
+---
+
+## 12. Batches A / B / C — implementation recap
+
+Three coherent commits landed M15 P0 end-to-end against the existing
+Phase 1 server foundation and Phase 2 client wrappers. Status: all
+three batches merged into `main` on 2026-06-01.
+
+Commits, in order:
+
+- `23c3b91` — **Batch A**: Patch Review Panel UI
+- `bebde49` — **Batch B**: Wire proposal generation into model/diff flows
+- `40fb243` — **Batch C**: Server-side validation-after-apply
+
+### Batch A — Patch Review Panel UI (commit `23c3b91`)
+
+Goal: first usable Patch Review panel for M15 P0. The panel is
+registered in the layout system so it can be opened from the top bar.
+
+What landed:
+
+- New `src/components/PatchReviewPanel.tsx` — list, create, detail,
+  and apply views, including a manual proposal-creation form with
+  pasted unified diff + workingDir + explanation + verification
+  commands.
+- `src/types/layout.ts` — added `'patches'` to `PanelId` and
+  `ALL_PANELS`.
+- `src/components/layout/panelRegistry.tsx` — added the `patches`
+  config entry with a `GitPullRequestArrow` icon.
+- `src/components/layout/PanelContent.tsx` — added the `patches` case
+  and threaded `sessionId` through the panel context.
+- `src/components/layout/LayoutEngine.tsx` — accepts and forwards
+  `sessionId`.
+- `src/App.tsx` — passes `activeSessionId` to `LayoutEngine`.
+- `src/styles/components.css` — added the patch-review styles
+  (hunk body, status badges, list item, apply result, form).
+
+UI behavior:
+
+- Toolbar with title, refresh, and New buttons.
+- Left pane: proposal list filtered by the active `sessionId`, with
+  status badge, source tag, file/hunk counts, working-dir basename,
+  verification command count, and relative updated time.
+- Right pane: empty state, create form, or proposal detail. Detail
+  shows files, action badges (create/update/delete/rename), binary
+  marker, hunks with old/new line numbers and added/removed/context
+  styling. Per-hunk accept/reject, plus accept-all, reject-all,
+  discard, and apply buttons in the header.
+- Apply result renders the server's exact response: `appliedFiles`,
+  `skippedFiles`, `errors`, `validation` array, and `validationPassed`
+  pill. No client-side validation is invented.
+- Empty/loading/error states for the list and the detail.
+
+Validation: `npm run lint` clean, `npm run build` clean. Direct API
+smoke against the running server (create, list, get, reject hunk,
+accept hunk, discard) all green. Throwaway file in `/tmp` was not
+touched (no apply was invoked). No server restart was needed — the
+Batch A commit is client-only.
+
+### Batch B — Wire proposal generation into existing model/diff flows (commit `bebde49`)
+
+Goal: make proposals appear naturally from existing CMDui workflows
+instead of only pasted diffs.
+
+What landed:
+
+- `src/App.tsx` — added `pendingPatchProposalId` state and a
+  `handleProposePatch(diffText, explanation?)` callback. The callback
+  ensures a session is active, calls `api.createPatchProposal` with
+  `source: 'diff-viewer'`, sets the pending id, and calls
+  `addPanel('patches')` so the panel is visible.
+- `src/components/layout/LayoutEngine.tsx` /
+  `src/components/layout/PanelContent.tsx` — added
+  `pendingPatchProposalId` and `clearPendingPatchProposalId` props to
+  the context.
+- `src/components/DiffViewer.tsx` — new **Propose patch** button next
+  to the existing **Review** action on the per-file diff header.
+  Disabled while a proposal is in flight or when the diff is empty.
+  Inline error banner surfaces server errors.
+- `src/components/MessageBubble.tsx` / `src/components/ChatPanel.tsx`
+  — `extractUnifiedDiff` helper that finds ```diff``` / ```patch```
+  fenced blocks (or a raw `diff --git` body in the message text).
+  Renders a one-click **🩹 Review patch** button on completed
+  assistant messages.
+- `src/utils/runSignals.ts` — extended `SuggestedAction.action` with
+  `'propose-patch'`. Emits a **Review proposed patch** action
+  whenever an assistant message contains a unified diff (priority 46),
+  and again under the existing execute-mode branch (priority 43).
+- `src/components/NextBestActions.tsx` — accepts `onProposePatch` and
+  `messageContent` props; the new action type extracts the diff and
+  routes it into the patch flow.
+- `src/components/PatchReviewPanel.tsx` — watches `pendingProposalId`,
+  refreshes, fetches the new proposal, auto-selects it, and clears
+  the signal.
+- `src/styles/components.css` — `.message-patch-action` rule.
+
+Validation: `npm run lint` clean, `npm run build` clean. Direct API
+smoke confirmed `source: diff-viewer` is persisted, hunk round-trips
+work, and the throwaway file is untouched. No server restart was
+needed — the Batch B commit is client-only.
+
+### Batch C — Validation-after-apply on the server (commit `40fb243`)
+
+Goal: make post-apply validation first-class on the server, and give
+the UI a clear pill for every state (pass / fail / none).
+
+What landed:
+
+- `server/index.ts`:
+  - `POST /api/patch-proposals` now defaults `verificationCommands`
+    from `ProjectProfile.validation.lint` and
+    `ProjectProfile.validation.typecheck` when the caller did not
+    supply any. Profile detection is best-effort and falls back to the
+    caller-supplied list on failure.
+  - `POST /api/patch-proposals/:id/apply` (now `async`):
+    - `skippedFiles` is computed as the diff between proposed file
+      paths and the files the system `patch` actually wrote.
+    - After a successful apply, `runValidation` from
+      `server/benchRuns` runs `proposal.verificationCommands` in the
+      proposal's `workingDir`, capped at 60 s per command (the
+      existing bench runner primitive).
+    - The response carries the real `validation` array and
+      `validationPassed` (true iff every command passed; true with an
+      empty array when no commands are configured).
+    - The proposal still flips to `applied` even if validation later
+      fails — no auto-rollback. The user is expected to inspect the
+      per-command results in the UI and recover via the existing
+      terminal panel / `git checkout` if needed.
+    - Validation is skipped entirely when the apply itself failed, so
+      the user sees the apply errors first instead of running
+      commands against a possibly half-patched tree.
+    - The runner is wrapped in try/catch so a runner crash produces a
+      single failed validation entry instead of a 500.
+- `src/components/PatchReviewPanel.tsx` — `ApplyResultView` now
+  shows a third state, **No verification commands**, when
+  `validation` is empty. The pass/fail pills are unchanged for
+  non-empty arrays. The Batch A wiring already routes the response
+  through unchanged, so no API client changes were needed.
+- `src/styles/components.css` — new `.patch-apply-pill-none` rule.
+
+Validation: `npm run lint` clean, `npm run build` clean. Direct API
+smoke in a throwaway `/tmp` directory covered five scenarios:
+
+- A) passing validation command — `appliedFiles: [version.txt]`,
+  `validationPassed: true`, `validation[0].passed: true`.
+- B) mixed passing/failing commands — patch still applied, no
+  auto-rollback, `validationPassed: false`, mixed pass/fail in
+  `validation`, `proposal.status: 'applied'`.
+- C) no verification commands — patch applied, `validation: []`,
+  `validationPassed: true` (UI shows the neutral "No verification
+  commands" pill).
+- D) defaults from project profile — caller supplied no commands,
+  the server defaulted to `['npm run lint']` from the smoke
+  `package.json`, and the runner executed it successfully.
+- E) apply fails (mismatched hunk) — `errors` populated,
+  `validation` skipped, `proposal.status: 'failed'`.
+
+Per AGENTS.md rule 1 the server was killed and relaunched after the
+Batch C commit landed. The new server is currently running at
+`http://127.0.0.1:3001` and the UI at `http://127.0.0.1:5173`.
+
+### Combined diff stats
+
+```
+23c3b91 Batch A:  7 files changed, 1440 insertions(+), 4 deletions(-)
+                  (1 new file: src/components/PatchReviewPanel.tsx)
+bebde49 Batch B: 10 files changed,  241 insertions(+), 13 deletions(-)
+                  (no new files)
+40fb243 Batch C:  3 files changed,   70 insertions(+),  6 deletions(-)
+                  (no new files)
+```
+
+### What's next
+
+The remaining M15 P1 items are still out of scope:
+
+- Inline comments with severity and resolved state (Batch D).
+- Commit/PR assistant with GitHub auth (separate scoping needed).
+
+M13 (Multi-Agent Team Runtime) and M14 (Deep Browser and UI
+Verification) remain deferred until M15 P0 is exercised end-to-end
+with at least one implementer-agent handoff.
