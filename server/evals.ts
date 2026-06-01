@@ -44,6 +44,8 @@ export interface EvalScores {
   producedSummary: boolean;
   latencyMs: number;
   toolCount: number;
+  validationPassed: boolean;
+  validationScore: number; // 0-5, weighted above heuristics
   overallScore: number; // 0-10
 }
 
@@ -173,6 +175,12 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
   // Tool efficiency (not too many, not too few)
   if (toolCalls.length >= 1 && toolCalls.length <= 10) score += 0.5;
 
+  // Validation scoring (if validation results are available)
+  const validationPassed = (result as any).validationPassed !== undefined
+    ? (result as any).validationPassed
+    : true; // Default to true if no validation was run
+  const validationScore = validationPassed ? 2.5 : 0;
+
   return {
     usedTools,
     answeredUser,
@@ -181,7 +189,9 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
     producedSummary,
     latencyMs: result.wallMs,
     toolCount: toolCalls.length,
-    overallScore: Math.min(10, Math.round(score * 10) / 10),
+    validationPassed,
+    validationScore,
+    overallScore: Math.min(10, Math.round((score + validationScore) * 10) / 10),
   };
 }
 

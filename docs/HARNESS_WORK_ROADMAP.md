@@ -782,11 +782,11 @@ This is the bridge from “model comparison UI” to “repeatable agent benchma
 
 ### P0 — Define a durable harness task format
 
-- [ ] Create `server/harnessTasks.ts`
-- [ ] Define `HarnessTask` with prompt, repo path, setup commands, allowed trust mode, verification commands, expected changed files, expected no-touch files, scoring rubric, timeout, and tags
-- [ ] Store task suites under `~/.open-harness/tasks`
-- [ ] Add import/export for JSON task suites
-- [ ] Add task fixtures for this repo: review repo, explain diff, fix lint error, update doc, run browser smoke check
+- [x] Create `server/harnessTasks.ts`
+- [x] Define `HarnessTask` with prompt, repo path, setup commands, allowed trust mode, verification commands, expected changed files, expected no-touch files, scoring rubric, timeout, and tags
+- [x] Store task suites under `~/.open-harness/tasks`
+- [x] Add import/export for JSON task suites
+- [x] Add task fixtures for this repo: review repo, explain diff, fix lint error, update doc, run browser smoke check
 
 Suggested type:
 
@@ -809,30 +809,30 @@ interface HarnessTask {
 
 ### P0 — Add deterministic validation scoring
 
-- [ ] Record command exit code, duration, stdout/stderr preview, and retry count for every validation command
-- [ ] Add pass/fail validation score to `EvalScores`
+- [x] Record command exit code, duration, stdout/stderr preview, and retry count for every validation command
+- [x] Add pass/fail validation score to `EvalScores`
 - [ ] Weight “tests passed” above language-model style heuristics
-- [ ] Show failed validation as a first-class run failure, not only a low score
+- [x] Show failed validation as a first-class run failure, not only a low score
 
 ### P1 — Add replayable benchmark runs
 
-- [ ] Create `HarnessBenchRun` records under `~/.open-harness/bench-runs`
-- [ ] Save prompt, project profile, run trace, tool calls, diffs, validation output, model/provider settings, cost estimate, and final answer
+- [x] Create `HarnessBenchRun` records under `~/.open-harness/bench-runs`
+- [x] Save prompt, project profile, run trace, tool calls, diffs, validation output, model/provider settings, cost estimate, and final answer
 - [ ] Add “Replay run” from saved trace
 - [ ] Add “Compare against previous run” for regression testing
 
 ### P1 — Add SWE-bench-style adapter hooks
 
-- [ ] Support task setup from issue text, base commit, patch/diff, and verification command
-- [ ] Report resolved/unresolved, cost, latency, step count, token count, and validation status
-- [ ] Export results as JSON/CSV for leaderboard-style comparison
+- [x] Support task setup from issue text, base commit, patch/diff, and verification command
+- [x] Report resolved/unresolved, cost, latency, step count, token count, and validation status
+- [x] Export results as JSON/CSV for leaderboard-style comparison
 
 ## Acceptance Criteria
 
-- [ ] A local suite can be run repeatedly and produce comparable pass/fail results.
-- [ ] Validation failures are visible without reading raw logs.
-- [ ] A saved run contains enough data to replay or audit later.
-- [ ] Reports include quality, speed, cost, steps, and verification signals.
+- [x] A local suite can be run repeatedly and produce comparable pass/fail results.
+- [x] Validation failures are visible without reading raw logs.
+- [x] A saved run contains enough data to replay or audit later.
+- [x] Reports include quality, speed, cost, steps, and verification signals.
 - [ ] `npm run lint` passes.
 - [ ] `npm run build` passes.
 

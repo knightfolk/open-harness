@@ -810,3 +810,191 @@ export async function compareModel(sessionId: string, targetModel: string, messa
   }
   return res.json();
 }
+
+// ── Harness Task API ───────────────────────────────────
+
+export interface HarnessTask {
+  id: string;
+  name: string;
+  prompt: string;
+  workingDir: string;
+  setupCommands: string[];
+  verificationCommands: string[];
+  expectedChangedFiles?: string[];
+  forbiddenChangedFiles?: string[];
+  trustMode: 'read-only' | 'ask-before-write' | 'workspace-write';
+  timeoutMs: number;
+  rubric: Array<{ id: string; points: number; description: string }>;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskSuite {
+  id: string;
+  name: string;
+  description: string;
+  tasks: string[];
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function getTasks(filter?: { tag?: string; trustMode?: string }): Promise<HarnessTask[]> {
+  const params = new URLSearchParams();
+  if (filter?.tag) params.set('tag', filter.tag);
+  if (filter?.trustMode) params.set('trustMode', filter.trustMode);
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/tasks${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw new Error(`Failed to get tasks: ${res.status}`);
+  return res.json();
+}
+
+export async function getTask(id: string): Promise<HarnessTask> {
+  const res = await fetch(`${API_BASE}/api/tasks/${id}`);
+  if (!res.ok) throw new Error(`Task not found: ${res.status}`);
+  return res.json();
+}
+
+export async function createTask(task: Omit<HarnessTask, 'id' | 'createdAt' | 'updatedAt'>): Promise<HarnessTask> {
+  const res = await fetch(`${API_BASE}/api/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(task),
+  });
+  if (!res.ok) throw new Error(`Failed to create task: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  await fetch(`${API_BASE}/api/tasks/${id}`, { method: 'DELETE' });
+}
+
+export async function seedTasks(workingDir?: string): Promise<void> {
+  await fetch(`${API_BASE}/api/tasks/seed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workingDir }),
+  });
+}
+
+export async function getTaskSuites(): Promise<TaskSuite[]> {
+  const res = await fetch(`${API_BASE}/api/task-suites`);
+  if (!res.ok) throw new Error(`Failed to get suites: ${res.status}`);
+  return res.json();
+}
+
+// ── Bench Run API ──────────────────────────────────────
+
+export interface BenchRunSummary {
+  id: string;
+  name: string;
+  status: string;
+  total: number;
+  completed: number;
+  createdAt: string;
+  completedAt?: string;
+  suiteId?: string;
+}
+
+export interface ValidationCommandResult {
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  passed: boolean;
+}
+
+export interface BenchScores {
+  usedTools: boolean;
+  answeredUser: boolean;
+  referencedRealFiles: boolean;
+  avoidedHallucinatedPaths: boolean;
+  producedSummary: boolean;
+  latencyMs: number;
+  toolCount: number;
+  validationPassed: boolean;
+  validationScore: number;
+  overallScore: number;
+  resolvedStatus: 'resolved' | 'unresolved' | 'partial';
+  stepCount: number;
+  tokenCount: number;
+  costEstimate: number;
+}
+
+export interface BenchRunResult {
+  taskId: string;
+  taskName: string;
+  modelId: string;
+  providerId: string;
+  status: 'ok' | 'error' | 'timeout' | 'validation-failed';
+  prompt: string;
+  response: string;
+  responseLength: number;
+  toolCalls: Array<{ name: string; status: string }>;
+  validationResults: ValidationCommandResult[];
+  validationPassed: boolean;
+  wallMs: number;
+  scores: BenchScores;
+  startedAt: string;
+  completedAt: string;
+  error?: string;
+}
+
+export interface BenchRun {
+  id: string;
+  name: string;
+  suiteId?: string;
+  status: 'running' | 'complete' | 'error';
+  taskIds: string[];
+  modelIds: string[];
+  results: BenchRunResult[];
+  total: number;
+  completed: number;
+  createdAt: string;
+  completedAt?: string;
+  summary?: {
+    byModel: Record<string, {
+      resolved: number; unresolved: number; partial: number;
+      avgScore: number; avgValidationScore: number;
+      avgLatencyMs: number; avgCost: number; avgSteps: number; totalRuns: number;
+    }>;
+    bestModel: string;
+    regressionFlags: Array<{ taskId: string; modelId: string; reason: string }>;
+  };
+}
+
+export async function getBenchRuns(): Promise<BenchRunSummary[]> {
+  const res = await fetch(`${API_BASE}/api/bench/runs`);
+  if (!res.ok) throw new Error(`Failed to get bench runs: ${res.status}`);
+  return res.json();
+}
+
+export async function getBenchRun(id: string): Promise<BenchRun> {
+  const res = await fetch(`${API_BASE}/api/bench/runs/${id}`);
+  if (!res.ok) throw new Error(`Bench run not found: ${res.status}`);
+  return res.json();
+}
+
+export async function runBench(params: {
+  name?: string;
+  taskIds: string[];
+  modelIds: string[];
+  suiteId?: string;
+  workingDir?: string;
+}): Promise<{ id: string; status: string; total: number }> {
+  const res = await fetch(`${API_BASE}/api/bench/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(`Failed to start bench: ${res.status}`);
+  return res.json();
+}
+
+export async function exportBenchRun(id: string, format: 'json' | 'csv' = 'json'): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/bench/runs/${id}/export?format=${format}`);
+  if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+  return res.text();
+}

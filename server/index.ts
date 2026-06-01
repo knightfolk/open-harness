@@ -24,6 +24,9 @@ import * as git from './git';
 import { capturePreview, checkServerHealth } from './browserPreview';
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import * as evals from './evals';
+import * as harnessTasks from './harnessTasks';
+import * as benchRuns from './benchRuns';
+import type { BenchRunResult } from './benchRuns';
 import { filterToolsForTrustMode, checkToolActionPolicy, type TrustMode } from './toolPolicy';
 import * as sessionStore from './sessionStore';
 import * as projectMemory from './projectMemory';
@@ -1793,6 +1796,303 @@ app.post('/api/chat/compare', async (req, res) => {
   });
 });
 
+
+// ── Harness Task Routes ────────────────────────────────
+
+app.get('/api/tasks', (req, res) => {
+  const { tag, trustMode } = req.query as { tag?: string; trustMode?: string };
+  res.json(harnessTasks.listTasks({ tag, trustMode }));
+});
+
+app.get('/api/tasks/:id', (req, res) => {
+  const task = harnessTasks.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  res.json(task);
+});
+
+app.post('/api/tasks', (req, res) => {
+  const task = harnessTasks.createTask(req.body);
+  res.status(201).json(task);
+});
+
+app.put('/api/tasks/:id', (req, res) => {
+  const task = harnessTasks.updateTask(req.params.id, req.body);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  res.json(task);
+});
+
+app.delete('/api/tasks/:id', (req, res) => {
+  if (!harnessTasks.deleteTask(req.params.id)) return res.status(404).json({ error: 'Task not found' });
+  res.status(204).end();
+});
+
+app.post('/api/tasks/seed', (req, res) => {
+  const { workingDir } = req.body as { workingDir?: string };
+  harnessTasks.seedFixtures(workingDir || process.cwd());
+  res.json({ ok: true, count: harnessTasks.listTasks().length });
+});
+
+// ── Task Suite Routes ──────────────────────────────────
+
+app.get('/api/task-suites', (_req, res) => {
+  res.json(harnessTasks.listSuites());
+});
+
+app.get('/api/task-suites/:id', (req, res) => {
+  const suite = harnessTasks.getSuite(req.params.id);
+  if (!suite) return res.status(404).json({ error: 'Suite not found' });
+  res.json(suite);
+});
+
+app.post('/api/task-suites', (req, res) => {
+  const suite = harnessTasks.createSuite(req.body);
+  res.status(201).json(suite);
+});
+
+app.delete('/api/task-suites/:id', (req, res) => {
+  if (!harnessTasks.deleteSuite(req.params.id)) return res.status(404).json({ error: 'Suite not found' });
+  res.status(204).end();
+});
+
+app.get('/api/task-suites/:id/export', (req, res) => {
+  const data = harnessTasks.exportSuite(req.params.id);
+  if (!data) return res.status(404).json({ error: 'Suite not found' });
+  res.json(data);
+});
+
+app.post('/api/task-suites/import', (req, res) => {
+  try {
+    const suite = harnessTasks.importSuite(req.body);
+    res.status(201).json(suite);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── Bench Run Routes ───────────────────────────────────
+
+app.get('/api/bench/runs', (_req, res) => {
+  res.json(benchRuns.listBenchRuns());
+});
+
+app.get('/api/bench/runs/:id', (req, res) => {
+  const run = benchRuns.getBenchRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Bench run not found' });
+  res.json(run);
+});
+
+app.get('/api/bench/runs/:id/export', (req, res) => {
+  const format = req.query.format as string || 'json';
+  if (format === 'csv') {
+    const csv = benchRuns.exportBenchRunCSV(req.params.id);
+    if (!csv) return res.status(404).json({ error: 'Bench run not found' });
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="bench-${req.params.id}.csv"`);
+    res.send(csv);
+  } else {
+    const json = benchRuns.exportBenchRunJSON(req.params.id);
+    if (!json) return res.status(404).json({ error: 'Bench run not found' });
+    res.setHeader('Content-Type', 'application/json');
+    res.send(json);
+  }
+});
+
+app.post('/api/bench/run', async (req, res) => {
+  const { name, taskIds, modelIds, suiteId, workingDir } = req.body as {
+    name?: string;
+    taskIds: string[];
+    modelIds: string[];
+    suiteId?: string;
+    workingDir?: string;
+  };
+
+  if (!taskIds?.length || !modelIds?.length) {
+    return res.status(400).json({ error: 'taskIds and modelIds are required' });
+  }
+
+  const tasks = taskIds.map(id => harnessTasks.getTask(id)).filter(Boolean) as harnessTasks.HarnessTask[];
+  if (tasks.length === 0) return res.status(400).json({ error: 'No valid tasks found' });
+
+  const run = benchRuns.createBenchRun({
+    name: name || `Bench ${new Date().toLocaleDateString()}`,
+    suiteId,
+    taskIds: tasks.map(t => t.id),
+    modelIds,
+  });
+
+  res.status(201).json({ id: run.id, status: 'running', total: run.total });
+
+  // Run in background
+  const targetDir = workingDir || process.cwd();
+
+  for (const modelId of modelIds) {
+    const resolved = resolveProviderForModel(modelId);
+    if (!resolved) {
+      for (const task of tasks) {
+        run.results.push({
+          taskId: task.id,
+          taskName: task.name,
+          modelId,
+          providerId: 'none',
+          status: 'error',
+          prompt: task.prompt,
+          response: 'No provider for model',
+          responseLength: 0,
+          toolCalls: [],
+          validationResults: [],
+          validationPassed: false,
+          wallMs: 0,
+          scores: benchRuns.computeBenchScores({
+            response: '', toolCalls: [], wallMs: 0,
+            validationResults: [], stepCount: 0, tokenCount: 0, costEstimate: 0,
+          }),
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          error: 'No provider for model',
+        });
+        run.completed++;
+      }
+      continue;
+    }
+
+    for (const task of tasks) {
+      const taskDir = task.workingDir || targetDir;
+      const startMs = Date.now();
+      const startedAt = new Date().toISOString();
+
+      // Run setup commands
+      for (const cmd of task.setupCommands) {
+        await runShellCommand(cmd, taskDir, 30_000);
+      }
+
+      // Create a temporary session for this task run
+      const taskSession: SessionRow = {
+        id: uuid(),
+        title: `[bench] ${modelId}--${task.name}`,
+        workingDir: taskDir,
+        messages: [{
+          id: uuid(),
+          role: 'user',
+          content: task.prompt,
+          timestamp: new Date().toISOString(),
+        }],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      sessions.set(taskSession.id, taskSession);
+
+      const chunks: string[] = [];
+      const toolCallsAccum: Array<{ name: string; status: string; input?: string; output?: string; duration?: number }> = [];
+      let stepCount = 0;
+
+      const writer = {
+        write: (data: string) => {
+          const lines = data.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const payload = line.slice(6);
+              if (payload === '{}' || payload === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed.text) chunks.push(parsed.text);
+                if (parsed.name && parsed.status) {
+                  toolCallsAccum.push({ name: parsed.name, status: parsed.status, input: parsed.input, output: parsed.output, duration: parsed.duration });
+                  stepCount++;
+                }
+              } catch { /* skip */ }
+            }
+          }
+          return true;
+        },
+        setHeader: () => {},
+        end: () => {},
+      } as unknown as express.Response;
+
+      try {
+        await streamModel(
+          resolved.chatURL, resolved.apiKey, resolved.providerId,
+          taskSession.messages, writer, uuid(), taskSession,
+          modelId,
+        );
+      } catch (err: any) {
+        run.results.push({
+          taskId: task.id,
+          taskName: task.name,
+          modelId,
+          providerId: resolved.providerId,
+          status: 'error',
+          prompt: task.prompt,
+          response: '',
+          responseLength: 0,
+          toolCalls: [],
+          validationResults: [],
+          validationPassed: false,
+          wallMs: Date.now() - startMs,
+          scores: benchRuns.computeBenchScores({
+            response: '', toolCalls: [], wallMs: Date.now() - startMs,
+            validationResults: [], stepCount: 0, tokenCount: 0, costEstimate: 0,
+          }),
+          startedAt,
+          completedAt: new Date().toISOString(),
+          error: err.message,
+        });
+        run.completed++;
+        benchRuns.saveBenchRun(run);
+        continue;
+      }
+
+      const response = chunks.join('');
+
+      // Run verification commands
+      let validationResults: benchRuns.ValidationCommandResult[] = [];
+      if (task.verificationCommands.length > 0) {
+        validationResults = await benchRuns.runValidation(task.verificationCommands, taskDir);
+      }
+
+      const wallMs = Date.now() - startMs;
+      const scores = benchRuns.computeBenchScores({
+        response,
+        toolCalls: toolCallsAccum,
+        wallMs,
+        validationResults,
+        stepCount,
+        tokenCount: 0, // TODO: extract from run trace
+        costEstimate: 0, // TODO: compute from token count
+      });
+
+      const status: BenchRunResult['status'] = !validationResults.every(r => r.passed) && validationResults.length > 0
+        ? 'validation-failed'
+        : 'ok';
+
+      run.results.push({
+        taskId: task.id,
+        taskName: task.name,
+        modelId,
+        providerId: resolved.providerId,
+        status,
+        prompt: task.prompt,
+        response,
+        responseLength: response.length,
+        toolCalls: toolCallsAccum,
+        validationResults,
+        validationPassed: validationResults.length === 0 || validationResults.every(r => r.passed),
+        wallMs,
+        scores,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      });
+      run.completed++;
+      benchRuns.saveBenchRun(run);
+    }
+  }
+
+  run.status = 'complete';
+  run.completedAt = new Date().toISOString();
+  run.summary = benchRuns.generateBenchSummary(run.results);
+  benchRuns.saveBenchRun(run);
+});
+
+
 // ── Eval / Model Lab Routes ──────────────────────────
 
 app.get('/api/evals/prompts', (_req, res) => {
@@ -1848,7 +2148,7 @@ app.post('/api/evals/run', async (req, res) => {
           toolCallCount: 0,
           toolCalls: [],
           wallMs: 0,
-          scores: { usedTools: false, answeredUser: false, referencedRealFiles: false, avoidedHallucinatedPaths: false, producedSummary: false, latencyMs: 0, toolCount: 0, overallScore: 0 },
+          scores: { usedTools: false, answeredUser: false, referencedRealFiles: false, avoidedHallucinatedPaths: false, producedSummary: false, latencyMs: 0, toolCount: 0, validationPassed: false, validationScore: 0, overallScore: 0 },
         });
         report.completed++;
       }
