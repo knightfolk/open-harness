@@ -13,6 +13,17 @@ import { getModelConfig, isReasoningModel, detectModelFamily } from './modelProf
 import { buildContextWindow } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
 import { formatProjectProfileForPrompt, getProjectProfile } from './projectProfile';
+import {
+  buildContextPack,
+  findSymbolDefinition,
+  getDirectDependencies,
+  getRepoMap,
+  getReverseDependencies,
+  suggestContextPack,
+  summarizeChangeImpact,
+  summarizeRepoMap,
+  type ContextPackName,
+} from './repoMap';
 import { routeRequest } from './router';
 import type { RouteDecision } from './router';
 import { orchestrationInstruction, orchestrationTraceSteps } from './orchestrator';
@@ -254,14 +265,14 @@ function resolveProviderForModel(modelId: string): { chatURL: string; apiKey: st
 
 // ── Provider resolution ─────────────────────────────
 function resolveActiveProvider(): { chatURL: string; apiKey: string; providerId: string } | null {
-  const modelId = appConfig.activeModel || 'MiniMax-M2.7';
+  const modelId = appConfig.activeModel || 'MiniMax-M3';
   const resolved = getProviderForModel(appConfig, modelId);
   if (!resolved) return null;
   return { chatURL: resolved.chatURL, apiKey: resolved.apiKey, providerId: resolved.provider.id };
 }
 
 function getActiveModel(): string {
-  return appConfig.activeModel || 'MiniMax-M2.7';
+  return appConfig.activeModel || 'MiniMax-M3';
 }
 
 function getPersonality(): string {
@@ -874,6 +885,94 @@ app.get('/api/project/profile', (req, res) => {
   }
 });
 
+
+// ── Repo Map & Semantic Code Intelligence (Milestone 11) ────────────
+const VALID_PACKS: ContextPackName[] = ['bugfix', 'feature', 'review', 'docs', 'ui-smoke'];
+function parsePack(value: unknown): ContextPackName | null {
+  if (typeof value !== 'string') return null;
+  return VALID_PACKS.includes(value as ContextPackName) ? (value as ContextPackName) : null;
+}
+
+app.get('/api/repo/map', (req, res) => {
+  const targetPath = (req.query.path as string) || process.cwd();
+  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  const budgetRaw = Number(req.query.tokenBudget);
+  const tokenBudget = Number.isFinite(budgetRaw) && budgetRaw > 0 ? Math.min(Math.floor(budgetRaw), 20000) : 4500;
+  try {
+    const map = getRepoMap(targetPath);
+    res.json(summarizeRepoMap(map, tokenBudget));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to build repo map' });
+  }
+});
+
+app.get('/api/repo/symbol', (req, res) => {
+  const targetPath = (req.query.path as string) || process.cwd();
+  const name = (req.query.name as string || '').trim();
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  try {
+    const map = getRepoMap(targetPath);
+    const matches = findSymbolDefinition(map, name).slice(0, 50);
+    res.json({ query: name, matchCount: matches.length, matches });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to search symbols' });
+  }
+});
+
+app.get('/api/repo/deps', (req, res) => {
+  const targetPath = (req.query.path as string) || process.cwd();
+  const file = (req.query.file as string || '').trim();
+  if (!file) return res.status(400).json({ error: 'file is required' });
+  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  try {
+    const map = getRepoMap(targetPath);
+    res.json({
+      file,
+      imports: getDirectDependencies(map, file),
+      importedBy: getReverseDependencies(map, file),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load dependencies' });
+  }
+});
+
+app.get('/api/repo/impact', (req, res) => {
+  const targetPath = (req.query.path as string) || process.cwd();
+  const raw = (req.query.files as string || '').trim();
+  if (!raw) return res.status(400).json({ error: 'files is required (comma-separated)' });
+  const files = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  try {
+    const map = getRepoMap(targetPath);
+    res.json({ files, ...summarizeChangeImpact(map, files) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to compute impact' });
+  }
+});
+
+app.get('/api/repo/context-pack/suggest', (req, res) => {
+  const userMessage = (req.query.userMessage as string) || '';
+  res.json(suggestContextPack(userMessage));
+});
+
+app.get('/api/repo/context-pack', (req, res) => {
+  const targetPath = (req.query.path as string) || process.cwd();
+  const pack = parsePack(req.query.pack) || suggestContextPack((req.query.userMessage as string) || '').pack;
+  const userMessage = (req.query.userMessage as string) || '';
+  const budgetRaw = Number(req.query.budgetTokens);
+  const budgetTokens = Number.isFinite(budgetRaw) && budgetRaw > 0 ? Math.min(Math.floor(budgetRaw), 20000) : 2500;
+  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  try {
+    const map = getRepoMap(targetPath);
+    const cp = buildContextPack(map, pack, userMessage, budgetTokens);
+    res.json(cp);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to build context pack' });
+  }
+});
+
+
 // ── Send message (stream MiniMax response) ─────────────
 app.post('/api/sessions/:id/messages', async (req, res) => {
   const session = sessions.get(req.params.id);
@@ -1197,12 +1296,54 @@ async function streamModel(
     try { projectProfile = getProjectProfile(session.workingDir); } catch { /* profile is best-effort */ }
   }
 
+  // ── Repo Map + Context Pack (Milestone 11) ──
+  // Build a token-budgeted repo map and a context pack matched to the request.
+  // The pack is appended to the system prompt so the model can see *why* each
+  // file was selected and explore them via tools.
+  let repoMapSummary: ReturnType<typeof summarizeRepoMap> | undefined;
+  let contextPack: ReturnType<typeof buildContextPack> | undefined;
+  const promptIntro: string[] = [];
+  if (session.workingDir) {
+    try {
+      const map = getRepoMap(session.workingDir);
+      repoMapSummary = summarizeRepoMap(map, 1800);
+      const suggestion = suggestContextPack(lastUserMsg?.content || "");
+      contextPack = buildContextPack(map, suggestion.pack, lastUserMsg?.content || "", 2200);
+      if (run) {
+        emitRunStep(res, run, {
+          type: 'repo_map',
+          tokenBudget: repoMapSummary.budgetTokens,
+          totalFiles: repoMapSummary.totalFiles,
+          truncated: repoMapSummary.truncated,
+          topFiles: repoMapSummary.topFiles.map((f) => f.path),
+        });
+        emitRunStep(res, run, {
+          type: 'context_pack',
+          pack: contextPack.name,
+          files: contextPack.files,
+          tokens: contextPack.budgetTokens,
+          reasons: contextPack.reasons,
+          suggestion: suggestion.reason,
+        });
+      }
+      promptIntro.push(repoMapSummary.text);
+      promptIntro.push(contextPack.text);
+    } catch (err: any) {
+      console.warn('[repoMap] failed to build map:', err?.message || err);
+    }
+  }
+
   const promptResult = buildPromptForModel({
     modelId: effectiveModel,
     role: classifiedRole,
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
-    projectProfileSummary: [projectProfile ? formatProjectProfileForPrompt(projectProfile) : undefined, session.workingDir ? projectMemory.formatMemoryForPrompt(session.workingDir) : undefined, orchestrationInstruction(route)].filter(Boolean).join('\n\n') || undefined,
+    projectProfileSummary: [
+      projectProfile ? formatProjectProfileForPrompt(projectProfile) : undefined,
+      session.workingDir ? projectMemory.formatMemoryForPrompt(session.workingDir) : undefined,
+      orchestrationInstruction(route),
+      ...promptIntro,
+    ].filter(Boolean).join('\n\n') || undefined,
     tools: filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
     enableThinking: isReasoningModel(effectiveModel),
   });
@@ -2238,7 +2379,7 @@ process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignorin
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Open-Harness server running on http://localhost:${PORT}`);
-  const _activeModel = appConfig.activeModel || 'MiniMax-M2.7';
+  const _activeModel = appConfig.activeModel || 'MiniMax-M3';
   const _family = detectModelFamily(_activeModel);
   const _cfg = getModelConfig(_activeModel);
   const _resolved = resolveActiveProvider();

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Folder, File, ChevronRight, ChevronDown, FolderOpen, GitBranch, ListChecks, Star, AlertCircle } from 'lucide-react';
+import { Folder, File, ChevronRight, ChevronDown, FolderOpen, GitBranch, ListChecks, Star, AlertCircle, Map as MapIcon, Search, Layers } from 'lucide-react';
 import type { FileEntry, ProjectProfile } from '../utils/api';
 import * as api from '../utils/api';
 
@@ -14,6 +14,55 @@ export function FilesPanel({ workingDir, projectProfile }: Props) {
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const [repoMap, setRepoMap] = useState<api.RepoMapSummary | null>(null);
+  const [repoMapLoading, setRepoMapLoading] = useState(false);
+  const [repoMapOpen, setRepoMapOpen] = useState(true);
+  const [symbolQuery, setSymbolQuery] = useState('');
+  const [symbolResults, setSymbolResults] = useState<api.RepoSymbolMatch[] | null>(null);
+  const [symbolLoading, setSymbolLoading] = useState(false);
+  const [packOpen, setPackOpen] = useState(false);
+  const [selectedPack, setSelectedPack] = useState<api.ContextPackName>('feature');
+  const [contextPack, setContextPack] = useState<api.ContextPack | null>(null);
+  const [contextPackLoading, setContextPackLoading] = useState(false);
+
+  const loadRepoMap = useCallback(async (dir: string) => {
+    setRepoMapLoading(true);
+    try {
+      const map = await api.getRepoMap(dir);
+      setRepoMap(map);
+    } catch (err) {
+      console.warn('[repoMap] failed:', err);
+    } finally {
+      setRepoMapLoading(false);
+    }
+  }, []);
+
+  const runSymbolSearch = useCallback(async () => {
+    if (!workingDir || !symbolQuery.trim()) return;
+    setSymbolLoading(true);
+    try {
+      const res = await api.searchSymbols(workingDir, symbolQuery.trim());
+      setSymbolResults(res.matches);
+    } catch (err) {
+      console.warn('[symbols] failed:', err);
+      setSymbolResults([]);
+    } finally {
+      setSymbolLoading(false);
+    }
+  }, [workingDir, symbolQuery]);
+
+  const loadContextPack = useCallback(async (pack: api.ContextPackName) => {
+    if (!workingDir) return;
+    setContextPackLoading(true);
+    try {
+      const cp = await api.getContextPack(workingDir, pack);
+      setContextPack(cp);
+    } catch (err) {
+      console.warn('[contextPack] failed:', err);
+    } finally {
+      setContextPackLoading(false);
+    }
+  }, [workingDir]);
 
   const loadDir = useCallback(async (dirPath: string) => {
     setLoading(true);
@@ -30,9 +79,10 @@ export function FilesPanel({ workingDir, projectProfile }: Props) {
 
 
   useEffect(() => {
-    if (!workingDir) { setEntries([]); return; }
+    if (!workingDir) { setEntries([]); setRepoMap(null); setSymbolResults(null); setContextPack(null); return; }
     loadDir(workingDir);
-  }, [workingDir, loadDir]);
+    loadRepoMap(workingDir);
+  }, [workingDir, loadDir, loadRepoMap]);
 
   const toggleDir = useCallback(async (dirPath: string) => {
     setExpandedDirs((prev) => {
@@ -116,6 +166,98 @@ export function FilesPanel({ workingDir, projectProfile }: Props) {
               <summary style={{ cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 600 }}>Repo instructions</summary>
               <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto', margin: '6px 0 0', fontFamily: "'JetBrains Mono', monospace" }}>{projectProfile.instructions.agentsMd.slice(0, 1600)}</pre>
             </details>
+          )}
+        </div>
+      )}
+
+      {/* Repo map (Milestone 11) */}
+      {workingDir && (
+        <div style={{ borderBottom: '1px solid var(--border-primary)', padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setRepoMapOpen((v) => !v)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+              <MapIcon size={13} style={{ color: 'var(--accent-primary)' }} /> Repo Map
+              {repoMap && <span style={{ fontSize: 10, color: 'var(--text-tertiary)', fontWeight: 500 }}>{repoMap.indexedFiles} files · {repoMap.routeCount} routes · {repoMap.componentCount} components</span>}
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{repoMapOpen ? '−' : '+'}</span>
+          </div>
+          {repoMapOpen && (
+            <>
+              {repoMapLoading && <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Indexing repository…</div>}
+              {repoMap && !repoMapLoading && (
+                <>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {repoMap.entryPoints.length > 0 && <span>Entries: {repoMap.entryPoints.slice(0, 3).join(', ')}</span>}
+                    {repoMap.entryPoints.length > 0 && repoMap.languages.length > 0 && <span> · </span>}
+                    {repoMap.languages.length > 0 && <span>{repoMap.languages.slice(0, 4).join(', ')}</span>}
+                  </div>
+                  {repoMap.topFiles.length > 0 && (
+                    <details>
+                      <summary style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}>Top {Math.min(10, repoMap.topFiles.length)} files</summary>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+                        {repoMap.topFiles.slice(0, 10).map((f) => (
+                          <button key={f.path} onClick={() => handleFileClick(`${repoMap.root}/${f.path}`)} style={{ textAlign: 'left', background: 'none', border: 0, padding: '2px 0', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} title={f.reasons.join(', ')}>
+                            <span style={{ color: 'var(--accent-primary)' }}>·</span> {f.path} <span style={{ color: 'var(--text-tertiary)' }}>· {f.score.toFixed(0)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <Search size={11} style={{ color: 'var(--text-tertiary)' }} />
+                    <input
+                      type="text"
+                      placeholder="Find symbol (e.g. App, buildPrompt, getRepoMap)"
+                      value={symbolQuery}
+                      onChange={(e) => setSymbolQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') runSymbolSearch(); }}
+                      style={{ flex: 1, background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)', borderRadius: 4, padding: '4px 6px', color: 'var(--text-primary)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}
+                    />
+                    <button onClick={runSymbolSearch} disabled={!symbolQuery.trim() || symbolLoading} style={{ background: 'var(--accent-primary)', color: 'var(--bg-primary)', border: 0, borderRadius: 4, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>{symbolLoading ? '…' : 'Go'}</button>
+                  </div>
+                  {symbolResults && (
+                    <div style={{ maxHeight: 160, overflow: 'auto' }}>
+                      {symbolResults.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>No symbols matched.</div>}
+                      {symbolResults.slice(0, 12).map((m, i) => (
+                        <button key={i} onClick={() => handleFileClick(`${repoMap.root}/${m.file}`)} style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 0, padding: '3px 0', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+                          <span style={{ color: 'var(--accent-primary)' }}>{m.kind}</span> {m.name} <span style={{ color: 'var(--text-tertiary)' }}>→ {m.file}:{m.line}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ borderTop: '1px dashed var(--border-primary)', paddingTop: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setPackOpen((v) => !v)}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>
+                        <Layers size={12} style={{ color: 'var(--accent-primary)' }} /> Context Pack
+                      </div>
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{packOpen ? '−' : '+'}</span>
+                    </div>
+                    {packOpen && (
+                      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {(['bugfix', 'feature', 'review', 'docs', 'ui-smoke'] as api.ContextPackName[]).map((p) => (
+                            <button key={p} onClick={() => { setSelectedPack(p); loadContextPack(p); }} style={{ background: selectedPack === p ? 'var(--accent-primary)' : 'var(--bg-tertiary)', color: selectedPack === p ? 'var(--bg-primary)' : 'var(--text-secondary)', border: '1px solid var(--border-primary)', borderRadius: 4, padding: '3px 7px', fontSize: 10, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 0.4 }}>{p}</button>
+                          ))}
+                        </div>
+                        {contextPackLoading && <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Building context pack…</div>}
+                        {contextPack && !contextPackLoading && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{contextPack.description}</div>
+                            <div style={{ fontSize: 10, color: 'var(--text-tertiary)', fontFamily: "'JetBrains Mono', monospace" }}>{contextPack.files.length} files · {contextPack.totalLines} lines · {contextPack.budgetTokens} tokens</div>
+                            <div style={{ maxHeight: 180, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              {contextPack.files.map((f) => (
+                                <button key={f} onClick={() => handleFileClick(`${repoMap.root}/${f}`)} style={{ textAlign: 'left', background: 'none', border: 0, padding: '2px 0', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }} title={contextPack.reasons[f]}>
+                                  <span style={{ color: 'var(--accent-primary)' }}>·</span> {f}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </>
           )}
         </div>
       )}

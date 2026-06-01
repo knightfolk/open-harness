@@ -15,6 +15,7 @@
 | Claude Opus 4 | Anthropic | 200K | Planner, Code Reviewer | Premium | Deepest analysis, best for complex refactors |
 | Gemini 2.5 Pro | Google | 1M | Planner, Design Specialist | Premium | Massive context, great at large codebase analysis |
 | Gemini 2.5 Flash | Google | 1M | Tool Runner, Bug Fixer | Mid | Fast with huge context window |
+| MiniMax-M3 | MiniMax | 1M | Code Implementer, Planner | Mid | Frontier multimodal — SOTA coding & agent; image/video input, thinking blocks, Anthropic-compatible API |
 | MiniMax-M2.7 | MiniMax | 1M | Code Implementer | Mid | Strong code generation, cost-effective |
 | DeepSeek V4 | DeepSeek | 128K | Code Implementer, Planner | Cheap | Top-tier open-weight, exceptional code quality |
 | DeepSeek V4 Flash | DeepSeek | 128K | Tool Runner, Bug Fixer | Cheap | Fast variant, great for iteration |
@@ -86,7 +87,7 @@
 | OpenAI | OpenAI-compatible | Bearer token | ✓ | ✓ | `https://api.openai.com/v1` |
 | Anthropic | Custom | x-api-key | ✓ | ✓ | `https://api.anthropic.com/v1` |
 | Google | Custom | API key param | ✓ | ✓ | `https://generativelanguage.googleapis.com/v1beta` |
-| MiniMax | OpenAI-compatible | Bearer token | ✓ | ✓ | `https://api.minimax.io/v1` |
+| MiniMax | OpenAI-compatible + Anthropic-compatible | Bearer token | ✓ | ✓ | `https://api.minimax.io/v1` |
 | DeepSeek | OpenAI-compatible | Bearer token | ✓ | ✓ | `https://api.deepseek.com/v1` |
 | Z.AI | OpenAI-compatible | Bearer token | ✓ | ✓ | `https://api.z.ai/api/coding/paas/v4` |
 | xAI | OpenAI-compatible | Bearer token | ✓ | ✓ | `https://api.x.ai/v1` |
@@ -98,6 +99,7 @@
 ## Notes
 - **OpenAI-compatible** means the provider uses the `/v1/chat/completions` endpoint format
 - Only Anthropic and Google need custom adapters — 80%+ of providers work with the same code
+- MiniMax-M3 additionally supports Anthropic-compatible API via  (recommended for M3)
 - Context window sizes are approximate and may vary by tier
 - "Local" models require Ollama, LM Studio, or similar runtime
 - Prices shift frequently — check provider websites for current rates

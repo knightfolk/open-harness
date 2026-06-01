@@ -39,7 +39,7 @@ const FAMILY_PATTERNS: Array<[RegExp, string]> = [
   [/\bglm\b|\bz-?ai\b/i, 'glm'],
   [/\bjamba\b|\bai21\b/i, 'jamba'],
   [/phi[\d._-]?/i, 'phi'],
-  [/\bminimax\b|\bm2[.-]?7?\b/i, 'minimax'],
+  [/\bminimax\b|\bm[23][.-]?7?\b/i, 'minimax'],
 ];
 
 /**
@@ -306,10 +306,10 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     family: 'minimax',
     systemPromptStyle: 'structured',
     maxSystemPromptTokens: 2000,
-    contextWindowTokens: 131072,
+    contextWindowTokens: 1000000,
     toolCallQuality: 'excellent',
     preferNativeToolCalls: true,
-    reasoningSupport: 'prompt-based-cot',
+    reasoningSupport: 'native-thinking',
     defaultCodingTemperature: 0.1,
     needsExplicitCotTrigger: false,
     stopSequences: [],
@@ -317,7 +317,10 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
     repeatInstructionsInUserMsg: false,
     defaultRole: 'coder',
     quirks: [
-      'MiniMax M2.7 default — good all-rounder',
+      'MiniMax M3 is frontier model with 1M context, multimodal (image/video), and thinking blocks',
+      'M3 supports Anthropic-compatible API at /anthropic/v1/messages (recommended)',
+      'M2.7 still available as fallback — context window is 204,800 tokens',
+      'M3 default top_p is 0.95 vs 0.9 for M2.x models',
     ],
   },
   unknown: {

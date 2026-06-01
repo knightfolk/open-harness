@@ -30,7 +30,22 @@ export type HarnessRunStep =
   | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
   | { type: 'model_text'; chars: number }
   | { type: 'final_answer'; chars: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | {
+      type: 'repo_map';
+      tokenBudget: number;
+      totalFiles: number;
+      truncated: boolean;
+      topFiles: string[];
+    }
+  | {
+      type: 'context_pack';
+      pack: string;
+      files: string[];
+      tokens: number;
+      reasons: Record<string, string>;
+      suggestion: string;
+    };
 
 const SECRET_PATTERNS = [
   /sk-[a-zA-Z0-9_-]{12,}/g,

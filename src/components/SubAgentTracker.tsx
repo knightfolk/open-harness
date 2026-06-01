@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Gauge, Route, Terminal, Zap } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
 import { useState } from 'react';
 import type { HarnessRunStep, SubAgent } from '../types';
 
@@ -43,6 +43,8 @@ function stepIcon(step: HarnessRunStep) {
     case 'model_text': return Gauge;
     case 'final_answer': return CheckCircle2;
     case 'error': return AlertTriangle;
+    case 'repo_map': return MapIcon;
+    case 'context_pack': return Package;
   }
 }
 
@@ -56,6 +58,8 @@ function stepTitle(step: HarnessRunStep): string {
     case 'model_text': return `Model text · ${step.chars} chars`;
     case 'final_answer': return `Final answer · ${step.chars} chars`;
     case 'error': return 'Error';
+    case 'repo_map': return `Repo map · ${step.totalFiles} files (${step.tokenBudget} tokens)`;
+    case 'context_pack': return `Context pack · ${step.pack} (${step.files.length} files)`;
   }
 }
 
@@ -76,6 +80,8 @@ function stepDetail(step: HarnessRunStep): string | null {
     case 'model_text': return 'Streaming response content from the model.';
     case 'final_answer': return 'Assistant response completed.';
     case 'error': return step.message;
+    case 'repo_map': return `Indexed ${step.totalFiles} files; top: ${step.topFiles.slice(0, 3).join(', ')}`;
+    case 'context_pack': return `${step.suggestion} · ${Object.keys(step.reasons).length} files included`;
   }
 }
 

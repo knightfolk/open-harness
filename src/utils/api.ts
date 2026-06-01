@@ -26,7 +26,22 @@ export type HarnessRunStep =
   | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
   | { type: 'model_text'; chars: number }
   | { type: 'final_answer'; chars: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | {
+      type: 'repo_map';
+      tokenBudget: number;
+      totalFiles: number;
+      truncated: boolean;
+      topFiles: string[];
+    }
+  | {
+      type: 'context_pack';
+      pack: string;
+      files: string[];
+      tokens: number;
+      reasons: Record<string, string>;
+      suggestion: string;
+    };
 
 export interface SessionInfo {
   id: string;
@@ -293,6 +308,106 @@ export interface ProjectProfile {
   instructions: { agentsMd?: string; readme?: string };
   importantFiles: string[];
   todoCount: number;
+}
+
+// ── Repo Map (Milestone 11) ────────────────────────────────────
+export type ContextPackName = 'bugfix' | 'feature' | 'review' | 'docs' | 'ui-smoke';
+
+export interface RepoMapSummary {
+  root: string;
+  generatedAt: string;
+  totalFiles: number;
+  indexedFiles: number;
+  languages: string[];
+  entryPoints: string[];
+  routeCount: number;
+  componentCount: number;
+  endpointCount: number;
+  text: string;
+  budgetTokens: number;
+  truncated: boolean;
+  topFiles: { path: string; score: number; reasons: string[] }[];
+}
+
+export interface RepoSymbolMatch {
+  name: string;
+  kind: string;
+  file: string;
+  line: number;
+  exported: boolean;
+  signature?: string;
+}
+
+export interface RepoDeps {
+  file: string;
+  imports: string[];
+  importedBy: string[];
+}
+
+export interface RepoImpact {
+  files: string[];
+  totalDependents: number;
+  impacted: string[];
+}
+
+export interface ContextPack {
+  name: ContextPackName;
+  description: string;
+  files: string[];
+  symbols: string[];
+  reasons: Record<string, string>;
+  totalLines: number;
+  budgetTokens: number;
+  text: string;
+}
+
+export interface PackSuggestion {
+  pack: ContextPackName;
+  reason: string;
+}
+
+export async function getRepoMap(path: string, tokenBudget?: number): Promise<RepoMapSummary> {
+  const params = new URLSearchParams({ path });
+  if (tokenBudget) params.set('tokenBudget', String(tokenBudget));
+  const res = await fetch(`${API_BASE}/api/repo/map?${params.toString()}`);
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to load repo map');
+  return res.json();
+}
+
+export async function searchSymbols(path: string, name: string): Promise<{ query: string; matchCount: number; matches: RepoSymbolMatch[] }> {
+  const params = new URLSearchParams({ path, name });
+  const res = await fetch(`${API_BASE}/api/repo/symbol?${params.toString()}`);
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to search symbols');
+  return res.json();
+}
+
+export async function getRepoDeps(path: string, file: string): Promise<RepoDeps> {
+  const params = new URLSearchParams({ path, file });
+  const res = await fetch(`${API_BASE}/api/repo/deps?${params.toString()}`);
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to load deps');
+  return res.json();
+}
+
+export async function getChangeImpact(path: string, files: string[]): Promise<RepoImpact> {
+  const params = new URLSearchParams({ path, files: files.join(',') });
+  const res = await fetch(`${API_BASE}/api/repo/impact?${params.toString()}`);
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to compute impact');
+  return res.json();
+}
+
+export async function getContextPack(path: string, pack: ContextPackName, userMessage = '', budgetTokens?: number): Promise<ContextPack> {
+  const params = new URLSearchParams({ path, pack, userMessage });
+  if (budgetTokens) params.set('budgetTokens', String(budgetTokens));
+  const res = await fetch(`${API_BASE}/api/repo/context-pack?${params.toString()}`);
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to build context pack');
+  return res.json();
+}
+
+export async function suggestContextPack(userMessage: string): Promise<PackSuggestion> {
+  const params = new URLSearchParams({ userMessage });
+  const res = await fetch(`${API_BASE}/api/repo/context-pack/suggest?${params.toString()}`);
+  if (!res.ok) throw new Error((await res.json()).error || 'Failed to suggest pack');
+  return res.json();
 }
 
 export async function getProjectProfile(path: string): Promise<ProjectProfile> {

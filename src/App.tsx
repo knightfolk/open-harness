@@ -25,6 +25,8 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'model_text': return `Received ${step.chars} characters from model`;
     case 'final_answer': return `Final answer ready (${step.chars} characters)`;
     case 'error': return `Error: ${step.message}`;
+    case 'repo_map': return `Repo map: ${step.totalFiles} files, ${step.tokenBudget} token budget${step.truncated ? ' (truncated)' : ''}`;
+    case 'context_pack': return `Context pack "${step.pack}": ${step.files.length} files (${step.tokens} tokens) — ${step.suggestion}`;
   }
 }
 

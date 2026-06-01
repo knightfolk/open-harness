@@ -59,23 +59,24 @@ const DEFAULT_CONFIG: StoredConfig = {
       apiKey: '',
       baseURL: 'https://api.minimax.io/v1',
       models: [
+        { id: 'MiniMax-M3', name: 'MiniMax M3', enabled: true },
         { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', enabled: true },
       ],
     },
   ],
   mcpServers: [],
   personality: '',
-  activeModel: 'MiniMax-M2.7',
+  activeModel: 'MiniMax-M3',
   activeTheme: 'midnight',
   trustMode: 'workspace-write',
   roleAssignments: {
-    coder: 'MiniMax-M2.7',       // Primary coding agent
-    reasoner: 'MiniMax-M2.7',    // Complex reasoning / planning
-    summarizer: 'MiniMax-M2.7',  // Text summarization
-    title: 'MiniMax-M2.7',       // Short title generation
-    planner: 'MiniMax-M2.7',     // Task decomposition
-    reviewer: 'MiniMax-M2.7',    // Code review
-    worker: 'MiniMax-M2.7',      // Fast parallel tasks
+    coder: 'MiniMax-M3',         // Primary coding agent
+    reasoner: 'MiniMax-M3',      // Complex reasoning / planning
+    summarizer: 'MiniMax-M3',    // Text summarization
+    title: 'MiniMax-M3',         // Short title generation
+    planner: 'MiniMax-M3',       // Task decomposition
+    reviewer: 'MiniMax-M3',      // Code review
+    worker: 'MiniMax-M3',        // Fast parallel tasks
   },
 };
 

@@ -27,7 +27,8 @@ enum ModelCatalog {
 
     // MARK: - MiniMax
     static let minimaxModels: [ModelConfig] = [
-        ModelConfig(id: "minimax.MiniMax-M2.7", name: "MiniMax M2.7", providerID: "minimax", apiModel: "MiniMax-M2.7", contextWindow: 1048576, defaultMaxTokens: 16384, costPer1MIn: 0.2, costPer1MOut: 1.0),
+        ModelConfig(id: "minimax.MiniMax-M3", name: "MiniMax M3", providerID: "minimax", apiModel: "MiniMax-M3", contextWindow: 1000000, defaultMaxTokens: 16384, costPer1MIn: 0.2, costPer1MOut: 1.0),
+        ModelConfig(id: "minimax.MiniMax-M2.7", name: "MiniMax M2.7", providerID: "minimax", apiModel: "MiniMax-M2.7", contextWindow: 204800, defaultMaxTokens: 16384, costPer1MIn: 0.2, costPer1MOut: 1.0),
     ]
 
     // MARK: - xAI
