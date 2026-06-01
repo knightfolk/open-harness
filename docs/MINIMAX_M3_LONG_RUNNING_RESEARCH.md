@@ -134,57 +134,129 @@ Key observations:
 
 ---
 
-## 4. Implementation plan
+## 4. Implementation plan — longer-running batches
 
-Each phase is one branch, one PR, and ships behind a feature flag (`VITE_PATCH_REVIEW=1`) until the next phase lands. Do **not** skip the feature flag in phase 1.
+Status as of the latest handoff:
 
-### Phase 1 — Server-side proposal resource and parser
+- **Phase 1 is complete and merged into `main`**: server-side patch parser, proposal store, hardened raw patch route, trust/path scoping, and patch-proposal server endpoints.
+- **Phase 2 is expected to be complete before the next agent starts**: shared client types and API client wrappers in `src/types/index.ts` and `src/utils/api.ts`. If Phase 2 is still unstaged/uncommitted, the next agent must first review, validate, and preserve it before continuing.
 
-- Create `server/patchParse.ts` with a pure `parseUnifiedDiff(text): ParsedFile[]` and a `serializeHunks(files): string` inverse.
-- Create `server/patchProposals.ts` with an in-memory `Map<id, PatchProposal>` (disk-backed JSONL under `~/.open-harness/patch-proposals/` for durability).
-- Add 5 routes to `server/index.ts` (placeholder bodies OK in this phase).
-- **Hardening**: rework the existing `/api/patches/apply` route to require `workingDir` and refuse when outside the project workspace; gate by trust mode via `filterToolsForTrustMode`.
-- **Validation**: `npm run lint && npm run build` and a curl smoke against `/api/patch-proposals` with a hand-crafted unified diff.
+The earlier one-phase-at-a-time plan caused too much ping-pong. Going forward, assign **larger coherent batches**. The agent should keep changes surgical, but it should continue through the whole assigned batch unless it hits a real blocker, failing validation, unsafe ambiguity, or a required human product decision.
 
-### Phase 2 — Client types and API client
+### Batch A — Patch Review Panel end-to-end UI (recommended next long-running task)
 
-- Add `PatchProposal`, `PatchHunk`, `PatchValidationResult` interfaces in `src/types/index.ts`.
-- Add `createPatchProposal`, `getPatchProposal`, `acceptHunk`, `rejectHunk`, `applyPatchProposal` to `src/utils/api.ts`.
-- Mirror the new shapes in the existing `PatchProposalInfo` interface so the legacy type does not drift.
-- **Validation**: `npm run lint && npm run build`.
+Goal: ship a usable Patch Review panel that can list proposals, create a proposal from pasted diff text, inspect files/hunks, accept/reject hunks, apply accepted hunks, show apply errors, and surface validation placeholders cleanly.
 
-### Phase 3 — Patch Review Panel UI (read-only)
+Scope:
 
-- Register `patches` panel in `src/components/layout/panelRegistry.tsx:30-40`.
-- Create `src/components/PatchReviewPanel.tsx` that lists proposals, opens one, and shows a file-by-file hunk list with `Accept` / `Reject` buttons (state held in React until "Apply" is clicked; do not call the network on every toggle).
-- Mount in `src/components/layout/PanelContent.tsx`.
-- **Validation**: manual smoke. Open the new panel, paste a diff, accept one hunk, reject another, confirm the "Apply" button shows the right preview.
+- Confirm Phase 2 client wrappers compile and match the server route names.
+- Create `src/components/PatchReviewPanel.tsx`.
+- Register a `patches` panel in:
+  - `src/components/layout/panelRegistry.tsx`
+  - `src/components/layout/PanelContent.tsx`
+  - any layout type/list that controls legal panel ids.
+- Implement proposal list:
+  - load `listPatchProposals({ sessionId })` when a session id is available; otherwise show recent proposals.
+  - show status, source, file count, hunk count, created/updated time, working directory, and verification command count.
+- Implement proposal creation from a pasted unified diff:
+  - fields: patch text, workingDir defaulting to current project folder, optional explanation, optional verification commands.
+  - call `createPatchProposal`.
+  - refresh and select the new proposal.
+- Implement proposal detail:
+  - file list with action badges: create/update/delete/rename/binary.
+  - per-hunk display with old/new line numbers and added/removed/context styling.
+  - accept/reject single hunk using `setPatchProposalHunkStatus`.
+  - accept all / reject all / discard using the Phase 2 API wrappers.
+- Implement apply flow:
+  - call `applyPatchProposal`.
+  - show applied files, skipped files, errors, validation results, and validationPassed state.
+  - do not invent validation execution on the client; render whatever the server returns.
+- Add a clear empty state explaining how to create or receive a proposal.
+- Add clear error states for parse failure, missing session, missing workingDir, rejected patch, and apply failure.
+- Keep styling within existing component/style conventions; do not redesign the app shell.
 
-> **Stop here for human review.** This is the smallest end-to-end loop.
+Validation for Batch A:
 
-### Phase 4 — Wire validation after apply
+- `npm run lint`
+- `npm run build`
+- Manual server/API smoke using an existing proposal route or the panel.
+- Relaunch because this changes runtime UI and possibly layout wiring:
+  - kill existing CMDui server/app processes.
+  - `npm start`
+  - verify `http://127.0.0.1:3001` and `http://127.0.0.1:5173`.
+- Manual UI smoke:
+  - open the Patch Review panel.
+  - paste a one-file create patch.
+  - create a proposal.
+  - reject then accept a hunk.
+  - apply it in a temp/safe workspace or a harmless repo file only if the user-approved workspace is safe.
+  - confirm DiffViewer shows the resulting changed file if applicable.
 
-- On `applyPatchProposal`, call `benchRuns.runValidation(proposal.verificationCommands, proposal.workingDir)` (reuse the existing function).
-- Render the result inline in `PatchReviewPanel.tsx`. Color-code pass/fail per command.
-- Default `verificationCommands` from `ProjectProfile.validation.lint` + `'tsc --noEmit'` (if the project is TypeScript) when the proposal did not specify its own.
-- **Validation**: `npm run lint && npm run build`, then manual: apply a small change that breaks lint, confirm the UI shows the failure without rolling the patch back.
+Stop condition for Batch A:
 
-### Phase 5 — Wire DiffViewer into the proposal flow
+- Stop after Batch A is complete, validated, committed, and reported.
+- Do not start Batch B unless the user explicitly asked for the full A+B batch.
 
-- In `src/components/DiffViewer.tsx`, replace the current "Review" button's behavior: when the diff originates from a model message (new prop), route to `createPatchProposal(diff)` and open the new panel.
-- Add an "Apply" button to `DiffViewer.tsx` that shows only when the file is part of an active proposal.
-- **Validation**: manual: in CMDui, run an "implement a function" task, watch the proposal appear in the new panel, accept, validate, see the file change in the diff panel.
+### Batch B — Wire proposal generation into existing model/diff flows
 
-### Phase 6 (optional, in this milestone) — Inline comment severities + resolve state
+Goal: make proposals appear naturally from existing CMDui workflows instead of only pasted diffs.
 
-- Extend `InlineComment` with `severity: 'info' | 'warn' | 'error'` (alias from `priority`) and `resolved: boolean`.
-- Persist via a tiny in-memory store keyed by `file:startLine` (disk persistence deferred).
-- `src/components/InlineComment.tsx`: add a checkbox; the existing `priority-0..3` CSS in `src/styles/components.css:1181-1196` is sufficient for the visual variant.
-- **Validation**: `npm run lint && npm run build`, manual: load a message that contains a `::code-comment{...}` directive, mark resolved, confirm UI persists during the session.
+Scope:
 
-Phases 1-5 close M15 P0 ("Finish patch proposal UI"). Phase 6 starts M15 P1 ("inline review comments"). Commit and PR work is the third M15 P1 item and is intentionally out of scope for this plan — it needs GitHub auth wiring.
+- Add a `Review patch` or `Create patch proposal` action wherever a model response or artifact contains a unified diff.
+- Wire `DiffViewer.tsx` so suitable diffs can become patch proposals.
+- Link proposal ids into run trace display when available.
+- Add next-best-action support for “Review proposed patch” if an assistant message includes a patch artifact.
+- Keep direct disk writes behind trust mode and proposal review; do not silently apply model changes.
 
----
+Validation for Batch B:
+
+- `npm run lint`
+- `npm run build`
+- Relaunch and smoke-test a real prompt that produces a diff.
+- Confirm the user can move from model output -> proposal -> review panel without copy/paste.
+
+### Batch C — Validation-after-apply on the server
+
+Goal: make post-apply validation first-class, not a placeholder.
+
+Scope:
+
+- Reuse the existing validation runner from `server/benchRuns.ts` or extract it if needed.
+- On `applyPatchProposal`, run `proposal.verificationCommands` after a successful apply.
+- Default verification commands from project profile only if that data is available at proposal creation time; otherwise keep explicit user-supplied commands.
+- Return real `validation` and `validationPassed` values to the client.
+- Render validation results in `PatchReviewPanel.tsx`.
+- Do not rollback applied patches automatically on validation failure; show failure clearly and leave the diff visible.
+
+Validation for Batch C:
+
+- `npm run lint`
+- `npm run build`
+- Direct API smoke with a harmless proposal and a passing command.
+- Direct API smoke with a harmless proposal and a failing command.
+- Relaunch and confirm UI displays both pass and fail validation states.
+
+### Batch D — Inline comments and follow-up task hooks
+
+Goal: begin M15 P1 only after M15 P0 is usable.
+
+Scope:
+
+- Extend `InlineComment` with severity and resolved state.
+- Persist resolved state for the current session.
+- Link comments to files/hunks when they came from a proposal.
+- Add “create follow-up task” affordance only if it can be implemented without broad task-system changes.
+
+Validation for Batch D:
+
+- `npm run lint`
+- `npm run build`
+- Manual smoke with a message containing a `::code-comment{...}` directive.
+
+### Batching guidance
+
+Default next assignment should be **Batch A only** if the agent is new to this codebase. If the agent is known to be reliable and the user wants a longer uninterrupted run, assign **Batch A + Batch B together**. Do not assign Batch C in the same run as A+B unless A+B validation is already clean, because validation-after-apply touches server write behavior and deserves separate review.
 
 ## 5. Data contracts
 
@@ -308,35 +380,36 @@ export interface ApplyPatchProposalResult {
 
 ## 7. Validation plan
 
-### 7.1 Static checks
+### 7.1 Static checks for every batch
 
 - `npm run lint` — must pass.
-- `npm run build` — must pass; the new `server/patchParse.ts` and `server/patchProposals.ts` must compile under the `tsconfig.server.json` config that already includes the rest of the server.
+- `npm run build` — must pass.
+- `git status --short` — inspect before and after work; do not hide unrelated changes.
 
-### 7.2 Unit/manual checks (per phase)
+### 7.2 API and UI checks
 
-- **Phase 1**: hand-craft a 3-file unified diff (1 create, 1 update, 1 delete), POST to `/api/patch-proposals`, GET it back, confirm the parsed shape round-trips.
-- **Phase 2**: type-check only.
-- **Phase 3**: open the new panel, paste the same diff, flip a hunk to rejected, confirm the "Apply" button is disabled and shows the right count.
-- **Phase 4**: apply a one-line change to a real file in the working tree, confirm `runValidation` runs the project's `lint` and `tsc --noEmit` (when present), confirm the result renders.
-- **Phase 5**: full loop in the actual CMDui app: chat -> model returns diff -> "Review patch" button appears -> panel opens -> accept one hunk, reject another -> apply -> validation runs -> file appears in `DiffViewer`.
-- **Phase 6**: load a model message that contains a `::code-comment{...}` directive (the parser is in `src/components/MessageBubble.tsx:44`), mark resolved, confirm persistence for the session.
+- For proposal creation/listing/status changes: use a harmless one-file unified diff and verify `create -> list -> get -> reject hunk -> accept hunk -> discard` works.
+- For apply behavior: use a temp directory or a clearly harmless repo file; never apply a destructive patch to the user's real worktree.
+- For legacy raw patch behavior: keep the Phase 1 safety guarantee that both git-style and legacy unified diffs cannot escape `workingDir`.
+- For UI behavior: use the real running CMDui app, not only static inspection.
 
 ### 7.3 App relaunch
 
-Per AGENTS.md rule 1, after any server change the agent must kill the existing app and relaunch with `npm start`. Per the Global Verification Checklist in the roadmap: confirm `http://127.0.0.1:3001` is reachable, confirm `http://127.0.0.1:5173` is reachable, smoke-test one real prompt, confirm `git status` shows no unrelated modifications.
+Per AGENTS.md rule 1, after runtime code changes the agent must kill the existing app/server processes and relaunch with `npm start`. Then confirm:
 
-### 7.4 Credential / provider smoke
+- server is reachable at `http://127.0.0.1:3001`.
+- UI is reachable at `http://127.0.0.1:5173`.
+- the changed UI can be opened and manually smoked.
 
-The roadmap also calls out: "Existing MiniMax compatibility should be verified with a credential-backed live smoke test before marking the provider acceptance item complete." This is **out of scope for M15 P0**, but the implementation agent should not regress it; the existing eval pipeline (`server/evals.ts` + the Bench tab) is the place to confirm it. Note that Assignment 2 in the Recommended Assignment Order is the owner of that smoke test.
+### 7.4 Provider smoke
 
----
+The roadmap also calls out: "Existing MiniMax compatibility should be verified with a credential-backed live smoke test before marking the provider acceptance item complete." This remains out of scope for M15 Patch Review unless the user explicitly asks for provider work.
 
 ## 8. Risks and rollback
 
 ### 8.1 Git state and user work
 
-- The working tree at the start of this spike has 1 unstaged modification: `docs/HARNESS_WORK_ROADMAP.md` (the new Assignment 8 + Currently Pending Question sections). **Do not touch this file in the implementation phase.** `git status --short` should still show exactly that one line after the implementation PR is staged.
+- The working tree may contain in-progress Phase 2 client changes or handoff-document updates. The next agent must inspect `git status --short` before editing, preserve unrelated changes, and avoid broad formatting or cleanup.
 - The implementation will create new files only (`server/patchParse.ts`, `server/patchProposals.ts`, `src/components/PatchReviewPanel.tsx`) and edit a small set of seams listed in section 2.3. No `git mv`, no broad `prettier` runs, no dependency upgrades.
 
 ### 8.2 Patch application safety
@@ -354,37 +427,55 @@ The roadmap also calls out: "Existing MiniMax compatibility should be verified w
 
 ### 8.5 Rollback plan
 
-- Each phase is its own PR. Reverting the PR is the rollback. No migration scripts touch user data; the on-disk store under `~/.open-harness/patch-proposals/` is additive (Phase 1 only writes; the rest only reads). If Phase 4 validation behavior surprises us, feature-flag it off in `App.tsx` and the user is back to the old M4 patch-proposal status quo.
+- Each batch should be one coherent commit or PR. Reverting that commit/PR is the rollback. No migration scripts should touch user data; the on-disk store under `~/.open-harness/patch-proposals/` is additive. If validation-after-apply behavior surprises us later, keep it isolated to Batch C so Batch A/B UI work remains revertable independently.
 
 ---
 
-## 9. Follow-up implementation prompt
+## 9. Long-running implementation prompt
 
-One prompt the next agent can paste after human approval. It assumes the user said "go" on M15 P0.
+Use this prompt for the next implementation agent. It intentionally gives a longer-running assignment than the original phase-by-phase prompt.
 
 ```text
-You are implementing Milestone 15 P0 — Patch Review UI — inside /Users/kevink/Projects/CMDui.
-The full research brief is in docs/MINIMAX_M3_LONG_RUNNING_RESEARCH.md and must be followed.
+You are implementing the next long-running M15 Patch Review batch inside /Users/kevink/Projects/CMDui.
 
-Hard rules (from project AGENTS.md and the research brief):
-- Follow the 6 phases in section 4 of the brief, in order. Do not start phase N+1 until phase N builds, lints, and is manually smoke-tested.
-- Never modify the existing unstaged change to docs/HARNESS_WORK_ROADMAP.md. After each commit, run `git status --short` and confirm the only modified line is your new files.
-- Do not kill or relaunch the app unless you actually changed server code; when you do, follow the Global Verification Checklist (kill prior tsx/vite, npm start, confirm :3001 and :5173 reachable, one real prompt, `git status` clean except for your files).
-- The feature flag `VITE_PATCH_REVIEW=1` must gate the new `patches` panel until phase 3 is complete; remove the flag in phase 3's PR.
+Context:
+- Phase 1 is complete and merged: server-side patch parser, proposal store, hardened raw patch route, trust/path scoping, and patch-proposal server endpoints.
+- Phase 2 should already be present or under review: shared client types in src/types/index.ts and API wrappers in src/utils/api.ts. Start by checking git status and reviewing those files. Preserve any existing user/agent changes; do not overwrite unrelated work.
+- The research/handoff doc is docs/MINIMAX_M3_LONG_RUNNING_RESEARCH.md. Follow its Batch A plan first.
 
-Phase 1 must, before any UI work:
-1. Add a workingDir argument to /api/patches/apply and refuse paths outside the workspace (use filterToolsForTrustMode from server/toolPolicy.ts).
-2. Create server/patchParse.ts with a pure unified-diff parser.
-3. Create server/patchProposals.ts with an in-memory + disk-backed store.
-4. Add the 5 routes listed in section 2.3 of the brief.
-5. Extend HarnessRunStep in server/runTrace.ts with patch_proposed and patch_applied variants.
-6. Lint + build pass.
-7. Hand-craft a 3-file diff and round-trip it through /api/patch-proposals via curl.
+Your long-running task:
+Complete Batch A — Patch Review Panel end-to-end UI. Continue through the whole batch unless you hit a real blocker, failing validation, unsafe ambiguity, or a required human product decision. Do not stop after tiny substeps just for review.
 
-Report a one-paragraph summary of what you did, which phases are complete, and which one is next. Do not start phase 2 until phase 1 is reviewed and merged.
+Batch A requirements:
+1. Confirm the Phase 2 types/API wrappers compile and match the server routes.
+2. Create src/components/PatchReviewPanel.tsx.
+3. Register a `patches` panel wherever panel ids/config/rendering are defined, including panelRegistry and PanelContent.
+4. Implement proposal listing with status, source, file count, hunk count, created/updated time, working directory, and verification command count.
+5. Implement proposal creation from pasted unified diff text. Include fields for patch text, workingDir defaulting to the current project folder, optional explanation, and optional verification commands.
+6. Implement proposal detail view: files, action badges, binary state, hunks, line numbers, added/removed/context styling.
+7. Implement accept/reject single hunk plus accept all, reject all, and discard using the Phase 2 API wrappers.
+8. Implement apply flow using applyPatchProposal. Show applied files, skipped files, errors, validation results, and validationPassed exactly as returned by the server. Do not invent client-side validation execution.
+9. Add clear empty, loading, and error states.
+10. Keep changes surgical. Do not redesign the app shell, do not start M13/M14, and do not implement commit/PR assistant work.
+
+Validation required before reporting done:
+- npm run lint
+- npm run build
+- Manual API or UI smoke for create/list/get/hunk status/discard.
+- Because runtime UI changes are made: kill existing CMDui app/server processes, relaunch with npm start, verify http://127.0.0.1:3001 and http://127.0.0.1:5173 are reachable.
+- Manual UI smoke: open Patch Review panel, paste a harmless one-file patch, create a proposal, reject then accept a hunk, and confirm the state updates. If applying, only apply in a temp/safe workspace or a harmless file.
+
+Deliverable:
+- Commit the completed Batch A changes with a clear message.
+- Report what changed, validation results, and any known limitations.
+- Also state whether Batch B (wire proposal generation into model/diff flows) is ready to start next.
 ```
 
----
+Optional longer prompt if the user explicitly wants fewer handoffs and trusts the agent to continue after Batch A:
+
+```text
+Do Batch A above, and if lint/build/relaunch/manual smoke are clean, continue directly into Batch B — wire proposal generation into existing model/diff flows. For Batch B, add a Review Patch/Create Patch Proposal action wherever existing model output or diff artifacts contain unified diff text, wire DiffViewer to create proposals when appropriate, and route the user into the Patch Review panel. Re-run all validation and relaunch checks after Batch B. Stop before Batch C validation-after-apply server work unless explicitly approved.
+```
 
 ## 10. Out of scope (explicit)
 
