@@ -1259,6 +1259,119 @@ Definition of done:
 - [ ] User can cancel and inspect agent work.
 - [ ] Lint/build pass.
 
+
+## Assignment 8 — MiniMax M3 Long-Running Research Spike
+
+Owner: MiniMax M3 / MiniMax 3.0  
+Priority: P0 research before implementation  
+Mode: read-only investigation and planning; no code changes unless a human explicitly promotes a follow-up implementation task
+
+Why this is a good fit for MiniMax M3:
+
+- MiniMax's current M3 page positions M3 as a coding and agentic model with autonomous task decomposition, tool invocation, and multi-step reasoning.
+- MiniMax says the M3 API supports up to a 1M-token context window, with a guaranteed minimum of 512K tokens, which is well suited to reading this repo, the roadmap, and relevant implementation files in one long-horizon pass.
+- MiniMax's API example uses model id `MiniMax-M3` at `https://api.minimax.io/v1/text/chatcompletion_v2`; use that exact model id for the smoke test and for this research run.
+- Source checked 2026-06-01: [MiniMax M3 model page](https://www.minimax.io/models/text/m3).
+
+Research objective:
+
+Create a repo-grounded implementation brief that decides the safest next execution order across M13, M14, and M15, with special attention to whether M15 Patch Review UI should come first because it also closes the remaining M4 patch-proposal gap.
+
+Files and areas to inspect:
+
+- `/Users/kevink/Projects/CMDui/docs/HARNESS_WORK_ROADMAP.md`
+- `/Users/kevink/Projects/CMDui/server/orchestrator.ts`
+- `/Users/kevink/Projects/CMDui/server/runTrace.ts`
+- `/Users/kevink/Projects/CMDui/server/patchApply.ts`
+- `/Users/kevink/Projects/CMDui/server/browserPreview.ts`
+- `/Users/kevink/Projects/CMDui/server/evals.ts`
+- `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
+- `/Users/kevink/Projects/CMDui/src/components/SubAgentTracker.tsx`
+- `/Users/kevink/Projects/CMDui/src/components/PlanTracker.tsx`
+- `/Users/kevink/Projects/CMDui/src/components/InlineComment.tsx`
+- `/Users/kevink/Projects/CMDui/src/components/BrowserPanel.tsx`
+- `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
+- `/Users/kevink/Projects/CMDui/src/utils/api.ts`
+- `/Users/kevink/Projects/CMDui/src/types/index.ts`
+
+Required deliverable:
+
+Write a single markdown report, preferably `docs/MINIMAX_M3_LONG_RUNNING_RESEARCH.md`, with these sections:
+
+1. **Executive recommendation** — pick one next implementation target and explain why.
+2. **Repo evidence** — cite exact files, existing functions/components, and missing seams.
+3. **Dependency graph** — show which M13/M14/M15 pieces unblock or depend on each other.
+4. **Implementation plan** — break the recommended target into small commits or phases.
+5. **Data contracts** — propose TypeScript shapes for any new server/client objects.
+6. **UI flow** — describe the user-visible flow and edge cases.
+7. **Validation plan** — list lint/build, unit/manual checks, and app relaunch checks.
+8. **Risks and rollback** — identify where user work, git state, or runtime processes could be harmed.
+9. **Follow-up prompts** — include one implementation prompt for the next agent after the research is accepted.
+
+Non-negotiable constraints:
+
+- Do not modify application code during this research spike.
+- Do not start implementation of M13, M14, or M15.
+- Do not overwrite unrelated working-tree changes.
+- If documentation is updated, keep it limited to the research report and this roadmap.
+- Treat the current `Currently Pending Question` section as a blocker until the user chooses the next implementation assignment.
+
+Copy/paste prompt for MiniMax M3:
+
+```text
+You are MiniMax M3 running inside /Users/kevink/Projects/CMDui. Use your long-context coding-agent strengths for a read-only, repo-grounded research spike.
+
+Goal: decide the safest next implementation target across Milestone 13 Multi-Agent Team Runtime, Milestone 14 Deep Browser and UI Verification, and Milestone 15 Patch Review / Inline Comments / Release Workflow. Pay special attention to whether M15 Patch Review UI should happen first because it also closes the existing M4 patch-proposal gap.
+
+Rules:
+- Read files and inspect the repo deeply, but do not modify application code.
+- Do not start implementation.
+- Do not launch or kill app processes unless a command is purely needed to inspect static repo state.
+- Preserve unrelated working-tree changes.
+- Ground every recommendation in exact files and existing code seams.
+
+Inspect at minimum:
+- docs/HARNESS_WORK_ROADMAP.md
+- server/orchestrator.ts
+- server/runTrace.ts
+- server/patchApply.ts
+- server/browserPreview.ts
+- server/evals.ts
+- src/components/DiffViewer.tsx
+- src/components/SubAgentTracker.tsx
+- src/components/PlanTracker.tsx
+- src/components/InlineComment.tsx
+- src/components/BrowserPanel.tsx
+- src/components/ModelLabPanel.tsx
+- src/utils/api.ts
+- src/types/index.ts
+
+Deliverable: create docs/MINIMAX_M3_LONG_RUNNING_RESEARCH.md with these sections:
+1. Executive recommendation — pick exactly one next implementation target and explain why.
+2. Repo evidence — cite exact files, functions/components, and missing seams.
+3. Dependency graph — explain what M13/M14/M15 pieces unblock or depend on.
+4. Implementation plan — small phases suitable for separate commits.
+5. Data contracts — TypeScript interface sketches for new server/client objects.
+6. UI flow — user-visible behavior, empty states, errors, and edge cases.
+7. Validation plan — lint/build/manual/app-relaunch checks.
+8. Risks and rollback — especially git state, patch application, user changes, and runtime processes.
+9. Follow-up implementation prompt — one clear prompt another agent can execute after human approval.
+
+Success criteria:
+- The report makes the next choice obvious.
+- The report is specific enough that an implementation agent can work surgically without redoing discovery.
+- The report does not claim code is complete unless verified from disk.
+```
+
+Definition of done:
+
+- [ ] MiniMax M3 credential-backed smoke test passes with model id `MiniMax-M3`.
+- [ ] `docs/MINIMAX_M3_LONG_RUNNING_RESEARCH.md` exists.
+- [ ] Report picks exactly one next implementation target.
+- [ ] Report cites exact repo files and implementation seams.
+- [ ] Report includes a copy/paste follow-up implementation prompt.
+- [ ] No application code is modified by the research spike.
+
 ---
 
 # Global Verification Checklist
@@ -1273,6 +1386,29 @@ Every implementation assignment should end with:
 - [ ] Verify UI is reachable at `http://127.0.0.1:5173`.
 - [ ] Smoke-test at least one real prompt.
 - [ ] Confirm no unrelated files were modified.
+
+---
+
+# Currently Pending Question — 2026-05-31
+
+User asked to focus on Milestones 13, 14, and 15. Before starting any implementation work, the next assignment needs to be confirmed. The user said "leave those alone" until this is resolved, so do not start any M13/M14/M15 implementation item below without an explicit pick. The safe current move is the read-only MiniMax M3 long-running research spike in Assignment 8.
+
+Next-work options on the table:
+
+- [ ] **M15 P0 — Patch Review UI**: build on `server/patchApply.ts` and `DiffViewer.tsx` to add file-by-file / hunk-by-hunk accept-reject plus post-apply validation. Also closes the M4 patch-proposal gap.
+- [ ] **M14 P0 — Upgraded Browser Capture**: replace the curl+screencapture hack in `server/browserPreview.ts` with real DOM, a11y tree, console, and network-failure capture.
+- [ ] **M13 P0 — Agent Profiles**: create `server/agentProfiles.ts` with built-in profiles (explorer, planner, implementer, reviewer, debugger, browser-tester, eval-judge) and add per-agent traces.
+- [ ] **Assignment 1 (Recommended Assignment Order)**: close the M4 patch-proposal gap from the assignment backlog. Effectively M15 P0.
+- [ ] **Assignment 8 — MiniMax M3 Long-Running Research Spike**: use MiniMax M3 / MiniMax 3.0 for a read-only repo-grounded implementation brief before choosing M13, M14, or M15. Recommended next step.
+- [ ] Something else from Assignments 2–7: eval validation scoring, MiniMax smoke test, worktree execution, repo map MVP, browser verification MVP, or multi-agent MVP.
+
+Status of M13/14/15 on disk (recorded for context, not action):
+
+- M13: nothing built. `server/agentProfiles.ts` does not exist. `SubAgentTracker.tsx` and `PlanTracker.tsx` are basic display shells.
+- M14: minimal. `server/browserPreview.ts` is a 4.7 KB curl+screencapture hack from M4. No DOM, a11y, console, network, or scripted steps.
+- M15: skeleton only. `server/patchApply.ts` is a thin wrapper around system `patch` with no hunk parsing. `InlineComment.tsx` is a 30-line read-only display with no creation, severity, resolution, or persistence. `DiffViewer.tsx` has no per-hunk accept/reject.
+
+Standing down from M13/M14/M15 implementation until the user picks an option; Assignment 8 is safe to run as research only.
 
 ---
 

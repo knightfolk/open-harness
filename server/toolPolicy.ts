@@ -1,4 +1,6 @@
 // ── Types ──────────────────────────────────────────────
+import { isAbsolute, relative, resolve } from 'path';
+
 
 export type TrustMode =
   | 'chat-only'
@@ -76,13 +78,41 @@ function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {
 
 // ── Write path validation ──────────────────────────────
 
+/**
+ * Return true iff `candidate` is the same path as `workspace` or sits
+ * inside it. Uses path.resolve + path.relative to defeat the three
+ * classic prefix bugs:
+ *   1) trailing-slash inconsistencies
+   *   2) `..` escapes
+ *   3) sibling-prefix collisions (e.g. /x/CMDui-other vs /x/CMDui)
+ */
+export function isPathWithin(candidate: string, workspace: string): boolean {
+  if (typeof candidate !== 'string' || typeof workspace !== 'string') return false;
+  if (candidate.length === 0 || workspace.length === 0) return false;
+  const resolvedWorkspace = resolve(workspace);
+  // Resolve the candidate: absolute paths are taken as-is, relative
+  // paths are resolved against the workspace. Then we compare the
+  // resolved candidates via `relative` so the result is a `..`-less
+  // path iff the candidate is inside the workspace.
+  const resolvedCandidate = isAbsolute(candidate)
+    ? resolve(candidate)
+    : resolve(resolvedWorkspace, candidate);
+  if (resolvedCandidate === resolvedWorkspace) return true;
+  const rel = relative(resolvedWorkspace, resolvedCandidate);
+  // `relative` returns a path that begins with `..` for any candidate
+  // that escapes the workspace, or an absolute path if the two arguments
+  // landed on different drives. Either case is outside.
+  if (rel === '' || rel.startsWith('..' + '/') || rel === '..' || isAbsolute(rel)) {
+    return false;
+  }
+  return true;
+}
+
 export function isPathAllowed(filePath: string, trustMode: TrustMode, workingDir?: string): ToolPolicyResult {
   if (trustMode === 'full-local') return { allowed: true };
   if (trustMode === 'workspace-write' || trustMode === 'ask-before-write') {
     if (!workingDir) return { allowed: false, reason: 'No working directory set' };
-    const normalizedTarget = filePath.replace(/\/+$/, '');
-    const normalizedWork = workingDir.replace(/\/+$/, '');
-    if (normalizedTarget.startsWith(normalizedWork)) {
+    if (isPathWithin(filePath, workingDir)) {
       return { allowed: true };
     }
     return {

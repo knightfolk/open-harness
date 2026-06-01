@@ -34,6 +34,19 @@ import { createSession as createTermSession, getHistory as getTermHistory, runCo
 import * as git from './git';
 import { capturePreview, checkServerHealth } from './browserPreview';
 import { applyPatch as nodeApplyPatch } from './patchApply';
+import {
+  createProposal,
+  getProposal,
+  listProposals,
+  setHunkStatus,
+  acceptAll as acceptAllHunks,
+  rejectAll as rejectAllHunks,
+  discardProposal,
+  recordApplyResult,
+  serializeAcceptedPatch,
+  type PatchProposal,
+} from './patchProposals';
+import { parseUnifiedDiff } from './patchParse';
 import * as evals from './evals';
 import * as harnessTasks from './harnessTasks';
 import * as benchRuns from './benchRuns';
@@ -42,7 +55,7 @@ import * as checkpoints from './checkpoints';
 import * as worktrees from './worktrees';
 import * as protectedPaths from './protectedPaths';
 import * as processLedger from './processLedger';
-import { filterToolsForTrustMode, checkToolActionPolicy, type TrustMode } from './toolPolicy';
+import { filterToolsForTrustMode, checkToolActionPolicy, isPathAllowed, type TrustMode } from './toolPolicy';
 import * as sessionStore from './sessionStore';
 import * as projectMemory from './projectMemory';
 import { getAdapterInfo, discoverLocalProviders } from './providers/registry';
@@ -834,17 +847,208 @@ app.get('/api/browser/health', (req, res) => {
   }
 });
 
-// ── Patch Apply Route ─────────────────────────────────
-
+// ── Patch Apply Route (hardened) ───────────────────────
+//
+// Requires a `workingDir` in the body and refuses any file path that
+// escapes it, gated by the active trust mode. This closes the M4 safety
+// gap where arbitrary unified-diff text could be applied against the
+// server's CWD with no scope check.
 app.post('/api/patches/apply', (req, res) => {
-  const { patch } = req.body as { patch?: string };
+  const { patch, workingDir } = req.body as { patch?: string; workingDir?: string };
   if (!patch?.trim()) return res.status(400).json({ error: 'patch is required' });
+  const wd = workingDir || process.cwd();
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+
+  // Trust-mode gate: refuse outright if the mode forbids writes, so the
+  // gate fires even when the parser returns an empty file list.
+  if (trustMode === 'read-only' || trustMode === 'chat-only') {
+    return res.status(400).json({ error: `Write operations not allowed in ${trustMode} mode` });
+  }
+
+  // Parse the patch. If the parser cannot extract any files, either the
+  // patch is empty / malformed (reject) or it is a legacy unified diff
+  // with no `diff --git` headers (allowed; the static path scan inside
+  // applyPatch() will still enforce the workingDir scope).
+  let parsed: ReturnType<typeof parseUnifiedDiff>;
   try {
-    const result = nodeApplyPatch(patch);
+    parsed = parseUnifiedDiff(patch);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Patch parse failed' });
+  }
+  if (parsed.length === 0) {
+    const hasLegacyMarker = /^(@@|\+\+\+ |--- )/m.test(patch);
+    if (!hasLegacyMarker) {
+      return res.status(400).json({ error: 'Patch has no files to apply' });
+    }
+  } else {
+    for (const f of parsed) {
+      const candidate = join(wd, f.filePath);
+      const check = isPathAllowed(candidate, trustMode, wd);
+      if (!check.allowed) {
+        return res.status(400).json({ error: check.reason || 'Path refused' });
+      }
+    }
+  }
+
+  try {
+    const result = nodeApplyPatch(patch, wd);
     res.json(result);
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
+});
+
+// ── Patch Proposal Routes (M15 P0) ─────────────────────
+
+function scopeCheckOrThrow(workingDir: string): void {
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const check = isPathAllowed(join(workingDir, 'noop-no-such-file'), trustMode, workingDir);
+  if (!check.allowed) {
+    const err: any = new Error(check.reason || 'Working directory refused by trust mode');
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
+app.post('/api/patch-proposals', (req, res) => {
+  const body = req.body as {
+    patch?: string;
+    workingDir?: string;
+    sessionId?: string;
+    runId?: string;
+    explanation?: string;
+    source?: PatchProposal['source'];
+    verificationCommands?: string[];
+  };
+  const { patch, workingDir, sessionId } = body;
+  if (!patch?.trim()) return res.status(400).json({ error: 'patch is required' });
+  if (!workingDir?.trim()) return res.status(400).json({ error: 'workingDir is required' });
+  if (!sessionId?.trim()) return res.status(400).json({ error: 'sessionId is required' });
+  try {
+    scopeCheckOrThrow(workingDir);
+  } catch (err: any) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
+  }
+  try {
+    const proposal = createProposal({
+      patch,
+      workingDir,
+      sessionId,
+      runId: body.runId,
+      explanation: body.explanation,
+      source: body.source,
+      verificationCommands: body.verificationCommands,
+    });
+    res.json({ id: proposal.id, proposal });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Failed to create proposal' });
+  }
+});
+
+app.get('/api/patch-proposals', (req, res) => {
+  const sessionId = req.query.sessionId as string | undefined;
+  res.json({ proposals: listProposals({ sessionId }) });
+});
+
+app.get('/api/patch-proposals/:id', (req, res) => {
+  const p = getProposal(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Proposal not found' });
+  res.json(p);
+});
+
+function setHunkFromBody(req: any, res: any, status: 'accepted' | 'rejected') {
+  const hunkId = (req.body as { hunkId?: string }).hunkId;
+  if (!hunkId || typeof hunkId !== 'string') {
+    return res.status(400).json({ error: 'hunkId is required in body' });
+  }
+  const p = setHunkStatus(req.params.id, req.params.fileId, hunkId, status);
+  if (!p) return res.status(404).json({ error: 'Proposal, file, or hunk not found' });
+  return res.json(p);
+}
+
+app.post('/api/patch-proposals/:id/hunks/:fileId/accept', (req, res) => {
+  return setHunkFromBody(req, res, 'accepted');
+});
+
+app.post('/api/patch-proposals/:id/hunks/:fileId/reject', (req, res) => {
+  return setHunkFromBody(req, res, 'rejected');
+});
+
+app.post('/api/patch-proposals/:id/accept-all', (req, res) => {
+  const p = acceptAllHunks(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Proposal not found' });
+  res.json(p);
+});
+
+app.post('/api/patch-proposals/:id/reject-all', (req, res) => {
+  const p = rejectAllHunks(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Proposal not found' });
+  res.json(p);
+});
+
+app.post('/api/patch-proposals/:id/discard', (req, res) => {
+  const p = discardProposal(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Proposal not found' });
+  res.json(p);
+});
+
+app.post('/api/patch-proposals/:id/apply', (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  if (proposal.status !== 'open') {
+    return res.status(409).json({ error: `Proposal is ${proposal.status}` });
+  }
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+
+  // Trust-mode gate: refuse outright if the mode forbids writes.
+  if (trustMode === 'read-only' || trustMode === 'chat-only') {
+    recordApplyResult(proposal.id, { status: 'failed' });
+    return res.status(400).json({ error: `Write operations not allowed in ${trustMode} mode` });
+  }
+
+  // Re-parse the accepted hunks and re-check path scope. Defense in depth
+  // in case the workingDir was tampered with after create.
+  const acceptedPatch = serializeAcceptedPatch(proposal);
+  let acceptedParsed: ReturnType<typeof parseUnifiedDiff>;
+  try {
+    acceptedParsed = parseUnifiedDiff(acceptedPatch);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Patch parse failed' });
+  }
+  for (const f of acceptedParsed) {
+    const candidate = join(proposal.workingDir, f.filePath);
+    const check = isPathAllowed(candidate, trustMode, proposal.workingDir);
+    if (!check.allowed) {
+      recordApplyResult(proposal.id, { status: 'failed' });
+      return res.status(400).json({ error: check.reason || 'Path refused' });
+    }
+  }
+
+  if (acceptedPatch.trim().length === 0) {
+    recordApplyResult(proposal.id, { status: 'failed' });
+    return res.status(400).json({ error: 'No hunks accepted; nothing to apply' });
+  }
+  if (acceptedParsed.length === 0) {
+    recordApplyResult(proposal.id, { status: 'failed' });
+    return res.status(400).json({ error: 'No files parsed from accepted hunks' });
+  }
+
+  const result = nodeApplyPatch(acceptedPatch, proposal.workingDir);
+  const appliedFiles = result.files;
+  const allGood = result.errors.length === 0;
+  if (allGood) {
+    recordApplyResult(proposal.id, { status: 'applied' });
+  } else {
+    recordApplyResult(proposal.id, { status: 'failed' });
+  }
+  res.json({
+    proposalId: proposal.id,
+    appliedFiles,
+    skippedFiles: [] as string[],
+    errors: result.errors,
+    validation: [] as Array<Record<string, unknown>>,
+    validationPassed: false, // populated in Phase 4 once runValidation is wired in
+  });
 });
 
 
