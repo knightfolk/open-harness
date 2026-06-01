@@ -2,7 +2,13 @@ import type { ProviderAdapter, ProviderChatRequest, ProviderEvent, ProviderStrea
 
 /**
  * Google Gemini adapter.
- * Uses the generateContent streaming endpoint.
+ *
+ * Uses the non-streaming :generateContent endpoint and emits a sequence of
+ * text_delta events from the JSON response. This is intentionally simple:
+ * SSE on :streamGenerateContent returned a stream we could not safely parse
+ * with response.json(), so we trade a small latency hit for a reliable
+ * implementation. Function calls are detected and emitted as tool_call_done
+ * but the surrounding chat loop does not yet round-trip them — see PLAN.md.
  */
 export class GeminiAdapter implements ProviderAdapter {
   id = 'gemini';
@@ -14,17 +20,15 @@ export class GeminiAdapter implements ProviderAdapter {
   }
 
   async *streamChat(request: ProviderChatRequest, options: ProviderStreamOptions): AsyncGenerator<ProviderEvent> {
-    const url = this.buildURL(options.baseURL, options.apiKey, request.model);
+    const url = this.buildURL(options.baseURL, options.apiKey, request.model, /* stream */ false);
 
-    // Convert messages to Gemini format
     const contents = this.convertMessages(request.messages);
-    const body: any = {
-      contents,
-      generationConfig: {},
-    };
+    const body: any = { contents, generationConfig: {} };
     if (request.max_tokens) body.generationConfig.maxOutputTokens = request.max_tokens;
     if (request.temperature != null) body.generationConfig.temperature = request.temperature;
     if (request.tools && request.tools.length > 0) {
+      // Tools are advertised for future use, but the chat loop does not yet
+      // round-trip functionCall/functionResponse for Gemini. Keep this opt-in.
       body.tools = [{ functionDeclarations: request.tools.map(t => ({
         name: t.function.name,
         description: t.function.description || '',
@@ -51,16 +55,35 @@ export class GeminiAdapter implements ProviderAdapter {
       return;
     }
 
-    const data = await response.json() as any;
-    const candidates = data.candidates || [];
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (err: any) {
+      yield { type: 'error', error: `Invalid JSON from Gemini: ${err.message || 'parse failed'}` };
+      return;
+    }
+
+    const candidates: any[] = Array.isArray(data?.candidates) ? data.candidates : [];
+    if (candidates.length === 0) {
+      const blockReason = data?.promptFeedback?.blockReason;
+      if (blockReason) {
+        yield { type: 'error', error: `Gemini blocked the request: ${blockReason}` };
+      } else {
+        yield { type: 'error', error: 'Gemini returned no candidates' };
+      }
+      return;
+    }
 
     for (const candidate of candidates) {
-      const parts = candidate.content?.parts || [];
+      const parts: any[] = candidate?.content?.parts || [];
       for (const part of parts) {
-        if (part.text) {
-          yield { type: 'text_delta', text: part.text };
+        if (typeof part?.text === 'string' && part.text.length > 0) {
+          // Split into modest chunks so the UI sees a streaming feel.
+          for (const chunk of this.chunkText(part.text)) {
+            yield { type: 'text_delta', text: chunk };
+          }
         }
-        if (part.functionCall) {
+        if (part?.functionCall) {
           const fc = part.functionCall;
           const id = `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const args = JSON.stringify(fc.args || {});
@@ -75,7 +98,7 @@ export class GeminiAdapter implements ProviderAdapter {
   private convertMessages(messages: any[]): any[] {
     const contents: any[] = [];
     for (const msg of messages) {
-      if (msg.role === 'system') continue; // Gemini uses systemInstruction, skip for now
+      if (msg.role === 'system') continue; // Gemini uses systemInstruction; skipped for parity with the existing path.
       const role = msg.role === 'assistant' ? 'model' : 'user';
       const parts: any[] = [];
       if (msg.content) parts.push({ text: msg.content });
@@ -102,10 +125,19 @@ export class GeminiAdapter implements ProviderAdapter {
     return contents;
   }
 
-  private buildURL(baseURL: string, apiKey: string, model: string): string {
+  private buildURL(baseURL: string, apiKey: string, model: string, stream: boolean): string {
     const base = baseURL.replace(/\/+$/, '');
     const modelPath = model.startsWith('models/') ? model : `models/${model}`;
-    // Gemini streaming endpoint
-    return `${base}/${modelPath}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    // Use the non-streaming :generateContent endpoint. The streaming endpoint
+    // returns SSE which we deliberately do not parse here — see file header.
+    const action = stream ? 'streamGenerateContent' : 'generateContent';
+    return `${base}/${modelPath}:${action}?key=${encodeURIComponent(apiKey)}`;
+  }
+
+  private chunkText(text: string, size = 24): string[] {
+    if (text.length <= size) return [text];
+    const out: string[] = [];
+    for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+    return out;
   }
 }

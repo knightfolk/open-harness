@@ -9,6 +9,8 @@ import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer
 import type { StoredMCPServer, StoredProvider } from './config';
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
+import { checkDockerReadiness } from './dockerReadiness';
+import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions } from './curatedMcp';
 import { getModelConfig, isReasoningModel, detectModelFamily } from './modelProfiles';
 import { buildContextWindow } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
@@ -58,7 +60,8 @@ import * as processLedger from './processLedger';
 import { filterToolsForTrustMode, checkToolActionPolicy, isPathAllowed, type TrustMode } from './toolPolicy';
 import * as sessionStore from './sessionStore';
 import * as projectMemory from './projectMemory';
-import { getAdapterInfo, discoverLocalProviders } from './providers/registry';
+import { getAdapterInfo, discoverLocalProviders, streamWithAdapter } from './providers/registry';
+import type { ProviderChatRequest, ProviderMessage } from './providers/types';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -274,10 +277,22 @@ function isRedundantToolCall(tracker: ToolCallTracker, name: string, args: Recor
 const activeTestRuns: Map<string, { total: number; completed: number; status: string; results: any[] }> = new Map();
 
 // ── Resolve provider for any model (no global mutation) ──
-function resolveProviderForModel(modelId: string): { chatURL: string; apiKey: string; providerId: string } | null {
+function resolveProviderForModel(modelId: string): {
+  chatURL: string;
+  apiKey: string;
+  providerId: string;
+  providerType: StoredProvider['type'];
+  provider: StoredProvider;
+} | null {
   const resolved = getProviderForModel(appConfig, modelId);
   if (!resolved) return null;
-  return { chatURL: resolved.chatURL, apiKey: resolved.apiKey, providerId: resolved.provider.id };
+  return {
+    chatURL: resolved.chatURL,
+    apiKey: resolved.apiKey,
+    providerId: resolved.provider.id,
+    providerType: resolved.provider.type,
+    provider: resolved.provider,
+  };
 }
 
 // ── Provider resolution ─────────────────────────────
@@ -418,6 +433,33 @@ app.get('/api/providers', (_req, res) => {
     hasKey: !!p.apiKey,
   }));
   res.json(providers);
+});
+
+// Save multiple providers in one call (used by guided onboarding)
+app.post('/api/providers/batch', (req, res) => {
+  const list = (req.body?.providers || []) as any[];
+  if (!Array.isArray(list) || list.length === 0) {
+    return res.status(400).json({ error: 'providers array is required' });
+  }
+  const created: any[] = [];
+  for (const raw of list) {
+    if (!raw?.name || !raw?.type || !raw?.baseURL) continue;
+    const id = raw.id || String(raw.name).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const existing = appConfig.providers.find((p) => p.id === id);
+    const incomingModels = Array.isArray(raw.models) ? raw.models : undefined;
+    const provider: StoredProvider = {
+      id,
+      name: raw.name,
+      type: raw.type as StoredProvider['type'],
+      apiKey: raw.apiKey || existing?.apiKey || '',
+      baseURL: raw.baseURL,
+      models: incomingModels && incomingModels.length > 0 ? incomingModels : (existing?.models || []),
+    };
+    appConfig = upsertProvider(appConfig, provider);
+    created.push({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey });
+  }
+  saveConfig(appConfig);
+  res.status(201).json({ providers: created, count: created.length });
 });
 
 app.post('/api/providers', (req, res) => {
@@ -596,11 +638,104 @@ app.post('/api/mcp/:serverId/stop', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Restart an MCP server (stop then start)
+app.post('/api/mcp/:serverId/restart', async (req, res) => {
+  const { serverId } = req.params;
+  try {
+    await mcpManager.stopServer(serverId).catch(() => {});
+    const server = serverId === 'docker-mcp'
+      ? { id: 'docker-mcp', name: 'Docker MCP', endpoint: 'stdio://docker mcp gateway run --transport stdio --profile ai_coding' }
+      : appConfig.mcpServers.find((s) => s.id === serverId);
+    if (!server) return res.status(404).json({ error: 'Server not found' });
+    const client = await mcpManager.startServer(server.id, server.name, server.endpoint);
+    res.json({
+      id: client.id,
+      name: client.name,
+      running: client.isConnected(),
+      toolCount: client.getTools().length,
+      restarted: true,
+    });
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Docker + Docker MCP readiness (used by onboarding + settings)
+app.get('/api/mcp/docker/readiness', async (_req, res) => {
+  try {
+    const readiness = await checkDockerReadiness();
+    res.json(readiness);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to check Docker readiness' });
+  }
+});
+
+// Curated safe-by-default MCP server catalog
+app.get('/api/mcp/curated', (_req, res) => {
+  const installed = new Set(appConfig.mcpServers.map((s) => s.id));
+  installed.add('docker-mcp');
+  res.json(CURATED_MCP_SERVERS.map((s) => ({
+    ...s,
+    command: undefined,
+    args: undefined,
+    installed: installed.has(s.id),
+    permissionSummary: describePermissions(s.permissions),
+  })));
+});
+
+// Install a curated MCP server in one click
+app.post('/api/mcp/curated/install', async (req, res) => {
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  const entry = findCuratedServer(id);
+  if (!entry) return res.status(404).json({ error: 'Unknown curated server' });
+
+  if (id === 'docker-mcp') {
+    return res.status(400).json({ error: 'Docker MCP is the built-in gateway; use the lifecycle buttons to start/stop it.' });
+  }
+
+  if (entry.transport === 'stdio' && entry.command) {
+    const endpoint = `stdio://${[entry.command, ...(entry.args || [])].join(' ')}`;
+    const server: StoredMCPServer = {
+      id: entry.id,
+      name: entry.name,
+      endpoint,
+      authType: 'none',
+      authToken: '',
+      enabled: true,
+    };
+    appConfig = upsertMCPServer(appConfig, server);
+    saveConfig(appConfig);
+    return res.status(201).json({ ...server, authToken: '' });
+  }
+
+  if (entry.transport === 'http' && entry.endpoint) {
+    const server: StoredMCPServer = {
+      id: entry.id,
+      name: entry.name,
+      endpoint: entry.endpoint,
+      authType: 'none',
+      authToken: '',
+      enabled: true,
+    };
+    appConfig = upsertMCPServer(appConfig, server);
+    saveConfig(appConfig);
+    return res.status(201).json({ ...server, authToken: '' });
+  }
+
+  res.status(400).json({ error: 'Curated server has no runnable configuration' });
+});
+
 // ── Models endpoint (all enabled models across providers) ──
 
 app.get('/api/models', (_req, res) => {
   const models = appConfig.providers
-    .filter((p) => (p.type === 'openai-compatible' || p.type === 'local' || p.type === 'custom') && (p.apiKey || p.type === 'local'))
+    .filter((p) => {
+      const supported = p.type === 'openai-compatible' || p.type === 'anthropic' || p.type === 'google' || p.type === 'local' || p.type === 'custom';
+      if (!supported) return false;
+      if (p.type === 'local') return true;
+      return !!p.apiKey;
+    })
     .flatMap((p) =>
       p.models
         .filter((m) => m.enabled)
@@ -1504,6 +1639,84 @@ async function parseStreamForContentAndTools(
 
 // ── Universal model streaming (with MCP tool-calling loop) ─
 
+// ── Native-adapter path for Anthropic / Google Gemini ──
+// Streams a single direct answer via the provider adapter. The OpenAI-shaped
+// tool loop is intentionally skipped: Anthropic tool round-trips need
+// content-block bookkeeping, and Gemini function-call round-trips are not
+// yet implemented. We forward text deltas as SSE `text` events, log any
+// tool_call_done events as run steps, and persist the final answer with a
+// run trace that mirrors the existing path.
+async function streamWithNativeAdapter(
+  provider: StoredProvider,
+  apiModelId: string,
+  messages: ProviderMessage[],
+  res: express.Response,
+  assistantId: string,
+  session: SessionRow,
+  run?: HarnessRun,
+) {
+  try {
+    const request: ProviderChatRequest = {
+      model: apiModelId,
+      messages,
+      stream: true,
+    };
+
+    let finalContent = '';
+    const toolCallsObserved: { id: string; name: string; args: string }[] = [];
+
+    for await (const event of streamWithAdapter(provider, request)) {
+      if (event.type === 'text_delta') {
+        finalContent += event.text;
+        res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: event.text }) + '\n\n');
+      } else if (event.type === 'thinking_delta') {
+        // Surface thinking as a small run step so the activity timeline shows it.
+        if (run) emitRunStep(res, run, { type: 'model_text', chars: event.text.length });
+      } else if (event.type === 'tool_call_done') {
+        // We do not execute these yet — the chat loop would need provider-specific
+        // tool-result shapes. Log them so the user can see the model wanted to call.
+        toolCallsObserved.push({ id: event.id, name: event.name, args: event.arguments });
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: event.id, name: event.name, input: event.arguments });
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: event.id, name: event.name, status: 'unsupported', input: event.arguments, output: 'Tool calls are not yet supported for this provider in the chat loop.' }) + '\n\n');
+      } else if (event.type === 'error') {
+        if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: event.error }); }
+        res.write('event: error\ndata: ' + JSON.stringify({ error: event.error }) + '\n\n');
+        return;
+      }
+    }
+
+    if (run) emitRunStep(res, run, { type: 'model_text', chars: finalContent.length });
+
+    let cleaned = filterMonologue(stripThinkingTags(finalContent));
+    if (!cleaned.trim()) {
+      cleaned = '(The model returned an empty response. Try rephrasing or check provider logs.)';
+      res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: cleaned }) + '\n\n');
+    }
+
+    if (run) emitRunStep(res, run, { type: 'final_answer', chars: cleaned.length });
+
+    session.messages.push({
+      id: assistantId,
+      role: 'assistant',
+      content: cleaned,
+      timestamp: new Date().toISOString(),
+      toolCalls: toolCallsObserved.length > 0 ? toolCallsObserved.map((tc) => ({
+        id: tc.id,
+        name: tc.name,
+        status: 'complete' as const,
+        input: tc.args,
+        output: 'Tool calls are not yet supported for this provider in the chat loop.',
+      })) : undefined,
+      runTrace: run,
+    });
+    session.updatedAt = new Date().toISOString();
+    sessionStore.saveSession(session);
+  } catch (err: any) {
+    if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
+    res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
+  }
+}
+
 async function streamModel(
   chatURL: string,
   apiKey: string,
@@ -1637,6 +1850,20 @@ async function streamModel(
 
   if (ctx.compressedCount > 0 || ctx.summarized) {
     console.log(`[ctx] ${effectiveModel}: kept ${ctx.keptCount}/${messages.length} msgs, ${ctx.compressedCount} compressed, budget ${ctx.tokensUsed}/${ctx.budget.availableForHistory} tokens`);
+  }
+
+  // ── Native-adapter branch for Anthropic / Gemini ──
+  // The OpenAI-shaped tool loop below assumes Bearer auth, /v1/chat/completions,
+  // and OpenAI-style tool_call SSE. Anthropic + Google use different shapes, so
+  // for those providers we take a separate path: no tools, single direct answer,
+  // forwarded via streamWithAdapter. See streamWithNativeAdapter above.
+  if (effectiveResolved && (effectiveResolved.providerType === 'anthropic' || effectiveResolved.providerType === 'google')) {
+    const nativeMessages: ProviderMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...ctx.messages,
+    ];
+    await streamWithNativeAdapter(effectiveResolved.provider, apiModelId, nativeMessages, res, assistantId, session, run);
+    return;
   }
 
   const MAX_TOOL_ROUNDS = 6;
@@ -2869,13 +3096,13 @@ process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignorin
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Open-Harness server running on http://localhost:${PORT}`);
+  console.log(`OpenHarness server running on http://localhost:${PORT}`);
 
   // Register this server process in the ledger so the UI can see/kill it.
   processLedger.registerExternal({
     pid: process.pid,
     kind: 'server',
-    name: `Open-Harness server (port ${PORT})`,
+    name: `OpenHarness server (port ${PORT})`,
     command: 'node',
     args: ['server/index.ts'],
     notes: `Started on port ${PORT}`,
@@ -2891,7 +3118,7 @@ app.listen(PORT, () => {
   } else {
     console.log(`⚠  No provider found for model ${_activeModel} — using local fallback`);
   }
-  console.log(`✓ Config loaded from ~/.open-harness/config.json`);
+  console.log(`✓ Config loaded from ~/.openharness/config.json`);
 
   // Auto-start Docker MCP gateway via stdio (keeps process alive as child)
   try {

@@ -53,6 +53,13 @@ function legacyRoleModel(assignments: Record<string, string>, roleId: string): s
   return currentToLegacy[roleId]?.map((legacy) => assignments[legacy]).find(Boolean);
 }
 
+function roleMapToAssignments(assignments: Record<string, string>): CodingRoleAssignment[] {
+  return DEFAULT_ROLE_ASSIGNMENTS.map((role) => ({
+    ...role,
+    modelId: assignments[role.id] || legacyRoleModel(assignments, role.id) || role.modelId,
+  }));
+}
+
 function App() {
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -94,7 +101,7 @@ function App() {
 
   // Listen for Electron IPC events (snap zones, menu actions)
   useEffect(() => {
-    const native = (window as any).CMDuiNative;
+    const native = (window as any).OpenHarnessNative;
     if (!native?.onMenuAction) return;
     native.onMenuAction(async (action: string, path?: string) => {
       if (action === 'show-snap-zones') {
@@ -149,6 +156,13 @@ function App() {
     poll();
     const interval = setInterval(poll, 15000);
     return () => { mounted = false; clearInterval(interval); };
+  }, []);
+
+  const refreshMcpStatus = useCallback(async () => {
+    try {
+      const status = await api.getMCPStatus();
+      setMcpStatus(status);
+    } catch { /* ignore */ }
   }, []);
 
 
@@ -710,7 +724,7 @@ function App() {
   const enabledToolCount = builtinToolCount + mcpToolCount;
 
   const msgCount = messages.length;
-  const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Open-Harness';
+  const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'OpenHarness';
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
   const latestToolCalls = latestAssistantMessage?.toolCalls || [];
   const hasRunningTools = latestToolCalls.some((tool) => tool.status === 'running');
@@ -861,34 +875,40 @@ function App() {
       )}
 
       {/* Snap Zone Overlay */}
-      {snapOverlayVisible && <SnapZoneOverlay onSnap={(zone) => { (window as any).CMDuiNative?.snapToZone(zone); setSnapOverlayVisible(false); }} onClose={() => setSnapOverlayVisible(false)} />}
+      {snapOverlayVisible && <SnapZoneOverlay onSnap={(zone) => { (window as any).OpenHarnessNative?.snapToZone(zone); setSnapOverlayVisible(false); }} onClose={() => setSnapOverlayVisible(false)} />}
 
       {/* Onboarding Wizard */}
       {showOnboarding && (
         <OnboardingWizard
-          onComplete={async (provider) => {
-            // Refresh providers after onboarding
-            if (provider) {
-              try {
-                const fresh = await api.getProviders();
-                setProviders(fresh.map((p: any) => ({
-                  id: p.id,
-                  name: p.name,
-                  type: p.type || 'openai-compatible',
-                  endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
-                  configured: !!p.hasKey || p.type === 'local',
-                  models: p.models || [],
-                })));
-                const models = await api.getModels();
-                if (models.length > 0) {
-                  const ctxMap = new Map<string, number>();
-                  for (const m of models) ctxMap.set(m.id, m.contextWindowTokens);
-                  setModelContextWindows(ctxMap);
-                  setActiveModel(models[0].id);
-                  await api.updateConfig({ activeModel: models[0].id });
-                }
-              } catch { /* use what we have */ }
-            }
+          onComplete={async (result) => {
+            // Refresh providers/models after onboarding completes.
+            try {
+              const fresh = await api.getProviders();
+              setProviders(fresh.map((p: any) => ({
+                id: p.id,
+                name: p.name,
+                type: p.type || 'openai-compatible',
+                endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
+                configured: !!p.hasKey || p.type === 'local',
+                models: p.models || [],
+              })));
+              const models = await api.getModels();
+              if (models.length > 0) {
+                const ctxMap = new Map<string, number>();
+                for (const m of models) ctxMap.set(m.id, m.contextWindowTokens);
+                setModelContextWindows(ctxMap);
+                if (result?.activeModel) setActiveModel(result.activeModel);
+                else setActiveModel(models[0].id);
+              }
+              // Adopt personality, trust mode, and role buckets from onboarding.
+              if (result?.personality) setPersonalityText(result.personality);
+              if (result?.trustMode) setTrustMode(result.trustMode as any);
+              if (result?.roleAssignments) setRoleAssignments(roleMapToAssignments(result.roleAssignments));
+              // If the user picked a folder, open it as a session.
+              if (result?.folderPath) {
+                try { await api.createSession('Onboarding project', result.folderPath); } catch { /* ignore */ }
+              }
+            } catch { /* use what we have */ }
             setShowOnboarding(false);
           }}
           onSkip={() => setShowOnboarding(false)}
@@ -916,6 +936,8 @@ function App() {
         onAssignRoleModel={handleAssignRoleModel}
         onSelectTheme={handleSelectTheme}
         onPersonalityChange={handlePersonalityChange}
+        onRestartOnboarding={() => { setSettingsOpen(false); setShowOnboarding(true); }}
+        onMcpStatusRefresh={refreshMcpStatus}
       />
     </div>
   );
