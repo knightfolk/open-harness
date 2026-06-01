@@ -610,6 +610,48 @@ function App() {
     await handleSendMessage(`I have a screenshot of ${url}. The screenshot shows the current state of the page. What issues or improvements do you see?`);
   }, [handleSendMessage]);
 
+  const handleCompareModel = useCallback(async () => {
+    if (isTyping) return;
+    const sessionId = await ensureSession();
+    if (!sessionId) return;
+    const candidateModels = Array.from(modelContextWindows.keys());
+    const targetModel = candidateModels.find((id) => id !== activeModel) || activeModel;
+    if (!targetModel) return;
+
+    const pendingId = uid();
+    setMessages((prev) => [...prev, {
+      id: pendingId,
+      role: 'assistant',
+      content: `Comparing the last answer with ${targetModel}…`,
+      timestamp: new Date(),
+      status: 'streaming',
+    }]);
+
+    try {
+      const result = await api.compareModel(sessionId, targetModel);
+      setMessages((prev) => prev.map((message) => message.id === pendingId ? {
+        ...message,
+        status: 'complete',
+        content: [
+          `## Model comparison artifact`,
+          ``,
+          `Compared with: **${result.model}** (${result.providerId})`,
+          `Runtime: ${(result.wallMs / 1000).toFixed(1)}s`,
+          `Tool calls: ${result.toolCalls.length}`,
+          ``,
+          `### Response`,
+          result.response || '_No response returned._',
+        ].join('\n'),
+      } : message));
+    } catch (err: any) {
+      setMessages((prev) => prev.map((message) => message.id === pendingId ? {
+        ...message,
+        status: 'error',
+        content: `Model comparison failed: ${err?.message || String(err)}`,
+      } : message));
+    }
+  }, [activeModel, ensureSession, isTyping, modelContextWindows]);
+
 
   const handleTrustModeChange = useCallback((mode: string) => {
     setTrustMode(mode);
@@ -737,6 +779,7 @@ function App() {
               onReviewDiff={handleReviewDiff}
               onExplainChange={handleExplainChange}
               onAskAboutScreenshot={handleAskAboutScreenshot}
+              onCompareModel={handleCompareModel}
               models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
             />
           )}

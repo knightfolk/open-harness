@@ -13,9 +13,10 @@ interface Props {
   activeModel: string;
   workingDir?: string | null;
   projectProfile?: ProjectProfile | null;
+  onCompareModel?: () => void;
 }
 
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile }: Props) {
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const userScrolledUpRef = useRef(false);
@@ -63,8 +64,8 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
 
   // Handle compare-model actions
   const handleCompareModel = useCallback(() => {
-    onSendMessage('Compare this answer with a different model to check quality.');
-  }, [onSendMessage]);
+    onCompareModel?.();
+  }, [onCompareModel]);
 
   return (
     <div className="chat-panel-root">

@@ -122,7 +122,7 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
     label: 'Ask follow-up',
     icon: '💬',
     action: 'send-message',
-    payload: '',
+    payload: 'What should we do next based on your last answer?',
     priority: 50,
   });
 

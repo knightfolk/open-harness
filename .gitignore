@@ -29,3 +29,6 @@ CMDuiApp/.swiftpm/
 CMDuiApp/Package.resolved
 release/
 CMDuiApp/Sources/CMDuiApp/Resources/dist/
+
+# Temporary backup files
+*.bak
