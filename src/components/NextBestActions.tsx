@@ -39,12 +39,20 @@ export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompar
                   break;
                 case 'propose-patch':
                   if (onProposePatch && messageContent) {
-                    // Extract the diff from the assistant message and route
-                    // it into the Patch Review panel.
-                    const m = messageContent.match(/```(?:diff|patch)\n([\s\S]*?)```/i)
-                      || messageContent.match(/(diff --git [\s\S]+)/);
-                    const diffText = (m && m[1]) ? m[1].trim() : messageContent.trim();
-                    onProposePatch(diffText, messageContent.slice(0, 200));
+                    // Extract the diff from the assistant message. If
+                    // we cannot find one, do nothing — the in-message
+                    // "Review patch" button has a more thorough
+                    // extraction and the user can use that instead.
+                    // Sending the whole message as a "diff" would
+                    // produce a malformed proposal.
+                    const fenced = messageContent.match(/```(?:diff|patch)\n([\s\S]*?)```/i);
+                    const raw = messageContent.match(/(diff --git [\s\S]+)/);
+                    const diffText = (fenced && fenced[1]) ? fenced[1].trim()
+                      : (raw && raw[1]) ? raw[1].trim()
+                      : null;
+                    if (diffText) {
+                      onProposePatch(diffText, messageContent.slice(0, 200));
+                    }
                   } else if (action.payload) {
                     onSendMessage(action.payload);
                   }

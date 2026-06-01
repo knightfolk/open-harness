@@ -631,8 +631,14 @@ function App() {
     }
   }, [workingDir, activeSessionId, ensureSession, addPanel]);
 
-  const clearPendingPatchProposalId = useCallback(() => {
-    setPendingPatchProposalId(null);
+  // Race-safe clear: if a different id is now pending (e.g. the user
+  // clicked Propose patch on file B while file A's effect was still
+  // running), leave it alone.
+  const clearPendingPatchProposalId = useCallback((idToClear?: string) => {
+    setPendingPatchProposalId((prev) => {
+      if (idToClear && prev !== idToClear) return prev;
+      return null;
+    });
   }, []);
 
   const handleExplainChange = useCallback(async (filePath: string) => {

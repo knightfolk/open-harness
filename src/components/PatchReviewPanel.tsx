@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   GitPullRequestArrow, RefreshCw, Plus, Check, X, FilePlus, FileX,
   FileEdit, Binary as BinaryIcon, AlertTriangle, Loader, Trash2, Play, CheckCircle2, XCircle, Clock,
@@ -12,7 +12,7 @@ interface Props {
   workingDir: string | null;
   sessionId: string | null;
   pendingProposalId?: string | null;
-  onClearPendingProposal?: () => void;
+  onClearPendingProposal?: (idToClear?: string) => void;
 }
 
 type View = 'list' | 'create' | 'detail';
@@ -108,38 +108,37 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
 
   // When a new proposal was just created elsewhere (DiffViewer / chat
   // diff block / next-best action), refresh and auto-select it.
+  // We capture the id locally so a stale effect can't clear a newer
+  // signal that the parent has since set.
   useEffect(() => {
     if (!pendingProposalId) return;
+    const myId = pendingProposalId;
     let cancelled = false;
     (async () => {
       try {
         await refresh();
         if (cancelled) return;
-        // Refresh sets proposals state. We can't read it synchronously
-        // here, so the list will contain the new id after refresh resolves.
-        // Use a tiny RAF + getPatchProposal fallback to be safe.
-        let found: PatchProposal | null = null;
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-          const fresh = await api.getPatchProposal(pendingProposalId);
-          if (cancelled) return;
-          if (fresh) { found = fresh; break; }
-          await new Promise((r) => setTimeout(r, 100));
-        }
+        // The proposal was just created on this same server, so a single
+        // fetch is enough — no polling.
+        const found = await api.getPatchProposal(myId);
         if (cancelled) return;
         if (found) {
           setProposals((prev) => {
             const list = prev ?? [];
-            const without = list.filter((x) => x.id !== found!.id);
-            return [found!, ...without];
+            const without = list.filter((x) => x.id !== found.id);
+            return [found, ...without];
           });
         }
-        setSelectedId(pendingProposalId);
+        setSelectedId(myId);
         setView('detail');
         setApplyResult(null);
         setApplyError(null);
-        onClearPendingProposal?.();
       } catch {
-        onClearPendingProposal?.();
+        // Swallow; the list will still reflect the new proposal on next
+        // manual refresh. Don't try to clear the parent signal here
+        // either, for the same race-avoidance reason.
+      } finally {
+        if (!cancelled) onClearPendingProposal?.(myId);
       }
     })();
     return () => { cancelled = true; };
@@ -490,8 +489,6 @@ function CreateProposalForm({
   const [verifyText, setVerifyText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const formRef = useRef<HTMLFormElement>(null);
-
   useEffect(() => { setWd(workingDir ?? ''); }, [workingDir]);
 
   const canSubmit = Boolean(
@@ -541,7 +538,7 @@ function CreateProposalForm({
   }
 
   return (
-    <form ref={formRef} className="patch-create-form" onSubmit={handleSubmit}>
+    <form className="patch-create-form" onSubmit={handleSubmit}>
       <div className="patch-create-header">
         <h3>New patch proposal</h3>
         <p className="patch-create-subtitle">Paste a unified diff to create a reviewable proposal.</p>

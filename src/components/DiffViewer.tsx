@@ -265,7 +265,7 @@ export function DiffViewer({ workingDir, onReviewDiff, onProposePatch, onExplain
                 )}
                 {onProposePatch && (
                   <button
-                    onClick={() => handleProposePatch(fileDiff.diff, fileDiff.path)}
+                    onClick={() => handleProposePatch(fileDiff.diff)}
                     disabled={proposing === fileDiff.diff || !fileDiff.diff.trim()}
                     title="Create a patch proposal you can review and apply hunks from"
                     style={{ background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: 3, padding: '2px 8px', fontSize: 10, cursor: proposing === fileDiff.diff ? 'wait' : 'pointer', opacity: proposing === fileDiff.diff ? 0.6 : 1 }}
