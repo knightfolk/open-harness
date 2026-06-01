@@ -775,6 +775,7 @@ function App() {
               activeModel={activeModel}
               workingDir={workingDir}
               projectProfile={projectProfile}
+              sessionId={activeSessionId}
               onSendToChat={handleSendToChat}
               onReviewDiff={handleReviewDiff}
               onExplainChange={handleExplainChange}

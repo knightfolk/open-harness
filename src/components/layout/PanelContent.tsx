@@ -9,6 +9,7 @@ import { FilesPanel } from '../FilesPanel';
 import { SideChatPanel } from '../SideChatPanel';
 import { ModelLabPanel } from '../ModelLabPanel';
 import { SafetyPanel } from '../SafetyPanel';
+import { PatchReviewPanel } from '../PatchReviewPanel';
 
 interface Props {
   panelId: PanelId;
@@ -23,6 +24,7 @@ interface Props {
     activeModel: string;
     workingDir: string | null;
     projectProfile?: any;
+    sessionId?: string | null;
     onSendToChat?: (text: string) => void;
     onReviewDiff?: (diffText: string) => void;
     onExplainChange?: (filePath: string) => void;
@@ -54,6 +56,8 @@ export function PanelContent({ panelId, context }: Props) {
       return <ModelLabPanel workingDir={context.workingDir} models={context.models || []} />;
     case 'safety':
       return <SafetyPanel workingDir={context.workingDir} />;
+    case 'patches':
+      return <PatchReviewPanel workingDir={context.workingDir} sessionId={context.sessionId ?? null} />;
     default:
       return <EmptyState text="Unknown panel" />;
   }

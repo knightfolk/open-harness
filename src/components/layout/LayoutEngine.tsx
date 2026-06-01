@@ -19,6 +19,7 @@ interface Props {
   activeModel: string;
   workingDir: string | null;
   projectProfile: any;
+  sessionId?: string | null;
   onSendToChat?: (text: string) => void;
   onReviewDiff?: (diffText: string) => void;
   onExplainChange?: (filePath: string) => void;
@@ -41,6 +42,7 @@ export function LayoutEngine({
   activeModel,
   workingDir,
   projectProfile,
+  sessionId,
   onSendToChat,
   onReviewDiff,
   onExplainChange,
@@ -50,7 +52,7 @@ export function LayoutEngine({
 }: Props) {
   return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{
     subAgents, plan, fileChanges, terminalCommands, messages, isTyping,
-    onSendMessage, activeModel, workingDir, projectProfile, onSwap: onSwapPanels,
+    onSendMessage, activeModel, workingDir, projectProfile, sessionId, onSwap: onSwapPanels,
     onSendToChat, onReviewDiff, onExplainChange, onAskAboutScreenshot,
     onCompareModel,
     models,
