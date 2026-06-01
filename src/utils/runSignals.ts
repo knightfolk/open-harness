@@ -230,14 +230,6 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
       priority: 42,
     });
     actions.push({
-      id: 'create-patch-proposal',
-      label: 'Review proposed patch',
-      icon: '🩻',
-      action: 'propose-patch',
-      payload: '',
-      priority: 43,
-    });
-    actions.push({
       id: 'create-commit',
       label: 'Create commit',
       icon: '📦',
