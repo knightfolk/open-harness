@@ -4996,3 +4996,15 @@ button:focus-visible {
 .spin {
   animation: spin 1s linear infinite;
 }
+
+/* ========== Message Patch Action ========== */
+.message-patch-action {
+  display: flex;
+  margin-top: 6px;
+}
+
+.message-patch-action .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

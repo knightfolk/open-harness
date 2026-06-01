@@ -99,13 +99,22 @@ export function analyzeConfidence(message: Message): ConfidenceSignals {
   };
 }
 
+function messageHasUnifiedDiff(content: string): boolean {
+  if (!content) return false;
+  if (/^diff --git /m.test(content)) return true;
+  if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(content)) return true;
+  if (/```(diff|patch)\b[\s\S]*?```/i.test(content)) return true;
+  if (/^--- a\/\S+/m.test(content) && /\n\+\+\+ b\/\S+/m.test(content)) return true;
+  return false;
+}
+
 // ── Next-best-action derivation ──────────────────────────
 
 export interface SuggestedAction {
   id: string;
   label: string;
   icon: string;
-  action: 'send-message' | 'run-command' | 'open-panel' | 'compare-model';
+  action: 'send-message' | 'run-command' | 'open-panel' | 'compare-model' | 'propose-patch';
   payload: string;
   priority: number;
 }
@@ -197,6 +206,19 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
     });
   }
 
+  // If the message itself contains a unified diff, always offer to
+  // route it into the Patch Review panel.
+  if (messageHasUnifiedDiff(message.content)) {
+    actions.push({
+      id: 'create-patch-proposal-content',
+      label: 'Review proposed patch',
+      icon: '🩻',
+      action: 'propose-patch',
+      payload: '',
+      priority: 46,
+    });
+  }
+
   // If orchestration was execute, suggest reviewing diff
   if (trace?.steps?.some(s => s.type === 'orchestration' && s.mode === 'execute')) {
     actions.push({
@@ -206,6 +228,14 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
       action: 'open-panel',
       payload: 'git-diff',
       priority: 42,
+    });
+    actions.push({
+      id: 'create-patch-proposal',
+      label: 'Review proposed patch',
+      icon: '🩻',
+      action: 'propose-patch',
+      payload: '',
+      priority: 43,
     });
     actions.push({
       id: 'create-commit',

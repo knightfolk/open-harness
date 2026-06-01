@@ -11,6 +11,8 @@ import type {
 interface Props {
   workingDir: string | null;
   sessionId: string | null;
+  pendingProposalId?: string | null;
+  onClearPendingProposal?: () => void;
 }
 
 type View = 'list' | 'create' | 'detail';
@@ -75,7 +77,7 @@ function basename(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
-export function PatchReviewPanel({ workingDir, sessionId }: Props) {
+export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onClearPendingProposal }: Props) {
   const [proposals, setProposals] = useState<PatchProposal[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +105,46 @@ export function PatchReviewPanel({ workingDir, sessionId }: Props) {
   }, [sessionId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // When a new proposal was just created elsewhere (DiffViewer / chat
+  // diff block / next-best action), refresh and auto-select it.
+  useEffect(() => {
+    if (!pendingProposalId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await refresh();
+        if (cancelled) return;
+        // Refresh sets proposals state. We can't read it synchronously
+        // here, so the list will contain the new id after refresh resolves.
+        // Use a tiny RAF + getPatchProposal fallback to be safe.
+        let found: PatchProposal | null = null;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const fresh = await api.getPatchProposal(pendingProposalId);
+          if (cancelled) return;
+          if (fresh) { found = fresh; break; }
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        if (cancelled) return;
+        if (found) {
+          setProposals((prev) => {
+            const list = prev ?? [];
+            const without = list.filter((x) => x.id !== found!.id);
+            return [found!, ...without];
+          });
+        }
+        setSelectedId(pendingProposalId);
+        setView('detail');
+        setApplyResult(null);
+        setApplyError(null);
+        onClearPendingProposal?.();
+      } catch {
+        onClearPendingProposal?.();
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingProposalId]);
 
   const selected: PatchProposal | null = useMemo(() => {
     if (!selectedId || !proposals) return null;

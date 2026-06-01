@@ -20,8 +20,11 @@ interface Props {
   workingDir: string | null;
   projectProfile: any;
   sessionId?: string | null;
+  pendingPatchProposalId?: string | null;
+  clearPendingPatchProposalId?: () => void;
   onSendToChat?: (text: string) => void;
   onReviewDiff?: (diffText: string) => void;
+  onProposePatch?: (diffText: string, explanation?: string) => void;
   onExplainChange?: (filePath: string) => void;
   onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
   onCompareModel?: () => void;
@@ -43,8 +46,11 @@ export function LayoutEngine({
   workingDir,
   projectProfile,
   sessionId,
+  pendingPatchProposalId,
+  clearPendingPatchProposalId,
   onSendToChat,
   onReviewDiff,
+  onProposePatch,
   onExplainChange,
   onAskAboutScreenshot,
   onCompareModel,
@@ -52,8 +58,10 @@ export function LayoutEngine({
 }: Props) {
   return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{
     subAgents, plan, fileChanges, terminalCommands, messages, isTyping,
-    onSendMessage, activeModel, workingDir, projectProfile, sessionId, onSwap: onSwapPanels,
-    onSendToChat, onReviewDiff, onExplainChange, onAskAboutScreenshot,
+    onSendMessage, activeModel, workingDir, projectProfile, sessionId,
+    pendingPatchProposalId, clearPendingPatchProposalId,
+    onSwap: onSwapPanels,
+    onSendToChat, onReviewDiff, onProposePatch, onExplainChange, onAskAboutScreenshot,
     onCompareModel,
     models,
   }} />;

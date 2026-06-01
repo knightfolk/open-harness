@@ -85,9 +85,10 @@ function App() {
   const [contextWarning, setContextWarning] = useState<string | null>(null);
   const [trustMode, setTrustMode] = useState('workspace-write');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const { layout, togglePanel, removePanel, swapPanels, resetLayout } = useLayoutState();
+  const { layout, togglePanel, removePanel, swapPanels, resetLayout, addPanel } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
 
@@ -602,6 +603,38 @@ function App() {
     await handleSendMessage(`Review this diff and provide feedback:\n\`\`\`diff\n${diffText.slice(0, 5000)}\n\`\`\``);
   }, [handleSendMessage]);
 
+  const handleProposePatch = useCallback(async (diffText: string, explanation?: string) => {
+    if (!workingDir) {
+      console.warn("[proposePatch] no workingDir open");
+      return;
+    }
+    let sid = activeSessionId;
+    if (!sid) {
+      sid = await ensureSession();
+      if (!sid) {
+        console.warn("[proposePatch] no active session");
+        return;
+      }
+    }
+    try {
+      const res = await api.createPatchProposal({
+        patch: diffText,
+        workingDir,
+        sessionId: sid,
+        source: "diff-viewer",
+        explanation: explanation?.trim() || undefined,
+      });
+      setPendingPatchProposalId(res.id);
+      addPanel("patches");
+    } catch (err: any) {
+      console.error("[proposePatch] failed:", err?.message || err);
+    }
+  }, [workingDir, activeSessionId, ensureSession, addPanel]);
+
+  const clearPendingPatchProposalId = useCallback(() => {
+    setPendingPatchProposalId(null);
+  }, []);
+
   const handleExplainChange = useCallback(async (filePath: string) => {
     await handleSendMessage(`Explain what changed in \`${filePath}\` and why.`);
   }, [handleSendMessage]);
@@ -776,8 +809,11 @@ function App() {
               workingDir={workingDir}
               projectProfile={projectProfile}
               sessionId={activeSessionId}
+              pendingPatchProposalId={pendingPatchProposalId}
+              clearPendingPatchProposalId={clearPendingPatchProposalId}
               onSendToChat={handleSendToChat}
               onReviewDiff={handleReviewDiff}
+              onProposePatch={handleProposePatch}
               onExplainChange={handleExplainChange}
               onAskAboutScreenshot={handleAskAboutScreenshot}
               onCompareModel={handleCompareModel}

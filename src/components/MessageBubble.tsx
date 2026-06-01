@@ -9,6 +9,33 @@ import { PromptMicroscope } from './PromptMicroscope';
 import { ArtifactDrawer } from './ArtifactDrawer';
 import { analyzeConfidence, deriveNextActions } from '../utils/runSignals';
 
+function looksLikeUnifiedDiff(text: string): boolean {
+  if (!text) return false;
+  if (/^diff --git /m.test(text)) return true;
+  if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(text)) return true;
+  if (/^--- a\/\S+/m.test(text) && /\n\+\+\+ b\/\S+/m.test(text)) return true;
+  return false;
+}
+
+function extractUnifiedDiff(message: Message): { diff: string; fromBlock: boolean } | null {
+  const codeRegex = /```(\w*)\n([\s\S]*?)```/g;
+  let m;
+  const blocks = [];
+  while ((m = codeRegex.exec(message.content)) !== null) {
+    const lang = (m[1] || '').toLowerCase();
+    if (lang === 'diff' || lang === 'patch' || looksLikeUnifiedDiff(m[2])) {
+      blocks.push(m[2].trimEnd());
+    }
+  }
+  if (blocks.length > 0) {
+    return { diff: blocks.join('\n\n'), fromBlock: true };
+  }
+  if (looksLikeUnifiedDiff(message.content)) {
+    return { diff: message.content.trim(), fromBlock: false };
+  }
+  return null;
+}
+
 interface Props {
   message: Message;
   assistantName: string;
@@ -16,6 +43,7 @@ interface Props {
   onSendMessage?: (text: string) => void;
   onRunCommand?: (command: string) => void;
   onCompareModel?: () => void;
+  onProposePatch?: (diffText: string, explanation?: string) => void;
 }
 
 function parseContent(content: string) {
@@ -166,7 +194,7 @@ function ToolCallSummary({ toolCalls }: { toolCalls: ToolCall[] }) {
   );
 }
 
-export function MessageBubble({ message, assistantName, projectProfile, onSendMessage, onRunCommand, onCompareModel }: Props) {
+export function MessageBubble({ message, assistantName, projectProfile, onSendMessage, onRunCommand, onCompareModel, onProposePatch }: Props) {
   const visibleContent = stripThinking(message.content);
   const parts = parseContent(visibleContent);
   const isStreaming = message.status === 'streaming';
@@ -180,6 +208,11 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
   const nextActions = useMemo(
     () => isAssistant && !isStreaming ? deriveNextActions(message, projectProfile) : [],
     [isAssistant, isStreaming, message, projectProfile]
+  );
+
+  const extractedDiff = useMemo(
+    () => isAssistant && !isStreaming ? extractUnifiedDiff(message) : null,
+    [isAssistant, isStreaming, message],
   );
 
   return (
@@ -219,6 +252,21 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
             <ToolCallSummary toolCalls={message.toolCalls} />
           )}
 
+          {/* Surface a one-click "Review patch" button when the assistant
+              message contains a unified diff. Routes to the Patch Review
+              panel via the propose-patch flow. */}
+          {isAssistant && !isStreaming && onProposePatch && extractedDiff && (
+            <div className="message-patch-action">
+              <button
+                className="btn btn-secondary btn-small"
+                onClick={() => onProposePatch(extractedDiff.diff, message.content.slice(0, 200))}
+                title="Send this diff to the Patch Review panel"
+              >
+                <span style={{ fontSize: 11 }}>🩹</span> Review patch
+              </button>
+            </div>
+          )}
+
           {/* ── Delight features for completed assistant messages ── */}
           {isAssistant && !isStreaming && (
             <>
@@ -235,6 +283,8 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
                   onSendMessage={onSendMessage}
                   onRunCommand={onRunCommand}
                   onCompareModel={onCompareModel}
+                  onProposePatch={onProposePatch}
+                  messageContent={visibleContent}
                 />
               )}
             </>

@@ -14,9 +14,10 @@ interface Props {
   workingDir?: string | null;
   projectProfile?: ProjectProfile | null;
   onCompareModel?: () => void;
+  onProposePatch?: (diffText: string, explanation?: string) => void;
 }
 
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel }: Props) {
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const userScrolledUpRef = useRef(false);
@@ -82,6 +83,7 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
             onSendMessage={onSendMessage}
             onRunCommand={handleRunCommand}
             onCompareModel={handleCompareModel}
+            onProposePatch={onProposePatch}
           />
         ))}
         {showTypingPlaceholder && (

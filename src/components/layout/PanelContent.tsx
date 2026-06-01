@@ -25,8 +25,11 @@ interface Props {
     workingDir: string | null;
     projectProfile?: any;
     sessionId?: string | null;
+    pendingPatchProposalId?: string | null;
+    clearPendingPatchProposalId?: () => void;
     onSendToChat?: (text: string) => void;
     onReviewDiff?: (diffText: string) => void;
+    onProposePatch?: (diffText: string, explanation?: string) => void;
     onExplainChange?: (filePath: string) => void;
     onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
     onCompareModel?: () => void;
@@ -37,11 +40,11 @@ interface Props {
 export function PanelContent({ panelId, context }: Props) {
   switch (panelId) {
     case 'chat':
-      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} />;
+      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} />;
     case 'side-chat':
       return <SideChatPanel />;
     case 'diffs':
-      return <DiffViewer workingDir={context.workingDir} onReviewDiff={context.onReviewDiff} onExplainChange={context.onExplainChange} />;
+      return <DiffViewer workingDir={context.workingDir} onReviewDiff={context.onReviewDiff} onProposePatch={context.onProposePatch} onExplainChange={context.onExplainChange} />;
     case 'browser':
       return <BrowserPanel workingDir={context.workingDir} onAskAboutScreenshot={context.onAskAboutScreenshot} />;
     case 'terminal':
@@ -57,7 +60,7 @@ export function PanelContent({ panelId, context }: Props) {
     case 'safety':
       return <SafetyPanel workingDir={context.workingDir} />;
     case 'patches':
-      return <PatchReviewPanel workingDir={context.workingDir} sessionId={context.sessionId ?? null} />;
+      return <PatchReviewPanel workingDir={context.workingDir} sessionId={context.sessionId ?? null} pendingProposalId={context.pendingPatchProposalId ?? null} onClearPendingProposal={context.clearPendingPatchProposalId ?? (() => {})} />;
     default:
       return <EmptyState text="Unknown panel" />;
   }

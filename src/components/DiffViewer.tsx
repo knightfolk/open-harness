@@ -4,10 +4,11 @@ import * as api from '../utils/api';
 interface Props {
   workingDir: string | null;
   onReviewDiff?: (diffText: string) => void;
+  onProposePatch?: (diffText: string, explanation?: string) => void;
   onExplainChange?: (filePath: string) => void;
 }
 
-export function DiffViewer({ workingDir, onReviewDiff, onExplainChange }: Props) {
+export function DiffViewer({ workingDir, onReviewDiff, onProposePatch, onExplainChange }: Props) {
   const [status, setStatus] = useState<api.GitStatusInfo | null>(null);
   const [diffs, setDiffs] = useState<api.GitDiffInfo[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -15,6 +16,8 @@ export function DiffViewer({ workingDir, onReviewDiff, onExplainChange }: Props)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [staging, setStaging] = useState<string | null>(null);
+  const [proposing, setProposing] = useState<string | null>(null);
+  const [proposeError, setProposeError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!workingDir) return;
@@ -68,6 +71,19 @@ export function DiffViewer({ workingDir, onReviewDiff, onExplainChange }: Props)
     } catch { /* ignore */ }
     setStaging(null);
   }, [workingDir, refresh]);
+
+  const handleProposePatch = useCallback(async (diffText: string, explanation?: string) => {
+    if (!onProposePatch) return;
+    setProposing(diffText);
+    setProposeError(null);
+    try {
+      await onProposePatch(diffText, explanation);
+    } catch (err: any) {
+      setProposeError(err?.message || 'Failed to propose patch');
+    } finally {
+      setProposing(null);
+    }
+  }, [onProposePatch]);
 
   const allChanges = [
     ...(status?.staged || []).map(f => ({ ...f, staged: true })),
@@ -247,6 +263,16 @@ export function DiffViewer({ workingDir, onReviewDiff, onExplainChange }: Props)
                     Review
                   </button>
                 )}
+                {onProposePatch && (
+                  <button
+                    onClick={() => handleProposePatch(fileDiff.diff, fileDiff.path)}
+                    disabled={proposing === fileDiff.diff || !fileDiff.diff.trim()}
+                    title="Create a patch proposal you can review and apply hunks from"
+                    style={{ background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: 3, padding: '2px 8px', fontSize: 10, cursor: proposing === fileDiff.diff ? 'wait' : 'pointer', opacity: proposing === fileDiff.diff ? 0.6 : 1 }}
+                  >
+                    {proposing === fileDiff.diff ? '...' : 'Propose patch'}
+                  </button>
+                )}
                 {onExplainChange && (
                   <button
                     onClick={() => onExplainChange(fileDiff.path)}
@@ -258,7 +284,12 @@ export function DiffViewer({ workingDir, onReviewDiff, onExplainChange }: Props)
               </div>
 
               {/* Diff lines */}
-              {fileDiff.binary ? (
+              {proposeError && (
+              <div style={{ padding: '4px 10px', background: 'rgba(239,68,68,0.1)', color: 'var(--accent-error)', fontSize: 11, borderBottom: '1px solid var(--border-primary)' }}>
+                {proposeError}
+              </div>
+            )}
+            {fileDiff.binary ? (
                 <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 12 }}>
                   Binary file
                 </div>

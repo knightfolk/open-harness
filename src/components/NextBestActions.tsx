@@ -6,9 +6,11 @@ interface Props {
   onSendMessage: (text: string) => void;
   onRunCommand?: (command: string) => void;
   onCompareModel?: () => void;
+  onProposePatch?: (diffText: string, explanation?: string) => void;
+  messageContent?: string;
 }
 
-export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompareModel }: Props) {
+export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompareModel, onProposePatch, messageContent }: Props) {
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed || actions.length === 0) return null;
@@ -34,6 +36,18 @@ export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompar
                   break;
                 case 'compare-model':
                   onCompareModel?.();
+                  break;
+                case 'propose-patch':
+                  if (onProposePatch && messageContent) {
+                    // Extract the diff from the assistant message and route
+                    // it into the Patch Review panel.
+                    const m = messageContent.match(/```(?:diff|patch)\n([\s\S]*?)```/i)
+                      || messageContent.match(/(diff --git [\s\S]+)/);
+                    const diffText = (m && m[1]) ? m[1].trim() : messageContent.trim();
+                    onProposePatch(diffText, messageContent.slice(0, 200));
+                  } else if (action.payload) {
+                    onSendMessage(action.payload);
+                  }
                   break;
                 case 'open-panel':
                   // For now, send as a message
