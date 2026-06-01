@@ -787,3 +787,26 @@ export async function appendProjectMemory(path: string, content: string): Promis
   });
   if (!res.ok) throw new Error(`Failed to append project memory: ${res.status}`);
 }
+
+// ── Compare Model API ──────────────────────────────────
+
+export interface CompareModelResult {
+  model: string;
+  providerId: string;
+  response: string;
+  toolCalls: Array<{ name: string; status: string }>;
+  wallMs: number;
+}
+
+export async function compareModel(sessionId: string, targetModel: string, messageIndex?: number): Promise<CompareModelResult> {
+  const res = await fetch(`${API_BASE}/api/chat/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, targetModel, messageIndex }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Compare failed: ${res.status}`);
+  }
+  return res.json();
+}

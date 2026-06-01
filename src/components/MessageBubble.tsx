@@ -1,12 +1,21 @@
 import { useMemo, useState } from 'react';
 import { Bot, User, Cpu, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
-import type { Message, ToolCall } from '../types';
+import type { Message, ToolCall, ProjectProfile } from '../types';
 import { ToolCallComponent } from './ToolCall';
 import { CodeBlockComponent } from './CodeBlock';
+import { NextBestActions } from './NextBestActions';
+import { ConfidenceMeter } from './ConfidenceMeter';
+import { PromptMicroscope } from './PromptMicroscope';
+import { ArtifactDrawer } from './ArtifactDrawer';
+import { analyzeConfidence, deriveNextActions } from '../utils/runSignals';
 
 interface Props {
   message: Message;
   assistantName: string;
+  projectProfile?: ProjectProfile | null;
+  onSendMessage?: (text: string) => void;
+  onRunCommand?: (command: string) => void;
+  onCompareModel?: () => void;
 }
 
 function parseContent(content: string) {
@@ -157,10 +166,21 @@ function ToolCallSummary({ toolCalls }: { toolCalls: ToolCall[] }) {
   );
 }
 
-export function MessageBubble({ message, assistantName }: Props) {
+export function MessageBubble({ message, assistantName, projectProfile, onSendMessage, onRunCommand, onCompareModel }: Props) {
   const visibleContent = stripThinking(message.content);
   const parts = parseContent(visibleContent);
   const isStreaming = message.status === 'streaming';
+  const isAssistant = message.role === 'assistant';
+
+  // Compute delight signals for assistant messages
+  const confidenceSignals = useMemo(
+    () => isAssistant && !isStreaming ? analyzeConfidence(message) : null,
+    [isAssistant, isStreaming, message]
+  );
+  const nextActions = useMemo(
+    () => isAssistant && !isStreaming ? deriveNextActions(message, projectProfile) : [],
+    [isAssistant, isStreaming, message, projectProfile]
+  );
 
   return (
     <div className="message-wrapper">
@@ -174,6 +194,10 @@ export function MessageBubble({ message, assistantName }: Props) {
             <span className="timestamp">
               {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
+            {/* Confidence badge inline with sender */}
+            {confidenceSignals && (
+              <ConfidenceMeter signals={confidenceSignals} />
+            )}
           </div>
           <div className="message-content">
             {parts.map((part, i) =>
@@ -193,6 +217,27 @@ export function MessageBubble({ message, assistantName }: Props) {
           </div>
           {message.toolCalls && message.toolCalls.length > 0 && (
             <ToolCallSummary toolCalls={message.toolCalls} />
+          )}
+
+          {/* ── Delight features for completed assistant messages ── */}
+          {isAssistant && !isStreaming && (
+            <>
+              {/* Artifact drawer */}
+              <ArtifactDrawer message={message} />
+
+              {/* Prompt microscope */}
+              <PromptMicroscope runTrace={message.runTrace} />
+
+              {/* Next best actions */}
+              {onSendMessage && nextActions.length > 0 && (
+                <NextBestActions
+                  actions={nextActions}
+                  onSendMessage={onSendMessage}
+                  onRunCommand={onRunCommand}
+                  onCompareModel={onCompareModel}
+                />
+              )}
+            </>
           )}
         </div>
       </div>

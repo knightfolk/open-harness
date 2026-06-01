@@ -1715,6 +1715,84 @@ app.post('/api/project/memory/append', (req, res) => {
 });
 
 
+// ── Compare Model Endpoint ─────────────────────────────
+// Re-runs the last user message through a different model for side-by-side comparison
+
+app.post('/api/chat/compare', async (req, res) => {
+  const { sessionId, targetModel, messageIndex } = req.body as {
+    sessionId: string;
+    targetModel: string;
+    messageIndex?: number;
+  };
+
+  if (!sessionId || !targetModel) {
+    return res.status(400).json({ error: 'sessionId and targetModel are required' });
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const userMessages = session.messages.filter(m => m.role === 'user');
+  if (userMessages.length === 0) return res.status(400).json({ error: 'No user messages in session' });
+  const targetMessage = messageIndex != null ? userMessages[messageIndex] : userMessages[userMessages.length - 1];
+  if (!targetMessage) return res.status(400).json({ error: 'Message not found' });
+
+  const resolved = resolveProviderForModel(targetModel);
+  if (!resolved) return res.status(400).json({ error: `No provider for model ${targetModel}` });
+
+  const compareSession: SessionRow = {
+    id: uuid(),
+    title: `[compare] ${targetModel}`,
+    workingDir: session.workingDir,
+    messages: [{ ...targetMessage }],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  sessions.set(compareSession.id, compareSession);
+
+  const chunks: string[] = [];
+  const toolCalls: any[] = [];
+  const writer = {
+    write: (data: string) => {
+      const lines = data.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = line.slice(6);
+          if (payload === '{}' || payload === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.text) chunks.push(parsed.text);
+            if (parsed.name && parsed.status) toolCalls.push(parsed);
+          } catch { /* skip */ }
+        }
+      }
+      return true;
+    },
+    setHeader: () => {},
+    end: () => {},
+  } as unknown as express.Response;
+
+  const startMs = Date.now();
+  try {
+    await streamModel(
+      resolved.chatURL, resolved.apiKey, resolved.providerId,
+      compareSession.messages, writer, uuid(), compareSession,
+      targetModel,
+    );
+  } catch (err: any) {
+    return res.status(502).json({ error: err.message });
+  }
+
+  const response = chunks.join('');
+  res.json({
+    model: targetModel,
+    providerId: resolved.providerId,
+    response,
+    toolCalls: toolCalls.map(tc => ({ name: tc.name, status: tc.status })),
+    wallMs: Date.now() - startMs,
+  });
+});
+
 // ── Eval / Model Lab Routes ──────────────────────────
 
 app.get('/api/evals/prompts', (_req, res) => {

@@ -56,6 +56,16 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
     setUserScrolledUp(!atBottom);
   }, [isNearBottom]);
 
+  // Handle run-command actions from NextBestActions
+  const handleRunCommand = useCallback((command: string) => {
+    onSendMessage(`Run this command: \`${command}\``);
+  }, [onSendMessage]);
+
+  // Handle compare-model actions
+  const handleCompareModel = useCallback(() => {
+    onSendMessage('Compare this answer with a different model to check quality.');
+  }, [onSendMessage]);
+
   return (
     <div className="chat-panel-root">
       <div className="messages" ref={scrollRef} onScroll={handleScroll}>
@@ -63,7 +73,15 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
           <SmartWelcome workingDir={workingDir || null} projectProfile={projectProfile || null} onSuggestionClick={onSendMessage} />
         )}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} assistantName={assistantName} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            assistantName={assistantName}
+            projectProfile={projectProfile}
+            onSendMessage={onSendMessage}
+            onRunCommand={handleRunCommand}
+            onCompareModel={handleCompareModel}
+          />
         ))}
         {showTypingPlaceholder && (
           <div className="message-wrapper">

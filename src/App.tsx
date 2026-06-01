@@ -621,6 +621,11 @@ function App() {
   };
   collectPanels(layout);
 
+  // Compute enabled tool count: 3 built-in + MCP tools from running servers
+  const builtinToolCount = trustMode === "chat-only" ? 0 : trustMode === "read-only" ? 2 : 3;
+  const mcpToolCount = mcpStatus.filter(s => s.running).reduce((sum, s) => sum + (s.toolCount || 0), 0);
+  const enabledToolCount = builtinToolCount + mcpToolCount;
+
   const msgCount = messages.length;
   const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'Open-Harness';
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
@@ -747,6 +752,7 @@ function App() {
             return { id, name: id, providerName: prov?.name || 'Unknown', contextWindow: ctx };
           })}
           onModelChange={handleSelectModel}
+          enabledToolCount={enabledToolCount}
           trustMode={trustMode}
           onTrustModeChange={handleTrustModeChange}
         />

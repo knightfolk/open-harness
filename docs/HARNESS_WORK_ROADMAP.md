@@ -4,6 +4,37 @@ Purpose: turn CMDui from a model chat interface into a local coding harness cont
 
 Use this document for work assignment, issue creation, milestone planning, and progress tracking.
 
+
+## Correctness Review — 2026-05-31
+
+This revision reconciles the roadmap with the current repo state after the Phase 1–8 implementation push.
+
+### Confirmed complete from code inspection
+
+- Milestones 1–3 and 7 are reflected by dedicated modules, API wiring, UI state, and persistence code.
+- Milestone 4 is mostly implemented: real terminal sessions, git status/diff/stage/unstage/commit routes, diff actions, browser screenshots, browser health checks, and screenshot-to-chat actions exist.
+- Milestone 5 is mounted in the layout and eval reports already persist under `~/.open-harness/evals/reports`.
+- Milestone 6 has trust modes, policy checks, command-risk reasons, and a visible trust-mode badge.
+- Milestone 8 has the universal provider adapter shape, registry, native Anthropic/Gemini adapters, OpenAI-compatible support, and local provider discovery.
+
+### Remaining correctness gaps before calling Phase 1–8 fully closed
+
+- Patch proposal review is still incomplete: the type and patch-apply endpoint exist, but there is no first-class UI for file-by-file / hunk-by-hunk accept-reject plus post-apply validation.
+- Eval scoring does not yet record validation pass/fail as a first-class score dimension.
+- The status bar component shows enabled tool count and `App.tsx` now passes the count (resolved in Phase 9).
+- Existing MiniMax compatibility should be verified with a credential-backed live smoke test before marking the provider acceptance item complete.
+
+## External Baselines Reviewed
+
+These roadmap additions are based on current coding-agent patterns from:
+
+- [OpenAI Codex CLI approval modes and sandboxed execution](https://help.openai.com/en/articles/11096431)
+- [Claude Code subagents, background work, permissions, hooks, memory, and worktree isolation](https://code.claude.com/docs/en/sub-agents)
+- [Claude Code hooks](https://code.claude.com/docs/en/hooks)
+- [Aider repository map](https://aider.chat/docs/repomap.html)
+- [Aider linting and testing workflow](https://aider.chat/docs/usage/lint-test.html)
+- [SWE-bench leaderboards and resolved/cost/step comparison signals](https://www.swebench.com/)
+
 ## North Star
 
 CMDui should be the local AI workbench where models, tools, repo state, plans, diffs, tests, browser sessions, and evaluations are all first-class objects.
@@ -352,11 +383,11 @@ Show real work products: terminal commands, diffs, validation results, browser p
 - [x] Add `GET /api/git/diff`
 - [x] Add `POST /api/git/stage`
 - [x] Add `POST /api/git/commit`
-- [ ] Update `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
+- [x] Update `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
 - [x] Show changed files
 - [x] Show inline diff
 - [x] Add “review this diff”
-- [ ] Add “explain this change”
+- [x] Add “explain this change”
 
 ### P2 — Real browser preview panel
 
@@ -365,8 +396,8 @@ Show real work products: terminal commands, diffs, validation results, browser p
 - [x] Load local dev URL
 - [x] Show screenshot
 - [x] Show console errors
-- [ ] Add “ask model about this screenshot”
-- [ ] Add “run smoke check”
+- [x] Add “ask model about this screenshot”
+- [x] Add “run smoke check”
 
 ### P1 — Patch proposal flow
 
@@ -389,10 +420,10 @@ interface ProposedPatch {
 
 ## Acceptance Criteria
 
-- [ ] User can run commands from the UI.
-- [ ] User can see actual git diff.
+- [x] User can run commands from the UI.
+- [x] User can see actual git diff.
 - [ ] User can review model-proposed patches before applying.
-- [ ] Browser panel is no longer a placeholder.
+- [x] Browser panel is no longer a placeholder.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
 
@@ -411,7 +442,7 @@ Turn the existing test-results and prompt-test harness into a first-class produc
 - [x] Create `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
 - [x] Update `/Users/kevink/Projects/CMDui/src/types/layout.ts`
 - [x] Update `/Users/kevink/Projects/CMDui/src/components/layout/panelRegistry.tsx`
-- [ ] Update `/Users/kevink/Projects/CMDui/src/components/layout/PanelContent.tsx`
+- [x] Update `/Users/kevink/Projects/CMDui/src/components/layout/PanelContent.tsx`
 
 ### P1 — Add eval server module
 
@@ -420,7 +451,7 @@ Turn the existing test-results and prompt-test harness into a first-class produc
 - [x] Add prompt suite CRUD
 - [x] Add model matrix runs
 - [x] Add run status endpoint
-- [ ] Save reports under `~/.open-harness/evals`
+- [x] Save reports under `~/.open-harness/evals`
 
 ### P1 — Add built-in prompt suites
 
@@ -430,7 +461,7 @@ Turn the existing test-results and prompt-test harness into a first-class produc
 - [x] Summarize README
 - [x] Inspect package.json
 - [x] Debug empty response
-- [ ] Compare route decisions
+- [x] Compare route decisions
 
 ### P2 — Add scoring
 
@@ -501,7 +532,7 @@ type TrustMode =
 - [x] Classify safe commands
 - [x] Classify risky commands
 - [x] Confirm or block destructive commands
-- [ ] Add clear error messages
+- [x] Add clear error messages
 
 Risky command examples:
 
@@ -517,15 +548,15 @@ Risky command examples:
 
 - [x] Update `/Users/kevink/Projects/CMDui/src/components/StatusBar.tsx`
 - [x] Show current trust mode
-- [ ] Show enabled tool count
-- [ ] Show active workspace
+- [x] Show enabled tool count in the badge component; pass the actual count from `App.tsx`
+- [x] Show active workspace
 
 ## Acceptance Criteria
 
 - [x] Read-only mode exposes no write/terminal tools.
 - [x] Workspace-write mode cannot write outside project.
 - [x] Dangerous shell commands are blocked or require confirmation.
-- [ ] Status bar clearly shows current trust mode.
+- [x] Status bar clearly shows current trust mode.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
 
@@ -648,7 +679,7 @@ type ProviderEvent =
 
 ## Acceptance Criteria
 
-- [ ] Existing MiniMax path still works.
+- [~] Existing MiniMax path still works — needs credential-backed live smoke test.
 - [x] OpenAI-compatible providers use common adapter.
 - [x] Anthropic works only after native adapter is implemented.
 - [x] Gemini works only after native adapter is implemented.
@@ -668,8 +699,8 @@ Add features that make CMDui feel better than a normal agent UI.
 
 ### P2 — Next Best Action strip
 
-- [ ] Add suggested actions below assistant responses
-- [ ] Actions derived from run trace and project profile
+- [x] Add suggested actions below assistant responses
+- [x] Actions derived from run trace and project profile
 - [ ] Examples:
   - Run build
   - Review diff
@@ -685,8 +716,8 @@ Files:
 
 ### P2 — Observable confidence meter
 
-- [ ] Add answer quality badge
-- [ ] Base it on observable signals, not model self-confidence
+- [x] Add answer quality badge
+- [x] Base it on observable signals, not model self-confidence
 - [ ] Signals:
   - files read
   - tools used
@@ -705,157 +736,527 @@ Risk: low
 
 ### P2 — Ask another model
 
-- [ ] Add response action: ask reviewer model
-- [ ] Add response action: ask planner model
-- [ ] Add response action: ask cheaper model
-- [ ] Add response action: ask stronger model
-- [ ] Store comparison as artifact
+- [x] Add response action: ask reviewer model
+- [x] Add response action: ask planner model
+- [x] Add response action: ask cheaper model
+- [x] Add response action: ask stronger model
+- [x] Store comparison as artifact
 
 ### P2 — Prompt microscope
 
-- [ ] Show system prompt
-- [ ] Show model request with keys redacted
-- [ ] Show context messages
-- [ ] Show context trimming decisions
-- [ ] Show raw provider errors
-- [ ] Link from run trace
+- [x] Show system prompt
+- [x] Show model request with keys redacted
+- [x] Show context messages
+- [x] Show context trimming decisions
+- [x] Show raw provider errors
+- [x] Link from run trace
 
 ### P2 — Artifact drawer
 
-- [ ] Extract plans
-- [ ] Extract diffs
-- [ ] Extract commands
-- [ ] Extract reports
-- [ ] Extract generated files
-- [ ] Extract eval summaries
+- [x] Extract plans
+- [x] Extract diffs
+- [x] Extract commands
+- [x] Extract reports
+- [x] Extract generated files
+- [x] Extract eval summaries
 
 ## Acceptance Criteria
 
-- [ ] Assistant responses have useful next actions.
-- [ ] User can inspect why a model answered a certain way.
-- [ ] User can compare another model from an existing answer.
-- [ ] Important outputs are not buried in chat.
+- [x] Assistant responses have useful next actions.
+- [x] User can inspect why a model answered a certain way.
+- [x] User can compare another model from an existing answer.
+- [x] Important outputs are not buried in chat.
+
+
+---
+
+# Milestone 10 — Agent Bench and Regression Arena
+
+## Goal
+
+Make CMDui's harness measurable against real coding-agent tasks, not only ad hoc prompt tests.
+
+This is the bridge from “model comparison UI” to “repeatable agent benchmark runner.” It should support local golden tasks, repo-grounded regression tasks, and later SWE-bench-style task imports.
+
+## Work Items
+
+### P0 — Define a durable harness task format
+
+- [ ] Create `server/harnessTasks.ts`
+- [ ] Define `HarnessTask` with prompt, repo path, setup commands, allowed trust mode, verification commands, expected changed files, expected no-touch files, scoring rubric, timeout, and tags
+- [ ] Store task suites under `~/.open-harness/tasks`
+- [ ] Add import/export for JSON task suites
+- [ ] Add task fixtures for this repo: review repo, explain diff, fix lint error, update doc, run browser smoke check
+
+Suggested type:
+
+```ts
+interface HarnessTask {
+  id: string;
+  name: string;
+  prompt: string;
+  workingDir: string;
+  setupCommands: string[];
+  verificationCommands: string[];
+  expectedChangedFiles?: string[];
+  forbiddenChangedFiles?: string[];
+  trustMode: 'read-only' | 'ask-before-write' | 'workspace-write';
+  timeoutMs: number;
+  rubric: Array<{ id: string; points: number; description: string }>;
+  tags: string[];
+}
+```
+
+### P0 — Add deterministic validation scoring
+
+- [ ] Record command exit code, duration, stdout/stderr preview, and retry count for every validation command
+- [ ] Add pass/fail validation score to `EvalScores`
+- [ ] Weight “tests passed” above language-model style heuristics
+- [ ] Show failed validation as a first-class run failure, not only a low score
+
+### P1 — Add replayable benchmark runs
+
+- [ ] Create `HarnessBenchRun` records under `~/.open-harness/bench-runs`
+- [ ] Save prompt, project profile, run trace, tool calls, diffs, validation output, model/provider settings, cost estimate, and final answer
+- [ ] Add “Replay run” from saved trace
+- [ ] Add “Compare against previous run” for regression testing
+
+### P1 — Add SWE-bench-style adapter hooks
+
+- [ ] Support task setup from issue text, base commit, patch/diff, and verification command
+- [ ] Report resolved/unresolved, cost, latency, step count, token count, and validation status
+- [ ] Export results as JSON/CSV for leaderboard-style comparison
+
+## Acceptance Criteria
+
+- [ ] A local suite can be run repeatedly and produce comparable pass/fail results.
+- [ ] Validation failures are visible without reading raw logs.
+- [ ] A saved run contains enough data to replay or audit later.
+- [ ] Reports include quality, speed, cost, steps, and verification signals.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 11 — Repo Map and Semantic Code Intelligence
+
+## Goal
+
+Give models a compact, accurate map of the codebase so they inspect the right files faster and avoid hallucinated architecture.
+
+## Work Items
+
+### P0 — Build a repository map
+
+- [ ] Create `server/repoMap.ts`
+- [ ] Index files, exports, imports, symbols, scripts, routes, components, and server endpoints
+- [ ] Rank files by centrality, recent changes, imports, and prompt relevance
+- [ ] Generate a token-budgeted repo map for prompts
+- [ ] Show repo-map preview in Project Cortex
+
+### P1 — Add symbol and dependency search
+
+- [ ] Add symbol search endpoint
+- [ ] Add “where is this defined?” UI action
+- [ ] Add reverse dependency lookup
+- [ ] Add change-impact summary for changed files
+
+### P1 — Add context pack builder
+
+- [ ] Build named context packs for bugfix, feature, review, docs, and UI-smoke tasks
+- [ ] Show exactly which files and symbols were inserted into prompt context
+- [ ] Record context pack in run trace
+
+## Acceptance Criteria
+
+- [ ] “Review this repo” starts with a useful repo map before reading large files.
+- [ ] The prompt builder can explain why each file was included.
+- [ ] Symbol lookup works for TypeScript server and React UI files.
+- [ ] Run traces include repo-map/context-pack decisions.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 12 — Sandboxed Worktrees, Checkpoints, and Rollback
+
+## Goal
+
+Let agents work aggressively without risking the user's current working tree.
+
+## Work Items
+
+### P0 — Add checkpoint snapshots
+
+- [ ] Create `server/checkpoints.ts`
+- [ ] Save pre-run git status, current branch, HEAD, dirty diff, and untracked-file list
+- [ ] Add checkpoint restore for tracked-file changes
+- [ ] Warn when untracked files cannot be safely restored
+
+### P0 — Add isolated worktree execution
+
+- [ ] Create temporary git worktrees for high-risk or benchmark runs
+- [ ] Run implementation and validation inside the worktree
+- [ ] Show “promote changes back to main workspace” action
+- [ ] Auto-clean worktrees with no changes
+
+### P1 — Add protected-path and secret safeguards
+
+- [ ] Protect `.env`, key files, credentials, build artifacts, and configured no-touch paths
+- [ ] Add secret scanning before patch apply, commit, or report export
+- [ ] Add redacted artifact export
+
+### P1 — Add process ledger
+
+- [ ] Track app/server processes launched by CMDui
+- [ ] Kill or reuse owned processes before relaunching
+- [ ] Store logs per process and link them from run traces
+
+## Acceptance Criteria
+
+- [ ] A failed code run can be rolled back from the UI.
+- [ ] High-risk tasks can run in an isolated worktree.
+- [ ] Dirty user work is never silently overwritten.
+- [ ] Runtime processes have visible ownership, logs, and cleanup controls.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 13 — Multi-Agent Team Runtime
+
+## Goal
+
+Move from a single orchestrated loop to visible, specialized agents that can run in parallel, share artifacts, and hand off work.
+
+## Work Items
+
+### P0 — Define agent profiles
+
+- [ ] Create `server/agentProfiles.ts`
+- [ ] Define profile name, purpose, model, tools, trust mode, max turns, memory scope, and output contract
+- [ ] Add built-in profiles: explorer, planner, implementer, reviewer, debugger, browser-tester, eval-judge
+- [ ] Add UI for enabling/disabling profiles per project
+
+### P1 — Add background task queue
+
+- [ ] Run read-only research agents in parallel
+- [ ] Stream each agent timeline separately
+- [ ] Support cancel, pause, resume, and promote-to-main
+- [ ] Merge agent findings into an artifact instead of dumping raw logs into chat
+
+### P1 — Add handoff contracts
+
+- [ ] Planner emits implementation checklist
+- [ ] Implementer emits patch summary
+- [ ] Reviewer emits actionable findings with severity
+- [ ] Browser-tester emits screenshot, console, network, and smoke-check result
+- [ ] Judge emits pass/fail with rubric evidence
+
+## Acceptance Criteria
+
+- [ ] The UI can show multiple concurrent agents with independent traces.
+- [ ] Read-only research does not pollute the main context.
+- [ ] Handoffs are structured and reusable by later agents.
+- [ ] User can cancel or inspect any agent run.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 14 — Deep Browser and UI Verification
+
+## Goal
+
+Make browser verification a real product capability: DOM, accessibility, console, network, screenshots, and scripted user journeys.
+
+## Work Items
+
+### P0 — Upgrade browser capture artifacts
+
+- [ ] Capture DOM snapshot, page title, URL, viewport size, console logs, failed requests, and accessibility tree
+- [ ] Store browser artifacts with the run trace
+- [ ] Add screenshot compare against previous capture
+- [ ] Add visual-diff threshold and manual approval override
+
+### P1 — Add scripted smoke checks
+
+- [ ] Define `BrowserSmokeCheck` with URL, steps, assertions, timeout, and screenshot points
+- [ ] Add built-in smoke checks for CMDui: open app, open folder, send prompt, inspect diff, run terminal command, open Model Lab
+- [ ] Show smoke-check pass/fail in eval and run reports
+
+### P1 — Add model-assisted UI triage
+
+- [ ] Feed screenshot plus DOM/a11y facts into reviewer model
+- [ ] Distinguish visual issue, accessibility issue, console error, and broken flow
+- [ ] Create actionable follow-up tasks from findings
+
+## Acceptance Criteria
+
+- [ ] Browser smoke checks run from the UI and from eval suites.
+- [ ] Console/network failures are linked to screenshots and traces.
+- [ ] Visual regressions can be compared against a baseline.
+- [ ] UI findings can become model tasks without copy-paste.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 15 — Patch Review, Inline Comments, and Release Workflow
+
+## Goal
+
+Turn model changes into a controlled review flow: propose, inspect, accept, validate, commit, and optionally open a PR.
+
+## Work Items
+
+### P0 — Finish patch proposal UI
+
+- [ ] Parse model patches into file and hunk proposals
+- [ ] Show proposed changes file-by-file
+- [ ] Allow accept/reject per file and per hunk
+- [ ] Support “apply all safe changes” and “discard all”
+- [ ] Run configured validation after applying
+
+### P1 — Add inline review comments
+
+- [ ] Let reviewer agents attach comments to exact files/lines
+- [ ] Show severity, rationale, and suggested fix
+- [ ] Track resolved/unresolved state
+- [ ] Convert selected comments into follow-up tasks
+
+### P1 — Add commit and PR assistant
+
+- [ ] Generate commit message from run trace and diff
+- [ ] Require validation gate before commit unless user overrides
+- [ ] Add optional branch creation
+- [ ] Add optional GitHub PR creation when GitHub is configured
+- [ ] Attach run report to PR body
+
+## Acceptance Criteria
+
+- [ ] Model-generated edits can be reviewed before touching disk.
+- [ ] Validation runs automatically after patch application.
+- [ ] Review findings are line-specific and resolvable.
+- [ ] User can go from accepted patch to commit/PR without leaving CMDui.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 16 — Context, Prompt, and Memory Governance
+
+## Goal
+
+Make context engineering transparent and editable so users can understand and control what the harness tells models.
+
+## Work Items
+
+### P0 — Finish prompt microscope
+
+- [x] Show system prompt, project instructions, model request, context files, tool schemas, memory, and route decision
+- [ ] Redact secrets while preserving debuggability
+- [ ] Show token estimate per prompt section
+- [ ] Link every prompt section back to its source artifact
+
+### P1 — Add context budget controls
+
+- [ ] Let user set budget by mode and provider
+- [ ] Show what was omitted due to budget
+- [ ] Add “include this file next time” and “never include this path” controls
+- [ ] Track compression/summarization decisions over time
+
+### P1 — Add memory governance UI
+
+- [ ] View project memory in the app
+- [ ] Edit, pin, archive, and delete memory entries
+- [ ] Show which memories were injected into each run
+- [ ] Export/delete all local memory for a project
+
+## Acceptance Criteria
+
+- [ ] User can inspect exactly what was sent to the model.
+- [ ] Prompt sections are explainable and source-linked.
+- [ ] Memory use is visible, editable, and removable.
+- [ ] Context trimming decisions are no longer opaque.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 17 — Provider Quality, Cost, and Reliability Operations
+
+## Goal
+
+Make provider/model selection evidence-based, resilient, and cost-aware.
+
+## Work Items
+
+### P0 — Add provider health probes
+
+- [ ] Test chat, streaming, tool calls, JSON mode, image input, context length, and error handling per provider
+- [ ] Show stale/failed provider state in settings and status bar
+- [ ] Save provider health history
+
+### P1 — Add cost and token ledger
+
+- [ ] Record input tokens, output tokens, cache reads/writes when available, estimated cost, and latency per run
+- [ ] Show cost by session, project, provider, model, and task suite
+- [ ] Add budget warning thresholds
+
+### P1 — Add routing policies
+
+- [ ] Route by task class, context need, trust mode, tool-call reliability, budget, and recent health
+- [ ] Add fallback policy when a provider fails or streams malformed tool calls
+- [ ] Let eval/bench results update model recommendations with user approval
+
+## Acceptance Criteria
+
+- [ ] Provider settings show live capability and health results.
+- [ ] Run traces include token/cost/latency details when available.
+- [ ] Routing decisions cite evidence, not only heuristics.
+- [ ] Failed providers fall back cleanly without losing the run trace.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
 
 ---
 
 # Recommended Assignment Order
 
-## Assignment 1 — Harness Run Trace
+This section now tracks the active post-Phase-8 backlog. Older assignments for Milestones 1–8 are represented by the milestone checklists above.
+
+## Assignment 1 — Close Phase 4 Patch Proposal Gap
 
 Owner: TBD  
 Priority: P0  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/runTrace.ts`
+- `/Users/kevink/Projects/CMDui/server/patchApply.ts`
 - `/Users/kevink/Projects/CMDui/server/index.ts`
+- `/Users/kevink/Projects/CMDui/src/types/index.ts`
 - `/Users/kevink/Projects/CMDui/src/utils/api.ts`
-- `/Users/kevink/Projects/CMDui/src/App.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/SubAgentTracker.tsx`
-
-Definition of done:
-
-- [ ] Real route/model/tool/final-answer timeline appears during chat.
-- [ ] Timeline persists with assistant message.
-- [ ] No fake progress indicators remain.
-- [ ] Lint/build pass.
-- [ ] App relaunched and smoke-tested.
-
-## Assignment 2 — Project Cortex Endpoint
-
-Owner: TBD  
-Priority: P1  
-Files:
-
-- `/Users/kevink/Projects/CMDui/server/projectProfile.ts`
-- `/Users/kevink/Projects/CMDui/server/index.ts`
-- `/Users/kevink/Projects/CMDui/src/utils/api.ts`
-- `/Users/kevink/Projects/CMDui/src/App.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/FilesPanel.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/SmartWelcome.tsx`
-
-Definition of done:
-
-- [ ] Opening a folder creates a project profile.
-- [ ] Profile is visible in UI.
-- [ ] Profile is injected into prompts.
-- [ ] Lint/build pass.
-
-## Assignment 3 — Trust Modes and Tool Policy
-
-Owner: TBD  
-Priority: P0  
-Files:
-
-- `/Users/kevink/Projects/CMDui/server/toolPolicy.ts`
-- `/Users/kevink/Projects/CMDui/server/config.ts`
-- `/Users/kevink/Projects/CMDui/server/index.ts`
-- `/Users/kevink/Projects/CMDui/src/components/SettingsModal.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/StatusBar.tsx`
-
-Definition of done:
-
-- [ ] Trust mode is persisted.
-- [ ] Tools are filtered by trust mode.
-- [ ] Risky commands are blocked or require confirmation.
-- [ ] Trust badge appears in status bar.
-- [ ] Lint/build pass.
-
-## Assignment 4 — Persistent Sessions
-
-Owner: TBD  
-Priority: P1  
-Files:
-
-- `/Users/kevink/Projects/CMDui/server/sessionStore.ts`
-- `/Users/kevink/Projects/CMDui/server/index.ts`
-- `/Users/kevink/Projects/CMDui/src/components/Sidebar.tsx`
-
-Definition of done:
-
-- [ ] Sessions survive server restart.
-- [ ] Messages survive server restart.
-- [ ] Run traces survive server restart.
-- [ ] Lint/build pass.
-
-## Assignment 5 — Real Diff and Terminal Workspace
-
-Owner: TBD  
-Priority: P1  
-Files:
-
-- `/Users/kevink/Projects/CMDui/server/git.ts`
-- `/Users/kevink/Projects/CMDui/server/terminalSessions.ts`
-- `/Users/kevink/Projects/CMDui/server/index.ts`
 - `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/TerminalPanel.tsx`
-- `/Users/kevink/Projects/CMDui/src/utils/api.ts`
+- New patch review component if needed
 
 Definition of done:
 
-- [ ] UI shows real git diff.
-- [ ] UI can run and cancel commands.
-- [ ] User can stage selected files.
-- [ ] User can ask model to review current diff.
+- [ ] Model-proposed patches render file-by-file and hunk-by-hunk.
+- [ ] User can accept/reject individual files and hunks.
+- [ ] Applying a patch triggers configured validation.
+- [ ] Run trace links proposal, apply result, and validation result.
 - [ ] Lint/build pass.
 
-## Assignment 6 — Model Lab
+## Assignment 2 — Close Phase 5/6/8 Correctness Gaps
 
 Owner: TBD  
-Priority: P1  
+Priority: P0  
 Files:
 
 - `/Users/kevink/Projects/CMDui/server/evals.ts`
-- `/Users/kevink/Projects/CMDui/scripts/test-prompts.mjs`
-- `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/layout/panelRegistry.tsx`
-- `/Users/kevink/Projects/CMDui/src/types/layout.ts`
+- `/Users/kevink/Projects/CMDui/server/toolPolicy.ts`
+- `/Users/kevink/Projects/CMDui/src/App.tsx`
+- `/Users/kevink/Projects/CMDui/src/components/StatusBar.tsx`
+- `/Users/kevink/Projects/CMDui/server/providers/registry.ts`
 
 Definition of done:
 
-- [ ] User can run prompt suites from UI.
-- [ ] User can compare models.
-- [ ] Results are saved.
-- [ ] Reports show quality and speed signals.
+- [ ] Eval scores include validation pass/fail.
+- [x] Status bar receives and displays the actual enabled tool count.
+- [ ] MiniMax provider path passes a live smoke test.
+- [ ] Provider smoke result is recorded in the roadmap or release notes.
+- [ ] Lint/build pass.
+
+## Assignment 3 — Agent Bench MVP
+
+Owner: TBD  
+Priority: P0  
+Files:
+
+- `/Users/kevink/Projects/CMDui/server/harnessTasks.ts`
+- `/Users/kevink/Projects/CMDui/server/evals.ts`
+- `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
+- `/Users/kevink/Projects/CMDui/src/utils/api.ts`
+
+Definition of done:
+
+- [ ] Local task suites can be saved and run.
+- [ ] Each task has deterministic validation commands.
+- [ ] Reports include resolved/unresolved, cost, steps, and validation status.
+- [ ] Runs can be replayed or compared against previous runs.
+- [ ] Lint/build pass.
+
+## Assignment 4 — Checkpointed Worktree Execution
+
+Owner: TBD  
+Priority: P0  
+Files:
+
+- `/Users/kevink/Projects/CMDui/server/checkpoints.ts`
+- `/Users/kevink/Projects/CMDui/server/orchestrator.ts`
+- `/Users/kevink/Projects/CMDui/server/git.ts`
+- `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
+
+Definition of done:
+
+- [ ] Pre-run checkpoints are recorded.
+- [ ] High-risk agent runs can happen in a temporary worktree.
+- [ ] User can promote or discard worktree changes.
+- [ ] Rollback path is visible and tested.
+- [ ] Lint/build pass.
+
+## Assignment 5 — Repo Map MVP
+
+Owner: TBD  
+Priority: P1  
+Files:
+
+- `/Users/kevink/Projects/CMDui/server/repoMap.ts`
+- `/Users/kevink/Projects/CMDui/server/projectProfile.ts`
+- `/Users/kevink/Projects/CMDui/server/promptBuilder.ts`
+- `/Users/kevink/Projects/CMDui/src/components/FilesPanel.tsx`
+
+Definition of done:
+
+- [ ] Repo map lists important symbols and relationships.
+- [ ] Prompt builder uses token-budgeted repo-map context.
+- [ ] User can inspect why files were included.
+- [ ] Symbol search works from UI.
+- [ ] Lint/build pass.
+
+## Assignment 6 — Browser Verification MVP
+
+Owner: TBD  
+Priority: P1  
+Files:
+
+- `/Users/kevink/Projects/CMDui/server/browserPreview.ts`
+- `/Users/kevink/Projects/CMDui/src/components/BrowserPanel.tsx`
+- `/Users/kevink/Projects/CMDui/server/evals.ts`
+
+Definition of done:
+
+- [ ] Browser artifacts include screenshot, DOM, console, network failures, and accessibility summary.
+- [ ] Scripted smoke checks can run from UI and eval suites.
+- [ ] Browser failures are linked to run traces.
+- [ ] Lint/build pass.
+
+## Assignment 7 — Multi-Agent Team Runtime
+
+Owner: TBD  
+Priority: P1  
+Files:
+
+- `/Users/kevink/Projects/CMDui/server/agentProfiles.ts`
+- `/Users/kevink/Projects/CMDui/server/orchestrator.ts`
+- `/Users/kevink/Projects/CMDui/src/components/SubAgentTracker.tsx`
+- `/Users/kevink/Projects/CMDui/src/components/PlanTracker.tsx`
+
+Definition of done:
+
+- [ ] Built-in agent profiles exist.
+- [ ] Read-only agents can run in parallel.
+- [ ] Each agent has its own trace and output artifact.
+- [ ] User can cancel and inspect agent work.
 - [ ] Lint/build pass.
 
 ---
