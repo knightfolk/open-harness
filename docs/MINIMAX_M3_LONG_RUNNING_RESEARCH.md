@@ -482,3 +482,105 @@ Do Batch A above, and if lint/build/manual smoke are clean, with restart only if
 - M15 P1 items (commit/PR assistant, GitHub auth) — not picked. Need separate scoping.
 - MiniMax M3 credential smoke test — not picked; owned by Assignment 2 in the Recommended Assignment Order.
 - The remaining M4/M5/M6/M8 correctness gaps in the roadmap's "Remaining correctness gaps" section — not picked. Owned by Assignment 2.
+---
+
+## 11. Next one-hour agent assignment
+
+Use this when the user wants one substantial uninterrupted session, but not a huge multi-day refactor. This is intentionally scoped to about one focused hour for a capable coding agent.
+
+### Objective
+
+Build the first usable Patch Review Panel UI on top of the completed Phase 1 server foundation and Phase 2 client API wrappers. The goal is not to finish every M15 feature; the goal is to make patch proposals visible, inspectable, and controllable from the app.
+
+### One-hour scope
+
+The next agent should complete as much of this list as possible in order, stopping only for a real blocker or failing validation:
+
+1. Review current repo state and confirm Phase 2 wrappers exist in `src/utils/api.ts` and types exist in `src/types/index.ts`.
+2. Add `src/components/PatchReviewPanel.tsx`.
+3. Register a `patches` panel in the layout system so the panel can be opened from CMDui.
+4. In the panel, implement proposal listing via `listPatchProposals()`.
+5. Add a simple “create proposal” form that accepts pasted unified diff text, working directory, optional explanation, and optional verification commands.
+6. After creation, select the new proposal and render its files and hunks.
+7. Render hunk lines with basic added/removed/context styling and line numbers.
+8. Wire accept/reject hunk, accept-all, reject-all, discard, and apply buttons to the Phase 2 API wrappers.
+9. Show apply results exactly as returned by the server: applied files, skipped files, errors, validation array, and validationPassed.
+10. Add minimal empty/loading/error states.
+11. Run `npm run lint` and `npm run build`.
+12. Because this should be client-only work, do **not** restart the server unless server/runtime files were changed. If only client files changed, leave the running app alone and tell the user to refresh if needed.
+
+### Files likely involved
+
+- `src/components/PatchReviewPanel.tsx`
+- `src/components/layout/panelRegistry.tsx`
+- `src/components/layout/PanelContent.tsx`
+- `src/types/layout.ts` if panel ids are typed there
+- `src/utils/api.ts` only if a tiny wrapper mismatch is found
+- `src/types/index.ts` only if a tiny type mismatch is found
+- Existing CSS file only if needed for simple hunk styling; avoid broad visual redesign
+
+### Out of scope for this one-hour task
+
+- Do not change server behavior.
+- Do not implement validation-after-apply on the server.
+- Do not start M13 or M14.
+- Do not build commit/PR assistant flows.
+- Do not redesign the app shell.
+- Do not silently apply patches to the real project during testing; use create/list/inspect/hunk-status/discard as the primary smoke path.
+
+### Definition of done
+
+- Patch Review panel exists and is registered in the layout.
+- User can create a proposal from pasted diff text.
+- User can inspect files/hunks.
+- User can accept/reject hunks and discard proposals.
+- Apply button calls the server and renders the server response, even if validation is still a placeholder.
+- `npm run lint` passes.
+- `npm run build` passes.
+- Running app/server is left alone unless server/runtime files changed.
+
+### Prompt
+
+```text
+You are working in /Users/kevink/Projects/CMDui.
+
+Goal: spend one focused session building the first usable Patch Review Panel UI for M15. Phase 1 server foundation is already merged. Phase 2 client types/API wrappers are already present. Do not redo those phases.
+
+Start by reading:
+- AGENTS.md
+- docs/MINIMAX_M3_LONG_RUNNING_RESEARCH.md, especially section 11
+- src/utils/api.ts patch proposal functions
+- src/types/index.ts patch proposal types
+- src/components/layout/panelRegistry.tsx
+- src/components/layout/PanelContent.tsx
+- src/types/layout.ts if panel ids are typed there
+
+Implement, in order:
+1. Create src/components/PatchReviewPanel.tsx.
+2. Register a `patches` panel in the layout system so it can be opened from the app.
+3. In the panel, list proposals using listPatchProposals(). Show status, source, file count, hunk count, working directory, updated time, and verification command count.
+4. Add a simple create-proposal form for pasted unified diff text, workingDir, optional explanation, and optional verification commands. Call createPatchProposal(), refresh the list, and select the new proposal.
+5. Render selected proposal details: files, action badges, binary marker, hunks, line numbers, and added/removed/context lines.
+6. Wire hunk controls: accept/reject single hunk, accept all, reject all, discard. Use the existing Phase 2 API wrappers.
+7. Wire applyPatchProposal(). Render exactly what the server returns: appliedFiles, skippedFiles, errors, validation, validationPassed. Do not invent client-side validation.
+8. Add minimal empty/loading/error states. Keep styling simple and consistent with existing panels.
+
+Constraints:
+- Keep changes surgical.
+- Do not change server behavior.
+- Do not implement server validation-after-apply.
+- Do not start M13, M14, commit/PR assistant, or broad UI redesign.
+- Do not restart the server/app unless you changed server/runtime files. For client-only changes, leave it running so the user can keep testing; mention that a refresh may be needed.
+- Do not apply destructive patches to the real project during testing. Prefer create/list/inspect/hunk-status/discard smoke tests.
+
+Validation before reporting done:
+- npm run lint
+- npm run build
+- Manual/API smoke: create a harmless proposal, list/get it, reject then accept a hunk, discard it.
+- If you changed only client files, do not restart the server. If you changed server/runtime files, kill/relaunch and verify http://127.0.0.1:3001 and http://127.0.0.1:5173.
+
+Deliverable:
+- Commit your completed work with a clear message.
+- Report changed files, validation results, and whether the next best task is Batch B: wiring model/diff outputs into patch proposals.
+```
+
