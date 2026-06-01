@@ -5008,3 +5008,9 @@ button:focus-visible {
   align-items: center;
   gap: 4px;
 }
+
+/* No-verification pill (apply succeeded but no commands were configured) */
+.patch-apply-pill-none {
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+}

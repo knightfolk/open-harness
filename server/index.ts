@@ -929,6 +929,23 @@ app.post('/api/patch-proposals', (req, res) => {
   } catch (err: any) {
     return res.status(err.statusCode || 400).json({ error: err.message });
   }
+  // Default verification commands from the project profile when the
+  // caller did not supply any. We try the lint and typecheck slots only,
+  // in that order, to stay minimal and predictable.
+  let verificationCommands = body.verificationCommands;
+  if (!verificationCommands || verificationCommands.length === 0) {
+    try {
+      const profile = getProjectProfile(workingDir);
+      const defaults: string[] = [];
+      if (profile.validation.lint) defaults.push(profile.validation.lint);
+      if (profile.validation.typecheck) defaults.push(profile.validation.typecheck);
+      if (defaults.length > 0) verificationCommands = defaults;
+    } catch {
+      // Profile detection is best-effort. If it fails, fall through with
+      // whatever the caller passed (which is empty / undefined).
+    }
+  }
+
   try {
     const proposal = createProposal({
       patch,
@@ -937,7 +954,7 @@ app.post('/api/patch-proposals', (req, res) => {
       runId: body.runId,
       explanation: body.explanation,
       source: body.source,
-      verificationCommands: body.verificationCommands,
+      verificationCommands,
     });
     res.json({ id: proposal.id, proposal });
   } catch (err: any) {
@@ -992,7 +1009,7 @@ app.post('/api/patch-proposals/:id/discard', (req, res) => {
   res.json(p);
 });
 
-app.post('/api/patch-proposals/:id/apply', (req, res) => {
+app.post('/api/patch-proposals/:id/apply', async (req, res) => {
   const proposal = getProposal(req.params.id);
   if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
   if (proposal.status !== 'open') {
@@ -1035,19 +1052,56 @@ app.post('/api/patch-proposals/:id/apply', (req, res) => {
 
   const result = nodeApplyPatch(acceptedPatch, proposal.workingDir);
   const appliedFiles = result.files;
+  const proposedFilePaths = new Set(acceptedParsed.map((f) => f.filePath));
+  const skippedFiles = Array.from(proposedFilePaths).filter((p) => !appliedFiles.includes(p));
   const allGood = result.errors.length === 0;
+
+  // Run post-apply validation when the patch actually wrote something to
+  // disk. We do not run validation if the apply itself failed, since the
+  // tree may be in a half-patched state and the user needs to see the
+  // apply errors first. Validation is also skipped if no commands are
+  // configured; the response still returns an empty `validation` array
+  // and validationPassed=true so the UI can render a "no commands
+  // configured" hint cleanly via the empty list.
+  let validation: benchRuns.ValidationCommandResult[] = [];
+  let validationPassed = true;
+  if (allGood) {
+    const commands = (proposal.verificationCommands ?? []).filter((c) => typeof c === 'string' && c.trim().length > 0);
+    if (commands.length > 0) {
+      try {
+        validation = await benchRuns.runValidation(commands, proposal.workingDir);
+        validationPassed = validation.length > 0 && validation.every((v) => v.passed);
+      } catch (err: any) {
+        validation = [{
+          command: '<runValidation>',
+          exitCode: 1,
+          stdout: '',
+          stderr: err?.message || 'Validation runner crashed',
+          durationMs: 0,
+          passed: false,
+        }];
+        validationPassed = false;
+      }
+    }
+  }
+
+  // The proposal is still considered 'applied' even if validation later
+  // fails; we surface that in the per-command results instead of
+  // auto-rolling back. Users can recover via `git checkout` or the
+  // existing terminal panel.
   if (allGood) {
     recordApplyResult(proposal.id, { status: 'applied' });
   } else {
     recordApplyResult(proposal.id, { status: 'failed' });
   }
+
   res.json({
     proposalId: proposal.id,
     appliedFiles,
-    skippedFiles: [] as string[],
+    skippedFiles,
     errors: result.errors,
-    validation: [] as Array<Record<string, unknown>>,
-    validationPassed: false, // populated in Phase 4 once runValidation is wired in
+    validation,
+    validationPassed,
   });
 });
 

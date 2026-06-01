@@ -855,7 +855,11 @@ function ApplyResultView({ result }: { result: ApplyPatchProposalResult }) {
   return (
     <div className="patch-apply-result">
       <div className="patch-apply-result-header">
-        {result.validationPassed ? (
+        {result.validation.length === 0 ? (
+          <span className="patch-apply-pill patch-apply-pill-none">
+            <AlertTriangle size={12} /> No verification commands
+          </span>
+        ) : result.validationPassed ? (
           <span className="patch-apply-pill patch-apply-pill-pass">
             <CheckCircle2 size={12} /> Validation passed
           </span>
