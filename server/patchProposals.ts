@@ -6,7 +6,7 @@
 // accept/reject controls before anything is written to disk.
 //
 // Storage layout:
-//   ~/.open-harness/patch-proposals/<id>.json
+//   ~/.openharness/patch-proposals/<id>.json
 //
 // This module is pure data; it does not import the patchApply executor and it
 // does not touch the working tree. The apply logic lives in server/index.ts
@@ -19,7 +19,7 @@ import { v4 as uuid } from 'uuid';
 
 import { parseUnifiedDiff, type ParsedFile, type ParsedHunk, type FileAction, serializeHunks } from './patchParse';
 
-const PROPOSALS_DIR = join(homedir(), '.open-harness', 'patch-proposals');
+const PROPOSALS_DIR = join(homedir(), '.openharness', 'patch-proposals');
 
 function ensureDir(): void {
   if (!existsSync(PROPOSALS_DIR)) mkdirSync(PROPOSALS_DIR, { recursive: true });

@@ -59,8 +59,8 @@ class WebBridge: NSObject, WKScriptMessageHandler {
 
         DispatchQueue.main.async { [weak self] in
             self?.webView?.evaluateJavaScript("""
-            if (window.__CMDUI_EVENT) {
-                window.__CMDUI_EVENT('\(event)', \(jsonString));
+            if (window.__OPENHARNESS_EVENT) {
+                window.__OPENHARNESS_EVENT('\(event)', \(jsonString));
             }
             """)
         }
@@ -75,8 +75,8 @@ class WebBridge: NSObject, WKScriptMessageHandler {
 
         DispatchQueue.main.async { [weak self] in
             self?.webView?.evaluateJavaScript("""
-            if (window.__CMDUI_CALLBACK) {
-                window.__CMDUI_CALLBACK('\(id)', \(jsonString));
+            if (window.__OPENHARNESS_CALLBACK) {
+                window.__OPENHARNESS_CALLBACK('\(id)', \(jsonString));
             }
             """)
         }

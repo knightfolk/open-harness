@@ -13,7 +13,7 @@ class BackendService {
         providerRegistry.reload()
 
         if providerRegistry.providers.isEmpty {
-            print("⚠  No providers configured. Add API keys in ~/.cmdui/config.json or set environment variables.")
+            print("⚠  No providers configured. Add API keys in ~/.openharness/config.json or set environment variables.")
         } else {
             print("✓ Providers loaded: \(providerRegistry.providers.keys.sorted().joined(separator: ", "))")
             print("✓ Models available: \(providerRegistry.availableModels().count)")

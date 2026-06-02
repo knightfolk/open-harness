@@ -84,7 +84,7 @@ function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {
  * classic prefix bugs:
  *   1) trailing-slash inconsistencies
    *   2) `..` escapes
- *   3) sibling-prefix collisions (e.g. /x/CMDui-other vs /x/CMDui)
+ *   3) sibling-prefix collisions (e.g. /x/OpenHarness-other vs /x/OpenHarness)
  */
 export function isPathWithin(candidate: string, workspace: string): boolean {
   if (typeof candidate !== 'string' || typeof workspace !== 'string') return false;

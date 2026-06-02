@@ -24,11 +24,11 @@ dist-ssr
 *.sw?
 .env
 # Swift build artifacts
-CMDuiApp/.build/
-CMDuiApp/.swiftpm/
-CMDuiApp/Package.resolved
+OpenHarnessApp/.build/
+OpenHarnessApp/.swiftpm/
+OpenHarnessApp/Package.resolved
 release/
-CMDuiApp/Sources/CMDuiApp/Resources/dist/
+OpenHarnessApp/Sources/OpenHarnessApp/Resources/dist/
 
 # Temporary backup files
 *.bak

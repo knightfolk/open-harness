@@ -295,6 +295,81 @@ export async function deleteMCPServer(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/mcp-servers/${id}`, { method: 'DELETE' });
 }
 
+// ── Docker / Docker MCP readiness (Milestone 19) ──
+export interface DockerReadiness {
+  dockerInstalled: boolean;
+  daemonRunning: boolean;
+  dockerMcpAvailable: boolean;
+  profileReady: boolean;
+  version?: string;
+  serverVersion?: string;
+  mcpVersion?: string;
+  profiles: string[];
+  hints: string[];
+  checkedAt: string;
+}
+
+export async function getDockerReadiness(): Promise<DockerReadiness | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/mcp/docker/readiness`);
+    if (res.ok) return res.json();
+  } catch { /* server not available */ }
+  return null;
+}
+
+// ── Curated MCP catalog (Milestone 19) ──
+export type CuratedPermission = 'local-files' | 'network-read' | 'network-write' | 'browser' | 'database' | 'containers' | 'shell' | 'memory';
+
+export interface CuratedMcpServer {
+  id: string;
+  name: string;
+  tagline: string;
+  description: string;
+  category: 'files' | 'git' | 'web' | 'database' | 'memory' | 'browser' | 'containers' | 'thinking';
+  transport: 'stdio' | 'http';
+  endpoint?: string;
+  permissions: CuratedPermission[];
+  requiresTrustMode: 'chat-only' | 'read-only' | 'workspace-write' | 'full-local';
+  homepage?: string;
+  installHint: string;
+  installed: boolean;
+  permissionSummary: string;
+}
+
+export async function getCuratedMcpServers(): Promise<CuratedMcpServer[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/mcp/curated`);
+    if (res.ok) return res.json();
+  } catch { /* not available yet */ }
+  return [];
+}
+
+export async function installCuratedMcpServer(id: string): Promise<MCPServerInfo> {
+  const res = await fetch(`${API_BASE}/api/mcp/curated/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new Error(`Failed to install curated MCP server: ${res.status}`);
+  return res.json();
+}
+
+export async function restartMCPServer(serverId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/mcp/${serverId}/restart`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to restart MCP server: ${res.status}`);
+  return res.json();
+}
+
+// ── Multi-provider batch save (Milestone 18 onboarding) ──
+export async function saveProvidersBatch(providers: Array<{ id?: string; name: string; type: string; apiKey: string; baseURL: string }>): Promise<{ providers: ProviderInfo[]; count: number }> {
+  const res = await fetch(`${API_BASE}/api/providers/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providers }),
+  });
+  if (!res.ok) throw new Error(`Failed to save providers: ${res.status}`);
+  return res.json();
+}
 
 export interface ProjectProfile {
   root: string;
@@ -507,8 +582,8 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
 
 export async function openFolderDialog(): Promise<string | null> {
   // Use Electron's native dialog if available
-  if (typeof window !== 'undefined' && (window as any).CMDuiNative?.openFolderDialog) {
-    return (window as any).CMDuiNative.openFolderDialog();
+  if (typeof window !== 'undefined' && (window as any).OpenHarnessNative?.openFolderDialog) {
+    return (window as any).OpenHarnessNative.openFolderDialog();
   }
   // Fallback to server-side dialog
   const res = await fetch(`${API_BASE}/api/dialog/open-folder`, { method: 'POST' });

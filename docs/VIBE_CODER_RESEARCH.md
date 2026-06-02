@@ -1,6 +1,6 @@
-# CMDui Vibe-Coder Research & Roadmap
+# OpenHarness Vibe-Coder Research & Roadmap
 
-> Goal: Make CMDui the most inviting AI coding tool for newcomers while keeping full power for experts.
+> Goal: Make OpenHarness the most inviting AI coding tool for newcomers while keeping full power for experts.
 > Date: May 2026
 
 ## What "Vibe Coders" Want (Research)
@@ -57,7 +57,7 @@ Vibe coders are people who code by describing what they want in natural language
 
 ---
 
-## CMDui's Current State
+## OpenHarness's Current State
 
 ### Strengths (keep these)
 - ✅ Multi-provider support (13+ providers, BYOK)
@@ -234,7 +234,7 @@ Vibe coders are people who code by describing what they want in natural language
 
 ## Competitive Positioning
 
-| Feature | CMDui | Cursor | Bolt | Lovable | Claude Code |
+| Feature | OpenHarness | Cursor | Bolt | Lovable | Claude Code |
 |---------|-------|--------|------|---------|-------------|
 | Multi-provider BYOK | ✅ Best | ❌ Closed | ❌ Closed | ❌ Closed | ❌ Closed |
 | Local models (Ollama) | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
@@ -246,7 +246,7 @@ Vibe coders are people who code by describing what they want in natural language
 | Token cost tracking | 🔜 Phase D | ❌ No | ❌ No | ❌ No | ❌ No |
 | Zero-config start | 🔜 Phase A | ❌ Complex | ✅ Yes | ✅ Yes | ❌ CLI setup |
 
-**CMDui's unique edge:** The only tool that combines multi-provider BYOK + local models + MCP tools + desktop app. Adding vibe-coder UX makes it the **"VS Code for people who don't want VS Code"** — a friendly desktop AI coding tool that works with ANY model.
+**OpenHarness's unique edge:** The only tool that combines multi-provider BYOK + local models + MCP tools + desktop app. Adding vibe-coder UX makes it the **"VS Code for people who don't want VS Code"** — a friendly desktop AI coding tool that works with ANY model.
 
 ---
 

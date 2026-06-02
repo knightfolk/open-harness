@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'CMDuiApp/.build', 'CMDuiApp/Sources/CMDuiApp/Resources/dist']),
+  globalIgnores(['dist', 'OpenHarnessApp/.build', 'OpenHarnessApp/Sources/OpenHarnessApp/Resources/dist']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

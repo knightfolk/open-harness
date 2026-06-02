@@ -2,15 +2,15 @@ import Foundation
 import Security
 
 /// Manages provider configuration and API keys.
-/// Keys are stored in macOS Keychain. Config is stored in ~/.cmdui/config.json.
+/// Keys are stored in macOS Keychain. Config is stored in ~/.openharness/config.json.
 class ConfigManager {
     static let shared = ConfigManager()
 
     private let configDir: URL
     private let configURL: URL
-    private(set) var config: CMDuiConfig
+    private(set) var config: OpenHarnessConfig
 
-    struct CMDuiConfig: Codable {
+    struct OpenHarnessConfig: Codable {
         var providers: [String: ProviderConfig]
         var defaultModel: String?
         var agents: AgentsConfig?
@@ -25,11 +25,70 @@ class ConfigManager {
         struct AgentConfig: Codable {
             var model: String?
         }
+
+        private struct ServerProvider: Codable {
+            var id: String
+            var name: String
+            var type: String
+            var apiKey: String?
+            var baseURL: String?
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case providers
+            case defaultModel
+            case activeModel
+            case agents
+        }
+
+        init(providers: [String: ProviderConfig], defaultModel: String?, agents: AgentsConfig?) {
+            self.providers = providers
+            self.defaultModel = defaultModel
+            self.agents = agents
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if let providerMap = try? container.decode([String: ProviderConfig].self, forKey: .providers) {
+                providers = providerMap
+            } else {
+                let serverProviders = (try? container.decode([ServerProvider].self, forKey: .providers)) ?? []
+                providers = Dictionary(uniqueKeysWithValues: serverProviders.map { provider in
+                    let type: ProviderType
+                    switch provider.type {
+                    case "anthropic":
+                        type = .anthropic
+                    case "google", "gemini":
+                        type = .gemini
+                    default:
+                        type = .openai
+                    }
+                    return (provider.id, ProviderConfig(
+                        id: provider.id,
+                        name: provider.name,
+                        type: type,
+                        apiKey: provider.apiKey,
+                        baseURL: provider.baseURL
+                    ))
+                })
+            }
+            defaultModel = (try? container.decode(String.self, forKey: .defaultModel))
+                ?? (try? container.decode(String.self, forKey: .activeModel))
+            agents = try? container.decode(AgentsConfig.self, forKey: .agents)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(providers, forKey: .providers)
+            try container.encodeIfPresent(defaultModel, forKey: .defaultModel)
+            try container.encodeIfPresent(defaultModel, forKey: .activeModel)
+            try container.encodeIfPresent(agents, forKey: .agents)
+        }
     }
 
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        self.configDir = home.appendingPathComponent(".cmdui")
+        self.configDir = home.appendingPathComponent(".openharness")
         self.configURL = configDir.appendingPathComponent("config.json")
         self.config = ConfigManager.loadConfig(from: configURL)
         self.migrateExistingConfigs()
@@ -37,19 +96,34 @@ class ConfigManager {
 
     // MARK: - Load / Save
 
-    private static func loadConfig(from url: URL) -> CMDuiConfig {
+    private static func loadConfig(from url: URL) -> OpenHarnessConfig {
         guard let data = try? Data(contentsOf: url),
-              let config = try? JSONDecoder().decode(CMDuiConfig.self, from: data) else {
-            return CMDuiConfig(providers: [:], defaultModel: nil, agents: nil)
+              let config = try? JSONDecoder().decode(OpenHarnessConfig.self, from: data) else {
+            return OpenHarnessConfig(providers: [:], defaultModel: nil, agents: nil)
         }
         return config
     }
 
     func save() {
         try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(config) {
+        var root = existingConfigObject()
+        let existingProviders = existingServerProviders(in: root)
+        root["providers"] = config.providers.values
+            .sorted { $0.id < $1.id }
+            .map { provider in
+                [
+                    "id": provider.id,
+                    "name": provider.name,
+                    "type": serverType(for: provider.type),
+                    "apiKey": provider.apiKey ?? "",
+                    "baseURL": provider.baseURL ?? defaultBaseURL(for: provider.id, type: provider.type),
+                    "models": existingProviders[provider.id]?["models"] ?? [],
+                ] as [String: Any]
+            }
+        if let defaultModel = config.defaultModel {
+            root["activeModel"] = defaultModel
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: configURL, options: .atomic)
         }
     }
@@ -92,7 +166,7 @@ class ConfigManager {
     private func getKeychain(providerID: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.cmdui.providers",
+            kSecAttrService as String: "com.openharness.providers",
             kSecAttrAccount as String: providerID,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
@@ -108,7 +182,7 @@ class ConfigManager {
         // Delete existing
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.cmdui.providers",
+            kSecAttrService as String: "com.openharness.providers",
             kSecAttrAccount as String: providerID,
         ]
         SecItemDelete(deleteQuery as CFDictionary)
@@ -116,7 +190,7 @@ class ConfigManager {
         // Add new
         let addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.cmdui.providers",
+            kSecAttrService as String: "com.openharness.providers",
             kSecAttrAccount as String: providerID,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
@@ -154,5 +228,52 @@ class ConfigManager {
         }
 
         if changed { save() }
+    }
+
+    private func existingConfigObject() -> [String: Any] {
+        guard let data = try? Data(contentsOf: configURL),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [
+                "version": 1,
+                "mcpServers": [],
+                "personality": "",
+                "activeTheme": "midnight",
+                "trustMode": "workspace-write",
+                "roleAssignments": [:],
+            ]
+        }
+        return object
+    }
+
+    private func existingServerProviders(in root: [String: Any]) -> [String: [String: Any]] {
+        guard let providers = root["providers"] as? [[String: Any]] else { return [:] }
+        return Dictionary(uniqueKeysWithValues: providers.compactMap { provider in
+            guard let id = provider["id"] as? String else { return nil }
+            return (id, provider)
+        })
+    }
+
+    private func serverType(for type: ProviderType) -> String {
+        switch type {
+        case .anthropic:
+            return "anthropic"
+        case .gemini, .vertexai:
+            return "google"
+        case .openai, .bedrock:
+            return "openai-compatible"
+        }
+    }
+
+    private func defaultBaseURL(for providerID: String, type: ProviderType) -> String {
+        switch providerID {
+        case "anthropic":
+            return "https://api.anthropic.com/v1"
+        case "google":
+            return "https://generativelanguage.googleapis.com/v1beta"
+        case "minimax":
+            return "https://api.minimax.io/v1"
+        default:
+            return type == .gemini ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1"
+        }
     }
 }

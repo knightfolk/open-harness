@@ -1,28 +1,34 @@
-# CMDui Harness Work Roadmap
+# OpenHarness Harness Work Roadmap
 
-Purpose: turn CMDui from a model chat interface into a local coding harness control plane that can inspect, plan, execute, verify, compare models, and explain what happened.
+Purpose: turn OpenHarness from a model chat interface into a local coding harness control plane that can inspect, plan, execute, verify, compare models, and explain what happened.
 
 Use this document for work assignment, issue creation, milestone planning, and progress tracking.
 
 
-## Correctness Review — 2026-05-31
+## Correctness Review — 2026-06-01
 
-This revision reconciles the roadmap with the current repo state after the Phase 1–8 implementation push.
+This revision reconciles the roadmap with the current repo state after the Phase 1–12 implementation push and adds the onboarding / MCP setup work requested on 2026-06-01.
 
 ### Confirmed complete from code inspection
 
 - Milestones 1–3 and 7 are reflected by dedicated modules, API wiring, UI state, and persistence code.
 - Milestone 4 is mostly implemented: real terminal sessions, git status/diff/stage/unstage/commit routes, diff actions, browser screenshots, browser health checks, and screenshot-to-chat actions exist.
-- Milestone 5 is mounted in the layout and eval reports already persist under `~/.open-harness/evals/reports`.
+- Milestone 5 is mounted in the layout and eval reports already persist under `~/.openharness/evals/reports`; deterministic validation score plumbing exists but still needs final weighting and UI/report polish.
 - Milestone 6 has trust modes, policy checks, command-risk reasons, and a visible trust-mode badge.
 - Milestone 8 has the universal provider adapter shape, registry, native Anthropic/Gemini adapters, OpenAI-compatible support, and local provider discovery.
+- Milestone 10 has task-suite, benchmark-run, validation-result, export, and reporting support in code, but saved-run replay and previous-run comparison remain open.
+- Milestone 11 is materially implemented: `server/repoMap.ts` exists, repo maps are injected into prompts, run traces include repo-map/context-pack steps, and `FilesPanel.tsx` shows a Project Cortex repo-map preview.
+- Milestone 12 is partially implemented: `server/checkpoints.ts`, checkpoint APIs, process-ledger APIs, and `SafetyPanel.tsx` exist. Isolated git worktrees and promotion/discard UX are still open.
+- Milestone 15 is more advanced than the old roadmap stated: `server/patchProposals.ts`, proposal APIs, `PatchReviewPanel.tsx`, and client API/types exist for file/hunk review and post-apply validation. Remaining work is integration polish, inline comments, and release workflow.
+- Current onboarding exists in `src/components/OnboardingWizard.tsx`, but it is single-provider-first and does not yet guide users through multi-provider setup, default agent behavior, Docker readiness, or suggested MCP profiles.
 
 ### Remaining correctness gaps before calling Phase 1–8 fully closed
 
-- Patch proposal review is still incomplete: the type and patch-apply endpoint exist, but there is no first-class UI for file-by-file / hunk-by-hunk accept-reject plus post-apply validation.
-- Eval scoring does not yet record validation pass/fail as a first-class score dimension.
-- The status bar component shows enabled tool count and `App.tsx` now passes the count (resolved in Phase 9).
+- Patch proposal review now has server and UI foundations, but the workflow still needs smoother proposal creation from chat, clearer empty states, run-trace links, and visual verification of hunk toggles.
+- Eval scoring records validation signals in parts of the codebase, but validation needs to be weighted above style heuristics in reports and surfaced consistently in the Model Lab.
 - Existing MiniMax compatibility should be verified with a credential-backed live smoke test before marking the provider acceptance item complete.
+- Docker MCP auto-start exists in `server/index.ts`, but the settings UI does not yet help install Docker, start/stop the gateway, create profiles, or recommend safe free MCP servers.
+- Provider/model IDs still need a decision on fully migrating to `providerId:modelId` to avoid collisions across providers.
 
 ## External Baselines Reviewed
 
@@ -34,10 +40,14 @@ These roadmap additions are based on current coding-agent patterns from:
 - [Aider repository map](https://aider.chat/docs/repomap.html)
 - [Aider linting and testing workflow](https://aider.chat/docs/usage/lint-test.html)
 - [SWE-bench leaderboards and resolved/cost/step comparison signals](https://www.swebench.com/)
+- [Model Context Protocol overview](https://modelcontextprotocol.io/docs/getting-started/intro)
+- [Official MCP Registry](https://registry.modelcontextprotocol.io/)
+- [MCP reference servers](https://github.com/modelcontextprotocol/servers)
+- [Docker MCP Catalog and Toolkit](https://docs.docker.com/ai/mcp-catalog-and-toolkit/)
 
 ## North Star
 
-CMDui should be the local AI workbench where models, tools, repo state, plans, diffs, tests, browser sessions, and evaluations are all first-class objects.
+OpenHarness should be the local AI workbench where models, tools, repo state, plans, diffs, tests, browser sessions, and evaluations are all first-class objects.
 
 Not just:
 
@@ -83,7 +93,7 @@ This creates the backbone for debugging, trust, evaluations, routing, model comp
 
 ### P0 — Add structured run trace model
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/runTrace.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/runTrace.ts`
 - [x] Define `HarnessRun`
 - [x] Define `HarnessRunStep`
 - [x] Create helpers for appending run steps safely
@@ -127,21 +137,21 @@ type HarnessRunStep =
 - [x] Add SSE event `run_start`
 - [x] Add SSE event `run_step`
 - [x] Add SSE event `run_complete`
-- [x] Update `/Users/kevink/Projects/CMDui/server/index.ts`
-- [x] Update `/Users/kevink/Projects/CMDui/src/utils/api.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/server/index.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
 - [x] Add callback types for run events
 
 ### P1 — Store run traces on assistant messages
 
-- [x] Extend `MessageRow` in `/Users/kevink/Projects/CMDui/server/index.ts`
-- [x] Extend `MessageInfo` in `/Users/kevink/Projects/CMDui/src/utils/api.ts`
-- [x] Extend `Message` in `/Users/kevink/Projects/CMDui/src/types/index.ts`
+- [x] Extend `MessageRow` in `/Users/kevink/Projects/OpenHarness/server/index.ts`
+- [x] Extend `MessageInfo` in `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
+- [x] Extend `Message` in `/Users/kevink/Projects/OpenHarness/src/types/index.ts`
 - [x] Persist trace summary with assistant response
 
 ### P1 — Replace fake/partial activity with real timeline
 
-- [x] Update `/Users/kevink/Projects/CMDui/src/App.tsx`
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/SubAgentTracker.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/App.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/SubAgentTracker.tsx`
 - [x] Render route, prompt, model, tool, and final-answer steps
 - [x] Show durations where available
 - [x] Show errors inline
@@ -162,13 +172,13 @@ type HarnessRunStep =
 
 ## Goal
 
-When a user opens a folder, CMDui should automatically understand the project and use that understanding in prompts and UI.
+When a user opens a folder, OpenHarness should automatically understand the project and use that understanding in prompts and UI.
 
 ## Work Items
 
 ### P1 — Add project profile endpoint
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/projectProfile.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/projectProfile.ts`
 - [x] Add `GET /api/project/profile?path=...`
 - [x] Detect git root
 - [x] Detect current branch
@@ -212,16 +222,16 @@ interface ProjectProfile {
 
 ### P1 — Auto-profile project on folder open
 
-- [x] Update `/Users/kevink/Projects/CMDui/src/App.tsx`
-- [x] Update `/Users/kevink/Projects/CMDui/src/utils/api.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/App.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
 - [x] Load project profile when `workingDir` changes
 - [x] Cache profile in app state
 - [x] Surface project profile in welcome state
 
 ### P1 — Inject project profile into prompts
 
-- [x] Update `/Users/kevink/Projects/CMDui/server/promptBuilder.ts`
-- [x] Update `/Users/kevink/Projects/CMDui/server/index.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/server/promptBuilder.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/server/index.ts`
 - [x] Add compact project profile summary to system prompt
 - [x] Include validation commands
 - [x] Include AGENTS.md rules
@@ -229,7 +239,7 @@ interface ProjectProfile {
 
 ### P2 — Upgrade FilesPanel into Project Cortex panel
 
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/FilesPanel.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/FilesPanel.tsx`
 - [x] Show important files
 - [x] Show changed files
 - [x] Show validation scripts
@@ -239,7 +249,7 @@ interface ProjectProfile {
 
 ## Acceptance Criteria
 
-- [x] Opening `/Users/kevink/Projects/CMDui` shows project profile data.
+- [x] Opening `/Users/kevink/Projects/OpenHarness` shows project profile data.
 - [x] Chat prompts reference the correct project profile.
 - [x] Validation commands are discoverable.
 - [x] The file panel is useful before any model response.
@@ -302,7 +312,7 @@ Prompt → model A
 
 ### P1 — Add router module
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/router.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/router.ts`
 - [x] Replace regex-only `classifyRole()` with structured route decisions
 - [x] Keep heuristic router first
 - [x] Allow optional model-router later
@@ -323,8 +333,8 @@ interface RouteDecision {
 
 ### P1 — Add orchestrator module
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/orchestrator.ts`
-- [x] Move streaming loop out of `/Users/kevink/Projects/CMDui/server/index.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/orchestrator.ts`
+- [x] Move streaming loop out of `/Users/kevink/Projects/OpenHarness/server/index.ts`
 - [x] Support direct mode
 - [x] Support investigate mode
 - [x] Preserve existing SSE behavior
@@ -367,8 +377,8 @@ Show real work products: terminal commands, diffs, validation results, browser p
 
 ### P1 — Real terminal panel
 
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/TerminalPanel.tsx`
-- [x] Create `/Users/kevink/Projects/CMDui/server/terminalSessions.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/TerminalPanel.tsx`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/terminalSessions.ts`
 - [x] Add command input
 - [x] Add working directory selector
 - [x] Add run history
@@ -378,12 +388,12 @@ Show real work products: terminal commands, diffs, validation results, browser p
 
 ### P1 — Git and diff tracking
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/git.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/git.ts`
 - [x] Add `GET /api/git/status`
 - [x] Add `GET /api/git/diff`
 - [x] Add `POST /api/git/stage`
 - [x] Add `POST /api/git/commit`
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
 - [x] Show changed files
 - [x] Show inline diff
 - [x] Add “review this diff”
@@ -391,8 +401,8 @@ Show real work products: terminal commands, diffs, validation results, browser p
 
 ### P2 — Real browser preview panel
 
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/BrowserPanel.tsx`
-- [x] Create `/Users/kevink/Projects/CMDui/server/browserPreview.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/BrowserPanel.tsx`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/browserPreview.ts`
 - [x] Load local dev URL
 - [x] Show screenshot
 - [x] Show console errors
@@ -439,19 +449,19 @@ Turn the existing test-results and prompt-test harness into a first-class produc
 
 ### P1 — Add Model Lab panel
 
-- [x] Create `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
-- [x] Update `/Users/kevink/Projects/CMDui/src/types/layout.ts`
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/layout/panelRegistry.tsx`
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/layout/PanelContent.tsx`
+- [x] Create `/Users/kevink/Projects/OpenHarness/src/components/ModelLabPanel.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/types/layout.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/layout/panelRegistry.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/layout/PanelContent.tsx`
 
 ### P1 — Add eval server module
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/evals.ts`
-- [x] Move test harness logic out of `/Users/kevink/Projects/CMDui/server/index.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/evals.ts`
+- [x] Move test harness logic out of `/Users/kevink/Projects/OpenHarness/server/index.ts`
 - [x] Add prompt suite CRUD
 - [x] Add model matrix runs
 - [x] Add run status endpoint
-- [x] Save reports under `~/.open-harness/evals`
+- [x] Save reports under `~/.openharness/evals`
 
 ### P1 — Add built-in prompt suites
 
@@ -504,9 +514,9 @@ Make local agent actions powerful but understandable and controllable.
 
 ### P0 — Add trust modes
 
-- [x] Update `/Users/kevink/Projects/CMDui/server/config.ts`
+- [x] Update `/Users/kevink/Projects/OpenHarness/server/config.ts`
 - [x] Add trust mode to persisted config
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/SettingsModal.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/SettingsModal.tsx`
 
 Suggested type:
 
@@ -521,7 +531,7 @@ type TrustMode =
 
 ### P0 — Add tool permission policy
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/toolPolicy.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/toolPolicy.ts`
 - [x] Filter model tools by trust mode
 - [x] Block write/terminal tools in read-only mode
 - [x] Restrict workspace-write mode to `workingDir`
@@ -546,7 +556,7 @@ Risky command examples:
 
 ### P1 — Add trust badge to status bar
 
-- [x] Update `/Users/kevink/Projects/CMDui/src/components/StatusBar.tsx`
+- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/StatusBar.tsx`
 - [x] Show current trust mode
 - [x] Show enabled tool count in the badge component; pass the actual count from `App.tsx`
 - [x] Show active workspace
@@ -566,14 +576,14 @@ Risky command examples:
 
 ## Goal
 
-Make CMDui durable across restarts and able to remember project-specific facts.
+Make OpenHarness durable across restarts and able to remember project-specific facts.
 
 ## Work Items
 
 ### P1 — Persist sessions to disk
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/sessionStore.ts`
-- [x] Store sessions under `~/.open-harness/sessions`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/sessionStore.ts`
+- [x] Store sessions under `~/.openharness/sessions`
 - [x] Load sessions on server startup
 - [x] Persist messages and run traces
 - [x] Add migration support
@@ -581,12 +591,12 @@ Make CMDui durable across restarts and able to remember project-specific facts.
 Suggested session path:
 
 ```text
-~/.open-harness/sessions/<session-id>.json
+~/.openharness/sessions/<session-id>.json
 ```
 
 ### P1 — Add project-scoped memory
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/projectMemory.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/projectMemory.ts`
 - [x] Store project profiles by path hash
 - [x] Store memory markdown per project
 - [x] Load project memory on folder open
@@ -595,8 +605,8 @@ Suggested session path:
 Suggested paths:
 
 ```text
-~/.open-harness/projects/<project-hash>/profile.json
-~/.open-harness/projects/<project-hash>/memory.md
+~/.openharness/projects/<project-hash>/profile.json
+~/.openharness/projects/<project-hash>/memory.md
 ```
 
 ### P2 — Add “What did we learn?” action
@@ -626,7 +636,7 @@ Finish the universal provider harness architecture.
 
 ### P1 — Add provider adapter interface
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/providers/types.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/providers/types.ts`
 - [x] Define `ProviderAdapter`
 - [x] Define `ProviderChatRequest`
 - [x] Define `ProviderEvent`
@@ -645,20 +655,20 @@ type ProviderEvent =
 
 ### P1 — Add OpenAI-compatible adapter
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/providers/openai.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/providers/openai.ts`
 - [x] Move current OpenAI-compatible streaming logic into adapter
 - [x] Support MiniMax, DeepSeek, xAI, Mistral, Z.AI, OpenRouter, Ollama, LM Studio
 
 ### P1 — Add registry
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/providers/registry.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/providers/registry.ts`
 - [x] Resolve provider by `{ providerId, modelId }`
 - [x] Return correct adapter
 - [x] Normalize model list output
 
 ### P2 — Add Anthropic adapter
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/providers/anthropic.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/providers/anthropic.ts`
 - [x] Support Messages API
 - [x] Normalize content blocks
 - [x] Normalize tool calls
@@ -666,7 +676,7 @@ type ProviderEvent =
 
 ### P2 — Add Gemini adapter
 
-- [x] Create `/Users/kevink/Projects/CMDui/server/providers/gemini.ts`
+- [x] Create `/Users/kevink/Projects/OpenHarness/server/providers/gemini.ts`
 - [x] Support streaming generate content
 - [x] Normalize tool calls
 - [x] Add provider preset back after working
@@ -693,7 +703,7 @@ type ProviderEvent =
 
 ## Goal
 
-Add features that make CMDui feel better than a normal agent UI.
+Add features that make OpenHarness feel better than a normal agent UI.
 
 ## Work Items
 
@@ -711,8 +721,8 @@ Add features that make CMDui feel better than a normal agent UI.
 
 Files:
 
-- `/Users/kevink/Projects/CMDui/src/components/MessageBubble.tsx`
-- `/Users/kevink/Projects/CMDui/src/App.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/MessageBubble.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/App.tsx`
 
 ### P2 — Observable confidence meter
 
@@ -774,7 +784,7 @@ Risk: low
 
 ## Goal
 
-Make CMDui's harness measurable against real coding-agent tasks, not only ad hoc prompt tests.
+Make OpenHarness's harness measurable against real coding-agent tasks, not only ad hoc prompt tests.
 
 This is the bridge from “model comparison UI” to “repeatable agent benchmark runner.” It should support local golden tasks, repo-grounded regression tasks, and later SWE-bench-style task imports.
 
@@ -784,7 +794,7 @@ This is the bridge from “model comparison UI” to “repeatable agent benchma
 
 - [x] Create `server/harnessTasks.ts`
 - [x] Define `HarnessTask` with prompt, repo path, setup commands, allowed trust mode, verification commands, expected changed files, expected no-touch files, scoring rubric, timeout, and tags
-- [x] Store task suites under `~/.open-harness/tasks`
+- [x] Store task suites under `~/.openharness/tasks`
 - [x] Add import/export for JSON task suites
 - [x] Add task fixtures for this repo: review repo, explain diff, fix lint error, update doc, run browser smoke check
 
@@ -816,7 +826,7 @@ interface HarnessTask {
 
 ### P1 — Add replayable benchmark runs
 
-- [x] Create `HarnessBenchRun` records under `~/.open-harness/bench-runs`
+- [x] Create `HarnessBenchRun` records under `~/.openharness/bench-runs`
 - [x] Save prompt, project profile, run trace, tool calls, diffs, validation output, model/provider settings, cost estimate, and final answer
 - [ ] Add “Replay run” from saved trace
 - [ ] Add “Compare against previous run” for regression testing
@@ -848,31 +858,31 @@ Give models a compact, accurate map of the codebase so they inspect the right fi
 
 ### P0 — Build a repository map
 
-- [ ] Create `server/repoMap.ts`
-- [ ] Index files, exports, imports, symbols, scripts, routes, components, and server endpoints
-- [ ] Rank files by centrality, recent changes, imports, and prompt relevance
-- [ ] Generate a token-budgeted repo map for prompts
-- [ ] Show repo-map preview in Project Cortex
+- [x] Create `server/repoMap.ts`
+- [x] Index files, exports, imports, symbols, scripts, routes, components, and server endpoints
+- [x] Rank files by centrality, recent changes, imports, and prompt relevance
+- [x] Generate a token-budgeted repo map for prompts
+- [x] Show repo-map preview in Project Cortex
 
 ### P1 — Add symbol and dependency search
 
-- [ ] Add symbol search endpoint
+- [x] Add symbol search endpoint
 - [ ] Add “where is this defined?” UI action
-- [ ] Add reverse dependency lookup
-- [ ] Add change-impact summary for changed files
+- [~] Add reverse dependency lookup
+- [x] Add change-impact summary for changed files
 
 ### P1 — Add context pack builder
 
-- [ ] Build named context packs for bugfix, feature, review, docs, and UI-smoke tasks
-- [ ] Show exactly which files and symbols were inserted into prompt context
-- [ ] Record context pack in run trace
+- [x] Build named context packs for bugfix, feature, review, docs, and UI-smoke tasks
+- [x] Show exactly which files and symbols were inserted into prompt context
+- [x] Record context pack in run trace
 
 ## Acceptance Criteria
 
-- [ ] “Review this repo” starts with a useful repo map before reading large files.
-- [ ] The prompt builder can explain why each file was included.
-- [ ] Symbol lookup works for TypeScript server and React UI files.
-- [ ] Run traces include repo-map/context-pack decisions.
+- [x] “Review this repo” starts with a useful repo map before reading large files.
+- [x] The prompt builder can explain why each file was included.
+- [~] Symbol lookup works for TypeScript server and React UI files; UI action still needed.
+- [x] Run traces include repo-map/context-pack decisions.
 - [ ] `npm run lint` passes.
 - [ ] `npm run build` passes.
 
@@ -888,10 +898,10 @@ Let agents work aggressively without risking the user's current working tree.
 
 ### P0 — Add checkpoint snapshots
 
-- [ ] Create `server/checkpoints.ts`
-- [ ] Save pre-run git status, current branch, HEAD, dirty diff, and untracked-file list
-- [ ] Add checkpoint restore for tracked-file changes
-- [ ] Warn when untracked files cannot be safely restored
+- [x] Create `server/checkpoints.ts`
+- [x] Save pre-run git status, current branch, HEAD, dirty diff, and untracked-file list
+- [x] Add checkpoint restore for tracked-file changes
+- [x] Warn when untracked files cannot be safely restored
 
 ### P0 — Add isolated worktree execution
 
@@ -902,22 +912,22 @@ Let agents work aggressively without risking the user's current working tree.
 
 ### P1 — Add protected-path and secret safeguards
 
-- [ ] Protect `.env`, key files, credentials, build artifacts, and configured no-touch paths
+- [~] Protect `.env`, key files, credentials, build artifacts, and configured no-touch paths
 - [ ] Add secret scanning before patch apply, commit, or report export
 - [ ] Add redacted artifact export
 
 ### P1 — Add process ledger
 
-- [ ] Track app/server processes launched by CMDui
-- [ ] Kill or reuse owned processes before relaunching
-- [ ] Store logs per process and link them from run traces
+- [x] Track app/server processes launched by OpenHarness
+- [x] Kill or reuse owned processes before relaunching
+- [~] Store logs per process and link them from run traces
 
 ## Acceptance Criteria
 
-- [ ] A failed code run can be rolled back from the UI.
+- [~] A failed code run can be rolled back from the UI with checkpoints; worktree rollback remains open.
 - [ ] High-risk tasks can run in an isolated worktree.
 - [ ] Dirty user work is never silently overwritten.
-- [ ] Runtime processes have visible ownership, logs, and cleanup controls.
+- [x] Runtime processes have visible ownership, logs, and cleanup controls.
 - [ ] `npm run lint` passes.
 - [ ] `npm run build` passes.
 
@@ -982,7 +992,7 @@ Make browser verification a real product capability: DOM, accessibility, console
 ### P1 — Add scripted smoke checks
 
 - [ ] Define `BrowserSmokeCheck` with URL, steps, assertions, timeout, and screenshot points
-- [ ] Add built-in smoke checks for CMDui: open app, open folder, send prompt, inspect diff, run terminal command, open Model Lab
+- [ ] Add built-in smoke checks for OpenHarness: open app, open folder, send prompt, inspect diff, run terminal command, open Model Lab
 - [ ] Show smoke-check pass/fail in eval and run reports
 
 ### P1 — Add model-assisted UI triage
@@ -1012,11 +1022,14 @@ Turn model changes into a controlled review flow: propose, inspect, accept, vali
 
 ### P0 — Finish patch proposal UI
 
-- [ ] Parse model patches into file and hunk proposals
-- [ ] Show proposed changes file-by-file
-- [ ] Allow accept/reject per file and per hunk
-- [ ] Support “apply all safe changes” and “discard all”
-- [ ] Run configured validation after applying
+- [x] Parse model patches into file and hunk proposals
+- [x] Show proposed changes file-by-file
+- [x] Allow accept/reject per hunk
+- [~] Allow accept/reject per file
+- [x] Support “apply all safe changes” and “discard all”
+- [x] Run configured validation after applying
+- [ ] Link chat-created proposals, run traces, apply results, and validation output in one obvious workflow
+- [ ] Add manual UI smoke checks for hunk toggles, empty proposals, rejected-all proposals, failed apply, and failed validation
 
 ### P1 — Add inline review comments
 
@@ -1035,10 +1048,10 @@ Turn model changes into a controlled review flow: propose, inspect, accept, vali
 
 ## Acceptance Criteria
 
-- [ ] Model-generated edits can be reviewed before touching disk.
-- [ ] Validation runs automatically after patch application.
+- [x] Model-generated edits can be reviewed before touching disk.
+- [x] Validation runs automatically after patch application.
 - [ ] Review findings are line-specific and resolvable.
-- [ ] User can go from accepted patch to commit/PR without leaving CMDui.
+- [ ] User can go from accepted patch to commit/PR without leaving OpenHarness.
 - [ ] `npm run lint` passes.
 - [ ] `npm run build` passes.
 
@@ -1121,9 +1134,160 @@ Make provider/model selection evidence-based, resilient, and cost-aware.
 
 ---
 
+# Milestone 18 — Guided Onboarding and Default Agent Setup
+
+## Goal
+
+Make first launch feel like a guided setup assistant instead of a settings scavenger hunt. A new user should be able to select every provider they already have, paste all needed keys once, choose a default agent style, pick sane model-role defaults, and open their first project without understanding provider plumbing.
+
+## Current Code State
+
+- `src/components/OnboardingWizard.tsx` exists and detects Ollama, but it currently configures one provider at a time.
+- `src/components/SettingsModal.tsx` already has provider presets, role buckets, and personality presets that onboarding can reuse.
+- `server/config.ts` persists providers, `activeModel`, `roleAssignments`, `personality`, theme, trust mode, and MCP server settings.
+- `src/App.tsx` shows onboarding only when no provider has a key, but the final folder path from onboarding is not currently opened as a session.
+
+## Work Items
+
+### P0 — Multi-provider setup flow
+
+- [ ] Replace single-provider selection with “check all providers you have” cards.
+- [ ] Next step renders one compact credential form per selected provider.
+- [ ] Support local no-key providers separately: Ollama and LM Studio should be auto-detected and optionally enabled.
+- [ ] Add “test all” and “save all working providers” actions.
+- [ ] Fetch model lists for all saved providers and summarize failures without blocking successful providers.
+- [ ] Preserve secrets only through existing server config paths; never echo full keys back to the client.
+
+### P0 — Default agent and role setup
+
+- [ ] Ask the user how the default agent should behave: business-only, concise, chatty, helpful/teacher, creative, or custom.
+- [ ] Write the selected personality into `config.personality`.
+- [ ] Ask whether OpenHarness should optimize for low cost, best quality, local/private, or balanced defaults.
+- [ ] Assign role buckets from enabled models: planner, coder, reviewer, reasoner, summarizer, worker.
+- [ ] Let users override role assignments before finishing.
+
+### P1 — First project and trust setup
+
+- [ ] Make the onboarding folder picker actually create/open a session with that working directory.
+- [ ] Ask for an initial trust mode in plain language: chat only, read only, ask before writing, workspace write.
+- [ ] Show a final review page: providers, active model, role buckets, personality, trust mode, MCP status, project folder.
+- [ ] Add “restart onboarding” and “rerun setup check” from Settings.
+
+### P2 — Friendly recovery and migration
+
+- [ ] Detect partial setup and resume at the right step.
+- [ ] Add key-missing, model-list-empty, and provider-test-failed copy that tells users exactly what to try next.
+- [ ] Migrate old one-provider setups into the new checklist flow without losing existing config.
+
+## Acceptance Criteria
+
+- [ ] A new user can configure multiple providers in one pass.
+- [ ] A local-only user can choose Ollama/LM Studio without entering a key.
+- [ ] The selected default agent personality is used by chat immediately.
+- [ ] Role buckets are filled with enabled models and can be changed before finish.
+- [ ] Finishing onboarding opens the selected folder/session.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
+# Milestone 19 — Docker MCP Setup Assistant and Safe Tool Catalog
+
+## Goal
+
+Make MCP power approachable. OpenHarness should help users install or start Docker MCP, understand what tools are available, and add useful free MCP servers through curated, safe profiles instead of asking them to paste opaque endpoints.
+
+## Research Baseline — 2026-06-01
+
+- Docker now documents an MCP Catalog and Toolkit that can run MCP servers/gateways through Docker Desktop.
+- The official MCP ecosystem includes a registry and reference servers, which are better defaults than random community lists.
+- The safest first-run experience is curated profiles, not an unbounded marketplace: show what each server can access, its transport, its permissions, and why it is useful.
+
+## Current Code State
+
+- `server/mcp.ts` supports stdio, HTTP transport, tool discovery, resource discovery, and tool invocation.
+- `server/index.ts` auto-starts `docker mcp gateway run --transport stdio --profile ai_coding` when Docker is present.
+- `src/components/SettingsModal.tsx` has a Docker MCP pane that displays running status and tools, but it does not install Docker, start/stop the gateway, manage profiles, or recommend servers.
+- `src/App.tsx` polls MCP status every 15 seconds, while the older plan said 30 seconds.
+
+## Work Items
+
+### P0 — Docker readiness check
+
+- [ ] Add a setup check for Docker Desktop installed, Docker daemon running, `docker mcp` available, and configured MCP profiles.
+- [ ] If Docker is missing, show a friendly install path and explain why Docker is optional.
+- [ ] If Docker is installed but stopped, show “Open Docker Desktop” / “Retry” guidance.
+- [ ] If `docker mcp` is unavailable, show a Docker MCP Toolkit update hint.
+- [ ] Store readiness results so Settings and onboarding share one truth.
+
+### P0 — Docker MCP lifecycle controls
+
+- [ ] Add start/stop/restart buttons in Docker MCP settings.
+- [ ] Show gateway PID/log tail through the process ledger.
+- [ ] Surface tool count, server count, last error, and last successful discovery time.
+- [ ] Add recovery when the gateway dies mid-session: mark tools unavailable, keep the chat alive, and offer restart.
+
+### P1 — Curated free MCP server suggestions
+
+- [ ] Add a curated “recommended free tools” screen with explicit permission labels.
+- [ ] Suggested local-first servers: filesystem/read-only workspace, git, browser automation, fetch/web, SQLite, memory/notes, sequential-thinking, Playwright/browser, and Docker/container tools.
+- [ ] For each suggestion, show “why add this,” required access, expected tools, and whether it is local-only or networked.
+- [ ] Add one-click profile enablement for safe defaults and keep risky tools behind trust-mode warnings.
+- [ ] Add “advanced custom MCP server” for users who already have an endpoint or stdio command.
+
+### P1 — Tool catalog UX
+
+- [ ] Group tools by server and capability: files, shell, browser, web, database, memory, containers.
+- [ ] Add search/filter and collapse by server.
+- [ ] Show tool schema preview in friendly language.
+- [ ] Add “available to current model?” status based on trust mode and model tool-call quality.
+
+### P2 — MCP validation and docs
+
+- [ ] Add an MCP smoke-test action that calls a harmless tool from each server.
+- [ ] Save server health history and recent errors.
+- [ ] Export MCP setup diagnostics with secrets redacted.
+- [ ] Add a short “MCP is optional” explainer to onboarding and Settings.
+
+## Acceptance Criteria
+
+- [ ] A user without Docker understands the next step and can continue without MCP.
+- [ ] A user with Docker can start/stop/restart Docker MCP from OpenHarness.
+- [ ] Recommended MCP servers can be added from a curated list without hand-writing endpoints.
+- [ ] Tool availability is clear before the user starts a chat.
+- [ ] Docker/MCP failures never break normal provider chat.
+- [ ] `npm run lint` passes.
+- [ ] `npm run build` passes.
+
+---
+
 # Recommended Assignment Order
 
-This section now tracks the active post-Phase-8 backlog. Older assignments for Milestones 1–8 are represented by the milestone checklists above.
+This section now tracks the active post-Phase-12 backlog. Older assignments for Milestones 1–12 are represented by the milestone checklists above.
+
+## Assignment 0 — Guided Onboarding and Docker MCP Setup
+
+Owner: TBD
+Priority: P0
+Files:
+
+- `/Users/kevink/Projects/OpenHarness/src/components/OnboardingWizard.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/SettingsModal.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/App.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
+- `/Users/kevink/Projects/OpenHarness/server/config.ts`
+- `/Users/kevink/Projects/OpenHarness/server/index.ts`
+- `/Users/kevink/Projects/OpenHarness/server/mcp.ts`
+
+Definition of done:
+
+- [ ] Onboarding asks which providers the user already has and saves multiple providers in one pass.
+- [ ] Onboarding sets personality, trust mode, active model, and role buckets from enabled models.
+- [ ] Onboarding can enable local Ollama/LM Studio without API keys.
+- [ ] Docker readiness is shown in onboarding and Settings.
+- [ ] Docker MCP start/stop/restart and tool catalog UX work from Settings.
+- [ ] Suggested free MCP servers are curated, permission-labeled, and safe by default.
+- [ ] Lint/build pass.
 
 ## Assignment 1 — Close Phase 4 Patch Proposal Gap
 
@@ -1131,19 +1295,20 @@ Owner: TBD
 Priority: P0  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/patchApply.ts`
-- `/Users/kevink/Projects/CMDui/server/index.ts`
-- `/Users/kevink/Projects/CMDui/src/types/index.ts`
-- `/Users/kevink/Projects/CMDui/src/utils/api.ts`
-- `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
-- New patch review component if needed
+- `/Users/kevink/Projects/OpenHarness/server/patchApply.ts`
+- `/Users/kevink/Projects/OpenHarness/server/index.ts`
+- `/Users/kevink/Projects/OpenHarness/src/types/index.ts`
+- `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/PatchReviewPanel.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
 
 Definition of done:
 
-- [ ] Model-proposed patches render file-by-file and hunk-by-hunk.
-- [ ] User can accept/reject individual files and hunks.
-- [ ] Applying a patch triggers configured validation.
-- [ ] Run trace links proposal, apply result, and validation result.
+- [x] Model-proposed patches render file-by-file and hunk-by-hunk.
+- [~] User can accept/reject individual files and hunks.
+- [x] Applying a patch triggers configured validation.
+- [ ] Chat-created proposals, run trace, apply result, and validation result are linked in one obvious workflow.
+- [ ] Patch-review panel has manual smoke coverage for empty/error/reject-all/validation-failed states.
 - [ ] Lint/build pass.
 
 ## Assignment 2 — Close Phase 5/6/8 Correctness Gaps
@@ -1152,11 +1317,11 @@ Owner: TBD
 Priority: P0  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/evals.ts`
-- `/Users/kevink/Projects/CMDui/server/toolPolicy.ts`
-- `/Users/kevink/Projects/CMDui/src/App.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/StatusBar.tsx`
-- `/Users/kevink/Projects/CMDui/server/providers/registry.ts`
+- `/Users/kevink/Projects/OpenHarness/server/evals.ts`
+- `/Users/kevink/Projects/OpenHarness/server/toolPolicy.ts`
+- `/Users/kevink/Projects/OpenHarness/src/App.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/StatusBar.tsx`
+- `/Users/kevink/Projects/OpenHarness/server/providers/registry.ts`
 
 Definition of done:
 
@@ -1172,10 +1337,10 @@ Owner: TBD
 Priority: P0  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/harnessTasks.ts`
-- `/Users/kevink/Projects/CMDui/server/evals.ts`
-- `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
-- `/Users/kevink/Projects/CMDui/src/utils/api.ts`
+- `/Users/kevink/Projects/OpenHarness/server/harnessTasks.ts`
+- `/Users/kevink/Projects/OpenHarness/server/evals.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/ModelLabPanel.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
 
 Definition of done:
 
@@ -1191,10 +1356,10 @@ Owner: TBD
 Priority: P0  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/checkpoints.ts`
-- `/Users/kevink/Projects/CMDui/server/orchestrator.ts`
-- `/Users/kevink/Projects/CMDui/server/git.ts`
-- `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
+- `/Users/kevink/Projects/OpenHarness/server/checkpoints.ts`
+- `/Users/kevink/Projects/OpenHarness/server/orchestrator.ts`
+- `/Users/kevink/Projects/OpenHarness/server/git.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
 
 Definition of done:
 
@@ -1210,10 +1375,10 @@ Owner: TBD
 Priority: P1  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/repoMap.ts`
-- `/Users/kevink/Projects/CMDui/server/projectProfile.ts`
-- `/Users/kevink/Projects/CMDui/server/promptBuilder.ts`
-- `/Users/kevink/Projects/CMDui/src/components/FilesPanel.tsx`
+- `/Users/kevink/Projects/OpenHarness/server/repoMap.ts`
+- `/Users/kevink/Projects/OpenHarness/server/projectProfile.ts`
+- `/Users/kevink/Projects/OpenHarness/server/promptBuilder.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/FilesPanel.tsx`
 
 Definition of done:
 
@@ -1229,9 +1394,9 @@ Owner: TBD
 Priority: P1  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/browserPreview.ts`
-- `/Users/kevink/Projects/CMDui/src/components/BrowserPanel.tsx`
-- `/Users/kevink/Projects/CMDui/server/evals.ts`
+- `/Users/kevink/Projects/OpenHarness/server/browserPreview.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/BrowserPanel.tsx`
+- `/Users/kevink/Projects/OpenHarness/server/evals.ts`
 
 Definition of done:
 
@@ -1246,10 +1411,10 @@ Owner: TBD
 Priority: P1  
 Files:
 
-- `/Users/kevink/Projects/CMDui/server/agentProfiles.ts`
-- `/Users/kevink/Projects/CMDui/server/orchestrator.ts`
-- `/Users/kevink/Projects/CMDui/src/components/SubAgentTracker.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/PlanTracker.tsx`
+- `/Users/kevink/Projects/OpenHarness/server/agentProfiles.ts`
+- `/Users/kevink/Projects/OpenHarness/server/orchestrator.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/SubAgentTracker.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/PlanTracker.tsx`
 
 Definition of done:
 
@@ -1279,20 +1444,20 @@ Create a repo-grounded implementation brief that decides the safest next executi
 
 Files and areas to inspect:
 
-- `/Users/kevink/Projects/CMDui/docs/HARNESS_WORK_ROADMAP.md`
-- `/Users/kevink/Projects/CMDui/server/orchestrator.ts`
-- `/Users/kevink/Projects/CMDui/server/runTrace.ts`
-- `/Users/kevink/Projects/CMDui/server/patchApply.ts`
-- `/Users/kevink/Projects/CMDui/server/browserPreview.ts`
-- `/Users/kevink/Projects/CMDui/server/evals.ts`
-- `/Users/kevink/Projects/CMDui/src/components/DiffViewer.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/SubAgentTracker.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/PlanTracker.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/InlineComment.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/BrowserPanel.tsx`
-- `/Users/kevink/Projects/CMDui/src/components/ModelLabPanel.tsx`
-- `/Users/kevink/Projects/CMDui/src/utils/api.ts`
-- `/Users/kevink/Projects/CMDui/src/types/index.ts`
+- `/Users/kevink/Projects/OpenHarness/docs/HARNESS_WORK_ROADMAP.md`
+- `/Users/kevink/Projects/OpenHarness/server/orchestrator.ts`
+- `/Users/kevink/Projects/OpenHarness/server/runTrace.ts`
+- `/Users/kevink/Projects/OpenHarness/server/patchApply.ts`
+- `/Users/kevink/Projects/OpenHarness/server/browserPreview.ts`
+- `/Users/kevink/Projects/OpenHarness/server/evals.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/SubAgentTracker.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/PlanTracker.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/InlineComment.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/BrowserPanel.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/ModelLabPanel.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
+- `/Users/kevink/Projects/OpenHarness/src/types/index.ts`
 
 Required deliverable:
 
@@ -1314,12 +1479,12 @@ Non-negotiable constraints:
 - Do not start implementation of M13, M14, or M15.
 - Do not overwrite unrelated working-tree changes.
 - If documentation is updated, keep it limited to the research report and this roadmap.
-- Treat the current `Currently Pending Question` section as a blocker until the user chooses the next implementation assignment.
+- This older research spike is no longer the only safe next move; Assignment 0 is now the recommended implementation start unless the user reprioritizes M13/M14/M15.
 
 Copy/paste prompt for MiniMax M3:
 
 ```text
-You are MiniMax M3 running inside /Users/kevink/Projects/CMDui. Use your long-context coding-agent strengths for a read-only, repo-grounded research spike.
+You are MiniMax M3 running inside /Users/kevink/Projects/OpenHarness. Use your long-context coding-agent strengths for a read-only, repo-grounded research spike.
 
 Goal: decide the safest next implementation target across Milestone 13 Multi-Agent Team Runtime, Milestone 14 Deep Browser and UI Verification, and Milestone 15 Patch Review / Inline Comments / Release Workflow. Pay special attention to whether M15 Patch Review UI should happen first because it also closes the existing M4 patch-proposal gap.
 
@@ -1389,9 +1554,11 @@ Every implementation assignment should end with:
 
 ---
 
-# Currently Pending Question — 2026-05-31
+# Currently Pending Question — Superseded 2026-06-01
 
-User asked to focus on Milestones 13, 14, and 15. Before starting any implementation work, the next assignment needs to be confirmed. The user said "leave those alone" until this is resolved, so do not start any M13/M14/M15 implementation item below without an explicit pick. The safe current move is the read-only MiniMax M3 long-running research spike in Assignment 8.
+The 2026-05-31 blocker about choosing among M13, M14, and M15 is no longer the active planning question. On 2026-06-01 the user asked for a repo/document reconciliation plus new user-friendly milestones for onboarding, default agent setup, Docker MCP setup, free MCP suggestions, and other UX gaps.
+
+No M13/M14/M15 implementation work was started by this documentation update. The current recommended next implementation assignment is **Assignment 0 — Guided Onboarding and Docker MCP Setup**.
 
 Next-work options on the table:
 
@@ -1406,9 +1573,9 @@ Status of M13/14/15 on disk (recorded for context, not action):
 
 - M13: nothing built. `server/agentProfiles.ts` does not exist. `SubAgentTracker.tsx` and `PlanTracker.tsx` are basic display shells.
 - M14: minimal. `server/browserPreview.ts` is a 4.7 KB curl+screencapture hack from M4. No DOM, a11y, console, network, or scripted steps.
-- M15: skeleton only. `server/patchApply.ts` is a thin wrapper around system `patch` with no hunk parsing. `InlineComment.tsx` is a 30-line read-only display with no creation, severity, resolution, or persistence. `DiffViewer.tsx` has no per-hunk accept/reject.
+- M15: partially built. `server/patchProposals.ts`, hunk-level proposal APIs, `PatchReviewPanel.tsx`, and client patch-proposal types/API calls exist. `InlineComment.tsx` is still a read-only display with no creation, severity workflow, resolution, or persistence.
 
-Standing down from M13/M14/M15 implementation until the user picks an option; Assignment 8 is safe to run as research only.
+M13/M14/M15 remain valid later milestones, but they are behind the new onboarding/MCP usability work unless the user reprioritizes.
 
 ---
 
@@ -1416,10 +1583,12 @@ Standing down from M13/M14/M15 implementation until the user picks an option; As
 
 - [ ] Should session storage use one JSON file per session or a small SQLite database?
 - [ ] Should write operations be model-generated patch proposals only, or direct write tools under trust mode?
-- [ ] Should browser automation be built into CMDui or delegated through MCP only?
+- [ ] Should browser automation be built into OpenHarness or delegated through MCP only?
 - [ ] Should eval scoring use deterministic heuristics first or model-based judging first?
 - [ ] Should provider/model IDs be migrated fully to `providerId:modelId`?
 - [ ] Should project memory be editable by the user in UI?
+- [ ] Which curated MCP servers should ship as default recommendations versus optional advanced tools?
+- [ ] Should onboarding write to the existing `config.json` directly through current endpoints or introduce an explicit setup-session API?
 
 ---
 

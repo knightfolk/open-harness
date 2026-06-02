@@ -46,7 +46,7 @@ import { execSync } from 'child_process';
 import { v4 as uuid } from 'uuid';
 import { getStatus, getFileDiff } from './git';
 
-const ROOT = join(homedir(), '.open-harness', 'checkpoints');
+const ROOT = join(homedir(), '.openharness', 'checkpoints');
 
 function ensureDir(dir: string) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });

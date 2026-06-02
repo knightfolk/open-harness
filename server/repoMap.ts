@@ -1,5 +1,5 @@
 // Module: server/repoMap.ts
-// CMDui — Milestone 11: Repo Map and Semantic Code Intelligence
+// OpenHarness — Milestone 11: Repo Map and Semantic Code Intelligence
 //
 // Builds a token-budgeted map of a repository: files, exports, imports,
 // routes/components/endpoints, and a ranked context index that can be

@@ -40,7 +40,7 @@ export interface TaskSuite {
 
 // ── Storage ────────────────────────────────────────────
 
-const TASKS_DIR = join(homedir(), '.open-harness', 'tasks');
+const TASKS_DIR = join(homedir(), '.openharness', 'tasks');
 const SUITES_DIR = join(TASKS_DIR, 'suites');
 
 function ensureDirs() {
@@ -273,7 +273,7 @@ export function seedFixtures(workingDir: string): void {
   if (allTasks.length > 0) {
     createSuite({
       name: 'Default Fixture Suite',
-      description: 'Built-in tasks for smoke-testing CMDui harness',
+      description: 'Built-in tasks for smoke-testing OpenHarness harness',
       tasks: allTasks.map(t => t.id),
       tags: ['fixture', 'default'],
     });

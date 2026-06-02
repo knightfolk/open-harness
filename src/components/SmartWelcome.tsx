@@ -146,7 +146,7 @@ export function SmartWelcome({ workingDir, projectProfile, onSuggestionClick }: 
           <Cpu size={24} />
         </div>
         <h1 className="smart-welcome-title">
-          {ctx?.framework ? `${ctx.framework} Project` : 'CMDui'}
+          {ctx?.framework ? `${ctx.framework} Project` : 'OpenHarness'}
         </h1>
         <p className="smart-welcome-subtitle">
           {workingDir

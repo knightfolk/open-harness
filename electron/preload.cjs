@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('CMDuiNative', {
+contextBridge.exposeInMainWorld('OpenHarnessNative', {
   platform: process.platform,
   openFolderDialog: () => ipcRenderer.invoke('open-folder-dialog'),
 

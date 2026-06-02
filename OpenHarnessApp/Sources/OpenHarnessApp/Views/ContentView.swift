@@ -99,8 +99,8 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
             let modelsStr = String(data: modelsJSON, encoding: .utf8) ?? "[]"
 
             webView.evaluateJavaScript("""
-            if (window.__CMDUI_BOOT) {
-                window.__CMDUI_BOOT({
+            if (window.__OPENHARNESS_BOOT) {
+                window.__OPENHARNESS_BOOT({
                     providers: \(providersStr),
                     models: \(modelsStr)
                 });
@@ -122,8 +122,8 @@ class WebViewLoader {
 
         let exeDir = URL(fileURLWithPath: exePath).deletingLastPathComponent()
         let candidates = [
-            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle/Resources"),
-            exeDir.appendingPathComponent("CMDuiApp_CMDuiApp.bundle"),
+            exeDir.appendingPathComponent("OpenHarnessApp_OpenHarnessApp.bundle/Resources"),
+            exeDir.appendingPathComponent("OpenHarnessApp_OpenHarnessApp.bundle"),
             exeDir.appendingPathComponent("Resources"),
         ]
 
@@ -165,7 +165,7 @@ class WebViewLoader {
                     <meta charset="UTF-8" />
                     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>" />
                     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                    <title>CMDui — Agent Desktop</title>
+                    <title>OpenHarness — Agent Desktop</title>
                     <style>html { background: #0d0f11; }</style>
                     <link rel="stylesheet" href="\(cssHref)">
                 </head>

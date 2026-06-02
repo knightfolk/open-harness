@@ -15,7 +15,7 @@ export interface ProjectMemory {
 
 // ── Storage ────────────────────────────────────────────
 
-const PROJECTS_DIR = join(homedir(), '.open-harness', 'projects');
+const PROJECTS_DIR = join(homedir(), '.openharness', 'projects');
 
 
 function projectHash(projectPath: string): string {

@@ -1,4 +1,4 @@
-# Open-Harness — AI Model Landscape for Coding
+# OpenHarness — AI Model Landscape for Coding
 
 > Research snapshot: May 2026. Prices and capabilities shift fast — update quarterly.
 

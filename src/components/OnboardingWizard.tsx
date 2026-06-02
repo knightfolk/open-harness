@@ -1,97 +1,161 @@
 import { useState, useEffect } from 'react';
 import {
   Zap, Brain, FolderOpen, ArrowRight, ArrowLeft, Check,
-  Wifi, WifiOff, Loader, Sparkles, Rocket, ChevronDown,
+  Wifi, Loader, Sparkles, Rocket, ChevronDown,
+  MessageCircle, Shield, ShieldCheck, ShieldAlert, Cpu,
+  CheckCircle2, Circle, X, Container, Eye,
 } from 'lucide-react';
 import * as api from '../utils/api';
 
-// ── Provider presets for quick connect ──
+// ── Provider catalog (shared with onboarding) ──────────
 interface OnboardingProvider {
   id: string;
   name: string;
+  type?: 'openai-compatible' | 'anthropic' | 'google' | 'local';
   color: string;
   desc: string;
   baseURL: string;
   placeholder: string;
   isLocal?: boolean;
+  defaultKey?: string;
+  quickConnect?: boolean;
 }
 
 const QUICK_PROVIDERS: OnboardingProvider[] = [
-  { id: 'openai', name: 'OpenAI', color: '#10a37f', desc: 'GPT-4.1, o3, o4-mini', baseURL: 'https://api.openai.com/v1', placeholder: 'sk-...' },
-  { id: 'minimax', name: 'MiniMax', color: '#6366f1', desc: 'M2.7 — fast & affordable', baseURL: 'https://api.minimax.io/v1', placeholder: 'sk-cp-...' },
-  { id: 'deepseek', name: 'DeepSeek', color: '#4a9eff', desc: 'V4, V4 Flash, R2', baseURL: 'https://api.deepseek.com/v1', placeholder: 'sk-...' },
-  { id: 'ollama', name: 'Ollama', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:11434/v1', placeholder: '(no key needed)', isLocal: true },
+  { id: 'openai', name: 'OpenAI', color: '#10a37f', desc: 'GPT-4.1, o3, o4-mini', baseURL: 'https://api.openai.com/v1', placeholder: 'sk-...', quickConnect: true },
+  { id: 'minimax', name: 'MiniMax', color: '#6366f1', desc: 'M2.7, M3 — fast & affordable', baseURL: 'https://api.minimax.io/v1', placeholder: 'sk-cp-...', quickConnect: true },
+  { id: 'anthropic', name: 'Anthropic', type: 'anthropic', color: '#d97706', desc: 'Claude Sonnet, Haiku, Opus', baseURL: 'https://api.anthropic.com/v1', placeholder: 'sk-ant-...', quickConnect: true },
+  { id: 'google', name: 'Google Gemini', type: 'google', color: '#4285f4', desc: 'Gemini 2.5 Pro/Flash', baseURL: 'https://generativelanguage.googleapis.com/v1beta', placeholder: 'AIza...', quickConnect: true },
+  { id: 'ollama', name: 'Ollama', type: 'local', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:11434/v1', placeholder: '(no key needed)', isLocal: true, quickConnect: true },
 ];
 
 const EXTENDED_PROVIDERS: OnboardingProvider[] = [
-  { id: 'xai', name: 'xAI', color: '#1d9bf0', desc: 'Grok models via OpenAI-compatible API', baseURL: 'https://api.x.ai/v1', placeholder: 'xai-...' },
+  { id: 'deepseek', name: 'DeepSeek', color: '#4a9eff', desc: 'V4, V4 Flash, R2', baseURL: 'https://api.deepseek.com/v1', placeholder: 'sk-...' },
+  { id: 'xai', name: 'xAI (Grok)', color: '#1d9bf0', desc: 'Grok models', baseURL: 'https://api.x.ai/v1', placeholder: 'xai-...' },
   { id: 'mistral', name: 'Mistral', color: '#f54e42', desc: 'Mistral Large, Codestral', baseURL: 'https://api.mistral.ai/v1', placeholder: '...' },
   { id: 'zhipu', name: 'Z.AI / Zhipu', color: '#3b5998', desc: 'GLM coding models', baseURL: 'https://api.z.ai/api/coding/paas/v4', placeholder: '...' },
-  { id: 'openrouter', name: 'OpenRouter', color: '#6d28d9', desc: 'Gateway to many OpenAI-compatible models', baseURL: 'https://openrouter.ai/api/v1', placeholder: 'sk-or-...' },
-  { id: 'qwen', name: 'Alibaba Qwen', color: '#ff6a00', desc: 'Qwen models via DashScope compatible mode', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', placeholder: 'sk-...' },
-  { id: 'lmstudio', name: 'LM Studio', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:1234/v1', placeholder: '(no key needed)', isLocal: true },
+  { id: 'openrouter', name: 'OpenRouter', color: '#6d28d9', desc: 'Gateway to many models', baseURL: 'https://openrouter.ai/api/v1', placeholder: 'sk-or-...' },
+  { id: 'qwen', name: 'Alibaba Qwen', color: '#ff6a00', desc: 'Qwen via DashScope', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', placeholder: 'sk-...' },
+  { id: 'lmstudio', name: 'LM Studio', type: 'local', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:1234/v1', placeholder: '(no key needed)', isLocal: true },
 ];
 
+function providerType(provider: OnboardingProvider): 'openai-compatible' | 'anthropic' | 'google' | 'local' {
+  return provider.type || (provider.isLocal ? 'local' : 'openai-compatible');
+}
+
+// ── Personality presets ────────────────────────────────
+interface PersonalityPreset { id: string; label: string; text: string; }
+const PERSONALITIES: PersonalityPreset[] = [
+  { id: 'business', label: 'Business-only', text: 'You are a professional software engineering assistant. Be thorough, well-structured, and prioritize code quality and best practices.' },
+  { id: 'concise', label: 'Concise', text: 'Be brief and direct. Show code, skip preamble. Focus on what changed and why.' },
+  { id: 'detailed', label: 'Detailed', text: 'Explain your reasoning step by step. Include context, alternatives considered, and tradeoffs. Teach while you code.' },
+  { id: 'chatty', label: 'Chatty', text: 'Be warm, friendly, and conversational. Use humor when it fits and explain things in plain English.' },
+  { id: 'teacher', label: 'Helpful teacher', text: 'Explain the why behind every change. When you write code, teach the underlying patterns. Be patient and supportive.' },
+  { id: 'creative', label: 'Creative', text: 'Think outside the box. Suggest unconventional approaches when appropriate. Prioritize elegance and developer experience.' },
+];
+
+// ── Trust mode options ─────────────────────────────────
+const TRUST_OPTIONS: { id: 'chat-only' | 'read-only' | 'ask-before-write' | 'workspace-write'; label: string; icon: any; desc: string }[] = [
+  { id: 'chat-only', label: 'Chat only', icon: MessageCircle, desc: 'AI can read files and chat. No commands, no edits. Safest option.' },
+  { id: 'read-only', label: 'Read only', icon: Eye, desc: 'AI can run read-only commands and inspect files. No writes.' },
+  { id: 'ask-before-write', label: 'Ask before writing', icon: ShieldAlert, desc: 'AI proposes changes, you approve every write. Balanced default.' },
+  { id: 'workspace-write', label: 'Workspace write', icon: ShieldCheck, desc: 'AI can edit files inside the project. Most productive, less safe.' },
+];
+
+// ── Role buckets ───────────────────────────────────────
+const ROLE_BUCKETS = [
+  { id: 'coder', label: 'Coder', desc: 'Primary coding agent' },
+  { id: 'reasoner', label: 'Reasoner', desc: 'Complex reasoning / planning' },
+  { id: 'summarizer', label: 'Summarizer', desc: 'Text summarization' },
+  { id: 'title', label: 'Title', desc: 'Short title generation' },
+  { id: 'planner', label: 'Planner', desc: 'Task decomposition' },
+  { id: 'reviewer', label: 'Reviewer', desc: 'Code review' },
+  { id: 'worker', label: 'Worker', desc: 'Fast parallel tasks' },
+];
+
+interface OnboardingResult {
+  providers: any[];
+  activeModel: string;
+  personality: string;
+  trustMode: string;
+  roleAssignments: Record<string, string>;
+  folderPath: string | null;
+}
+
 interface Props {
-  onComplete: (provider?: { name: string; type: string; apiKey: string; baseURL: string }) => void;
+  onComplete: (result: OnboardingResult) => void;
   onSkip: () => void;
 }
 
 export function OnboardingWizard({ onComplete, onSkip }: Props) {
   const [step, setStep] = useState(0);
-  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState('');
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; msg: string; models?: number }>>({});
   const [ollamaDetected, setOllamaDetected] = useState(false);
-  const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [lmstudioDetected, setLmstudioDetected] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const [personality, setPersonality] = useState('');
+  const [trustMode, setTrustMode] = useState<'chat-only' | 'read-only' | 'ask-before-write' | 'workspace-write'>('ask-before-write');
+  const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [dockerReadiness, setDockerReadiness] = useState<api.DockerReadiness | null>(null);
 
-  // Detect Ollama on mount
+  // Auto-detect local providers + docker readiness on mount
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) });
-        if (res.ok) setOllamaDetected(true);
+        const r = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) });
+        if (r.ok) setOllamaDetected(true);
       } catch { /* not running */ }
+      try {
+        const r = await fetch('http://localhost:1234/v1/models', { signal: AbortSignal.timeout(2000) });
+        if (r.ok) setLmstudioDetected(true);
+      } catch { /* not running */ }
+      const readiness = await api.getDockerReadiness();
+      if (readiness) setDockerReadiness(readiness);
     })();
   }, []);
 
-  const provider = [...QUICK_PROVIDERS, ...EXTENDED_PROVIDERS].find(p => p.id === selectedProvider);
+  const allProviders = [...QUICK_PROVIDERS, ...EXTENDED_PROVIDERS];
 
-  const handleTestAndConnect = async () => {
-    if (!provider) return;
+  const toggleProvider = (id: string) => {
+    setSelectedProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleTestAll = async () => {
     setTesting(true);
-    setTestResult(null);
-
-    try {
-      // Add the provider
-      const result = await api.addProvider({
-        name: provider.name,
-        type: provider.isLocal ? 'local' : 'openai-compatible',
-        apiKey: provider.isLocal ? '' : apiKey,
-        baseURL: provider.baseURL,
-      });
-
-      // Fetch models
+    setTestResults({});
+    const next: Record<string, { ok: boolean; msg: string; models?: number }> = {};
+    for (const id of selectedProviders) {
+      const p = allProviders.find((x) => x.id === id);
+      if (!p) continue;
       try {
-        await api.fetchProviderModels(result.id, provider.isLocal ? undefined : apiKey);
-      } catch { /* models fetch is optional */ }
-
-      setTestResult({ ok: true, msg: `${provider.name} connected!` });
-
-      // Get available models
-      const models = await api.getModels();
-      if (models.length > 0) {
-        await api.updateConfig({ activeModel: models[0].id });
+        const result = await api.addProvider({
+          id: p.id,
+          name: p.name,
+          type: providerType(p),
+          apiKey: p.isLocal ? '' : (apiKeys[p.id] || ''),
+          baseURL: p.baseURL,
+        });
+        try {
+          const models = await api.fetchProviderModels(result.id, p.isLocal ? undefined : apiKeys[p.id]);
+          next[p.id] = { ok: true, msg: `Connected (${models.length} models)`, models: models.length };
+        } catch {
+          next[p.id] = { ok: true, msg: 'Connected (models not fetched)' };
+        }
+      } catch (err: any) {
+        next[p.id] = { ok: false, msg: err.message || 'Failed' };
       }
-
-      setTimeout(() => onComplete(result), 800);
-    } catch (err: any) {
-      setTestResult({ ok: false, msg: err.message || 'Connection failed' });
-    } finally {
-      setTesting(false);
     }
+    setTestResults(next);
+    setTesting(false);
   };
 
   const handleOpenFolder = async () => {
@@ -101,40 +165,118 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     } catch { /* dialog cancelled */ }
   };
 
-  const handleFinish = () => {
-    if (folderPath) {
-      // Will be handled by parent
+  const handleFinish = async () => {
+    setSaving(true);
+    try {
+      // Save all selected providers in one batch (covers the case where the
+      // user tested them one-by-one but some still need a key).
+      const toSave = [...selectedProviders].map((id) => {
+        const p = allProviders.find((x) => x.id === id)!;
+        return {
+          name: p.name,
+          id: p.id,
+          type: providerType(p),
+          apiKey: p.isLocal ? '' : (apiKeys[p.id] || ''),
+          baseURL: p.baseURL,
+        };
+      });
+      if (toSave.length > 0) {
+        try { await api.saveProvidersBatch(toSave); } catch { /* some may already exist; fall through */ }
+      }
+
+      // Get available models and pick active model
+      const models = await api.getModels();
+      const activeModel = models[0]?.id || '';
+
+      // Build default role assignments (all -> active model; user can override later)
+      const roleAssignments: Record<string, string> = {};
+      if (activeModel) {
+        for (const role of ROLE_BUCKETS) roleAssignments[role.id] = activeModel;
+      }
+
+      // Persist personality + trust + active model + role assignments
+      await api.updateConfig({
+        personality,
+        activeModel,
+        trustMode,
+        roleAssignments: roleAssignments as any,
+      });
+
+      onComplete({
+        providers: toSave,
+        activeModel,
+        personality,
+        trustMode,
+        roleAssignments,
+        folderPath,
+      });
+    } catch {
+      // Best-effort: still hand off to parent so they can refresh state.
+      onComplete({
+        providers: [],
+        activeModel: '',
+        personality,
+        trustMode,
+        roleAssignments: {},
+        folderPath,
+      });
+    } finally {
+      setSaving(false);
     }
-    onComplete();
   };
+
+  const stepDots = (
+    <div className="onboarding-step-dots">
+      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        <div key={i} className={`onboarding-dot ${i === step ? 'active' : ''}`} />
+      ))}
+    </div>
+  );
 
   // ── Step 0: Welcome ──
   if (step === 0) {
     return (
       <div className="onboarding-root">
-        <div className="onboarding-card" style={{ maxWidth: 480 }}>
+        <div className="onboarding-card" style={{ maxWidth: 520 }}>
           <div className="onboarding-icon-large">
             <Rocket size={32} />
           </div>
-          <h1 className="onboarding-title">Welcome to CMDui</h1>
+          <h1 className="onboarding-title">Welcome to OpenHarness</h1>
           <p className="onboarding-subtitle">
-            Your open AI coding harness. Connect any model, code anything.
+            Your open AI coding harness. Connect any model, pick an agent style, and start building.
           </p>
 
           <div className="onboarding-features">
             <div className="onboarding-feature">
               <Zap size={16} style={{ color: 'var(--accent-primary)' }} />
-              <span>Works with <strong>any AI model</strong> — OpenAI, Anthropic, local, free</span>
+              <span>Works with <strong>any AI model</strong> — OpenAI, Anthropic, Google, local, free</span>
             </div>
             <div className="onboarding-feature">
               <Brain size={16} style={{ color: 'var(--accent-primary)' }} />
-              <span><strong>Smart tools</strong> — read files, run commands, search code</span>
+              <span><strong>Multi-provider setup</strong> — add as many providers as you have, in one pass</span>
             </div>
             <div className="onboarding-feature">
-              <FolderOpen size={16} style={{ color: 'var(--accent-primary)' }} />
-              <span><strong>Your code, your keys</strong> — nothing leaves your machine</span>
+              <Container size={16} style={{ color: 'var(--accent-primary)' }} />
+              <span><strong>Optional MCP tools</strong> — files, git, browser, SQLite, and more</span>
+            </div>
+            <div className="onboarding-feature">
+              <Shield size={16} style={{ color: 'var(--accent-primary)' }} />
+              <span><strong>Your code, your keys</strong> — pick the trust level that fits your work</span>
             </div>
           </div>
+
+          {dockerReadiness && (
+            <div className="onboarding-tip" style={{ marginTop: 16 }}>
+              <Container size={14} />
+              <span>
+                {dockerReadiness.dockerMcpAvailable
+                  ? 'Docker MCP Toolkit detected — Docker MCP will be available after setup.'
+                  : dockerReadiness.dockerInstalled
+                    ? 'Docker is installed but the MCP Toolkit is not — you can enable it later from Settings.'
+                    : 'Docker is optional — you can enable it later from Settings.'}
+              </span>
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 12, marginTop: 32 }}>
             <button className="onboarding-btn-primary" onClick={() => setStep(1)}>
@@ -144,76 +286,82 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
               Skip setup
             </button>
           </div>
-
-          <div className="onboarding-step-dots">
-            <div className="onboarding-dot active" />
-            <div className="onboarding-dot" />
-            <div className="onboarding-dot" />
-          </div>
+          {stepDots}
         </div>
       </div>
     );
   }
 
-  // ── Step 1: Connect AI ──
+  // ── Step 1: Pick providers ──
   if (step === 1) {
     return (
       <div className="onboarding-root">
-        <div className="onboarding-card" style={{ maxWidth: 560 }}>
+        <div className="onboarding-card" style={{ maxWidth: 620 }}>
           <h2 className="onboarding-step-title">
-            <Wifi size={20} /> Connect your first AI
+            <Cpu size={20} /> Which providers do you have?
           </h2>
-          <p className="onboarding-step-subtitle">Pick a provider and enter your API key. You can add more later.</p>
+          <p className="onboarding-step-subtitle">Check every provider you already have a key for. Local providers are free.</p>
 
-          {ollamaDetected && (
+          {(ollamaDetected || lmstudioDetected) && (
             <div className="onboarding-tip">
               <Sparkles size={14} />
-              <span><strong>Ollama detected!</strong> Free local models are available — select Ollama below to use them instantly.</span>
+              <span>
+                {ollamaDetected && 'Ollama is running on this machine. '}
+                {lmstudioDetected && 'LM Studio is running on this machine. '}
+                Both are free and need no key.
+              </span>
             </div>
           )}
 
-          <div className="onboarding-providers">
-            {QUICK_PROVIDERS.map(p => (
-              <button
-                key={p.id}
-                className={`onboarding-provider-card ${selectedProvider === p.id ? 'selected' : ''}`}
-                onClick={() => { setSelectedProvider(p.id); setApiKey(''); setTestResult(null); }}
-              >
-                <div className="onboarding-provider-dot" style={{ background: p.color }} />
-                <div className="onboarding-provider-info">
-                  <div className="onboarding-provider-name">
-                    {p.name}
-                    {p.id === 'ollama' && ollamaDetected && (
-                      <span className="onboarding-badge-free">FREE · LOCAL</span>
-                    )}
-                  </div>
-                  <div className="onboarding-provider-desc">{p.desc}</div>
-                </div>
-                {selectedProvider === p.id && <Check size={18} style={{ color: 'var(--accent-primary)' }} />}
-              </button>
-            ))}
-          </div>
-
-          {/* Extended providers */}
-          {showMore && (
-            <div className="onboarding-providers">
-              {EXTENDED_PROVIDERS.map(p => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+            {QUICK_PROVIDERS.map((p) => {
+              const detected = (p.id === 'ollama' && ollamaDetected) || (p.id === 'lmstudio' && lmstudioDetected);
+              const selected = selectedProviders.has(p.id);
+              return (
                 <button
                   key={p.id}
-                  className={`onboarding-provider-card ${selectedProvider === p.id ? 'selected' : ''}`}
-                  onClick={() => { setSelectedProvider(p.id); setApiKey(''); setTestResult(null); }}
+                  className={`onboarding-provider-card ${selected ? 'selected' : ''}`}
+                  onClick={() => toggleProvider(p.id)}
                 >
                   <div className="onboarding-provider-dot" style={{ background: p.color }} />
                   <div className="onboarding-provider-info">
                     <div className="onboarding-provider-name">
                       {p.name}
                       {p.isLocal && <span className="onboarding-badge-free">FREE · LOCAL</span>}
+                      {detected && <span className="onboarding-badge-detected">DETECTED</span>}
                     </div>
                     <div className="onboarding-provider-desc">{p.desc}</div>
                   </div>
-                  {selectedProvider === p.id && <Check size={18} style={{ color: 'var(--accent-primary)' }} />}
+                  {selected ? <CheckCircle2 size={18} style={{ color: 'var(--accent-primary)' }} /> : <Circle size={18} style={{ color: 'var(--text-tertiary)' }} />}
                 </button>
-              ))}
+              );
+            })}
+          </div>
+
+          {showMore && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              {EXTENDED_PROVIDERS.map((p) => {
+                const detected = p.id === 'lmstudio' && lmstudioDetected;
+                const selected = selectedProviders.has(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    className={`onboarding-provider-card ${selected ? 'selected' : ''}`}
+                    onClick={() => toggleProvider(p.id)}
+                  >
+                    <div className="onboarding-provider-dot" style={{ background: p.color }} />
+                    <div className="onboarding-provider-info">
+                      <div className="onboarding-provider-name">
+                        {p.name}
+                        {p.isLocal && <span className="onboarding-badge-free">FREE · LOCAL</span>}
+                        {detected && <span className="onboarding-badge-detected">DETECTED</span>}
+                      </div>
+                      <div className="onboarding-provider-desc">{p.desc}</div>
+                    </div>
+                    {selected ? <CheckCircle2 size={18} style={{ color: 'var(--accent-primary)' }} /> : <Circle size={18} style={{ color: 'var(--text-tertiary)' }} />}
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -223,65 +371,206 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
             </button>
           )}
 
-          {/* API Key input */}
-          {provider && !provider.isLocal && (
-            <div className="onboarding-key-section">
-              <label className="onboarding-label">API Key</label>
-              <input
-                className="onboarding-input"
-                type="password"
-                placeholder={provider.placeholder}
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && apiKey.trim()) handleTestAndConnect(); }}
-              />
-            </div>
-          )}
-
-          {/* Test result */}
-          {testResult && (
-            <div className={`onboarding-result ${testResult.ok ? 'success' : 'error'}`}>
-              {testResult.ok ? <Check size={16} /> : <WifiOff size={16} />}
-              {testResult.msg}
-            </div>
-          )}
-
           <div className="onboarding-nav">
             <button className="onboarding-btn-back" onClick={() => setStep(0)}>
               <ArrowLeft size={16} /> Back
             </button>
             <button
               className="onboarding-btn-primary"
-              disabled={!provider || (testing || (!provider.isLocal && !apiKey.trim()))}
-              onClick={handleTestAndConnect}
+              disabled={selectedProviders.size === 0}
+              onClick={() => setStep(2)}
             >
-              {testing ? <><Loader size={16} className="spin" /> Testing...</> : <>Connect <ArrowRight size={16} /></>}
+              {selectedProviders.size > 0 ? `${selectedProviders.size} selected` : 'Select at least one'} <ArrowRight size={16} />
             </button>
           </div>
-
-          <div className="onboarding-step-dots">
-            <div className="onboarding-dot" />
-            <div className="onboarding-dot active" />
-            <div className="onboarding-dot" />
-          </div>
+          {stepDots}
         </div>
       </div>
     );
   }
 
-  // ── Step 2: Open Project ──
+  // ── Step 2: Enter keys ──
   if (step === 2) {
+    return (
+      <div className="onboarding-root">
+        <div className="onboarding-card" style={{ maxWidth: 560 }}>
+          <h2 className="onboarding-step-title">
+            <Wifi size={20} /> Add your API keys
+          </h2>
+          <p className="onboarding-step-subtitle">Paste the keys for the providers you picked. You can skip a key and add it later from Settings.</p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16, maxHeight: 360, overflowY: 'auto' }}>
+            {[...selectedProviders].map((id) => {
+              const p = allProviders.find((x) => x.id === id);
+              if (!p) return null;
+              if (p.isLocal) {
+                return (
+                  <div key={id} className="onboarding-key-row">
+                    <div className="onboarding-provider-dot" style={{ background: p.color }} />
+                    <div style={{ flex: 1 }}>
+                      <div className="onboarding-provider-name">{p.name}</div>
+                      <div className="onboarding-provider-desc">Local — no key needed</div>
+                    </div>
+                    <Check size={16} style={{ color: 'var(--accent-success)' }} />
+                  </div>
+                );
+              }
+              return (
+                <div key={id} className="onboarding-key-row">
+                  <div className="onboarding-provider-dot" style={{ background: p.color }} />
+                  <div style={{ flex: 1 }}>
+                    <div className="onboarding-provider-name">{p.name}</div>
+                    <input
+                      className="onboarding-input"
+                      type="password"
+                      placeholder={p.placeholder}
+                      value={apiKeys[id] || ''}
+                      onChange={(e) => setApiKeys((prev) => ({ ...prev, [id]: e.target.value }))}
+                      style={{ marginTop: 6 }}
+                    />
+                  </div>
+                  {testResults[id] && (
+                    <div className={`onboarding-mini-result ${testResults[id].ok ? 'success' : 'error'}`}>
+                      {testResults[id].ok ? <Check size={12} /> : <X size={12} />}
+                      {testResults[id].msg}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+            <button
+              className="onboarding-btn-secondary"
+              onClick={handleTestAll}
+              disabled={testing || selectedProviders.size === 0}
+            >
+              {testing ? <><Loader size={14} className="spin" /> Testing...</> : <><CheckCircle2 size={14} /> Test all & save</>}
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--text-tertiary)', alignSelf: 'center' }}>
+              Failures are saved as drafts — you can fix them in Settings.
+            </span>
+          </div>
+
+          <div className="onboarding-nav">
+            <button className="onboarding-btn-back" onClick={() => setStep(1)}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button className="onboarding-btn-primary" onClick={() => setStep(3)}>
+              Continue <ArrowRight size={16} />
+            </button>
+          </div>
+          {stepDots}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 3: Personality ──
+  if (step === 3) {
+    return (
+      <div className="onboarding-root">
+        <div className="onboarding-card" style={{ maxWidth: 540 }}>
+          <h2 className="onboarding-step-title">
+            <MessageCircle size={20} /> How should the default agent behave?
+          </h2>
+          <p className="onboarding-step-subtitle">Pick a style. You can change this any time from Settings.</p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 16 }}>
+            {PERSONALITIES.map((p) => {
+              const active = personality === p.text;
+              return (
+                <button
+                  key={p.id}
+                  className={`onboarding-pill-card ${active ? 'selected' : ''}`}
+                  onClick={() => setPersonality(active ? '' : p.text)}
+                >
+                  <div className="onboarding-pill-label">{p.label}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <textarea
+            className="personality-textarea"
+            placeholder="Or write your own personality instructions (optional)..."
+            value={personality}
+            onChange={(e) => setPersonality(e.target.value)}
+            rows={4}
+            style={{ marginTop: 16 }}
+          />
+
+          <div className="onboarding-nav">
+            <button className="onboarding-btn-back" onClick={() => setStep(2)}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button className="onboarding-btn-primary" onClick={() => setStep(4)}>
+              Continue <ArrowRight size={16} />
+            </button>
+          </div>
+          {stepDots}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 4: Trust mode ──
+  if (step === 4) {
+    return (
+      <div className="onboarding-root">
+        <div className="onboarding-card" style={{ maxWidth: 540 }}>
+          <h2 className="onboarding-step-title">
+            <Shield size={20} /> Pick a trust level
+          </h2>
+          <p className="onboarding-step-subtitle">Choose how much the AI is allowed to do without asking.</p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+            {TRUST_OPTIONS.map((t) => {
+              const active = trustMode === t.id;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  className={`onboarding-trust-card ${active ? 'selected' : ''}`}
+                  onClick={() => setTrustMode(t.id)}
+                >
+                  <Icon size={18} style={{ color: active ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{t.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t.desc}</div>
+                  </div>
+                  {active && <Check size={16} style={{ color: 'var(--accent-primary)' }} />}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="onboarding-nav">
+            <button className="onboarding-btn-back" onClick={() => setStep(3)}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button className="onboarding-btn-primary" onClick={() => setStep(5)}>
+              Continue <ArrowRight size={16} />
+            </button>
+          </div>
+          {stepDots}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 5: Project folder ──
+  if (step === 5) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 480 }}>
           <h2 className="onboarding-step-title">
-            <FolderOpen size={20} /> Open a project
+            <FolderOpen size={20} /> Open a project folder
           </h2>
-          <p className="onboarding-step-subtitle">
-            Open a folder to give the AI context about your code. You can skip this and start fresh.
-          </p>
+          <p className="onboarding-step-subtitle">Give the AI context about your code. You can skip this and start from scratch.</p>
 
-          <div className="onboarding-folder-section">
+          <div style={{ marginTop: 16 }}>
             {folderPath ? (
               <div className="onboarding-folder-selected">
                 <FolderOpen size={20} style={{ color: 'var(--accent-primary)' }} />
@@ -300,26 +589,101 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
             <span>or start from scratch</span>
           </div>
 
-          <div className="onboarding-quickstart">
-            <button className="onboarding-quickstart-btn" onClick={() => handleFinish()}>
-              <span>✨</span> Start with a blank project
-            </button>
-          </div>
-
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(1)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(4)}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="onboarding-btn-primary" onClick={handleFinish}>
+            <button className="onboarding-btn-primary" onClick={() => setStep(6)}>
               {folderPath ? 'Open project' : "Let's go"} <ArrowRight size={16} />
             </button>
           </div>
+          {stepDots}
+        </div>
+      </div>
+    );
+  }
 
-          <div className="onboarding-step-dots">
-            <div className="onboarding-dot" />
-            <div className="onboarding-dot" />
-            <div className="onboarding-dot active" />
+  // ── Step 6: Final review ──
+  if (step === 6) {
+    return (
+      <div className="onboarding-root">
+        <div className="onboarding-card" style={{ maxWidth: 540 }}>
+          <h2 className="onboarding-step-title">
+            <CheckCircle2 size={20} /> Ready to go
+          </h2>
+          <p className="onboarding-step-subtitle">Here's what we're about to save.</p>
+
+          <div className="onboarding-review">
+            <div className="onboarding-review-section">
+              <div className="onboarding-review-label">Providers ({selectedProviders.size})</div>
+              <div className="onboarding-review-list">
+                {[...selectedProviders].map((id) => {
+                  const p = allProviders.find((x) => x.id === id);
+                  if (!p) return null;
+                  const tested = testResults[id];
+                  return (
+                    <div key={id} className="onboarding-review-row">
+                      <div className="onboarding-provider-dot" style={{ background: p.color }} />
+                      <span style={{ flex: 1 }}>{p.name}</span>
+                      {p.isLocal ? (
+                        <span className="onboarding-badge-free">LOCAL</span>
+                      ) : tested ? (
+                        <span className={tested.ok ? 'onboarding-badge-ok' : 'onboarding-badge-warn'}>
+                          {tested.ok ? `OK${tested.models ? ` (${tested.models})` : ''}` : 'DRAFT'}
+                        </span>
+                      ) : (
+                        <span className="onboarding-badge-warn">DRAFT</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="onboarding-review-section">
+              <div className="onboarding-review-label">Personality</div>
+              <div className="onboarding-review-value">
+                {PERSONALITIES.find((p) => p.text === personality)?.label || (personality ? 'Custom' : 'Default')}
+              </div>
+            </div>
+
+            <div className="onboarding-review-section">
+              <div className="onboarding-review-label">Trust mode</div>
+              <div className="onboarding-review-value">
+                {TRUST_OPTIONS.find((t) => t.id === trustMode)?.label || trustMode}
+              </div>
+            </div>
+
+            <div className="onboarding-review-section">
+              <div className="onboarding-review-label">Project</div>
+              <div className="onboarding-review-value">
+                {folderPath || 'Start from scratch'}
+              </div>
+            </div>
+
+            {dockerReadiness && (
+              <div className="onboarding-review-section">
+                <div className="onboarding-review-label">Docker MCP</div>
+                <div className="onboarding-review-value">
+                  {dockerReadiness.dockerMcpAvailable
+                    ? `Ready (${dockerReadiness.mcpVersion || 'installed'})`
+                    : dockerReadiness.dockerInstalled
+                      ? 'Installed — MCP Toolkit not active'
+                      : 'Not installed — you can add it later'}
+                </div>
+              </div>
+            )}
           </div>
+
+          <div className="onboarding-nav">
+            <button className="onboarding-btn-back" onClick={() => setStep(5)}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button className="onboarding-btn-primary" onClick={handleFinish} disabled={saving}>
+              {saving ? <><Loader size={16} className="spin" /> Saving...</> : <>Finish setup <Check size={16} /></>}
+            </button>
+          </div>
+          {stepDots}
         </div>
       </div>
     );

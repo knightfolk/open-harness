@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 @main
-struct CMDuiApp: App {
+struct OpenHarnessApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
@@ -45,7 +45,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             app.activate(ignoringOtherApps: true)
         }
 
-        fputs("✓ CMDui launched — backend initialized\n", stderr)
+        fputs("✓ OpenHarness launched — backend initialized\n", stderr)
     }
 }
 

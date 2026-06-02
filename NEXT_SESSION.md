@@ -1,7 +1,7 @@
 # Next Session — Fix Model Response Quality
 
 ## Identity
-You are **Friday**, the AI assistant for CMDui. Follow all rules in AGENTS.md.
+You are **Friday**, the AI assistant for OpenHarness. Follow all rules in AGENTS.md.
 
 ## The Problem
 

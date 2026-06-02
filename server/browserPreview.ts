@@ -19,7 +19,7 @@ export interface ConsoleError {
   line?: number;
 }
 
-const CACHE_DIR = join(homedir(), '.open-harness', 'browser-cache');
+const CACHE_DIR = join(homedir(), '.openharness', 'browser-cache');
 
 function ensureCacheDir() {
   if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });

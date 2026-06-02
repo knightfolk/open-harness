@@ -1,8 +1,8 @@
-# CMDui — Agent Desktop
+# OpenHarness — Agent Desktop
 
 A polished, modern agent interface inspired by [Codex Desktop](https://codex.ai). Built with React, TypeScript, and Vite.
 
-![CMDui](public/vite.svg)
+![OpenHarness](public/vite.svg)
 
 ## Features
 

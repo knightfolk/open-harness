@@ -105,7 +105,7 @@ class MCPClient {
         this.sendRequest('initialize', {
           protocolVersion: '2024-11-05',
           capabilities: {},
-          clientInfo: { name: 'open-harness', version: '1.0.0' },
+          clientInfo: { name: 'openharness', version: '1.0.0' },
         }).then(() => {
           this.connected = true;
           // Send initialized notification
@@ -245,7 +245,7 @@ class MCPHttpTransport {
       await this.sendRequest('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: {},
-        clientInfo: { name: 'open-harness', version: '1.0.0' },
+        clientInfo: { name: 'openharness', version: '1.0.0' },
       });
       this.connected = true;
       // Send initialized notification (fire-and-forget for HTTP)
@@ -355,7 +355,7 @@ class StdioMCPClient {
       this.sendRequest('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: {},
-        clientInfo: { name: 'open-harness', version: '1.0.0' },
+        clientInfo: { name: 'openharness', version: '1.0.0' },
       }).then(() => {
         this.connected = true;
         this.sendNotification('notifications/initialized', {});

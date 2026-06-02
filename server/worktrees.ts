@@ -36,7 +36,7 @@ export interface Worktree {
 
 // ── Storage ────────────────────────────────────────────
 
-const ROOT = join(homedir(), '.open-harness', 'worktrees');
+const ROOT = join(homedir(), '.openharness', 'worktrees');
 
 function ensureDir(dir: string) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -116,7 +116,7 @@ export interface CreateWorktreeOptions {
   reuseBranch?: boolean;
 }
 
-const BRANCH_PREFIX = 'cmdui/wt-';
+const BRANCH_PREFIX = 'openharness/wt-';
 
 export function createWorktree(dir: string, opts: CreateWorktreeOptions = {}): Worktree {
   const root = getGitRoot(dir);

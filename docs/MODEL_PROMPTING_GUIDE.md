@@ -2,7 +2,7 @@
 
 > **Purpose:** Definitive reference for how to optimally prompt each of the top 30+ open-source/open-weights models as of May 2026. Designed for consumption by agents, subagents, workers, and harness code that adapts system prompts, formatting, and workflow strategies based on the active model.
 
-> **Audience:** CMDui harness, agent orchestration layer, and any system that adapts prompting behavior per-model at runtime.
+> **Audience:** OpenHarness harness, agent orchestration layer, and any system that adapts prompting behavior per-model at runtime.
 
 > **Research date:** May 30, 2026. Update quarterly or on major model releases.
 
@@ -662,7 +662,7 @@ System instructions are injected into the first user turn or as a system prefix.
 
 ## Agent/Harness Integration Guide
 
-### How to Use This Document in CMDui
+### How to Use This Document in OpenHarness
 
 #### 1. Model Detection and Prompt Adaptation
 

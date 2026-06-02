@@ -13,7 +13,7 @@ export function WelcomeScreen({ onSuggestionClick }: Props) {
       <div className="welcome-logo">
         <Cpu size={28} color="white" />
       </div>
-      <h1 className="welcome-title">Open-Harness</h1>
+      <h1 className="welcome-title">OpenHarness</h1>
       <p className="welcome-subtitle">
         A polished, modern agent interface. Ask anything — write code, debug issues, explore repos, manage agents, and more.
       </p>

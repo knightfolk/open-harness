@@ -2,8 +2,8 @@ const { app, BrowserWindow, dialog, Menu, ipcMain } = require('electron');
 const path = require('path');
 
 // ── Config ─────────────────────────────────────────────
-const SERVER_PORT = process.env.CMDUI_SERVER_PORT || 3001;
-const VITE_PORT = process.env.CMDUI_VITE_PORT || 5173;
+const SERVER_PORT = process.env.OPENHARNESS_SERVER_PORT || 3001;
+const VITE_PORT = process.env.OPENHARNESS_VITE_PORT || 5173;
 const isDev = !app.isPackaged;
 
 let mainWindow = null;
@@ -19,7 +19,7 @@ const template = [
   {
     label: app.name,
     submenu: [
-      { role: 'about', label: 'About Open-Harness' },
+      { role: 'about', label: 'About OpenHarness' },
       { type: 'separator' },
       { label: 'Preferences...', accelerator: 'Cmd+,', click: () => send('open-preferences') },
       { type: 'separator' },
@@ -74,7 +74,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Open-Harness — Universal AI Harness',
+    title: 'OpenHarness — Universal AI Harness',
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0d0f11',
     webPreferences: {

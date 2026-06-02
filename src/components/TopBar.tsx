@@ -72,7 +72,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePa
       </button>
 
       <div className="top-bar-title">
-        {sessionTitle || 'Open-Harness'}
+        {sessionTitle || 'OpenHarness'}
         {workingDir && (
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: "'JetBrains Mono', monospace", marginLeft: 8 }}>
             {workingDir}

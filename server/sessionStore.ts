@@ -32,7 +32,7 @@ export interface PersistedSession {
 
 // ── Storage paths ──────────────────────────────────────
 
-const SESSIONS_DIR = join(homedir(), '.open-harness', 'sessions');
+const SESSIONS_DIR = join(homedir(), '.openharness', 'sessions');
 
 function ensureDir() {
   if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });

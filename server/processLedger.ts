@@ -53,7 +53,7 @@ export interface LogTail {
   tail: string;
 }
 
-const ROOT = join(homedir(), '.open-harness', 'process-ledger');
+const ROOT = join(homedir(), '.openharness', 'process-ledger');
 const LOGS_DIR = join(ROOT, 'logs');
 const LEDGER_PATH = join(ROOT, 'ledger.json');
 

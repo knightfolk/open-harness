@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CMDui Test Harness — runs prompts through models, captures results,
+ * OpenHarness Test Harness — runs prompts through models, captures results,
  * writes JSON + markdown reports with multi-model comparison.
  *
  * Usage:
@@ -177,7 +177,7 @@ function createResultWriter(resultsDir, timestamp) {
 
 function buildMarkdownSummary(results, models, prompts) {
   const lines = [
-    `# CMDui Test Results`,
+    `# OpenHarness Test Results`,
     ``,
     `**Date:** ${new Date().toISOString()}`,
     `**Target:** ${CHAINS_DIR}`,
@@ -242,7 +242,7 @@ function buildMarkdownSummary(results, models, prompts) {
 // ── Main runner ────────────────────────────────────────
 
 async function main() {
-  console.log('═══ CMDui Test Harness ═══\n');
+  console.log('═══ OpenHarness Test Harness ═══\n');
   console.log(`Target: ${CHAINS_DIR}`);
   console.log(`Prompts: ${PROMPTS.length}`);
 

@@ -1,8 +1,8 @@
 /**
- * Open-Harness persistent configuration
- * Stores providers, MCP servers, personality, theme to ~/.open-harness/config.json
+ * OpenHarness persistent configuration
+ * Stores providers, MCP servers, personality, theme to ~/.openharness/config.json
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -46,7 +46,8 @@ export interface StoredConfig {
 
 // ── Config path ────────────────────────────────────────
 
-const CONFIG_DIR = join(homedir(), '.open-harness');
+const LEGACY_CONFIG_DIR = join(homedir(), '.open-harness');
+const CONFIG_DIR = join(homedir(), '.openharness');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
 const DEFAULT_CONFIG: StoredConfig = {
@@ -84,6 +85,7 @@ const DEFAULT_CONFIG: StoredConfig = {
 
 export function loadConfig(): StoredConfig {
   try {
+    migrateLegacyConfigDir();
     if (!existsSync(CONFIG_PATH)) {
       // Try to bootstrap MiniMax key from existing mmx config
       const mmxKey = tryReadMmxKey();
@@ -102,8 +104,8 @@ export function loadConfig(): StoredConfig {
       ...parsed,
       providers: parsed.providers || cloneDefaultConfig().providers,
       mcpServers: parsed.mcpServers || [],
-      trustMode: 'workspace-write',
-  roleAssignments: {
+      trustMode: parsed.trustMode || DEFAULT_CONFIG.trustMode,
+      roleAssignments: {
         ...DEFAULT_CONFIG.roleAssignments,
         ...normalizeRoleAssignments(parsed.roleAssignments || {}),
       },
@@ -166,6 +168,15 @@ function tryReadMmxKey(): string {
     return mmxConfig.api_key || '';
   } catch {
     return '';
+  }
+}
+
+function migrateLegacyConfigDir(): void {
+  if (existsSync(CONFIG_DIR) || !existsSync(LEGACY_CONFIG_DIR)) return;
+  try {
+    cpSync(LEGACY_CONFIG_DIR, CONFIG_DIR, { recursive: true, errorOnExist: false });
+  } catch {
+    // Best-effort migration; fall back to bootstrapping a fresh config.
   }
 }
 

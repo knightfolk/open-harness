@@ -2,22 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "CMDuiApp",
+    name: "OpenHarnessApp",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "CMDuiApp", targets: ["CMDuiApp"]),
+        .executable(name: "OpenHarnessApp", targets: ["OpenHarnessApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
     ],
     targets: [
         .executableTarget(
-            name: "CMDuiApp",
+            name: "OpenHarnessApp",
             dependencies: [
                 .product(name: "Crypto", package: "swift-crypto"),
-            ],
-            resources: [
-                .copy("Resources"),
             ],
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"]),

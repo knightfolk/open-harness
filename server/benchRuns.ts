@@ -78,7 +78,7 @@ export interface BenchSummary {
 
 // ── Storage ────────────────────────────────────────────
 
-const BENCH_DIR = join(homedir(), '.open-harness', 'bench-runs');
+const BENCH_DIR = join(homedir(), '.openharness', 'bench-runs');
 
 function ensureDir() {
   mkdirSync(BENCH_DIR, { recursive: true });

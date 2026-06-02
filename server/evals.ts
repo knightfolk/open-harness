@@ -70,7 +70,7 @@ export interface EvalSummary {
 
 // ── Storage ────────────────────────────────────────────
 
-const EVALS_DIR = join(homedir(), '.open-harness', 'evals');
+const EVALS_DIR = join(homedir(), '.openharness', 'evals');
 const SUITES_DIR = join(EVALS_DIR, 'suites');
 const REPORTS_DIR = join(EVALS_DIR, 'reports');
 

@@ -67,7 +67,7 @@ export function applyPatch(patchText: string, workingDir: string): PatchResult {
 
   // Write the patch into the OS tmpdir, not the project, so scratch data
   // never lands in the working tree we are about to mutate.
-  const tmpDir = mkdtempSync(joinSafe(tmpdir(), 'cmdui-patch-'));
+  const tmpDir = mkdtempSync(joinSafe(tmpdir(), 'openharness-patch-'));
   const patchFile = joinSafe(tmpDir, 'patch.diff');
   writeFileSync(patchFile, patchText, 'utf-8');
 

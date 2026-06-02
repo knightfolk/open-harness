@@ -2,7 +2,7 @@
 
 Date: 2026-05-31
 Author: MiniMax M3 (read-only research spike)
-Scope: `/Users/kevink/Projects/CMDui`
+Scope: `/Users/kevink/Projects/OpenHarness`
 Working tree at start: 1 unstaged change — `docs/HARNESS_WORK_ROADMAP.md` (Assignment 8 + Currently Pending Question sections). Preserved untouched.
 Process state at start: no app/server processes inspected or killed. Static repo read only.
 
@@ -181,7 +181,7 @@ Validation for Batch A:
 - `npm run build`
 - Manual server/API smoke using an existing proposal route or the panel.
 - Restart only if server/runtime code changed. For client-only UI changes, leave the running app/server alone so the user can keep testing; a browser/Electron refresh is enough if needed.
-- If server/runtime code changed, kill existing CMDui server/app processes, run `npm start`, and verify `http://127.0.0.1:3001` plus `http://127.0.0.1:5173`.
+- If server/runtime code changed, kill existing OpenHarness server/app processes, run `npm start`, and verify `http://127.0.0.1:3001` plus `http://127.0.0.1:5173`.
 - Manual UI smoke:
   - open the Patch Review panel.
   - paste a one-file create patch.
@@ -197,7 +197,7 @@ Stop condition for Batch A:
 
 ### Batch B — Wire proposal generation into existing model/diff flows
 
-Goal: make proposals appear naturally from existing CMDui workflows instead of only pasted diffs.
+Goal: make proposals appear naturally from existing OpenHarness workflows instead of only pasted diffs.
 
 Scope:
 
@@ -389,7 +389,7 @@ export interface ApplyPatchProposalResult {
 - For proposal creation/listing/status changes: use a harmless one-file unified diff and verify `create -> list -> get -> reject hunk -> accept hunk -> discard` works.
 - For apply behavior: use a temp directory or a clearly harmless repo file; never apply a destructive patch to the user's real worktree.
 - For legacy raw patch behavior: keep the Phase 1 safety guarantee that both git-style and legacy unified diffs cannot escape `workingDir`.
-- For UI behavior: use the real running CMDui app, not only static inspection.
+- For UI behavior: use the real running OpenHarness app, not only static inspection.
 
 ### 7.3 App relaunch
 
@@ -425,7 +425,7 @@ The roadmap also calls out: "Existing MiniMax compatibility should be verified w
 
 ### 8.5 Rollback plan
 
-- Each batch should be one coherent commit or PR. Reverting that commit/PR is the rollback. No migration scripts should touch user data; the on-disk store under `~/.open-harness/patch-proposals/` is additive. If validation-after-apply behavior surprises us later, keep it isolated to Batch C so Batch A/B UI work remains revertable independently.
+- Each batch should be one coherent commit or PR. Reverting that commit/PR is the rollback. No migration scripts should touch user data; the on-disk store under `~/.openharness/patch-proposals/` is additive. If validation-after-apply behavior surprises us later, keep it isolated to Batch C so Batch A/B UI work remains revertable independently.
 
 ---
 
@@ -434,7 +434,7 @@ The roadmap also calls out: "Existing MiniMax compatibility should be verified w
 Use this prompt for the next implementation agent. It intentionally gives a longer-running assignment than the original phase-by-phase prompt.
 
 ```text
-You are implementing the next long-running M15 Patch Review batch inside /Users/kevink/Projects/CMDui.
+You are implementing the next long-running M15 Patch Review batch inside /Users/kevink/Projects/OpenHarness.
 
 Context:
 - Phase 1 is complete and merged: server-side patch parser, proposal store, hardened raw patch route, trust/path scoping, and patch-proposal server endpoints.
@@ -460,7 +460,7 @@ Validation required before reporting done:
 - npm run lint
 - npm run build
 - Manual API or UI smoke for create/list/get/hunk status/discard.
-- Restart only if server/runtime code changed. For client-only UI changes, leave the running app/server alone; refresh the UI if needed. If server/runtime code changed, kill existing CMDui app/server processes, relaunch with npm start, and verify http://127.0.0.1:3001 plus http://127.0.0.1:5173 are reachable.
+- Restart only if server/runtime code changed. For client-only UI changes, leave the running app/server alone; refresh the UI if needed. If server/runtime code changed, kill existing OpenHarness app/server processes, relaunch with npm start, and verify http://127.0.0.1:3001 plus http://127.0.0.1:5173 are reachable.
 - Manual UI smoke: open Patch Review panel, paste a harmless one-file patch, create a proposal, reject then accept a hunk, and confirm the state updates. If applying, only apply in a temp/safe workspace or a harmless file.
 
 Deliverable:
@@ -498,7 +498,7 @@ The next agent should complete as much of this list as possible in order, stoppi
 
 1. Review current repo state and confirm Phase 2 wrappers exist in `src/utils/api.ts` and types exist in `src/types/index.ts`.
 2. Add `src/components/PatchReviewPanel.tsx`.
-3. Register a `patches` panel in the layout system so the panel can be opened from CMDui.
+3. Register a `patches` panel in the layout system so the panel can be opened from OpenHarness.
 4. In the panel, implement proposal listing via `listPatchProposals()`.
 5. Add a simple “create proposal” form that accepts pasted unified diff text, working directory, optional explanation, and optional verification commands.
 6. After creation, select the new proposal and render its files and hunks.
@@ -542,7 +542,7 @@ The next agent should complete as much of this list as possible in order, stoppi
 ### Prompt
 
 ```text
-You are working in /Users/kevink/Projects/CMDui.
+You are working in /Users/kevink/Projects/OpenHarness.
 
 Goal: spend one focused session building the first usable Patch Review Panel UI for M15. Phase 1 server foundation is already merged. Phase 2 client types/API wrappers are already present. Do not redo those phases.
 
@@ -646,7 +646,7 @@ Batch A commit is client-only.
 
 ### Batch B — Wire proposal generation into existing model/diff flows (commit `bebde49`)
 
-Goal: make proposals appear naturally from existing CMDui workflows
+Goal: make proposals appear naturally from existing OpenHarness workflows
 instead of only pasted diffs.
 
 What landed:
