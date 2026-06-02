@@ -5,6 +5,13 @@ export interface ProviderMessage {
   content: string | null;
   tool_calls?: ProviderToolCall[];
   tool_call_id?: string;
+  /**
+   * Optional function name. Carried on `tool` messages so adapters that
+   * need the function name to echo the result back (notably Gemini's
+   * functionResponse) have it. Anthropic does not need it; it derives the
+   * match from `tool_call_id` against the assistant's tool_use block.
+   */
+  name?: string;
 }
 
 export interface ProviderToolCall {

@@ -1,5 +1,5 @@
 {
-  "name": "cmdui",
+  "name": "openharness",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "smoke:minimax": "node scripts/smoke-minimax.mjs",
     "server": "dotenv -- tsx server/index.ts",
     "dev:all": "dotenv -- tsx server/index.ts & vite --port 5173",
     "electron": "electron .",
@@ -53,8 +54,8 @@
     "vite": "^8.0.12"
   },
   "build": {
-    "appId": "com.open-harness.desktop",
-    "productName": "Open-Harness",
+    "appId": "com.openharness.desktop",
+    "productName": "OpenHarness",
     "directories": {
       "output": "release"
     },

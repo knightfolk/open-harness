@@ -1640,48 +1640,138 @@ async function parseStreamForContentAndTools(
 // ── Universal model streaming (with MCP tool-calling loop) ─
 
 // ── Native-adapter path for Anthropic / Google Gemini ──
-// Streams a single direct answer via the provider adapter. The OpenAI-shaped
-// tool loop is intentionally skipped: Anthropic tool round-trips need
-// content-block bookkeeping, and Gemini function-call round-trips are not
-// yet implemented. We forward text deltas as SSE `text` events, log any
-// tool_call_done events as run steps, and persist the final answer with a
-// run trace that mirrors the existing path.
+// Streams a chat completion through the provider adapter with full tool
+// round-trip support. Both Anthropic and Gemini emit tool_call_done events
+// from the adapter; we execute them via the shared invokeMCPTool path,
+// push the result back as a `tool` role message (with the function `name`
+// populated so Gemini's functionResponse can match it), and loop until
+// the model produces a text-only answer or the round limit is hit. The
+// `name` field on ProviderMessage is what makes Gemini's round-trip work
+// — Anthropic only needs `tool_call_id`.
 async function streamWithNativeAdapter(
   provider: StoredProvider,
   apiModelId: string,
-  messages: ProviderMessage[],
+  initialMessages: ProviderMessage[],
+  tools: any[] | undefined,
+  toolServerMap: Record<string, string>,
   res: express.Response,
   assistantId: string,
   session: SessionRow,
   run?: HarnessRun,
 ) {
   try {
-    const request: ProviderChatRequest = {
-      model: apiModelId,
-      messages,
-      stream: true,
-    };
-
+    const MAX_TOOL_ROUNDS = 6;
+    const toolTracker = createToolTracker();
+    const roundMessages: ProviderMessage[] = [...initialMessages];
     let finalContent = '';
-    const toolCallsObserved: { id: string; name: string; args: string }[] = [];
+    const sessionToolCalls: ToolCallRow[] = [];
 
-    for await (const event of streamWithAdapter(provider, request)) {
-      if (event.type === 'text_delta') {
-        finalContent += event.text;
-        res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: event.text }) + '\n\n');
-      } else if (event.type === 'thinking_delta') {
-        // Surface thinking as a small run step so the activity timeline shows it.
-        if (run) emitRunStep(res, run, { type: 'model_text', chars: event.text.length });
-      } else if (event.type === 'tool_call_done') {
-        // We do not execute these yet — the chat loop would need provider-specific
-        // tool-result shapes. Log them so the user can see the model wanted to call.
-        toolCallsObserved.push({ id: event.id, name: event.name, args: event.arguments });
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: event.id, name: event.name, input: event.arguments });
-        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: event.id, name: event.name, status: 'unsupported', input: event.arguments, output: 'Tool calls are not yet supported for this provider in the chat loop.' }) + '\n\n');
-      } else if (event.type === 'error') {
-        if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: event.error }); }
-        res.write('event: error\ndata: ' + JSON.stringify({ error: event.error }) + '\n\n');
-        return;
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      if (run) emitRunStep(res, run, { type: 'model_request', round: round + 1, model: apiModelId });
+
+      // Final round is tool-free and gets a forced-synthesis nudge so the
+      // model produces a real answer instead of yet another tool call.
+      const isLastRound = round === MAX_TOOL_ROUNDS - 1;
+      if (isLastRound) {
+        roundMessages.push({
+          role: 'user',
+          content: 'Based on all the information gathered above, provide your complete answer now. Start directly with the answer using headings, lists, or code blocks. Do not narrate your process.',
+        });
+      }
+
+      const request: ProviderChatRequest = {
+        model: apiModelId,
+        messages: roundMessages,
+        stream: true,
+      };
+      if (!isLastRound && tools && tools.length > 0) {
+        request.tools = tools;
+      }
+
+      let roundContent = '';
+      const roundToolCalls: { id: string; name: string; arguments: string }[] = [];
+      let abort = false;
+
+      for await (const event of streamWithAdapter(provider, request)) {
+        if (event.type === 'text_delta') {
+          roundContent += event.text;
+          // Only stream text on the last round — intermediate text is
+          // narration and is suppressed so the user doesn't see duplicates.
+          if (isLastRound) {
+            res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: event.text }) + '\n\n');
+          }
+        } else if (event.type === 'thinking_delta') {
+          if (run) emitRunStep(res, run, { type: 'model_text', chars: event.text.length });
+        } else if (event.type === 'tool_call_done') {
+          roundToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
+        } else if (event.type === 'error') {
+          if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: event.error }); }
+          res.write('event: error\ndata: ' + JSON.stringify({ error: event.error }) + '\n\n');
+          abort = true;
+          break;
+        }
+      }
+      if (abort) return;
+
+      // Direct answer (no tool calls) → done.
+      if (roundToolCalls.length === 0) {
+        finalContent = filterMonologue(stripThinkingTags(roundContent));
+        if (!isLastRound && finalContent.trim()) {
+          // Was a tool round but the model skipped straight to text — emit now.
+          res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: finalContent }) + '\n\n');
+        }
+        break;
+      }
+
+      // Persist the assistant turn so the adapter can echo tool_use blocks
+      // back in the provider-specific shape (Anthropic content blocks,
+      // Gemini functionCall parts).
+      roundMessages.push({
+        role: 'assistant',
+        content: roundContent || null,
+        tool_calls: roundToolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      });
+
+      // Execute each tool call through the same shared MCP path the OpenAI
+      // branch uses, so behavior stays consistent across providers.
+      for (const tc of roundToolCalls) {
+        const tcId = tc.id || uuid();
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: tc.arguments }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments });
+
+        const startTime = Date.now();
+        let output: string;
+        let parsedArgs: any = {};
+        try { parsedArgs = JSON.parse(tc.arguments); } catch { parsedArgs = {}; }
+
+        if (isRedundantToolCall(toolTracker, tc.name, parsedArgs)) {
+          const skipMsg = `[Skipped: ${tc.name} already called with same path]`;
+          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: skipMsg, durationMs: 0 });
+          // `name` is what Gemini's functionResponse needs to match the call.
+          roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: skipMsg });
+          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 });
+          continue;
+        }
+
+        try {
+          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap);
+          output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
+        } catch (err: any) {
+          output = 'Error: ' + err.message;
+        }
+        const duration = Date.now() - startTime;
+
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 500), duration }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: output.slice(0, 500), durationMs: duration });
+
+        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 2000), duration });
+        // `name` is what Gemini's functionResponse needs to match the call.
+        roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: output });
       }
     }
 
@@ -1700,13 +1790,7 @@ async function streamWithNativeAdapter(
       role: 'assistant',
       content: cleaned,
       timestamp: new Date().toISOString(),
-      toolCalls: toolCallsObserved.length > 0 ? toolCallsObserved.map((tc) => ({
-        id: tc.id,
-        name: tc.name,
-        status: 'complete' as const,
-        input: tc.args,
-        output: 'Tool calls are not yet supported for this provider in the chat loop.',
-      })) : undefined,
+      toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
       runTrace: run,
     });
     session.updatedAt = new Date().toISOString();
@@ -1862,7 +1946,17 @@ async function streamModel(
       { role: 'system', content: systemPrompt },
       ...ctx.messages,
     ];
-    await streamWithNativeAdapter(effectiveResolved.provider, apiModelId, nativeMessages, res, assistantId, session, run);
+    await streamWithNativeAdapter(
+      effectiveResolved.provider,
+      apiModelId,
+      nativeMessages,
+      filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
+      toolServerMap,
+      res,
+      assistantId,
+      session,
+      run,
+    );
     return;
   }
 
@@ -3132,7 +3226,68 @@ app.listen(PORT, () => {
     });
     mcpGateway.on('error', (err: Error) => console.log('[mcp-gw] Failed:', err.message));
     mcpGateway.on('exit', (code: number | null) => console.log('[mcp-gw] exited with code', code));
-    mcpGateway.stderr?.on('data', (d: Buffer) => console.log('[mcp-gw:err]', d.toString().trim()));
+    // Filter the very chatty credential-helper / catalog banner lines from
+    // the gateway so they don't drown the server log. We keep the first
+    // occurrence of a banner line and collapse repeated identical lines
+    // into a single '<line> (xN)' entry. Genuine errors still pass through.
+    {
+      const lastBanner = new Map<string, number>();
+      const bannerCount = new Map<string, number>();
+      const isBanner = (line: string) =>
+        /Using credential helper:/i.test(line) ||
+        /^Watching for configuration updates/i.test(line) ||
+        /^Connecting to OAuth notification stream/i.test(line) ||
+        /^Starting OAuth (notification monitor|provider loops)/i.test(line) ||
+        /^Images? pulled in/i.test(line) ||
+        /^Those servers are enabled/i.test(line) ||
+        /^Listing MCP tools/i.test(line) ||
+        /^Running mcp\//i.test(line) ||
+        /^Configuration read in/i.test(line) ||
+        /^> \w[\w-]*: \(\d+ tools\)$/i.test(line) ||
+        /^> \d+ tools? listed in/i.test(line) ||
+        /^Adding internal tools/i.test(line) ||
+        /^> mcp-[a-z-]+: tool for/i.test(line) ||
+        /^> code-mode: write code/i.test(line) ||
+        /^> mcp-exec: execute tools/i.test(line) ||
+        /^> mcp-config-set: tool for setting/i.test(line) ||
+        /^> mcp-create-profile: tool for creating/i.test(line) ||
+        /^> mcp-activate-profile: tool for activating/i.test(line) ||
+        /^> mcp-discover: prompt for learning/i.test(line) ||
+        /^Total servers loaded from all catalogs/i.test(line) ||
+        /^Loading \d+ catalog/i.test(line) ||
+        /^Processing catalog/i.test(line) ||
+        /^Using images:/i.test(line) ||
+        /^Initialized in /i.test(line) ||
+        /^Client initialized openharness/i.test(line) ||
+        /^Current working directory:/i.test(line) ||
+        /^Initialize request:/i.test(line) ||
+        /^"?capabilities"?:/i.test(line) ||
+        /^"?clientInfo"?:/i.test(line) ||
+        /^"?protocolVersion"?:/i.test(line) ||
+        /^Start stdio server$/i.test(line);
+      mcpGateway.stderr?.on('data', (d: Buffer) => {
+        const text = d.toString();
+        for (const rawLine of text.split('\n')) {
+          // Strip the gateway's "- " / "> " line prefixes so banner
+          // regexes match the actual content regardless of decoration.
+          const line = rawLine.trim().replace(/^[->]\s+/, '');
+          if (!line) continue;
+          if (!isBanner(line)) {
+            console.log('[mcp-gw:err]', line);
+            continue;
+          }
+          const prev = lastBanner.get(line) ?? 0;
+          lastBanner.set(line, prev + 1);
+          bannerCount.set(line, (bannerCount.get(line) ?? 0) + 1);
+          if (prev === 0) console.log('[mcp-gw]', line);
+          // The collapse note prints once when a new banner line appears after
+          // a streak of duplicates; keeps the log scannable.
+          if (bannerCount.get(line) === 5) {
+            console.log('[mcp-gw]   …identical banner line repeated; further duplicates suppressed');
+          }
+        }
+      });
+    }
 
     // Connect via stdio using the MCP client after the gateway initializes
     setTimeout(async () => {

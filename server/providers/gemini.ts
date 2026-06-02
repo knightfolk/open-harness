@@ -3,12 +3,11 @@ import type { ProviderAdapter, ProviderChatRequest, ProviderEvent, ProviderStrea
 /**
  * Google Gemini adapter.
  *
- * Uses the non-streaming :generateContent endpoint and emits a sequence of
- * text_delta events from the JSON response. This is intentionally simple:
- * SSE on :streamGenerateContent returned a stream we could not safely parse
- * with response.json(), so we trade a small latency hit for a reliable
- * implementation. Function calls are detected and emitted as tool_call_done
- * but the surrounding chat loop does not yet round-trip them — see PLAN.md.
+ * Streaming is implemented against :streamGenerateContent?alt=sse with a real
+ * SSE parser. The non-streaming :generateContent endpoint is kept as a
+ * fallback for callers that explicitly disable streaming. Function calls are
+ * emitted as tool_call_done; the chat loop is responsible for round-tripping
+ * functionResponse parts on the next turn.
  */
 export class GeminiAdapter implements ProviderAdapter {
   id = 'gemini';
@@ -20,15 +19,14 @@ export class GeminiAdapter implements ProviderAdapter {
   }
 
   async *streamChat(request: ProviderChatRequest, options: ProviderStreamOptions): AsyncGenerator<ProviderEvent> {
-    const url = this.buildURL(options.baseURL, options.apiKey, request.model, /* stream */ false);
+    const useStream = request.stream !== false;
+    const url = this.buildURL(options.baseURL, options.apiKey, request.model, useStream);
 
     const contents = this.convertMessages(request.messages);
     const body: any = { contents, generationConfig: {} };
     if (request.max_tokens) body.generationConfig.maxOutputTokens = request.max_tokens;
     if (request.temperature != null) body.generationConfig.temperature = request.temperature;
     if (request.tools && request.tools.length > 0) {
-      // Tools are advertised for future use, but the chat loop does not yet
-      // round-trip functionCall/functionResponse for Gemini. Keep this opt-in.
       body.tools = [{ functionDeclarations: request.tools.map(t => ({
         name: t.function.name,
         description: t.function.description || '',
@@ -55,6 +53,100 @@ export class GeminiAdapter implements ProviderAdapter {
       return;
     }
 
+    if (useStream) {
+      if (!response.body) {
+        yield { type: 'error', error: 'No response body' };
+        return;
+      }
+      yield* this.parseSSE(response.body);
+    } else {
+      yield* this.parseNonStreaming(response);
+    }
+  }
+
+  // ── SSE path ─────────────────────────────────────────
+  private async *parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<ProviderEvent> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Gemini streams as a JSON array split across multiple `data:` lines:
+        //   data: { "candidates": [...] }
+        //   data: { "candidates": [...] }
+        // We accumulate the buffer into a single JSON document by joining
+        // each `data:` payload with a comma, then parse once per pass.
+        const events = this.collectSSEEvents(buffer);
+        if (events) {
+          for (const ev of events) yield ev;
+          // Consume everything up to the last fully-formed record.
+          const lastDouble = buffer.lastIndexOf('\n\n');
+          if (lastDouble !== -1) buffer = buffer.slice(lastDouble + 2);
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    yield { type: 'done' };
+  }
+
+  // Pulls complete SSE records out of the buffer and converts them to events.
+  // Returns null if we don't yet have any fully-terminated record to consume.
+  private collectSSEEvents(buffer: string): ProviderEvent[] | null {
+    const lastDouble = buffer.lastIndexOf('\n\n');
+    if (lastDouble === -1) return null;
+
+    const out: ProviderEvent[] = [];
+    const records = buffer.slice(0, lastDouble).split('\n\n');
+    for (const record of records) {
+      const lines = record.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        let payload = trimmed.slice(5).trim();
+        if (!payload) continue;
+        if (payload === '[DONE]') continue;
+        // Strip a trailing comma so we can parse a streaming array of objects
+        // as a single document.
+        if (payload.endsWith(',')) payload = payload.slice(0, -1);
+        for (const ev of this.eventsFromPayload(payload)) out.push(ev);
+      }
+    }
+    return out;
+  }
+
+  private *eventsFromPayload(payload: string): Generator<ProviderEvent> {
+    let parsed: any;
+    try { parsed = JSON.parse(payload); } catch { return; }
+
+    const candidates: any[] = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.candidates) ? parsed.candidates
+        : parsed?.candidates ? [parsed.candidates]
+          : [];
+
+    for (const candidate of candidates) {
+      const parts: any[] = candidate?.content?.parts || [];
+      for (const part of parts) {
+        if (typeof part?.text === 'string' && part.text.length > 0) {
+          yield { type: 'text_delta', text: part.text };
+        }
+        if (part?.functionCall) {
+          const fc = part.functionCall;
+          const id = `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const args = JSON.stringify(fc.args || {});
+          yield { type: 'tool_call_done', id, name: fc.name || '', arguments: args };
+        }
+      }
+    }
+  }
+
+  // ── Non-streaming fallback ───────────────────────────
+  private async *parseNonStreaming(response: Response): AsyncGenerator<ProviderEvent> {
     let data: any;
     try {
       data = await response.json();
@@ -66,11 +158,7 @@ export class GeminiAdapter implements ProviderAdapter {
     const candidates: any[] = Array.isArray(data?.candidates) ? data.candidates : [];
     if (candidates.length === 0) {
       const blockReason = data?.promptFeedback?.blockReason;
-      if (blockReason) {
-        yield { type: 'error', error: `Gemini blocked the request: ${blockReason}` };
-      } else {
-        yield { type: 'error', error: 'Gemini returned no candidates' };
-      }
+      yield { type: 'error', error: blockReason ? `Gemini blocked the request: ${blockReason}` : 'Gemini returned no candidates' };
       return;
     }
 
@@ -78,7 +166,6 @@ export class GeminiAdapter implements ProviderAdapter {
       const parts: any[] = candidate?.content?.parts || [];
       for (const part of parts) {
         if (typeof part?.text === 'string' && part.text.length > 0) {
-          // Split into modest chunks so the UI sees a streaming feel.
           for (const chunk of this.chunkText(part.text)) {
             yield { type: 'text_delta', text: chunk };
           }
@@ -91,10 +178,10 @@ export class GeminiAdapter implements ProviderAdapter {
         }
       }
     }
-
     yield { type: 'done' };
   }
 
+  // ── Helpers ──────────────────────────────────────────
   private convertMessages(messages: any[]): any[] {
     const contents: any[] = [];
     for (const msg of messages) {
@@ -107,7 +194,7 @@ export class GeminiAdapter implements ProviderAdapter {
           parts.push({
             functionCall: {
               name: tc.function.name,
-              args: JSON.parse(tc.function.arguments || '{}'),
+              args: this.safeParseArgs(tc.function.arguments),
             },
           });
         }
@@ -115,8 +202,10 @@ export class GeminiAdapter implements ProviderAdapter {
       if (msg.role === 'tool' && msg.content) {
         parts.push({
           functionResponse: {
-            name: msg.tool_call_id || 'unknown',
-            response: { result: msg.content },
+            // Gemini needs the function name, not the call id. The chat loop
+            // populates `name` on tool messages so we can echo it back here.
+            name: msg.name || msg.tool_call_id || 'unknown',
+            response: { result: this.parseToolContent(msg.content) },
           },
         });
       }
@@ -125,13 +214,20 @@ export class GeminiAdapter implements ProviderAdapter {
     return contents;
   }
 
+  private safeParseArgs(raw: string | undefined): Record<string, any> {
+    if (!raw) return {};
+    try { return JSON.parse(raw); } catch { return {}; }
+  }
+
+  private parseToolContent(raw: string): any {
+    try { return JSON.parse(raw); } catch { return { content: raw }; }
+  }
+
   private buildURL(baseURL: string, apiKey: string, model: string, stream: boolean): string {
     const base = baseURL.replace(/\/+$/, '');
     const modelPath = model.startsWith('models/') ? model : `models/${model}`;
-    // Use the non-streaming :generateContent endpoint. The streaming endpoint
-    // returns SSE which we deliberately do not parse here — see file header.
     const action = stream ? 'streamGenerateContent' : 'generateContent';
-    return `${base}/${modelPath}:${action}?key=${encodeURIComponent(apiKey)}`;
+    return `${base}/${modelPath}:${action}?alt=sse&key=${encodeURIComponent(apiKey)}`;
   }
 
   private chunkText(text: string, size = 24): string[] {
