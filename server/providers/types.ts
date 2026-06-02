@@ -29,6 +29,7 @@ export interface ProviderChatRequest {
   model: string;
   messages: ProviderMessage[];
   stream: boolean;
+  systemInstruction?: string;
   max_tokens?: number;
   temperature?: number;
   tools?: ProviderTool[];

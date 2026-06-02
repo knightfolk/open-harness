@@ -999,6 +999,26 @@ export async function discardPatchProposal(
   return res.json();
 }
 
+export async function isolatePatchProposal(
+  id: string,
+): Promise<{
+  proposal: import('../types').PatchProposal | null;
+  sandbox?: import('../types').PatchProposalSandbox;
+  appliedFiles: string[];
+  errors: string[];
+}> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(id)}/isolate`,
+    { method: 'POST' },
+  );
+  if (res.status === 404) return { proposal: null, appliedFiles: [], errors: ['Proposal not found'] };
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.error || detail?.errors?.join('\n') || `Isolate failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 /**
  * Apply the proposal: only the accepted hunks are written to disk in
  * the proposal's `workingDir`. Returns the apply summary.
@@ -1056,7 +1076,30 @@ export interface EvalScores {
   producedSummary: boolean;
   latencyMs: number;
   toolCount: number;
+  validationPassed: boolean;
+  validationScore: number;
   overallScore: number;
+  breakdown: EvalScoreBreakdown;
+}
+
+export type EvalSignalCategory = 'structural' | 'runtime' | 'style';
+
+export interface EvalSignalScore {
+  id: string;
+  label: string;
+  category: EvalSignalCategory;
+  passed: boolean;
+  score: number;
+  maxScore: number;
+}
+
+export interface EvalScoreBreakdown {
+  structural: number;
+  runtime: number;
+  style: number;
+  total: number;
+  weakestSignal: EvalSignalScore;
+  signals: EvalSignalScore[];
 }
 
 export interface EvalResult {
@@ -1295,7 +1338,9 @@ export interface BenchScores {
   toolCount: number;
   validationPassed: boolean;
   validationScore: number;
+  styleScore: number;
   overallScore: number;
+  breakdown: EvalScoreBreakdown;
   resolvedStatus: 'resolved' | 'unresolved' | 'partial';
   stepCount: number;
   tokenCount: number;
@@ -1342,6 +1387,23 @@ export interface BenchRun {
     bestModel: string;
     regressionFlags: Array<{ taskId: string; modelId: string; reason: string }>;
   };
+  previousDelta?: {
+    previousRunId: string;
+    previousRunName: string;
+    previousCreatedAt: string;
+    avgScoreDelta: number;
+    avgScoreDeltaPct: number;
+    avgValidationDelta: number;
+    avgStyleDelta: number;
+    taskDeltas: Array<{
+      taskId: string;
+      taskName: string;
+      modelId: string;
+      currentScore: number;
+      previousScore: number;
+      delta: number;
+    }>;
+  } | null;
 }
 
 export async function getBenchRuns(): Promise<BenchRunSummary[]> {

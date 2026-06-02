@@ -47,6 +47,27 @@ export interface EvalScores {
   validationPassed: boolean;
   validationScore: number; // 0-5, weighted above heuristics
   overallScore: number; // 0-10
+  breakdown: EvalScoreBreakdown;
+}
+
+export type EvalSignalCategory = 'structural' | 'runtime' | 'style';
+
+export interface EvalSignalScore {
+  id: string;
+  label: string;
+  category: EvalSignalCategory;
+  passed: boolean;
+  score: number;
+  maxScore: number;
+}
+
+export interface EvalScoreBreakdown {
+  structural: number;
+  runtime: number;
+  style: number;
+  total: number;
+  weakestSignal: EvalSignalScore;
+  signals: EvalSignalScore[];
 }
 
 export interface EvalReport {
@@ -151,6 +172,32 @@ export function getPromptsByCategory(category: string): PromptCase[] {
 
 // ── Scoring ────────────────────────────────────────────
 
+function roundScore(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+export function buildScoreBreakdown(signals: EvalSignalScore[]): EvalScoreBreakdown {
+  const structural = signals.filter(s => s.category === 'structural').reduce((sum, s) => sum + s.score, 0);
+  const runtime = signals.filter(s => s.category === 'runtime').reduce((sum, s) => sum + s.score, 0);
+  const style = signals.filter(s => s.category === 'style').reduce((sum, s) => sum + s.score, 0);
+  const weakestSignal = [...signals].sort((a, b) => (a.score / a.maxScore) - (b.score / b.maxScore))[0] || {
+    id: 'none',
+    label: 'No signals',
+    category: 'style',
+    passed: false,
+    score: 0,
+    maxScore: 1,
+  };
+  return {
+    structural: roundScore(structural),
+    runtime: roundScore(runtime),
+    style: roundScore(style),
+    total: roundScore(structural + runtime + style),
+    weakestSignal,
+    signals: signals.map(s => ({ ...s, score: roundScore(s.score), maxScore: roundScore(s.maxScore) })),
+  };
+}
+
 function scoreResult(result: { response: string; toolCalls: Array<{ name: string; status: string }>; wallMs: number; workingDir?: string }): EvalScores {
   const response = result.response.toLowerCase();
   const toolCalls = result.toolCalls;
@@ -179,7 +226,17 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
   const validationPassed = (result as any).validationPassed !== undefined
     ? (result as any).validationPassed
     : true; // Default to true if no validation was run
-  const validationScore = validationPassed ? 2.5 : 0;
+  const validationScore = validationPassed ? 2 : 0;
+  const breakdown = buildScoreBreakdown([
+    { id: 'answered-user', label: 'Answered user', category: 'structural', passed: answeredUser, score: answeredUser ? 2 : 0, maxScore: 2 },
+    { id: 'real-files', label: 'Referenced real files', category: 'structural', passed: referencedRealFiles, score: referencedRealFiles ? 1.5 : 0, maxScore: 1.5 },
+    { id: 'no-missing-paths', label: 'Avoided missing paths', category: 'structural', passed: avoidedHallucinatedPaths, score: avoidedHallucinatedPaths ? 1 : 0, maxScore: 1 },
+    { id: 'validation', label: 'Validation passed', category: 'runtime', passed: validationPassed, score: validationScore, maxScore: 2 },
+    { id: 'tool-use', label: 'Used tools', category: 'runtime', passed: usedTools, score: usedTools ? 1.5 : 0, maxScore: 1.5 },
+    { id: 'summary', label: 'Produced summary', category: 'style', passed: producedSummary, score: producedSummary ? 1 : 0, maxScore: 1 },
+    { id: 'latency', label: 'Responsive latency', category: 'style', passed: result.wallMs < 30000, score: result.wallMs < 10000 ? 0.7 : result.wallMs < 30000 ? 0.4 : 0, maxScore: 0.7 },
+    { id: 'tool-efficiency', label: 'Tool efficiency', category: 'style', passed: toolCalls.length >= 1 && toolCalls.length <= 10, score: toolCalls.length >= 1 && toolCalls.length <= 10 ? 0.3 : 0, maxScore: 0.3 },
+  ]);
 
   return {
     usedTools,
@@ -190,8 +247,9 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
     latencyMs: result.wallMs,
     toolCount: toolCalls.length,
     validationPassed,
-    validationScore,
-    overallScore: Math.min(10, Math.round((score + validationScore) * 10) / 10),
+    validationScore: roundScore(validationScore),
+    overallScore: Math.min(10, breakdown.total || Math.round((score + validationScore) * 10) / 10),
+    breakdown,
   };
 }
 

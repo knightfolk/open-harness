@@ -338,9 +338,21 @@ export interface PatchProposal {
   files: PatchFile[];
   verificationCommands: string[];
   status: PatchProposalStatus;
+  sandbox?: PatchProposalSandbox;
+  preview?: BrowserPreviewResult;
   appliedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PatchProposalSandbox {
+  worktreeId: string;
+  path: string;
+  root: string;
+  status: 'ready' | 'promoted' | 'discarded' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
 }
 
 export interface ApplyPatchProposalResult {
@@ -350,6 +362,7 @@ export interface ApplyPatchProposalResult {
   errors: string[];
   validation: PatchValidationResult[];
   validationPassed: boolean;
+  preview?: BrowserPreviewResult | null;
 }
 
 // ── Browser Preview Types ────────────────────────

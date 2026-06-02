@@ -45,6 +45,9 @@ import {
   rejectAll as rejectAllHunks,
   discardProposal,
   recordApplyResult,
+  recordPreview,
+  recordSandbox,
+  updateSandboxStatus,
   serializeAcceptedPatch,
   type PatchProposal,
 } from './patchProposals';
@@ -1045,6 +1048,34 @@ function scopeCheckOrThrow(workingDir: string): void {
   }
 }
 
+const DEV_PREVIEW_PORTS = [5173, 3000, 4173, 8787, 8080, 4321];
+
+function detectDevPreviewUrl(): string | null {
+  for (const port of DEV_PREVIEW_PORTS) {
+    const url = `http://localhost:${port}`;
+    try {
+      if (checkServerHealth(url).reachable) return url;
+    } catch {
+      // Keep probing the common dev-server ports.
+    }
+  }
+  return null;
+}
+
+async function captureDetectedPreview() {
+  const url = detectDevPreviewUrl();
+  if (!url) return null;
+  return capturePreview(url);
+}
+
+function contextPreludeBudgets(modelId: string): { repoMap: number; contextPack: number } {
+  const tokens = getModelConfig(modelId).contextWindowTokens;
+  if (tokens >= 1_000_000) return { repoMap: 9000, contextPack: 9000 };
+  if (tokens >= 200_000) return { repoMap: 4500, contextPack: 4500 };
+  if (tokens >= 100_000) return { repoMap: 3000, contextPack: 3000 };
+  return { repoMap: 1800, contextPack: 2200 };
+}
+
 app.post('/api/patch-proposals', (req, res) => {
   const body = req.body as {
     patch?: string;
@@ -1138,7 +1169,78 @@ app.post('/api/patch-proposals/:id/reject-all', (req, res) => {
   res.json(p);
 });
 
+app.post('/api/patch-proposals/:id/isolate', (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  if (proposal.status !== 'open') {
+    return res.status(409).json({ error: `Proposal is ${proposal.status}` });
+  }
+  if (proposal.sandbox?.status === 'ready') {
+    return res.json({ proposal, sandbox: proposal.sandbox, appliedFiles: [], errors: [] });
+  }
+
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  if (trustMode === 'read-only' || trustMode === 'chat-only') {
+    return res.status(400).json({ error: `Write operations not allowed in ${trustMode} mode` });
+  }
+
+  const acceptedPatch = serializeAcceptedPatch(proposal);
+  if (acceptedPatch.trim().length === 0) {
+    return res.status(400).json({ error: 'No hunks accepted; nothing to isolate' });
+  }
+
+  let acceptedParsed: ReturnType<typeof parseUnifiedDiff>;
+  try {
+    acceptedParsed = parseUnifiedDiff(acceptedPatch);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Patch parse failed' });
+  }
+  for (const f of acceptedParsed) {
+    const candidate = join(proposal.workingDir, f.filePath);
+    const check = isPathAllowed(candidate, trustMode, proposal.workingDir);
+    if (!check.allowed) return res.status(400).json({ error: check.reason || 'Path refused' });
+  }
+
+  let wt: worktrees.Worktree | null = null;
+  try {
+    wt = worktrees.createWorktree(proposal.workingDir, {
+      label: `Patch ${proposal.id.slice(0, 8)}`,
+    });
+    const result = nodeApplyPatch(acceptedPatch, wt.path);
+    const sandbox = {
+      worktreeId: wt.id,
+      path: wt.path,
+      root: wt.root,
+      status: result.errors.length === 0 ? 'ready' as const : 'failed' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: result.errors[0],
+    };
+    const updated = recordSandbox(proposal.id, sandbox);
+    if (result.errors.length > 0) {
+      worktrees.removeWorktree(proposal.workingDir, wt.id, { force: true });
+      return res.status(400).json({ proposal: updated, sandbox, appliedFiles: result.files, errors: result.errors });
+    }
+    res.json({ proposal: updated, sandbox, appliedFiles: result.files, errors: [] });
+  } catch (err: any) {
+    if (wt) {
+      try { worktrees.removeWorktree(proposal.workingDir, wt.id, { force: true }); } catch { /* ignore */ }
+    }
+    res.status(400).json({ error: err?.message || 'Failed to isolate proposal' });
+  }
+});
+
 app.post('/api/patch-proposals/:id/discard', (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  if (proposal.sandbox?.worktreeId && proposal.sandbox.status === 'ready') {
+    try {
+      worktrees.removeWorktree(proposal.workingDir, proposal.sandbox.worktreeId, { force: true });
+      updateSandboxStatus(proposal.id, 'discarded');
+    } catch (err: any) {
+      updateSandboxStatus(proposal.id, 'failed', err?.message || 'Failed to discard worktree');
+    }
+  }
   const p = discardProposal(req.params.id);
   if (!p) return res.status(404).json({ error: 'Proposal not found' });
   res.json(p);
@@ -1226,8 +1328,26 @@ app.post('/api/patch-proposals/:id/apply', async (req, res) => {
   // existing terminal panel.
   if (allGood) {
     recordApplyResult(proposal.id, { status: 'applied' });
+    if (proposal.sandbox?.worktreeId && proposal.sandbox.status === 'ready') {
+      try {
+        worktrees.removeWorktree(proposal.workingDir, proposal.sandbox.worktreeId, { force: true });
+        updateSandboxStatus(proposal.id, 'promoted');
+      } catch (err: any) {
+        updateSandboxStatus(proposal.id, 'failed', err?.message || 'Failed to clean up worktree');
+      }
+    }
   } else {
     recordApplyResult(proposal.id, { status: 'failed' });
+  }
+
+  let preview = null;
+  if (allGood) {
+    try {
+      preview = await captureDetectedPreview();
+      if (preview) recordPreview(proposal.id, preview);
+    } catch {
+      preview = null;
+    }
   }
 
   res.json({
@@ -1237,6 +1357,7 @@ app.post('/api/patch-proposals/:id/apply', async (req, res) => {
     errors: result.errors,
     validation,
     validationPassed,
+    preview,
   });
 });
 
@@ -1652,6 +1773,8 @@ async function streamWithNativeAdapter(
   provider: StoredProvider,
   apiModelId: string,
   initialMessages: ProviderMessage[],
+  systemInstruction: string,
+  generationConfig: { temperature: number; max_tokens: number },
   tools: any[] | undefined,
   toolServerMap: Record<string, string>,
   res: express.Response,
@@ -1683,6 +1806,9 @@ async function streamWithNativeAdapter(
         model: apiModelId,
         messages: roundMessages,
         stream: true,
+        systemInstruction,
+        max_tokens: generationConfig.max_tokens,
+        temperature: generationConfig.temperature,
       };
       if (!isLastRound && tools && tools.length > 0) {
         request.tools = tools;
@@ -1864,10 +1990,11 @@ async function streamModel(
   const promptIntro: string[] = [];
   if (session.workingDir) {
     try {
+      const budgets = contextPreludeBudgets(effectiveModel);
       const map = getRepoMap(session.workingDir);
-      repoMapSummary = summarizeRepoMap(map, 1800);
+      repoMapSummary = summarizeRepoMap(map, budgets.repoMap);
       const suggestion = suggestContextPack(lastUserMsg?.content || "");
-      contextPack = buildContextPack(map, suggestion.pack, lastUserMsg?.content || "", 2200);
+      contextPack = buildContextPack(map, suggestion.pack, lastUserMsg?.content || "", budgets.contextPack);
       if (run) {
         emitRunStep(res, run, {
           type: 'repo_map',
@@ -1950,6 +2077,8 @@ async function streamModel(
       effectiveResolved.provider,
       apiModelId,
       nativeMessages,
+      promptResult.systemInstruction.content,
+      promptResult.generationConfig,
       filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
       toolServerMap,
       res,
@@ -2602,7 +2731,7 @@ app.get('/api/bench/runs', (_req, res) => {
 app.get('/api/bench/runs/:id', (req, res) => {
   const run = benchRuns.getBenchRun(req.params.id);
   if (!run) return res.status(404).json({ error: 'Bench run not found' });
-  res.json(run);
+  res.json({ ...run, previousDelta: benchRuns.getPreviousRunDelta(run) });
 });
 
 app.get('/api/bench/runs/:id/export', (req, res) => {
@@ -2872,7 +3001,7 @@ app.post('/api/evals/run', async (req, res) => {
           toolCallCount: 0,
           toolCalls: [],
           wallMs: 0,
-          scores: { usedTools: false, answeredUser: false, referencedRealFiles: false, avoidedHallucinatedPaths: false, producedSummary: false, latencyMs: 0, toolCount: 0, validationPassed: false, validationScore: 0, overallScore: 0 },
+          scores: evals.scoreResult({ response: '', toolCalls: [], wallMs: 0, workingDir: targetDir, validationPassed: false } as any),
         });
         report.completed++;
       }
@@ -3233,6 +3362,7 @@ app.listen(PORT, () => {
     {
       const lastBanner = new Map<string, number>();
       const bannerCount = new Map<string, number>();
+      let multilineJson: { label: string; depth: number; lines: number; started: boolean } | null = null;
       const isBanner = (line: string) =>
         /Using credential helper:/i.test(line) ||
         /^Watching for configuration updates/i.test(line) ||
@@ -3265,6 +3395,35 @@ app.listen(PORT, () => {
         /^"?clientInfo"?:/i.test(line) ||
         /^"?protocolVersion"?:/i.test(line) ||
         /^Start stdio server$/i.test(line);
+      const isMultilineJsonBanner = (line: string) =>
+        /^(Initialize request|Read profile|Read profile response|.* payload):/i.test(line);
+      const isJsonPayloadLine = (line: string) =>
+        /^[{}[\],]+$/.test(line) ||
+        /^"?[\w.-]+"?\s*:/.test(line) ||
+        /^"[^"]*"\s*,?$/.test(line) ||
+        /^(true|false|null|\d+)\s*,?$/.test(line);
+      const braceDelta = (line: string) => {
+        let delta = 0;
+        for (const ch of line) {
+          if (ch === '{' || ch === '[') delta++;
+          if (ch === '}' || ch === ']') delta--;
+        }
+        return delta;
+      };
+      const emitCollapsedBanner = (line: string) => {
+        const prev = lastBanner.get(line) ?? 0;
+        lastBanner.set(line, prev + 1);
+        bannerCount.set(line, (bannerCount.get(line) ?? 0) + 1);
+        if (prev === 0) console.log('[mcp-gw]', line);
+        if (bannerCount.get(line) === 5) {
+          console.log('[mcp-gw]   …identical banner line repeated; further duplicates suppressed');
+        }
+      };
+      const finishMultilineJson = () => {
+        if (!multilineJson) return;
+        emitCollapsedBanner(`${multilineJson.label} (${multilineJson.lines} JSON lines)`);
+        multilineJson = null;
+      };
       mcpGateway.stderr?.on('data', (d: Buffer) => {
         const text = d.toString();
         for (const rawLine of text.split('\n')) {
@@ -3272,19 +3431,25 @@ app.listen(PORT, () => {
           // regexes match the actual content regardless of decoration.
           const line = rawLine.trim().replace(/^[->]\s+/, '');
           if (!line) continue;
+          if (multilineJson) {
+            if (isJsonPayloadLine(line)) {
+              multilineJson.started = true;
+              multilineJson.lines++;
+              multilineJson.depth += braceDelta(line);
+              continue;
+            }
+            if (multilineJson.started) finishMultilineJson();
+            else multilineJson = null;
+          }
+          if (isMultilineJsonBanner(line)) {
+            multilineJson = { label: line.replace(/:$/, ''), depth: 0, lines: 0, started: false };
+            continue;
+          }
           if (!isBanner(line)) {
             console.log('[mcp-gw:err]', line);
             continue;
           }
-          const prev = lastBanner.get(line) ?? 0;
-          lastBanner.set(line, prev + 1);
-          bannerCount.set(line, (bannerCount.get(line) ?? 0) + 1);
-          if (prev === 0) console.log('[mcp-gw]', line);
-          // The collapse note prints once when a new banner line appears after
-          // a streak of duplicates; keeps the log scannable.
-          if (bannerCount.get(line) === 5) {
-            console.log('[mcp-gw]   …identical banner line repeated; further duplicates suppressed');
-          }
+          emitCollapsedBanner(line);
         }
       });
     }

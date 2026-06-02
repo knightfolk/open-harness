@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   GitPullRequestArrow, RefreshCw, Plus, Check, X, FilePlus, FileX,
   FileEdit, Binary as BinaryIcon, AlertTriangle, Loader, Trash2, Play, CheckCircle2, XCircle, Clock,
+  GitBranch, Camera,
 } from 'lucide-react';
 import * as api from '../utils/api';
 import type {
-  PatchProposal, PatchFile, PatchHunk, PatchFileAction, ApplyPatchProposalResult,
+  PatchProposal, PatchFile, PatchHunk, PatchFileAction, ApplyPatchProposalResult, BrowserPreviewResult,
 } from '../types';
 
 interface Props {
@@ -75,6 +76,19 @@ function proposalAcceptedHunkCount(p: PatchProposal): number {
 function basename(p: string): string {
   const parts = p.split('/').filter(Boolean);
   return parts[parts.length - 1] || p;
+}
+
+function proposalTouchesActiveProject(p: PatchProposal, workingDir: string | null): boolean {
+  if (!workingDir || p.workingDir !== workingDir || p.files.length === 0) return false;
+  return p.files.every((f) => {
+    const paths = [f.filePath, f.oldPath].filter(Boolean) as string[];
+    return paths.every((path) => (
+      !path.startsWith('/') &&
+      !path.startsWith('..') &&
+      !path.includes('/../') &&
+      path.trim().length > 0
+    ));
+  });
 }
 
 export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onClearPendingProposal }: Props) {
@@ -263,6 +277,25 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
     }
   }, [selected, updateProposal]);
 
+  const handleIsolate = useCallback(async () => {
+    if (!selected) return;
+    setBusyId('isolate');
+    setActionError(null);
+    setApplyError(null);
+    try {
+      const result = await api.isolatePatchProposal(selected.id);
+      if (result.proposal) updateProposal(result.proposal);
+      if (result.errors.length > 0) {
+        setActionError(result.errors.join('\n'));
+      }
+      refresh();
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to run in isolated worktree');
+    } finally {
+      setBusyId(null);
+    }
+  }, [selected, updateProposal, refresh]);
+
   const handleApply = useCallback(async () => {
     if (!selected) return;
     setBusyId('apply');
@@ -351,7 +384,9 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
               onAcceptAll={handleAcceptAll}
               onRejectAll={handleRejectAll}
               onDiscard={handleDiscard}
+              onIsolate={handleIsolate}
               onApply={handleApply}
+              canIsolate={proposalTouchesActiveProject(selected, workingDir)}
             />
           )}
           {view === 'detail' && !selected && (
@@ -614,7 +649,7 @@ function CreateProposalForm({
 
 function ProposalDetail({
   proposal: p, busyId, actionError, applyResult, applyError,
-  onAcceptHunk, onRejectHunk, onAcceptAll, onRejectAll, onDiscard, onApply,
+  onAcceptHunk, onRejectHunk, onAcceptAll, onRejectAll, onDiscard, onIsolate, onApply, canIsolate,
 }: {
   proposal: PatchProposal;
   busyId: string | null;
@@ -626,12 +661,15 @@ function ProposalDetail({
   onAcceptAll: () => void;
   onRejectAll: () => void;
   onDiscard: () => void;
+  onIsolate: () => void;
   onApply: () => void;
+  canIsolate: boolean;
 }) {
   const isOpen = p.status === 'open';
   const acceptedHunks = proposalAcceptedHunkCount(p);
   const totalHunks = proposalHunkCount(p);
   const canApply = isOpen && acceptedHunks > 0 && busyId !== 'apply';
+  const preview = applyResult?.preview ?? p.preview;
 
   return (
     <div className="patch-detail">
@@ -644,6 +682,14 @@ function ProposalDetail({
         <div className="patch-detail-header-path" title={p.workingDir}>{p.workingDir}</div>
         {p.explanation && (
           <div className="patch-detail-explanation">{p.explanation}</div>
+        )}
+        {p.sandbox && (
+          <div className={`patch-sandbox-banner patch-sandbox-${p.sandbox.status}`}>
+            <GitBranch size={12} />
+            <span>{p.sandbox.status === 'ready' ? 'Isolated in worktree' : `Worktree ${p.sandbox.status}`}</span>
+            <code title={p.sandbox.path}>{basename(p.sandbox.path)}</code>
+            {p.sandbox.error && <span className="patch-sandbox-error">{p.sandbox.error}</span>}
+          </div>
         )}
         <div className="patch-detail-stats">
           <span>{p.files.length} {p.files.length === 1 ? 'file' : 'files'}</span>
@@ -681,20 +727,29 @@ function ProposalDetail({
           className="btn btn-ghost btn-small"
           onClick={onDiscard}
           disabled={!isOpen || busyId === 'discard'}
-          title="Discard this proposal"
+          title={p.sandbox?.status === 'ready' ? 'Discard this proposal and remove the worktree' : 'Discard this proposal'}
         >
           {busyId === 'discard' ? <Loader size={12} className="spin" /> : <Trash2 size={12} />}
           Discard
+        </button>
+        <button
+          className="btn btn-secondary btn-small"
+          onClick={onIsolate}
+          disabled={!isOpen || !canIsolate || acceptedHunks === 0 || busyId === 'isolate' || p.sandbox?.status === 'ready'}
+          title={!canIsolate ? 'Only available for proposals in the active project.' : 'Apply accepted hunks in a temporary git worktree'}
+        >
+          {busyId === 'isolate' ? <Loader size={12} className="spin" /> : <GitBranch size={12} />}
+          Run in isolated worktree
         </button>
         <div style={{ flex: 1 }} />
         <button
           className="btn btn-primary btn-small"
           onClick={onApply}
           disabled={!canApply}
-          title={acceptedHunks === 0 ? 'Accept at least one hunk to apply.' : 'Apply accepted hunks to disk'}
+          title={acceptedHunks === 0 ? 'Accept at least one hunk to apply.' : p.sandbox?.status === 'ready' ? 'Promote accepted hunks to the real working tree and remove the worktree' : 'Apply accepted hunks to disk'}
         >
           {busyId === 'apply' ? <Loader size={12} className="spin" /> : <Play size={12} />}
-          Apply
+          {p.sandbox?.status === 'ready' ? 'Apply to real tree' : 'Apply'}
         </button>
       </div>
 
@@ -711,6 +766,8 @@ function ProposalDetail({
       )}
 
       {applyResult && <ApplyResultView result={applyResult} />}
+
+      {preview && <PreviewResultView preview={preview} />}
 
       <div className="patch-files">
         {p.files.length === 0 && (
@@ -919,6 +976,33 @@ function ApplyResultView({ result }: { result: ApplyPatchProposalResult }) {
             ))}
           </ul>
         </div>
+      )}
+    </div>
+  );
+}
+
+function PreviewResultView({ preview }: { preview: BrowserPreviewResult }) {
+  const imageSrc = preview.screenshotBase64 ? `data:image/png;base64,${preview.screenshotBase64}` : null;
+  return (
+    <div className="patch-preview-result">
+      <div className="patch-preview-header">
+        <Camera size={13} />
+        <span>Browser preview</span>
+        <a href={preview.url} target="_blank" rel="noreferrer">{preview.title || preview.url}</a>
+      </div>
+      {imageSrc ? (
+        <img className="patch-preview-image" src={imageSrc} alt={`Preview of ${preview.url}`} />
+      ) : (
+        <div className="patch-preview-empty">Dev server was reachable, but no screenshot image was captured.</div>
+      )}
+      {preview.errors.length > 0 && (
+        <ul className="patch-preview-errors">
+          {preview.errors.map((err, i) => (
+            <li key={i} className={`patch-preview-${err.type}`}>
+              <AlertTriangle size={11} /> {err.message}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

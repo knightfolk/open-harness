@@ -4720,6 +4720,44 @@ button:focus-visible {
   color: var(--text-tertiary);
 }
 
+.patch-sandbox-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.patch-sandbox-ready,
+.patch-sandbox-promoted {
+  color: var(--accent-success);
+  border-color: color-mix(in srgb, var(--accent-success) 45%, var(--border-primary));
+}
+
+.patch-sandbox-failed {
+  color: var(--accent-error);
+  border-color: color-mix(in srgb, var(--accent-error) 45%, var(--border-primary));
+}
+
+.patch-sandbox-banner code {
+  color: inherit;
+  background: var(--bg-elevated);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10px;
+}
+
+.patch-sandbox-error {
+  color: var(--accent-error);
+  min-width: 100%;
+}
+
 .patch-detail-actions {
   display: flex;
   align-items: center;
@@ -4991,6 +5029,69 @@ button:focus-visible {
   border-radius: 3px;
   font-size: 11px;
 }
+
+.patch-preview-result {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.patch-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.patch-preview-header a {
+  color: var(--accent-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patch-preview-image {
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.patch-preview-empty {
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: 12px;
+}
+
+.patch-preview-errors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.patch-preview-errors li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.patch-preview-error { color: var(--accent-error); }
+.patch-preview-warning { color: var(--accent-warning, #f59e0b); }
 
 /* Spin animation for refresh/loading icons */
 .spin {

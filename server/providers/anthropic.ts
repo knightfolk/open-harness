@@ -28,7 +28,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       stream: true,
       max_tokens: request.max_tokens || 8192,
     };
-    if (systemMsg?.content) body.system = systemMsg.content;
+    if (request.systemInstruction || systemMsg?.content) body.system = request.systemInstruction || systemMsg?.content;
     if (request.temperature != null) body.temperature = request.temperature;
     if (request.tools && request.tools.length > 0) {
       body.tools = request.tools.map(t => ({

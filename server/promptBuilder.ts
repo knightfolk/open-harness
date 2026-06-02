@@ -22,6 +22,10 @@ export interface BuildPromptOptions {
 
 export interface PromptBuildResult {
   systemPrompt: string;
+  systemInstruction: {
+    target: 'system-message' | 'anthropic-system' | 'gemini-systemInstruction';
+    content: string;
+  };
   adaptedTools: any[] | undefined;
   generationConfig: {
     temperature: number;
@@ -76,6 +80,14 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
 
   return {
     systemPrompt,
+    systemInstruction: {
+      target: config.family === 'anthropic'
+        ? 'anthropic-system'
+        : config.family === 'gemini'
+          ? 'gemini-systemInstruction'
+          : 'system-message',
+      content: systemPrompt,
+    },
     adaptedTools,
     generationConfig: {
       temperature,

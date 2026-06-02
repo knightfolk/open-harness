@@ -23,7 +23,14 @@ export class GeminiAdapter implements ProviderAdapter {
     const url = this.buildURL(options.baseURL, options.apiKey, request.model, useStream);
 
     const contents = this.convertMessages(request.messages);
+    const systemInstruction = request.systemInstruction || request.messages
+      .filter(msg => msg.role === 'system' && msg.content)
+      .map(msg => msg.content)
+      .join('\n\n');
     const body: any = { contents, generationConfig: {} };
+    if (systemInstruction) {
+      body.systemInstruction = { parts: [{ text: systemInstruction }] };
+    }
     if (request.max_tokens) body.generationConfig.maxOutputTokens = request.max_tokens;
     if (request.temperature != null) body.generationConfig.temperature = request.temperature;
     if (request.tools && request.tools.length > 0) {

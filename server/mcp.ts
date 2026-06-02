@@ -37,6 +37,43 @@ interface MCPMessage {
   error?: { code: number; message: string; data?: any };
 }
 
+function createMcpStderrLogger(name: string): (chunk: Buffer) => void {
+  let multilineJson: { label: string; lines: number; started: boolean } | null = null;
+  const isMultilineJsonBanner = (line: string) =>
+    /^(Initialize request|Read profile|Read profile response|.* payload):/i.test(line);
+  const isJsonPayloadLine = (line: string) =>
+    /^[{}[\],]+$/.test(line) ||
+    /^"?[\w.-]+"?\s*:/.test(line) ||
+    /^"[^"]*"\s*,?$/.test(line) ||
+    /^(true|false|null|\d+)\s*,?$/.test(line);
+  const finish = () => {
+    if (!multilineJson) return;
+    console.error(`[MCP:${name}] ${multilineJson.label} (${multilineJson.lines} JSON lines)`);
+    multilineJson = null;
+  };
+
+  return (chunk: Buffer) => {
+    for (const rawLine of chunk.toString().split('\n')) {
+      const line = rawLine.trim().replace(/^[->]\s+/, '');
+      if (!line) continue;
+      if (multilineJson) {
+        if (isJsonPayloadLine(line)) {
+          multilineJson.started = true;
+          multilineJson.lines++;
+          continue;
+        }
+        if (multilineJson.started) finish();
+        else multilineJson = null;
+      }
+      if (isMultilineJsonBanner(line)) {
+        multilineJson = { label: line.replace(/:$/, ''), lines: 0, started: false };
+        continue;
+      }
+      console.error(`[MCP:${name}] ${line}`);
+    }
+  };
+}
+
 // ── MCP Client ────────────────────────────────────────
 
 class MCPClient {
@@ -96,10 +133,8 @@ class MCPClient {
           this.processBuffer();
         });
 
-        this.process.stderr!.on('data', (chunk: Buffer) => {
-          // Log MCP server stderr but don't crash
-          console.error(`[MCP:${this.name}] ${chunk.toString().trim()}`);
-        });
+        const logStderr = createMcpStderrLogger(this.name);
+        this.process.stderr!.on('data', logStderr);
 
         // Initialize the connection
         this.sendRequest('initialize', {
@@ -341,9 +376,8 @@ class StdioMCPClient {
         this.processBuffer();
       });
 
-      this.process.stderr?.on('data', (chunk: Buffer) => {
-        console.error('[MCP:' + this.name + '] ' + chunk.toString().trim());
-      });
+      const logStderr = createMcpStderrLogger(this.name);
+      this.process.stderr?.on('data', logStderr);
 
       this.process.on('error', (err) => {
         this.lastError = err.message;

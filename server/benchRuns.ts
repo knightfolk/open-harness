@@ -4,7 +4,7 @@ import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { v4 as uuid } from 'uuid';
 
-import type { EvalScores } from './evals';
+import { buildScoreBreakdown, type EvalScores, type EvalScoreBreakdown } from './evals';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -38,7 +38,9 @@ export interface BenchRunResult {
 
 export interface BenchScores extends EvalScores {
   validationPassed: boolean;
-  validationScore: number; // 0-10, weighted above heuristics
+  validationScore: number;
+  styleScore: number;
+  breakdown: EvalScoreBreakdown;
   resolvedStatus: 'resolved' | 'unresolved' | 'partial';
   stepCount: number;
   tokenCount: number;
@@ -58,6 +60,25 @@ export interface BenchRun {
   createdAt: string;
   completedAt?: string;
   summary?: BenchSummary;
+  previousDelta?: BenchRunDelta | null;
+}
+
+export interface BenchRunDelta {
+  previousRunId: string;
+  previousRunName: string;
+  previousCreatedAt: string;
+  avgScoreDelta: number;
+  avgScoreDeltaPct: number;
+  avgValidationDelta: number;
+  avgStyleDelta: number;
+  taskDeltas: Array<{
+    taskId: string;
+    taskName: string;
+    modelId: string;
+    currentScore: number;
+    previousScore: number;
+    delta: number;
+  }>;
 }
 
 export interface BenchSummary {
@@ -163,23 +184,27 @@ export function computeBenchScores(params: {
   const avoidedHallucinatedPaths = !response.toLowerCase().includes('file not found');
   const producedSummary = response.length > 300;
 
-  // Base score from heuristics (max 5 points)
-  let heuristicScore = 0;
-  if (usedTools) heuristicScore += 1;
-  if (answeredUser) heuristicScore += 1;
-  if (referencedRealFiles) heuristicScore += 1;
-  if (avoidedHallucinatedPaths) heuristicScore += 0.5;
-  if (producedSummary) heuristicScore += 0.5;
-  if (wallMs < 30_000) heuristicScore += 0.5;
-  if (toolCalls.length >= 1 && toolCalls.length <= 15) heuristicScore += 0.5;
-
-  // Validation score (max 5 points — weighted above heuristics)
   const validationPassed = validationResults.length === 0 || validationResults.every(r => r.passed);
   const validationScore = validationResults.length > 0
-    ? (validationResults.filter(r => r.passed).length / validationResults.length) * 5
-    : 2.5; // No validation commands = neutral score
+    ? (validationResults.filter(r => r.passed).length / validationResults.length) * 2
+    : 1; // No validation commands = neutral runtime signal
+  const toolRuntimeScore = usedTools ? 1.5 : 0;
+  const styleScore =
+    (producedSummary ? 0.8 : 0) +
+    (wallMs < 30_000 ? 0.5 : 0) +
+    (toolCalls.length >= 1 && toolCalls.length <= 15 ? 0.2 : 0);
+  const breakdown = buildScoreBreakdown([
+    { id: 'answered-user', label: 'Answered user', category: 'structural', passed: answeredUser, score: answeredUser ? 2 : 0, maxScore: 2 },
+    { id: 'real-files', label: 'Referenced real files', category: 'structural', passed: referencedRealFiles, score: referencedRealFiles ? 1.5 : 0, maxScore: 1.5 },
+    { id: 'no-missing-paths', label: 'Avoided missing paths', category: 'structural', passed: avoidedHallucinatedPaths, score: avoidedHallucinatedPaths ? 1 : 0, maxScore: 1 },
+    { id: 'validation-commands', label: 'Validation commands', category: 'runtime', passed: validationPassed, score: validationScore, maxScore: 2 },
+    { id: 'tool-use', label: 'Used tools', category: 'runtime', passed: usedTools, score: toolRuntimeScore, maxScore: 1.5 },
+    { id: 'summary', label: 'Produced summary', category: 'style', passed: producedSummary, score: producedSummary ? 0.8 : 0, maxScore: 0.8 },
+    { id: 'latency', label: 'Responsive latency', category: 'style', passed: wallMs < 30_000, score: wallMs < 30_000 ? 0.5 : 0, maxScore: 0.5 },
+    { id: 'tool-efficiency', label: 'Tool efficiency', category: 'style', passed: toolCalls.length >= 1 && toolCalls.length <= 15, score: toolCalls.length >= 1 && toolCalls.length <= 15 ? 0.2 : 0, maxScore: 0.2 },
+  ]);
 
-  const overallScore = Math.min(10, Math.round((heuristicScore + validationScore) * 10) / 10);
+  const overallScore = Math.min(10, breakdown.total);
 
   // Resolved status
   let resolvedStatus: BenchScores['resolvedStatus'] = 'unresolved';
@@ -197,6 +222,8 @@ export function computeBenchScores(params: {
     overallScore,
     validationPassed,
     validationScore: Math.round(validationScore * 10) / 10,
+    styleScore: Math.round(styleScore * 10) / 10,
+    breakdown,
     resolvedStatus,
     stepCount,
     tokenCount,
@@ -241,6 +268,81 @@ export function getBenchRun(id: string): BenchRun | null {
   } catch {
     return null;
   }
+}
+
+function listFullBenchRuns(): BenchRun[] {
+  if (!existsSync(BENCH_DIR)) return [];
+  return readdirSync(BENCH_DIR)
+    .filter(f => f.endsWith('.json'))
+    .map(f => {
+      try {
+        return JSON.parse(readFileSync(join(BENCH_DIR, f), 'utf-8')) as BenchRun;
+      } catch {
+        return null;
+      }
+    })
+    .filter((run): run is BenchRun => run !== null);
+}
+
+function taskSignature(run: BenchRun): string {
+  return [...run.taskIds].sort().join('|');
+}
+
+function avg(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  return nums.reduce((sum, n) => sum + n, 0) / nums.length;
+}
+
+function roundDelta(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+export function getPreviousRunDelta(run: BenchRun): BenchRunDelta | null {
+  const prior = listFullBenchRuns()
+    .filter(candidate => candidate.id !== run.id && candidate.status === 'complete')
+    .filter(candidate => new Date(candidate.createdAt).getTime() < new Date(run.createdAt).getTime())
+    .filter(candidate => {
+      if (run.suiteId || candidate.suiteId) return run.suiteId === candidate.suiteId;
+      return taskSignature(run) === taskSignature(candidate);
+    })
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+  if (!prior) return null;
+
+  const currentAvg = avg(run.results.map(r => r.scores.overallScore));
+  const previousAvg = avg(prior.results.map(r => r.scores.overallScore));
+  const currentValidation = avg(run.results.map(r => r.scores.validationScore));
+  const previousValidation = avg(prior.results.map(r => r.scores.validationScore));
+  const currentStyle = avg(run.results.map(r => r.scores.breakdown?.style ?? 0));
+  const previousStyle = avg(prior.results.map(r => r.scores.breakdown?.style ?? 0));
+  const previousByTask = new Map<string, BenchRunResult>();
+  for (const r of prior.results) previousByTask.set(`${r.taskId}:${r.modelId}`, r);
+
+  const taskDeltas = run.results
+    .map(r => {
+      const prev = previousByTask.get(`${r.taskId}:${r.modelId}`);
+      if (!prev) return null;
+      return {
+        taskId: r.taskId,
+        taskName: r.taskName,
+        modelId: r.modelId,
+        currentScore: r.scores.overallScore,
+        previousScore: prev.scores.overallScore,
+        delta: roundDelta(r.scores.overallScore - prev.scores.overallScore),
+      };
+    })
+    .filter((d): d is BenchRunDelta['taskDeltas'][number] => d !== null);
+
+  return {
+    previousRunId: prior.id,
+    previousRunName: prior.name,
+    previousCreatedAt: prior.createdAt,
+    avgScoreDelta: roundDelta(currentAvg - previousAvg),
+    avgScoreDeltaPct: roundDelta((currentAvg - previousAvg) * 10),
+    avgValidationDelta: roundDelta(currentValidation - previousValidation),
+    avgStyleDelta: roundDelta(currentStyle - previousStyle),
+    taskDeltas,
+  };
 }
 
 export function listBenchRuns(): Array<Pick<BenchRun, 'id' | 'name' | 'status' | 'total' | 'completed' | 'createdAt' | 'completedAt' | 'suiteId'>> {

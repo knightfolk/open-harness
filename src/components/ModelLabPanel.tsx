@@ -365,6 +365,10 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                   )}
                 </div>
 
+                {selectedBenchRun.previousDelta && (
+                  <BenchDeltaCallout delta={selectedBenchRun.previousDelta} />
+                )}
+
                 {/* Bench Summary */}
                 {selectedBenchRun.summary && (
                   <div style={{ marginBottom: 12, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6 }}>
@@ -384,11 +388,13 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                             {' · '}<span style={{ color: '#ef4444' }}>{data.unresolved} failed</span>
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                            Score: {data.avgScore}/10 · Validation: {data.avgValidationScore}/5 · Latency: {(data.avgLatencyMs / 1000).toFixed(1)}s
+                            Score: {data.avgScore}/10 · Validation: {data.avgValidationScore}/2 · Latency: {(data.avgLatencyMs / 1000).toFixed(1)}s
                           </div>
+                          <StackedScoreBreakdown breakdown={averageBreakdown(selectedBenchRun.results.filter(r => r.modelId === modelId))} />
                         </div>
                       ))}
                     </div>
+                    <WeakestSignalCallout results={selectedBenchRun.results} />
                     {selectedBenchRun.summary.regressionFlags.length > 0 && (
                       <div style={{ marginTop: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 600, color: '#ef4444', marginBottom: 4 }}>
@@ -404,6 +410,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                   </div>
                 )}
 
+                <PerTaskScoreTable run={selectedBenchRun} />
+
                 {/* Per-result table */}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                   <thead>
@@ -412,6 +420,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                       <th style={thStyle}>Model</th>
                       <th style={thStyle}>Status</th>
                       <th style={thStyle}>Score</th>
+                      <th style={thStyle}>Breakdown</th>
+                      <th style={thStyle}>Weakest</th>
                       <th style={thStyle}>Validation</th>
                       <th style={thStyle}>Latency</th>
                     </tr>
@@ -427,6 +437,10 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                         <td style={{ ...tdStyle, color: scoreColor(r.scores.overallScore) }}>
                           {r.scores.overallScore}/10
                         </td>
+                        <td style={tdStyle}>
+                          <StackedScoreBreakdown breakdown={r.scores.breakdown} compact />
+                        </td>
+                        <td style={tdStyle}>{r.scores.breakdown?.weakestSignal?.label ?? '—'}</td>
                         <td style={{ ...tdStyle, color: r.validationPassed ? '#22c55e' : '#ef4444' }}>
                           {r.validationResults.length > 0 ? (r.validationPassed ? '✓ Pass' : '✗ Fail') : '—'}
                         </td>
@@ -485,9 +499,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                             {' · '}Latency: {(data.avgLatencyMs / 1000).toFixed(1)}s
                             {' · '}Tools: {data.avgToolCount}
                           </div>
+                          <StackedScoreBreakdown breakdown={averageBreakdown(selectedReport.results.filter(r => r.modelId === modelId))} />
                         </div>
                       ))}
                     </div>
+                    <WeakestSignalCallout results={selectedReport.results} />
                     {selectedReport.summary.recommendations.length > 0 && (
                       <div style={{ marginTop: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 4 }}>Recommendations</div>
@@ -507,6 +523,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                       <th style={thStyle}>Model</th>
                       <th style={thStyle}>Prompt</th>
                       <th style={thStyle}>Score</th>
+                      <th style={thStyle}>Breakdown</th>
+                      <th style={thStyle}>Weakest</th>
                       <th style={thStyle}>Latency</th>
                       <th style={thStyle}>Tools</th>
                       <th style={thStyle}>Status</th>
@@ -518,6 +536,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                         <td style={tdStyle}>{r.modelId}</td>
                         <td style={tdStyle}>{r.promptName}</td>
                         <td style={{ ...tdStyle, color: scoreColor(r.scores.overallScore) }}>{r.scores.overallScore}/10</td>
+                        <td style={tdStyle}><StackedScoreBreakdown breakdown={r.scores.breakdown} compact /></td>
+                        <td style={tdStyle}>{r.scores.breakdown?.weakestSignal?.label ?? '—'}</td>
                         <td style={tdStyle}>{(r.wallMs / 1000).toFixed(1)}s</td>
                         <td style={tdStyle}>{r.toolCallCount}</td>
                         <td style={{ ...tdStyle, color: r.status === 'ok' ? 'var(--accent-success)' : 'var(--accent-error)' }}>{r.status}</td>
@@ -580,6 +600,133 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 }
 
 // ── Shared sub-components ──────────────────────────────
+
+function averageBreakdown(results: Array<{ scores: api.EvalScores }>): api.EvalScoreBreakdown {
+  const count = results.length || 1;
+  const structural = results.reduce((sum, r) => sum + (r.scores.breakdown?.structural ?? 0), 0) / count;
+  const runtime = results.reduce((sum, r) => sum + (r.scores.breakdown?.runtime ?? 0), 0) / count;
+  const style = results.reduce((sum, r) => sum + (r.scores.breakdown?.style ?? 0), 0) / count;
+  const weakest = results
+    .flatMap(r => r.scores.breakdown?.signals ?? [])
+    .sort((a, b) => (a.score / a.maxScore) - (b.score / b.maxScore))[0] ?? {
+      id: 'none',
+      label: 'No signals',
+      category: 'style' as const,
+      passed: false,
+      score: 0,
+      maxScore: 1,
+    };
+  return {
+    structural: Math.round(structural * 10) / 10,
+    runtime: Math.round(runtime * 10) / 10,
+    style: Math.round(style * 10) / 10,
+    total: Math.round((structural + runtime + style) * 10) / 10,
+    weakestSignal: weakest,
+    signals: [],
+  };
+}
+
+function StackedScoreBreakdown({ breakdown, compact = false }: { breakdown?: api.EvalScoreBreakdown; compact?: boolean }) {
+  if (!breakdown) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
+  const total = Math.max(10, breakdown.structural + breakdown.runtime + breakdown.style);
+  const height = compact ? 6 : 8;
+  return (
+    <div style={{ marginTop: compact ? 0 : 6, minWidth: compact ? 90 : 0 }}>
+      <div style={{ display: 'flex', height, borderRadius: 999, overflow: 'hidden', background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
+        <div title={`Structural ${breakdown.structural}/4.5`} style={{ width: `${(breakdown.structural / total) * 100}%`, background: 'var(--accent-primary)' }} />
+        <div title={`Runtime ${breakdown.runtime}/3.5`} style={{ width: `${(breakdown.runtime / total) * 100}%`, background: '#22c55e' }} />
+        <div title={`Style ${breakdown.style}/2`} style={{ width: `${(breakdown.style / total) * 100}%`, background: '#f59e0b' }} />
+      </div>
+      {!compact && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 9, color: 'var(--text-tertiary)' }}>
+          <span>Structural {breakdown.structural}</span>
+          <span>Runtime {breakdown.runtime}</span>
+          <span>Style {breakdown.style}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WeakestSignalCallout({ results }: { results: Array<{ scores: api.EvalScores }> }) {
+  const weakest = averageBreakdown(results).weakestSignal;
+  return (
+    <div style={{ marginTop: 8, padding: 6, borderRadius: 4, background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', fontSize: 10 }}>
+      Weakest signal: <span style={{ color: weakest.passed ? 'var(--accent-success)' : 'var(--accent-error)', fontWeight: 600 }}>{weakest.label}</span>
+      <span style={{ color: 'var(--text-tertiary)' }}> · {weakest.score}/{weakest.maxScore}</span>
+    </div>
+  );
+}
+
+function BenchDeltaCallout({ delta }: { delta: NonNullable<api.BenchRun['previousDelta']> }) {
+  const positive = delta.avgScoreDelta >= 0;
+  return (
+    <div style={{ marginBottom: 12, padding: 8, borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+        Compared with previous run
+      </div>
+      <div style={{ fontSize: 12, color: positive ? 'var(--accent-success)' : 'var(--accent-error)', fontWeight: 600 }}>
+        {positive ? '+' : ''}{delta.avgScoreDeltaPct}% score ({positive ? '+' : ''}{delta.avgScoreDelta}/10)
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+        vs {delta.previousRunName} · validation {formatSigned(delta.avgValidationDelta)} · style {formatSigned(delta.avgStyleDelta)}
+      </div>
+    </div>
+  );
+}
+
+function PerTaskScoreTable({ run }: { run: api.BenchRun }) {
+  const rows = [...new Set(run.results.map(r => r.taskId))].map(taskId => {
+    const taskResults = run.results.filter(r => r.taskId === taskId);
+    const first = taskResults[0];
+    const avgScore = taskResults.reduce((sum, r) => sum + r.scores.overallScore, 0) / (taskResults.length || 1);
+    const avgValidation = taskResults.reduce((sum, r) => sum + r.scores.validationScore, 0) / (taskResults.length || 1);
+    const avgStyle = taskResults.reduce((sum, r) => sum + (r.scores.breakdown?.style ?? 0), 0) / (taskResults.length || 1);
+    const delta = run.previousDelta?.taskDeltas.find(d => d.taskId === taskId);
+    return {
+      taskId,
+      taskName: first?.taskName ?? taskId,
+      avgScore: Math.round(avgScore * 10) / 10,
+      avgValidation: Math.round(avgValidation * 10) / 10,
+      avgStyle: Math.round(avgStyle * 10) / 10,
+      delta: delta?.delta,
+    };
+  });
+  if (rows.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={sectionLabelStyle}>Per-task scores</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
+            <th style={thStyle}>Task</th>
+            <th style={thStyle}>Avg score</th>
+            <th style={thStyle}>Validation</th>
+            <th style={thStyle}>Style</th>
+            <th style={thStyle}>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.taskId} style={{ borderBottom: '1px solid var(--border-primary)' }}>
+              <td style={tdStyle}>{row.taskName}</td>
+              <td style={{ ...tdStyle, color: scoreColor(row.avgScore) }}>{row.avgScore}/10</td>
+              <td style={tdStyle}>{row.avgValidation}</td>
+              <td style={tdStyle}>{row.avgStyle}</td>
+              <td style={{ ...tdStyle, color: row.delta == null ? 'var(--text-tertiary)' : row.delta >= 0 ? 'var(--accent-success)' : 'var(--accent-error)' }}>
+                {row.delta == null ? '—' : formatSigned(row.delta)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatSigned(n: number): string {
+  return `${n >= 0 ? '+' : ''}${n}`;
+}
 
 function ModelSelection({ models, selected, onToggle, onSelectAll }: {
   models: Array<{ id: string; name: string }>;

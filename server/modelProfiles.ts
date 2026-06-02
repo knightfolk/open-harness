@@ -26,6 +26,8 @@ export interface ModelPromptConfig {
 // ── Family detection ───────────────────────────────────
 
 const FAMILY_PATTERNS: Array<[RegExp, string]> = [
+  [/\bclaude\b|\banthropic\b/i, 'anthropic'],
+  [/\bgemini\b|\bgoogle\b/i, 'gemini'],
   [/\bdeepseek\b/i, 'deepseek'],
   [/\bllama\b/i, 'llama'],
   [/qwen[\d._-]?/i, 'qwen'],
@@ -58,6 +60,44 @@ export function detectModelFamily(modelId: string): string {
 // ── Family configs ─────────────────────────────────────
 
 export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
+  anthropic: {
+    family: 'anthropic',
+    systemPromptStyle: 'xml-tagged',
+    maxSystemPromptTokens: 4000,
+    contextWindowTokens: 200000,
+    toolCallQuality: 'excellent',
+    preferNativeToolCalls: true,
+    reasoningSupport: 'none',
+    defaultCodingTemperature: 0.1,
+    needsExplicitCotTrigger: false,
+    stopSequences: [],
+    recommendedMaxTokens: 16384,
+    repeatInstructionsInUserMsg: false,
+    defaultRole: 'coder',
+    quirks: [
+      'Uses top-level Messages API system field rather than a system message',
+      'XML-tagged instructions and examples work well for Claude 3.5+',
+    ],
+  },
+  gemini: {
+    family: 'gemini',
+    systemPromptStyle: 'structured',
+    maxSystemPromptTokens: 4000,
+    contextWindowTokens: 1000000,
+    toolCallQuality: 'good',
+    preferNativeToolCalls: true,
+    reasoningSupport: 'none',
+    defaultCodingTemperature: 0.1,
+    needsExplicitCotTrigger: false,
+    stopSequences: [],
+    recommendedMaxTokens: 32768,
+    repeatInstructionsInUserMsg: false,
+    defaultRole: 'coder',
+    quirks: [
+      'Uses top-level systemInstruction instead of system-role contents',
+      'Long-context models benefit from larger history budgets',
+    ],
+  },
   deepseek: {
     family: 'deepseek',
     systemPromptStyle: 'structured',
@@ -348,7 +388,18 @@ export const MODEL_FAMILY_CONFIGS: Record<string, ModelPromptConfig> = {
 /** Get the full prompt config for a model by detecting its family. */
 export function getModelConfig(modelId: string): ModelPromptConfig {
   const family = detectModelFamily(modelId);
-  return MODEL_FAMILY_CONFIGS[family] || MODEL_FAMILY_CONFIGS['unknown'];
+  const base = MODEL_FAMILY_CONFIGS[family] || MODEL_FAMILY_CONFIGS['unknown'];
+  const lower = modelId.toLowerCase();
+  if (family === 'gemini' && /gemini-1\.5-pro/.test(lower)) {
+    return { ...base, contextWindowTokens: 2000000, recommendedMaxTokens: 32768 };
+  }
+  if (family === 'gemini' && /gemini-1\.5-flash/.test(lower)) {
+    return { ...base, contextWindowTokens: 1000000, recommendedMaxTokens: 32768 };
+  }
+  if (family === 'anthropic' && /claude-3[-.]5|claude-3-7|claude-sonnet-4|claude-opus-4/.test(lower)) {
+    return { ...base, contextWindowTokens: 200000, recommendedMaxTokens: 16384 };
+  }
+  return base;
 }
 
 /** Check if a model is a reasoning/thinking model. */
@@ -366,14 +417,14 @@ export function isReasoningModel(modelId: string): boolean {
 /** Get ordered model family recommendations for a given agent role. */
 export function getRoleModelRecommendation(role: string): string[] {
   const recommendations: Record<string, string[]> = {
-    coder: ['qwen', 'deepseek', 'devstral', 'codestral', 'mistral', 'minimax'],
+    coder: ['anthropic', 'gemini', 'qwen', 'deepseek', 'devstral', 'codestral', 'mistral', 'minimax'],
     reasoner: ['deepseek', 'qwen', 'grok', 'mistral'],
     summarizer: ['deepseek', 'mistral', 'qwen', 'gemma', 'nemotron'],
     title: ['mistral', 'deepseek', 'qwen', 'gemma', 'phi'],
     planner: ['deepseek', 'qwen', 'grok', 'mistral'],
     reviewer: ['qwen', 'deepseek', 'devstral', 'mistral'],
     worker: ['qwen', 'deepseek', 'nemotron', 'mistral'],
-    longcontext: ['llama', 'deepseek', 'qwen', 'cohere'],
+    longcontext: ['gemini', 'anthropic', 'llama', 'deepseek', 'qwen', 'cohere'],
   };
   return recommendations[role] || recommendations['coder'];
 }

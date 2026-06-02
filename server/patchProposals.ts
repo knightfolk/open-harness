@@ -72,9 +72,30 @@ export interface PatchProposal {
   files: PatchFileRecord[];
   verificationCommands: string[];
   status: 'open' | 'applied' | 'discarded' | 'failed';
+  sandbox?: PatchProposalSandbox;
+  preview?: PatchProposalPreview;
   appliedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PatchProposalSandbox {
+  worktreeId: string;
+  path: string;
+  root: string;
+  status: 'ready' | 'promoted' | 'discarded' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
+}
+
+export interface PatchProposalPreview {
+  url: string;
+  screenshotPath: string;
+  screenshotBase64?: string;
+  title?: string;
+  timestamp: string;
+  errors: Array<{ type: 'error' | 'warning'; message: string; source?: string; line?: number }>;
 }
 
 function rollupStatus(hunks: PatchHunkRecord[]): HunkStatus {
@@ -241,6 +262,48 @@ export function recordApplyResult(
   p.status = result.status;
   p.appliedAt = new Date().toISOString();
   p.updatedAt = p.appliedAt;
+  persist(p);
+  return p;
+}
+
+export function recordSandbox(
+  id: string,
+  sandbox: PatchProposalSandbox,
+): PatchProposal | null {
+  const p = getProposal(id);
+  if (!p) return null;
+  p.sandbox = sandbox;
+  p.updatedAt = new Date().toISOString();
+  persist(p);
+  return p;
+}
+
+export function updateSandboxStatus(
+  id: string,
+  status: PatchProposalSandbox['status'],
+  error?: string,
+): PatchProposal | null {
+  const p = getProposal(id);
+  if (!p || !p.sandbox) return p;
+  p.sandbox = {
+    ...p.sandbox,
+    status,
+    updatedAt: new Date().toISOString(),
+    error,
+  };
+  p.updatedAt = p.sandbox.updatedAt;
+  persist(p);
+  return p;
+}
+
+export function recordPreview(
+  id: string,
+  preview: PatchProposalPreview,
+): PatchProposal | null {
+  const p = getProposal(id);
+  if (!p) return null;
+  p.preview = preview;
+  p.updatedAt = new Date().toISOString();
   persist(p);
   return p;
 }
