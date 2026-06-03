@@ -222,6 +222,100 @@ export function startBackgroundAgent(
   return handle;
 }
 
+
+/**
+ * Run a single agent phase synchronously (awaits internally).
+ * Unlike startBackgroundAgent, this allows non-backgroundSafe profiles
+ * (since the orchestrator is running as part of an interactive chat turn,
+ * not as an unattended background task).
+ * Returns the artifact directly instead of a handle.
+ */
+export async function runAgentPhase(
+  config: StoredConfig,
+  req: BackgroundAgentRequest & { profileId: AgentProfileId },
+): Promise<BackgroundAgentArtifact> {
+  const profile = getAgentProfile(req.profileId);
+  if (!profile) {
+    throw new Error(`Unknown agent profile: ${req.profileId}`);
+  }
+  const modelId = resolveModelId(config, profile.preferredRole, req.modelId);
+  if (!modelId) {
+    throw new Error('No model is configured for this agent');
+  }
+  const provider = pickProviderForModel(config, modelId);
+  if (!provider) {
+    throw new Error('No provider is configured');
+  }
+
+  const id = uuid();
+  const controller = new AbortController();
+  if (req.signal) {
+    req.signal.addEventListener('abort', () => controller.abort());
+  }
+
+  const startedAt = new Date().toISOString();
+  const systemPrompt = buildProfileSystemPrompt(profile, req.workingDir);
+  const notes: string[] = [];
+  notes.push(`profile=${profile.id} model=${modelId} provider=${provider.providerId}`);
+
+  const artifact: BackgroundAgentArtifact = {
+    id,
+    profileId: profile.id,
+    prompt: req.prompt,
+    modelId,
+    response: '',
+    startedAt,
+    completedAt: '',
+    durationMs: 0,
+    status: 'complete',
+    notes,
+  };
+
+  try {
+    const { apiKey } = provider;
+    const url = buildChatURL(provider);
+    const body = {
+      model: modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: req.prompt },
+      ],
+      stream: false,
+      temperature: profile.temperature,
+    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Provider returned ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const data = await res.json() as any;
+    const choice = data.choices?.[0];
+    const text = choice?.message?.content || data.content?.[0]?.text || '';
+    artifact.response = typeof text === 'string' ? text : JSON.stringify(text);
+  } catch (err: any) {
+    if (controller.signal.aborted) {
+      artifact.status = 'cancelled';
+    } else {
+      artifact.status = 'error';
+      artifact.error = err?.message || 'Agent run failed';
+    }
+  } finally {
+    artifact.completedAt = new Date().toISOString();
+    artifact.durationMs = new Date(artifact.completedAt).getTime() - new Date(startedAt).getTime();
+  }
+
+  return artifact;
+}
+
+
 function buildChatURL(provider: { baseURL: string; providerType: string }): string {
   const base = provider.baseURL.replace(/\/+$/, '');
   if (provider.providerType === 'anthropic') {

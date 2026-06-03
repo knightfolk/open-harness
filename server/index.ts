@@ -29,7 +29,7 @@ import {
 import { routeRequest, routeWithAutoRouter } from './router';
 import type { RouteDecision } from './router';
 import { configureAutoRouter, getAutoRouterState, clearRouterCache, getAvailableCandidates, checkRouterHealth } from './autoRouter';
-import { orchestrationInstruction, orchestrationTraceSteps } from './orchestrator';
+import { orchestrationInstruction, orchestrationTraceSteps, runOrchestratorPipeline } from './orchestrator';
 import type { ProjectProfile } from './projectProfile';
 import { appendRunStep, completeHarnessRun, createHarnessRun } from './runTrace';
 import type { HarnessRun, HarnessRunStep } from './runTrace';
@@ -1592,7 +1592,39 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     });
   }
 
-  if (!resolved) {
+  // Non-direct modes run multi-agent orchestration instead of single-stream model
+  if (route.mode !== 'direct' && resolved) {
+    // Emit orchestration step headers
+    for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
+
+    try {
+      const orchResult = await runOrchestratorPipeline(route, content, appConfig, session.workingDir || undefined);
+
+      // Emit per-phase run steps
+      for (const phase of orchResult.phases) {
+        emitRunStep(res, run, {
+          type: 'orchestration',
+          mode: route.mode,
+          label: phase.label,
+          detail: `model=${phase.modelId} status=${phase.status} duration=${phase.durationMs}ms`,
+        });
+      }
+
+      // Stream the final text
+      const finalText = orchResult.finalText || '(no output)';
+      writeSSE(res, 'orchestration_text', { text: finalText });
+
+      // Write full response
+      writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: finalText });
+
+      if (run) emitRunStep(res, run, { type: 'final_answer', chars: finalText.length });
+      if (!orchResult.ok) run.status = 'error';
+    } catch (err: any) {
+      console.error('[orchestrator] pipeline error:', err);
+      writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: `Orchestration failed: ${err?.message || err}` });
+      if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err?.message || 'Orchestration failed' }); }
+    }
+  } else if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session, run);
   } else {
     await streamModel(resolved.chatURL, resolved.apiKey, resolved.providerId, session.messages, res, assistantId, session, undefined, run, route);
