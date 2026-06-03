@@ -7,27 +7,27 @@ Use this document for work assignment, issue creation, milestone planning, and p
 
 ## Correctness Review — 2026-06-01
 
-This revision reconciles the roadmap with the current repo state after the Phase 1–12 implementation push and adds the onboarding / MCP setup work requested on 2026-06-01.
+This revision reconciles the roadmap with the current repo state after the Phase 1–12 implementation push, the Assignment 0 onboarding/MCP work, the native-adapter follow-up, and the final documentation reconciliation on 2026-06-01.
 
 ### Confirmed complete from code inspection
 
 - Milestones 1–3 and 7 are reflected by dedicated modules, API wiring, UI state, and persistence code.
 - Milestone 4 is mostly implemented: real terminal sessions, git status/diff/stage/unstage/commit routes, diff actions, browser screenshots, browser health checks, and screenshot-to-chat actions exist.
-- Milestone 5 is mounted in the layout and eval reports already persist under `~/.openharness/evals/reports`; deterministic validation score plumbing exists but still needs final weighting and UI/report polish.
+- Milestone 5 is mounted in the layout and eval reports already persist under `~/.openharness/evals/reports`; deterministic validation score plumbing, weighted score breakdowns, weakest-signal callouts, and bench previous-run deltas exist. Saved-run replay and broader report export polish remain open.
 - Milestone 6 has trust modes, policy checks, command-risk reasons, and a visible trust-mode badge.
 - Milestone 8 has the universal provider adapter shape, registry, native Anthropic/Gemini adapters, OpenAI-compatible support, and local provider discovery.
 - Milestone 10 has task-suite, benchmark-run, validation-result, export, and reporting support in code, but saved-run replay and previous-run comparison remain open.
 - Milestone 11 is materially implemented: `server/repoMap.ts` exists, repo maps are injected into prompts, run traces include repo-map/context-pack steps, and `FilesPanel.tsx` shows a Project Cortex repo-map preview.
 - Milestone 12 is partially implemented: `server/checkpoints.ts`, checkpoint APIs, process-ledger APIs, and `SafetyPanel.tsx` exist. Isolated git worktrees and promotion/discard UX are still open.
 - Milestone 15 is more advanced than the old roadmap stated: `server/patchProposals.ts`, proposal APIs, `PatchReviewPanel.tsx`, and client API/types exist for file/hunk review and post-apply validation. Remaining work is integration polish, inline comments, and release workflow.
-- Current onboarding exists in `src/components/OnboardingWizard.tsx`, but it is single-provider-first and does not yet guide users through multi-provider setup, default agent behavior, Docker readiness, or suggested MCP profiles.
+- Current onboarding in `src/components/OnboardingWizard.tsx` now supports multi-provider setup, local-provider detection, default agent personality, trust mode, Docker readiness, and a final review page. Remaining onboarding work is optimization preference selection, role override before finish, partial-setup resume, and sharper failure recovery copy.
 
 ### Remaining correctness gaps before calling Phase 1–8 fully closed
 
 - Patch proposal review now has server and UI foundations, but the workflow still needs smoother proposal creation from chat, clearer empty states, run-trace links, and visual verification of hunk toggles.
-- Eval scoring records validation signals in parts of the codebase, but validation needs to be weighted above style heuristics in reports and surfaced consistently in the Model Lab.
+- Eval scoring now has weighted structural/runtime/style breakdowns and Model Lab UI support. Remaining eval work is saved-run replay, export/report polish, and making token/cost estimates real instead of placeholders.
 - Existing MiniMax compatibility should be verified with a credential-backed live smoke test before marking the provider acceptance item complete.
-- Docker MCP auto-start exists in `server/index.ts`, but the settings UI does not yet help install Docker, start/stop the gateway, create profiles, or recommend safe free MCP servers.
+- Docker MCP auto-start, readiness checks, Settings lifecycle controls, and curated MCP suggestions exist. Remaining MCP work is profile creation/validation depth, gateway-death recovery, PID/log tail surfacing, smoke-test actions, and clearer install failure text.
 - Provider/model IDs still need a decision on fully migrating to `providerId:modelId` to avoid collisions across providers.
 
 ## External Baselines Reviewed
@@ -1142,7 +1142,7 @@ Make first launch feel like a guided setup assistant instead of a settings scave
 
 ## Current Code State
 
-- `src/components/OnboardingWizard.tsx` exists and detects Ollama, but it currently configures one provider at a time.
+- `src/components/OnboardingWizard.tsx` exists and now configures multiple selected providers in one pass.
 - `src/components/SettingsModal.tsx` already has provider presets, role buckets, and personality presets that onboarding can reuse.
 - `server/config.ts` persists providers, `activeModel`, `roleAssignments`, `personality`, theme, trust mode, and MCP server settings.
 - `src/App.tsx` shows onboarding only when no provider has a key, but the final folder path from onboarding is not currently opened as a session.
@@ -1151,27 +1151,27 @@ Make first launch feel like a guided setup assistant instead of a settings scave
 
 ### P0 — Multi-provider setup flow
 
-- [ ] Replace single-provider selection with “check all providers you have” cards.
-- [ ] Next step renders one compact credential form per selected provider.
-- [ ] Support local no-key providers separately: Ollama and LM Studio should be auto-detected and optionally enabled.
-- [ ] Add “test all” and “save all working providers” actions.
-- [ ] Fetch model lists for all saved providers and summarize failures without blocking successful providers.
-- [ ] Preserve secrets only through existing server config paths; never echo full keys back to the client.
+- [x] Replace single-provider selection with “check all providers you have” cards.
+- [x] Next step renders one compact credential form per selected provider.
+- [x] Support local no-key providers separately: Ollama and LM Studio should be auto-detected and optionally enabled.
+- [x] Add “test all” and “save all working providers” actions.
+- [x] Fetch model lists for all saved providers and summarize failures without blocking successful providers.
+- [x] Preserve secrets only through existing server config paths; never echo full keys back to the client.
 
 ### P0 — Default agent and role setup
 
-- [ ] Ask the user how the default agent should behave: business-only, concise, chatty, helpful/teacher, creative, or custom.
-- [ ] Write the selected personality into `config.personality`.
+- [x] Ask the user how the default agent should behave: business-only, concise, chatty, helpful/teacher, creative, or custom.
+- [x] Write the selected personality into `config.personality`.
 - [ ] Ask whether OpenHarness should optimize for low cost, best quality, local/private, or balanced defaults.
-- [ ] Assign role buckets from enabled models: planner, coder, reviewer, reasoner, summarizer, worker.
+- [~] Assign role buckets from enabled models: planner, coder, reviewer, reasoner, summarizer, worker.
 - [ ] Let users override role assignments before finishing.
 
 ### P1 — First project and trust setup
 
-- [ ] Make the onboarding folder picker actually create/open a session with that working directory.
-- [ ] Ask for an initial trust mode in plain language: chat only, read only, ask before writing, workspace write.
-- [ ] Show a final review page: providers, active model, role buckets, personality, trust mode, MCP status, project folder.
-- [ ] Add “restart onboarding” and “rerun setup check” from Settings.
+- [x] Make the onboarding folder picker actually create/open a session with that working directory.
+- [x] Ask for an initial trust mode in plain language: chat only, read only, ask before writing, workspace write.
+- [~] Show a final review page: providers, active model, role buckets, personality, trust mode, MCP status, project folder.
+- [~] Add “restart onboarding” and “rerun setup check” from Settings.
 
 ### P2 — Friendly recovery and migration
 
@@ -1181,13 +1181,13 @@ Make first launch feel like a guided setup assistant instead of a settings scave
 
 ## Acceptance Criteria
 
-- [ ] A new user can configure multiple providers in one pass.
-- [ ] A local-only user can choose Ollama/LM Studio without entering a key.
-- [ ] The selected default agent personality is used by chat immediately.
-- [ ] Role buckets are filled with enabled models and can be changed before finish.
-- [ ] Finishing onboarding opens the selected folder/session.
-- [ ] `npm run lint` passes.
-- [ ] `npm run build` passes.
+- [x] A new user can configure multiple providers in one pass.
+- [x] A local-only user can choose Ollama/LM Studio without entering a key.
+- [x] The selected default agent personality is used by chat immediately.
+- [~] Role buckets are filled with enabled models and can be changed before finish.
+- [x] Finishing onboarding opens the selected folder/session.
+- [x] `npm run lint` passes.
+- [x] `npm run build` passes.
 
 ---
 
@@ -1207,33 +1207,33 @@ Make MCP power approachable. OpenHarness should help users install or start Dock
 
 - `server/mcp.ts` supports stdio, HTTP transport, tool discovery, resource discovery, and tool invocation.
 - `server/index.ts` auto-starts `docker mcp gateway run --transport stdio --profile ai_coding` when Docker is present.
-- `src/components/SettingsModal.tsx` has a Docker MCP pane that displays running status and tools, but it does not install Docker, start/stop the gateway, manage profiles, or recommend servers.
+- `src/components/SettingsModal.tsx` has a Docker MCP pane that displays readiness, running status, tools, start/stop/restart actions, and curated server recommendations. It still does not create Docker MCP profiles, show gateway PID/log tails, or run harmless server smoke tests.
 - `src/App.tsx` polls MCP status every 15 seconds, while the older plan said 30 seconds.
 
 ## Work Items
 
 ### P0 — Docker readiness check
 
-- [ ] Add a setup check for Docker Desktop installed, Docker daemon running, `docker mcp` available, and configured MCP profiles.
-- [ ] If Docker is missing, show a friendly install path and explain why Docker is optional.
-- [ ] If Docker is installed but stopped, show “Open Docker Desktop” / “Retry” guidance.
-- [ ] If `docker mcp` is unavailable, show a Docker MCP Toolkit update hint.
-- [ ] Store readiness results so Settings and onboarding share one truth.
+- [x] Add a setup check for Docker Desktop installed, Docker daemon running, `docker mcp` available, and configured MCP profiles.
+- [x] If Docker is missing, show a friendly install path and explain why Docker is optional.
+- [x] If Docker is installed but stopped, show “Open Docker Desktop” / “Retry” guidance.
+- [x] If `docker mcp` is unavailable, show a Docker MCP Toolkit update hint.
+- [~] Store readiness results so Settings and onboarding share one truth.
 
 ### P0 — Docker MCP lifecycle controls
 
-- [ ] Add start/stop/restart buttons in Docker MCP settings.
+- [x] Add start/stop/restart buttons in Docker MCP settings.
 - [ ] Show gateway PID/log tail through the process ledger.
-- [ ] Surface tool count, server count, last error, and last successful discovery time.
+- [~] Surface tool count, server count, last error, and last successful discovery time.
 - [ ] Add recovery when the gateway dies mid-session: mark tools unavailable, keep the chat alive, and offer restart.
 
 ### P1 — Curated free MCP server suggestions
 
-- [ ] Add a curated “recommended free tools” screen with explicit permission labels.
-- [ ] Suggested local-first servers: filesystem/read-only workspace, git, browser automation, fetch/web, SQLite, memory/notes, sequential-thinking, Playwright/browser, and Docker/container tools.
-- [ ] For each suggestion, show “why add this,” required access, expected tools, and whether it is local-only or networked.
-- [ ] Add one-click profile enablement for safe defaults and keep risky tools behind trust-mode warnings.
-- [ ] Add “advanced custom MCP server” for users who already have an endpoint or stdio command.
+- [x] Add a curated “recommended free tools” screen with explicit permission labels.
+- [x] Suggested local-first servers: filesystem/read-only workspace, git, browser automation, fetch/web, SQLite, memory/notes, sequential-thinking, Playwright/browser, and Docker/container tools.
+- [x] For each suggestion, show “why add this,” required access, expected tools, and whether it is local-only or networked.
+- [x] Add one-click profile enablement for safe defaults and keep risky tools behind trust-mode warnings.
+- [x] Add “advanced custom MCP server” for users who already have an endpoint or stdio command.
 
 ### P1 — Tool catalog UX
 
@@ -1251,13 +1251,13 @@ Make MCP power approachable. OpenHarness should help users install or start Dock
 
 ## Acceptance Criteria
 
-- [ ] A user without Docker understands the next step and can continue without MCP.
-- [ ] A user with Docker can start/stop/restart Docker MCP from OpenHarness.
-- [ ] Recommended MCP servers can be added from a curated list without hand-writing endpoints.
-- [ ] Tool availability is clear before the user starts a chat.
+- [x] A user without Docker understands the next step and can continue without MCP.
+- [x] A user with Docker can start/stop/restart Docker MCP from OpenHarness.
+- [x] Recommended MCP servers can be added from a curated list without hand-writing endpoints.
+- [~] Tool availability is clear before the user starts a chat.
 - [ ] Docker/MCP failures never break normal provider chat.
-- [ ] `npm run lint` passes.
-- [ ] `npm run build` passes.
+- [x] `npm run lint` passes.
+- [x] `npm run build` passes.
 
 ---
 
@@ -1265,7 +1265,7 @@ Make MCP power approachable. OpenHarness should help users install or start Dock
 
 This section now tracks the active post-Phase-12 backlog. Older assignments for Milestones 1–12 are represented by the milestone checklists above.
 
-## Assignment 0 — Guided Onboarding and Docker MCP Setup
+## Assignment 0 — Guided Onboarding and Docker MCP Setup (mostly complete)
 
 Owner: TBD
 Priority: P0
@@ -1281,13 +1281,20 @@ Files:
 
 Definition of done:
 
-- [ ] Onboarding asks which providers the user already has and saves multiple providers in one pass.
-- [ ] Onboarding sets personality, trust mode, active model, and role buckets from enabled models.
-- [ ] Onboarding can enable local Ollama/LM Studio without API keys.
-- [ ] Docker readiness is shown in onboarding and Settings.
-- [ ] Docker MCP start/stop/restart and tool catalog UX work from Settings.
-- [ ] Suggested free MCP servers are curated, permission-labeled, and safe by default.
-- [ ] Lint/build pass.
+- [x] Onboarding asks which providers the user already has and saves multiple providers in one pass.
+- [~] Onboarding sets personality, trust mode, active model, and role buckets from enabled models.
+- [x] Onboarding can enable local Ollama/LM Studio without API keys.
+- [x] Docker readiness is shown in onboarding and Settings.
+- [~] Docker MCP start/stop/restart and tool catalog UX work from Settings.
+- [x] Suggested free MCP servers are curated, permission-labeled, and safe by default.
+- [x] Lint/build pass.
+
+Remaining Assignment 0 polish:
+
+- [ ] Add low-cost / best-quality / local-private / balanced default selection.
+- [ ] Let users override role buckets before finishing onboarding.
+- [ ] Add partial-setup resume and clearer provider failure recovery copy.
+- [ ] Add MCP server smoke tests, gateway-death recovery, PID/log tails, and profile creation/validation depth.
 
 ## Assignment 1 — Close Phase 4 Patch Proposal Gap
 
@@ -1325,11 +1332,11 @@ Files:
 
 Definition of done:
 
-- [ ] Eval scores include validation pass/fail.
+- [x] Eval scores include validation pass/fail.
 - [x] Status bar receives and displays the actual enabled tool count.
 - [ ] MiniMax provider path passes a live smoke test.
 - [ ] Provider smoke result is recorded in the roadmap or release notes.
-- [ ] Lint/build pass.
+- [x] Lint/build pass.
 
 ## Assignment 3 — Agent Bench MVP
 

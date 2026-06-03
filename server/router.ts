@@ -1,4 +1,6 @@
 import type { HarnessRole } from './runTrace';
+import { isAutoRouterEnabled, routeTask, buildRouterSignal } from './autoRouter';
+import type { StoredConfig } from './config';
 
 export type OrchestrationMode = 'direct' | 'investigate' | 'execute' | 'compare';
 export type Complexity = 'simple' | 'medium' | 'deep';
@@ -11,6 +13,13 @@ export interface RouteDecision {
   needsValidation: boolean;
   suggestedModels: string[];
   reason: string;
+  routerData?: {
+    source: 'heuristic' | 'auto';
+    score?: number;
+    cached?: boolean;
+    fallback?: boolean;
+    classifierModel?: string | null;
+  };
 }
 
 export function routeRequest(content: string, activeModel: string, roleAssignments: Record<string, string> = {}): RouteDecision {
@@ -54,4 +63,59 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
         : 'Request asks to compare or evaluate alternatives.';
 
   return { mode, role, complexity, needsTools, needsValidation, suggestedModels, reason };
+}
+
+/**
+ * Enhanced route decision that also runs the auto-router for per-task model selection.
+ * Falls back to the heuristic-only router when auto-router is not configured.
+ * Returns the route decision with auto-router model selection merged in.
+ */
+export async function routeWithAutoRouter(
+  content: string,
+  config: StoredConfig,
+): Promise<RouteDecision> {
+  // First run the heuristic router for role/mode classification
+  const route = routeRequest(content, config.activeModel || '', config.roleAssignments || {});
+
+  // If auto-router is enabled, use it for model selection
+  if (isAutoRouterEnabled()) {
+    // TODO(P1): Pass real hasImages, turns, and toolCount from session state.
+    // Currently hardcoded because routeWithAutoRouter doesn't have access to the session.
+    // The classifier still works, but accuracy improves with real signal values.
+    const signal = buildRouterSignal(
+      content,
+      'orchestrator',
+      false, // hasImages — would need to check message content
+      1,     // turns — approximate; true count from session
+      route.needsTools ? 5 : 0,  // approximate tool count
+    );
+    try {
+      const decision = await routeTask(signal, config);
+      if (decision) {
+        const isFallback = decision.fallback || decision.score === 0;
+        if (!isFallback) {
+          route.suggestedModels = [decision.modelId];
+        }
+        route.reason += ` | auto-router: ${decision.reason}`;
+        route.routerData = {
+          source: isFallback ? 'heuristic' : 'auto',
+          score: decision.score,
+          cached: decision.cached,
+          fallback: decision.fallback,
+          classifierModel: decision.classifierModel,
+        };
+        console.log(
+          `[route] auto-router: ${isFallback ? 'fallback' : 'active'} ` +
+          `model=${decision.modelId} score=${decision.score.toFixed(2)} ` +
+          `cached=${decision.cached} fallback=${decision.fallback} ` +
+          `reason="${decision.reason}"`
+        );
+      }
+    } catch (err) {
+      // If auto-router fails, fall through to heuristic suggestedModels
+      console.warn('[route] auto-router decision failed, using heuristic:', err);
+    }
+  }
+
+  return route;
 }

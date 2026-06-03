@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   X,
+  FileText,
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
@@ -27,18 +28,19 @@ import type {
   SecretFinding,
   ProtectedPathRule,
 } from '../utils/api';
+import { ProjectMemoryPanel } from './ProjectMemoryPanel';
 
 interface Props {
   workingDir: string | null;
 }
-
-type Tab = 'checkpoints' | 'worktrees' | 'secrets' | 'processes';
+type Tab = 'checkpoints' | 'worktrees' | 'secrets' | 'processes' | 'memory';
 
 const TABS: Array<{ id: Tab; label: string; icon: any }> = [
   { id: 'checkpoints', label: 'Checkpoints', icon: Shield },
   { id: 'worktrees', label: 'Worktrees', icon: GitBranch },
   { id: 'secrets', label: 'Secrets & Paths', icon: Lock },
   { id: 'processes', label: 'Processes', icon: Cpu },
+  { id: 'memory', label: 'Memory', icon: FileText },
 ];
 
 export function SafetyPanel({ workingDir }: Props) {
@@ -70,6 +72,8 @@ export function SafetyPanel({ workingDir }: Props) {
         ))}
       </div>
       <div className="safety-tab-content">
+        {tab === 'processes' && <ProcessesTab />}
+        {tab === 'memory' && <ProjectMemoryPanel workingDir={dir} />}
         {tab === 'checkpoints' && <CheckpointsTab dir={dir} />}
         {tab === 'worktrees' && <WorktreesTab dir={dir} />}
         {tab === 'secrets' && <SecretsTab />}

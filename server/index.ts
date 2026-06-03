@@ -26,8 +26,9 @@ import {
   summarizeRepoMap,
   type ContextPackName,
 } from './repoMap';
-import { routeRequest } from './router';
+import { routeRequest, routeWithAutoRouter } from './router';
 import type { RouteDecision } from './router';
+import { configureAutoRouter, getAutoRouterState, clearRouterCache, getAvailableCandidates, checkRouterHealth } from './autoRouter';
 import { orchestrationInstruction, orchestrationTraceSteps } from './orchestrator';
 import type { ProjectProfile } from './projectProfile';
 import { appendRunStep, completeHarnessRun, createHarnessRun } from './runTrace';
@@ -35,6 +36,13 @@ import type { HarnessRun, HarnessRunStep } from './runTrace';
 import { createSession as createTermSession, getHistory as getTermHistory, runCommand as runTermCommand, cancelCommand as cancelTermCommand, getEntry as getTermEntry } from './terminalSessions';
 import * as git from './git';
 import { capturePreview, checkServerHealth } from './browserPreview';
+import * as providerHealth from './providerHealth';
+import * as reviewComments from './reviewComments';
+import * as commitMessage from './commitMessage';
+import * as agentProfiles from './agentProfiles';
+import * as agentRuntime from './agentRuntime';
+import { captureDeepBrowser } from './browserCapture';
+import { estimateSections, redactSecrets } from "./sectionRedaction";
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import {
   createProposal,
@@ -111,6 +119,8 @@ interface ToolCallRow {
 
 // ── Config ─────────────────────────────────────────────
 let appConfig = loadConfig();
+configureAutoRouter(appConfig);  // Initialize auto-router from config
+
 
 
 // ── Thinking tag stripping ─────────────────────────────
@@ -412,6 +422,7 @@ app.get('/api/config', (_req, res) => {
       authToken: s.authToken ? '••••' + s.authToken.slice(-4) : '',
     })),
   };
+  (safeConfig as any).autoRouter = appConfig.autoRouter;
   res.json(safeConfig);
 });
 
@@ -423,9 +434,43 @@ app.put('/api/config', (req, res) => {
   if (updates.trustMode !== undefined) appConfig.trustMode = updates.trustMode;
   if (updates.activeTheme !== undefined) appConfig.activeTheme = updates.activeTheme;
   if (updates.roleAssignments !== undefined) appConfig.roleAssignments = updates.roleAssignments;
+  if (updates.autoRouter !== undefined) {
+    (appConfig as any).autoRouter = updates.autoRouter;
+    configureAutoRouter(appConfig);
+  }
   saveConfig(appConfig);
   res.json({ ok: true });
 });
+
+
+// ── Auto-Router endpoints ──────────────────────────
+
+app.get('/api/router/state', (_req, res) => {
+  res.json(getAutoRouterState());
+});
+
+app.post('/api/router/configure', (req, res) => {
+  const routerConfig = req.body;
+  (appConfig as any).autoRouter = routerConfig;
+  configureAutoRouter(appConfig);
+  saveConfig(appConfig);
+  res.json({ ok: true, state: getAutoRouterState() });
+});
+
+app.post('/api/router/clear-cache', (_req, res) => {
+  clearRouterCache();
+  res.json({ ok: true });
+});
+
+app.get('/api/router/candidates', (_req, res) => {
+  res.json(getAvailableCandidates());
+});
+
+app.get('/api/router/health', async (_req, res) => {
+  const health = await checkRouterHealth(appConfig);
+  res.json(health);
+});
+
 
 // ── Provider endpoints ─────────────────────────────────
 
@@ -1532,8 +1577,20 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   });
   writeSSE(res, 'run_start', run);
 
-  const route = routeRequest(content, requestedModel, appConfig.roleAssignments || {});
+  const route = await routeWithAutoRouter(content, appConfig);
   run.role = route.role;
+  const rd = route.routerData;
+  if (rd && rd.source === 'auto') {
+    emitRunStep(res, run, {
+      type: 'auto_router',
+      modelId: route.suggestedModels[0] || requestedModel,
+      score: rd.score ?? 0,
+      reason: route.reason,
+      cached: rd.cached ?? false,
+      fallback: rd.fallback ?? false,
+      classifierModel: rd.classifierModel ?? null,
+    });
+  }
 
   if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session, run);
@@ -1958,7 +2015,15 @@ async function streamModel(
   const classifiedRole = route.role;
   // Check if the user configured a different model for this role
   const roleModelOverride = appConfig.roleAssignments?.[classifiedRole];
-  const effectiveModel = (roleModelOverride && overrideModelId === undefined) ? roleModelOverride : activeModel;
+  // Priority: overrideModelId > route.suggestedModels[0] (auto-router, active non-fallback) > role bucket > activeModel
+  const autoRouterModel = route.routerData?.source === 'auto' && !route.routerData?.fallback
+    ? route.suggestedModels?.[0]
+    : undefined;
+  const effectiveModel = overrideModelId
+    ? overrideModelId
+    : autoRouterModel
+      ? autoRouterModel
+      : (roleModelOverride || activeModel);
   if (run) {
     run.role = classifiedRole;
     run.effectiveModel = effectiveModel;
@@ -2038,8 +2103,10 @@ async function streamModel(
   // Text-form tool JSON needs a separate parser/executor, otherwise models emit
   // JSON that the app cannot act on.
   let systemPrompt = promptResult.systemPrompt;
-  // Prevent model from narrating its thought process before the answer
-  systemPrompt += '\n\nRULE: Start your response directly with the answer. Do NOT narrate your planning process. Never say things like The user wants me to or Let me or I need to or I will or Now I. Begin immediately with the substantive response.';
+  // Prevent model from narrating its thought process before the answer (skip for reasoning models)
+  if (!isReasoningModel(effectiveModel)) {
+    systemPrompt += '\n\nRULE: Start your response directly with the answer. Do NOT narrate your planning process. Never say things like The user wants me to or Let me or I need to or I will or Now I. Begin immediately with the substantive response.';
+  }
 
 
   // ── Context management: fit conversation within model's token budget ──
@@ -3314,6 +3381,262 @@ app.get('/api/safety/summary', (req, res) => {
   });
 });
 
+
+// ── Provider Health (M17) ────────────────────────────
+
+app.post('/api/providers/:id/health/probe', async (req, res) => {
+  const provider = appConfig.providers.find((p) => p.id === req.params.id);
+  if (!provider) return res.status(404).json({ error: 'Provider not found' });
+  try {
+    const record = await providerHealth.probeProvider(provider);
+    res.json(record);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Health probe failed' });
+  }
+});
+
+app.get('/api/providers/:id/health', (req, res) => {
+  res.json({
+    history: providerHealth.getProviderHealth(req.params.id),
+    summary: providerHealth.getProviderHealthSummary(req.params.id),
+  });
+});
+
+app.get('/api/providers/health', (_req, res) => {
+  res.json(providerHealth.listAllProviderHealth());
+});
+
+// ── Review Comments (M15 P1) ─────────────────────────
+
+app.get('/api/patch-proposals/:id/comments', (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  res.json(reviewComments.listComments(req.params.id));
+});
+
+app.post('/api/patch-proposals/:id/comments', (req, res) => {
+  const body = req.body as Partial<reviewComments.CreateCommentInput>;
+  if (!body.filePath || typeof body.startLine !== 'number') {
+    return res.status(400).json({ error: 'filePath and startLine are required' });
+  }
+  if (!body.rationale || !body.severity) {
+    return res.status(400).json({ error: 'severity and rationale are required' });
+  }
+  const validSeverities: reviewComments.ReviewCommentSeverity[] = ['blocker', 'warning', 'nit', 'suggestion'];
+  if (!validSeverities.includes(body.severity)) {
+    return res.status(400).json({ error: 'invalid severity' });
+  }
+  const comment = reviewComments.addComment({
+    proposalId: req.params.id,
+    filePath: body.filePath,
+    startLine: body.startLine,
+    endLine: body.endLine,
+    severity: body.severity,
+    rationale: body.rationale,
+    suggestedFix: body.suggestedFix,
+    author: body.author,
+  });
+  if (!comment) return res.status(404).json({ error: 'Proposal not found' });
+  res.json(comment);
+});
+
+app.patch('/api/patch-proposals/:id/comments/:commentId', (req, res) => {
+  const body = req.body as Partial<reviewComments.ReviewComment>;
+  const validSeverities: reviewComments.ReviewCommentSeverity[] = ['blocker', 'warning', 'nit', 'suggestion'];
+  const validStatuses: reviewComments.ReviewCommentStatus[] = ['open', 'resolved'];
+  const patch: Partial<reviewComments.ReviewComment> = {};
+  if (body.severity) {
+    if (!validSeverities.includes(body.severity)) {
+      return res.status(400).json({ error: 'invalid severity' });
+    }
+    patch.severity = body.severity;
+  }
+  if (body.rationale) patch.rationale = body.rationale;
+  if (body.suggestedFix !== undefined) patch.suggestedFix = body.suggestedFix;
+  if (body.status) {
+    if (!validStatuses.includes(body.status)) {
+      return res.status(400).json({ error: 'invalid status' });
+    }
+    patch.status = body.status;
+  }
+  const comment = reviewComments.updateComment(req.params.id, req.params.commentId, patch, body.resolvedBy);
+  if (!comment) return res.status(404).json({ error: 'Comment not found' });
+  res.json(comment);
+});
+
+app.delete('/api/patch-proposals/:id/comments/:commentId', (req, res) => {
+  const ok = reviewComments.deleteComment(req.params.id, req.params.commentId);
+  if (!ok) return res.status(404).json({ error: 'Comment not found' });
+  res.json({ ok: true });
+});
+
+// ── Commit Message + Validation Gate (M15 P1) ────────
+
+app.post('/api/patch-proposals/:id/commit-message', (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  const body = (req.body || {}) as { subjectOverride?: string; runSummary?: commitMessage.CommitMessageOptions['runSummary']; validation?: commitMessage.CommitMessageOptions['validation'] };
+  res.json(commitMessage.generateCommitMessage(proposal, body));
+});
+
+app.post('/api/patch-proposals/:id/validate', async (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  const body = (req.body || {}) as { force?: boolean };
+  try {
+    const result = await commitMessage.runValidationGate({
+      workingDir: proposal.workingDir,
+      commands: proposal.verificationCommands ?? [],
+      force: body.force,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Validation gate failed' });
+  }
+});
+
+app.post('/api/patch-proposals/:id/commit', async (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  const body = (req.body || {}) as { subjectOverride?: string; branchName?: string; force?: boolean };
+  const gate = await commitMessage.runValidationGate({
+    workingDir: proposal.workingDir,
+    commands: proposal.verificationCommands ?? [],
+    force: body.force,
+  });
+  if (!gate.ok) {
+    return res.status(409).json({ error: 'Validation gate failed', gate, blockedBy: gate.blockers });
+  }
+  // Optionally create a new branch first.
+  if (body.branchName && body.branchName.trim()) {
+    const branch = commitMessage.createBranch(proposal.workingDir, body.branchName.trim());
+    if (!branch.ok) {
+      return res.status(400).json({ error: branch.error || 'Branch creation failed' });
+    }
+  }
+  // Only commit the files this proposal touched.
+  const filePaths = proposal.files.map((f) => f.filePath);
+  const message = commitMessage.generateCommitMessage(proposal, { subjectOverride: body.subjectOverride });
+  const result = commitMessage.gitCommit(proposal.workingDir, message.fullText, filePaths);
+  if (!result.ok) {
+    return res.status(400).json({ error: result.error || 'Commit failed' });
+  }
+  res.json({ ok: true, hash: result.hash, subject: message.subject, bypassed: gate.bypassed });
+});
+
+// ── Manual Browser Preview Trigger (M15) ──────────────
+
+app.post('/api/patch-proposals/:id/preview', async (req, res) => {
+  const proposal = getProposal(req.params.id);
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  try {
+    const preview = await captureDetectedPreview();
+    if (preview) {
+      recordPreview(proposal.id, preview);
+      res.json({ ok: true, preview });
+    } else {
+      res.json({ ok: false, error: 'No local dev server detected on common ports' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Preview failed' });
+  }
+});
+
+// ── Deep Browser Capture (M14) ───────────────────────
+
+app.post('/api/browser/deep', async (req, res) => {
+  const url = (req.body as { url?: string })?.url;
+  if (!url?.trim()) return res.status(400).json({ error: 'url is required' });
+  try {
+    const artifact = await captureDeepBrowser(url);
+    if (!artifact) {
+      return res.status(400).json({ error: 'Only localhost URLs are supported' });
+    }
+    res.json(artifact);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Deep capture failed' });
+  }
+});
+
+// ── Prompt Microscope helpers (M16) ───────────────────
+
+app.post('/api/prompt/redact', (req, res) => {
+  const text = (req.body as { text?: string })?.text ?? '';
+  const result = redactSecrets(text);
+  res.json(result);
+});
+
+app.post('/api/prompt/estimate', (req, res) => {
+  const sections = ((req.body as { sections?: Array<{ id: string; label: string; text: string }> })?.sections) ?? [];
+  res.json({ sections: estimateSections(sections) });
+});
+
+// ── Project Memory archive/export (M16) ──────────────
+
+app.post('/api/project/memory/archive', (req, res) => {
+  const path = (req.body as { path?: string })?.path;
+  if (!path) return res.status(400).json({ error: 'path is required' });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const archived = projectMemory.saveMemory(path, projectMemory.loadMemory(path));
+  res.json({ ok: true, archived, archivedAt: stamp });
+});
+
+app.get('/api/project/memory/export', (req, res) => {
+  const path = req.query.path as string;
+  if (!path) return res.status(400).json({ error: 'path is required' });
+  const memory = projectMemory.loadMemory(path);
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="openharness-memory-${path.replace(/[^a-zA-Z0-9._-]/g, '_')}.md"`);
+  res.send(memory || '# (empty)');
+});
+
+// ── Agent Profiles (M13) ─────────────────────────────
+
+app.get('/api/agents/profiles', (_req, res) => {
+  res.json(agentProfiles.listAgentProfiles());
+});
+
+app.get('/api/agents/profiles/:id', (req, res) => {
+  const profile = agentProfiles.getAgentProfile(req.params.id as agentProfiles.AgentProfileId);
+  if (!profile) return res.status(404).json({ error: 'Agent profile not found' });
+  res.json(profile);
+});
+
+// ── Background Agent Runtime (M13) ───────────────────
+
+app.post('/api/agents/background', (req, res) => {
+  const body = req.body as { profileId?: string; prompt?: string; modelId?: string; workingDir?: string };
+  if (!body.profileId || !body.prompt) {
+    return res.status(400).json({ error: 'profileId and prompt are required' });
+  }
+  try {
+    const handle = agentRuntime.startBackgroundAgent(appConfig, {
+      profileId: body.profileId as agentProfiles.AgentProfileId,
+      prompt: body.prompt,
+      modelId: body.modelId,
+      workingDir: body.workingDir,
+    });
+    res.json({ id: handle.id, startedAt: new Date().toISOString() });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Failed to start background agent' });
+  }
+});
+
+app.get('/api/agents/background', (_req, res) => {
+  res.json(agentRuntime.listActiveBackgroundAgents());
+});
+
+app.delete('/api/agents/background/:id', (req, res) => {
+  const ok = agentRuntime.cancelBackgroundAgent(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Background agent not found' });
+  res.json({ ok: true });
+});
+
+app.get('/api/agents/background/:id/result', async (_req, res) => {
+  // The runtime returns a handle whose promise resolves with the artifact.
+  // We do not keep handles across restarts, so unknown ids return 404.
+  res.status(404).json({ error: 'Live result fetch is not supported; the artifact is returned in the POST response' });
+});
 
 process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignoring'); });
 

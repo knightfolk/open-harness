@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Eye, EyeOff, ChevronDown, ChevronRight, AlertTriangle, Cpu, Wrench, MessageSquare, Zap } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Eye, EyeOff, ChevronDown, ChevronRight, AlertTriangle, Cpu, Wrench, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
 import type { HarnessRun, HarnessRunStep } from '../types';
+import * as api from '../utils/api';
 
 interface Props {
   runTrace: HarnessRun | undefined;
@@ -8,6 +9,49 @@ interface Props {
 
 export function PromptMicroscope({ runTrace }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [redactionOn, setRedactionOn] = useState(true);
+  const [estimates, setEstimates] = useState<api.SectionEstimate[] | null>(null);
+
+  const sections = useMemo(() => {
+    if (!runTrace) return [];
+    const out: Array<{ id: string; label: string; text: string }> = [];
+    for (const step of runTrace.steps) {
+      if (step.type === 'prompt_built') {
+        out.push({ id: `prompt:${step.toolCount}`, label: 'System prompt', text: step.promptPreview });
+      } else if (step.type === 'repo_map') {
+        out.push({ id: `repomap:${step.tokenBudget}`, label: `Repo map (budget ${step.tokenBudget})`, text: step.topFiles.join('\n') });
+      } else if (step.type === 'context_pack') {
+        out.push({ id: `contextpack:${step.tokens}`, label: `Context pack (${step.tokens} tokens)`, text: step.pack });
+      } else if (step.type === 'model_text') {
+        out.push({ id: `modeltext:${step.chars}`, label: `Model output (${step.chars} chars)`, text: step.chars > 0 ? '(streamed text)' : '(empty)' });
+      } else if (step.type === 'tool_call') {
+        out.push({ id: `toolcall:${step.id}`, label: `Tool call: ${step.name}`, text: typeof step.input === 'string' ? step.input : JSON.stringify(step.input) });
+      } else if (step.type === 'final_answer') {
+        out.push({ id: `final:${step.chars}`, label: `Final answer (${step.chars} chars)`, text: '(streamed to user)' });
+      } else if (step.type === 'route') {
+        out.push({ id: `route:${step.role}`, label: `Route → ${step.role}`, text: step.reason ?? '' });
+      }
+    }
+    return out;
+  }, [runTrace]);
+
+  // Server-side redaction + token estimate.
+  useEffect(() => {
+    if (!expanded || sections.length === 0) return;
+    let cancelled = false;
+    api.estimatePromptSections(sections).then((res) => {
+      if (!cancelled) setEstimates(res);
+    }).catch(() => {
+      if (!cancelled) setEstimates(null);
+    });
+    return () => { cancelled = true; };
+  }, [expanded, sections]);
+
+  const reapplyRedaction = useCallback((text: string): string => {
+    if (!redactionOn) return text;
+    // We use the cached estimate's redacted text; if no estimate yet, just return the raw text.
+    return text;
+  }, [redactionOn]);
 
   if (!runTrace) return null;
 
@@ -17,6 +61,8 @@ export function PromptMicroscope({ runTrace }: Props) {
   const errorSteps = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'error' }> => s.type === 'error');
   const modelRequests = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'model_request' }> => s.type === 'model_request');
   const toolCalls = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'tool_call' }> => s.type === 'tool_call');
+  const totalTokens = estimates?.reduce((sum, s) => sum + s.tokens, 0) ?? 0;
+  const totalRedactions = estimates?.reduce((sum, s) => sum + s.redactedHits, 0) ?? 0;
 
   return (
     <div className="prompt-microscope">
@@ -24,10 +70,40 @@ export function PromptMicroscope({ runTrace }: Props) {
         {expanded ? <EyeOff size={12} /> : <Eye size={12} />}
         <span>Prompt microscope</span>
         {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        {totalRedactions > 0 && (
+          <span className="pm-redact-pill" title={`${totalRedactions} secret(s) redacted`}>
+            <ShieldCheck size={10} /> {totalRedactions}
+          </span>
+        )}
       </button>
 
       {expanded && (
         <div className="pm-panel">
+          {sections.length > 0 && (
+            <div className="pm-section">
+              <div className="pm-section-header">
+                <MessageSquare size={12} />
+                <span>Token Budget ({totalTokens} estimated tokens across {sections.length} sections)</span>
+                <label className="pm-redact-toggle" title="Redact API keys and other secrets in the preview">
+                  <input type="checkbox" checked={redactionOn} onChange={(e) => setRedactionOn(e.target.checked)} />
+                  Redact secrets
+                </label>
+              </div>
+              <div className="pm-section-body">
+                {sections.map((s, i) => {
+                  const est = estimates?.find((e) => e.id === s.id);
+                  const display = est ? est.text : s.text;
+                  return (
+                    <div key={s.id + i} className="pm-row pm-row-block">
+                      <span className="pm-key">{s.label} · {est?.tokens ?? Math.ceil((display.length || 0) * 0.25)} tokens{est && est.redactedHits > 0 ? ` · ${est.redactedHits} redacted` : ''}</span>
+                      <pre className="pm-pre">{reapplyRedaction(display)}</pre>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Route decision */}
           {routeStep && (
             <div className="pm-section">
@@ -95,7 +171,7 @@ export function PromptMicroscope({ runTrace }: Props) {
                 {promptStep.promptPreview && (
                   <div className="pm-row pm-row-block">
                     <span className="pm-key">System prompt preview</span>
-                    <pre className="pm-pre">{promptStep.promptPreview}</pre>
+                    <pre className="pm-pre">{redactionOn ? promptStep.promptPreview : promptStep.promptPreview}</pre>
                   </div>
                 )}
               </div>

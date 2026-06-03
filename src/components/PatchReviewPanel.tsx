@@ -2,13 +2,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   GitPullRequestArrow, RefreshCw, Plus, Check, X, FilePlus, FileX,
   FileEdit, Binary as BinaryIcon, AlertTriangle, Loader, Trash2, Play, CheckCircle2, XCircle, Clock,
-  GitBranch, Camera,
+  GitCommit, MessageCircle, ListChecks, ShieldAlert, CheckCheck, MessageSquareWarning, Camera, GitBranch,
 } from 'lucide-react';
 import * as api from '../utils/api';
 import type {
   PatchProposal, PatchFile, PatchHunk, PatchFileAction, ApplyPatchProposalResult, BrowserPreviewResult,
 } from '../types';
-
+import type { ReviewComment, ReviewCommentSeverity, CommitMessageResult, ValidationGateResult } from '../utils/api';
 interface Props {
   workingDir: string | null;
   sessionId: string | null;
@@ -101,6 +101,11 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
   const [actionError, setActionError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<ApplyPatchProposalResult | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commitMessage, setCommitMessage] = useState<CommitMessageResult | null>(null);
+  const [validationGate, setValidationGate] = useState<ValidationGateResult | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -119,6 +124,14 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
   }, [sessionId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Load review comments for the selected proposal so the workflow can show
+  // them inline next to apply / validation output.
+  useEffect(() => {
+    if (!selectedId) { setComments([]); return; }
+    setCommentsLoading(true);
+    api.listReviewComments(selectedId).then((c) => setComments(c)).catch(() => setComments([])).finally(() => setCommentsLoading(false));
+  }, [selectedId]);
 
   // When a new proposal was just created elsewhere (DiffViewer / chat
   // diff block / next-best action), refresh and auto-select it.
@@ -313,6 +326,114 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
     }
   }, [selected, refresh]);
 
+  // ── Item 1: manual browser preview trigger
+  const handleCapturePreview = useCallback(async () => {
+    if (!selected) return;
+    setPreviewBusy(true);
+    setActionError(null);
+    try {
+      const res = await api.captureProposalPreview(selected.id);
+      if (res.ok && res.preview) {
+        // The apply result is null here; reuse the proposal.preview slot.
+        updateProposal({ ...selected, preview: res.preview });
+        setProposals((prev) => (prev ?? []).map((p) => (p.id === selected.id ? { ...p, preview: res.preview } : p)));
+      } else {
+        setActionError(res.error || 'No dev server detected on common ports');
+      }
+    } catch (err: any) {
+      setActionError(err?.message || 'Preview capture failed');
+    } finally {
+      setPreviewBusy(false);
+    }
+  }, [selected, updateProposal]);
+
+  // ── Item 3: commit message + validation gate + commit
+  const handleGenerateCommitMessage = useCallback(async () => {
+    if (!selected) return;
+    setBusyId('commit-msg');
+    setActionError(null);
+    try {
+      const msg = await api.generateProposalCommitMessage(selected.id, {});
+      setCommitMessage(msg);
+    } catch (err: any) {
+      setActionError(err?.message || 'Commit message generation failed');
+    } finally {
+      setBusyId(null);
+    }
+  }, [selected]);
+
+  const handleRunValidation = useCallback(async () => {
+    if (!selected) return;
+    setBusyId('validate');
+    setActionError(null);
+    try {
+      const gate = await api.runProposalValidationGate(selected.id, { force: false });
+      setValidationGate(gate);
+    } catch (err: any) {
+      setActionError(err?.message || 'Validation gate failed');
+    } finally {
+      setBusyId(null);
+    }
+  }, [selected]);
+
+  const handleCommit = useCallback(async () => {
+    if (!selected) return;
+    setBusyId('commit');
+    setActionError(null);
+    try {
+      const result = await api.commitProposal(selected.id, { subjectOverride: commitMessage?.subject });
+      setActionError(null);
+      // Refresh the list so the user can see the new commit happened.
+      refresh();
+      // Show a success pill by setting validationGate to ok.
+      setValidationGate({ ok: true, bypassed: false, results: [], blockers: 0 });
+      // Stash the commit hash in a friendly message.
+      setActionError(null);
+      // We don't have a dedicated commit-result slot; embed the hash in commitMessage.
+      setCommitMessage((prev) => prev ? { ...prev, body: `${prev.body}\n\nCommitted as ${result.hash.slice(0, 12)}`.trim() } : prev);
+    } catch (err: any) {
+      setActionError(err?.message || 'Commit failed');
+    } finally {
+      setBusyId(null);
+    }
+  }, [selected, commitMessage, refresh]);
+
+  // ── Item 3: review comments
+  const handleAddComment = useCallback(async (input: {
+    filePath: string; startLine: number; endLine?: number;
+    severity: ReviewCommentSeverity; rationale: string; suggestedFix?: string;
+  }) => {
+    if (!selected) return null;
+    try {
+      const created = await api.addReviewComment({ proposalId: selected.id, ...input });
+      setComments((prev) => [...prev, created]);
+      return created;
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to add comment');
+      return null;
+    }
+  }, [selected]);
+
+  const handleResolveComment = useCallback(async (commentId: string, status: 'open' | 'resolved') => {
+    if (!selected) return;
+    try {
+      const updated = await api.updateReviewComment(selected.id, commentId, { status, resolvedBy: 'user' });
+      setComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to update comment');
+    }
+  }, [selected]);
+
+  const handleDeleteComment = useCallback(async (commentId: string) => {
+    if (!selected) return;
+    try {
+      await api.deleteReviewComment(selected.id, commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to delete comment');
+    }
+  }, [selected]);
+
   return (
     <div className="patch-review-root">
       <div className="patch-review-toolbar">
@@ -387,6 +508,18 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
               onIsolate={handleIsolate}
               onApply={handleApply}
               canIsolate={proposalTouchesActiveProject(selected, workingDir)}
+              onCapturePreview={handleCapturePreview}
+              previewBusy={previewBusy}
+              onGenerateCommitMessage={handleGenerateCommitMessage}
+              onRunValidation={handleRunValidation}
+              onCommit={handleCommit}
+              commitMessage={commitMessage}
+              validationGate={validationGate}
+              comments={comments}
+              commentsLoading={commentsLoading}
+              onAddComment={handleAddComment}
+              onResolveComment={handleResolveComment}
+              onDeleteComment={handleDeleteComment}
             />
           )}
           {view === 'detail' && !selected && (
@@ -650,6 +783,9 @@ function CreateProposalForm({
 function ProposalDetail({
   proposal: p, busyId, actionError, applyResult, applyError,
   onAcceptHunk, onRejectHunk, onAcceptAll, onRejectAll, onDiscard, onIsolate, onApply, canIsolate,
+  onCapturePreview, previewBusy, onGenerateCommitMessage, onRunValidation, onCommit,
+  commitMessage, validationGate, comments, commentsLoading,
+  onAddComment, onResolveComment, onDeleteComment,
 }: {
   proposal: PatchProposal;
   busyId: string | null;
@@ -664,6 +800,18 @@ function ProposalDetail({
   onIsolate: () => void;
   onApply: () => void;
   canIsolate: boolean;
+  onCapturePreview: () => void;
+  previewBusy: boolean;
+  onGenerateCommitMessage: () => void;
+  onRunValidation: () => void;
+  onCommit: () => void;
+  commitMessage: CommitMessageResult | null;
+  validationGate: ValidationGateResult | null;
+  comments: ReviewComment[];
+  commentsLoading: boolean;
+  onAddComment: (input: { filePath: string; startLine: number; endLine?: number; severity: ReviewCommentSeverity; rationale: string; suggestedFix?: string }) => Promise<ReviewComment | null>;
+  onResolveComment: (commentId: string, status: 'open' | 'resolved') => void;
+  onDeleteComment: (commentId: string) => void;
 }) {
   const isOpen = p.status === 'open';
   const acceptedHunks = proposalAcceptedHunkCount(p);
@@ -741,6 +889,15 @@ function ProposalDetail({
           {busyId === 'isolate' ? <Loader size={12} className="spin" /> : <GitBranch size={12} />}
           Run in isolated worktree
         </button>
+        <button
+          className="btn btn-ghost btn-small"
+          onClick={onCapturePreview}
+          disabled={previewBusy || !isOpen}
+          title="Capture a browser screenshot of the local dev server (auto-detects common ports)"
+        >
+          {previewBusy ? <Loader size={12} className="spin" /> : <Camera size={12} />}
+          Capture preview
+        </button>
         <div style={{ flex: 1 }} />
         <button
           className="btn btn-primary btn-small"
@@ -768,6 +925,26 @@ function ProposalDetail({
       {applyResult && <ApplyResultView result={applyResult} />}
 
       {preview && <PreviewResultView preview={preview} />}
+
+
+      <CommitAndValidateSection
+        proposal={p}
+        commitMessage={commitMessage}
+        validationGate={validationGate}
+        busyId={busyId}
+        onGenerate={onGenerateCommitMessage}
+        onValidate={onRunValidation}
+        onCommit={onCommit}
+      />
+
+      <ReviewCommentsSection
+        proposal={p}
+        comments={comments}
+        loading={commentsLoading}
+        onAdd={onAddComment}
+        onResolve={onResolveComment}
+        onDelete={onDeleteComment}
+      />
 
       <div className="patch-files">
         {p.files.length === 0 && (
@@ -1003,6 +1180,197 @@ function PreviewResultView({ preview }: { preview: BrowserPreviewResult }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Item 3: Review comments + commit message + validation gate UI    */
+/* ------------------------------------------------------------------ */
+
+function ReviewCommentsSection({
+  proposal, comments, loading, onAdd, onResolve, onDelete,
+}: {
+  proposal: PatchProposal;
+  comments: ReviewComment[];
+  loading: boolean;
+  onAdd: (input: { filePath: string; startLine: number; endLine?: number; severity: ReviewCommentSeverity; rationale: string; suggestedFix?: string }) => Promise<ReviewComment | null>;
+  onResolve: (commentId: string, status: 'open' | 'resolved') => void;
+  onDelete: (commentId: string) => void;
+}) {
+  const [filePath, setFilePath] = useState(proposal.files[0]?.filePath ?? '');
+  const [startLine, setStartLine] = useState(1);
+  const [severity, setSeverity] = useState<ReviewCommentSeverity>('warning');
+  const [rationale, setRationale] = useState('');
+  const [suggestedFix, setSuggestedFix] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const openCount = comments.filter((c) => c.status === 'open').length;
+  const blockerCount = comments.filter((c) => c.status === 'open' && c.severity === 'blocker').length;
+
+  const submit = async () => {
+    if (!filePath.trim() || !rationale.trim()) return;
+    setSubmitting(true);
+    const result = await onAdd({ filePath, startLine, severity, rationale, suggestedFix: suggestedFix || undefined });
+    if (result) {
+      setRationale('');
+      setSuggestedFix('');
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="patch-comments-section">
+      <div className="patch-comments-header">
+        <MessageCircle size={12} />
+        <span>Review comments</span>
+        <span className="patch-comments-count">
+          {loading ? '…' : `${openCount} open${blockerCount > 0 ? `, ${blockerCount} blocker${blockerCount === 1 ? '' : 's'}` : ''}`}
+        </span>
+      </div>
+      {proposal.files.length > 0 && (
+        <div className="patch-comment-form">
+          <div className="patch-comment-form-row">
+            <select className="patch-comment-input" value={filePath} onChange={(e) => setFilePath(e.target.value)}>
+              {proposal.files.map((f) => (
+                <option key={f.id} value={f.filePath}>{f.filePath}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              className="patch-comment-input"
+              style={{ width: 60 }}
+              value={startLine}
+              min={1}
+              onChange={(e) => setStartLine(parseInt(e.target.value, 10) || 1)}
+            />
+            <select className="patch-comment-input" value={severity} onChange={(e) => setSeverity(e.target.value as ReviewCommentSeverity)}>
+              <option value="blocker">blocker</option>
+              <option value="warning">warning</option>
+              <option value="nit">nit</option>
+              <option value="suggestion">suggestion</option>
+            </select>
+          </div>
+          <textarea
+            className="patch-comment-textarea"
+            value={rationale}
+            onChange={(e) => setRationale(e.target.value)}
+            placeholder="Why is this line a concern? What's the fix?"
+            rows={2}
+          />
+          <textarea
+            className="patch-comment-textarea"
+            value={suggestedFix}
+            onChange={(e) => setSuggestedFix(e.target.value)}
+            placeholder="Suggested fix (optional)"
+            rows={1}
+          />
+          <div className="patch-comment-form-actions">
+            <button className="btn btn-secondary btn-small" onClick={submit} disabled={!rationale.trim() || submitting}>
+              {submitting ? <Loader size={11} className="spin" /> : <MessageSquareWarning size={11} />}
+              Add comment
+            </button>
+          </div>
+        </div>
+      )}
+      <ul className="patch-comment-list">
+        {comments.length === 0 && !loading && (
+          <li className="patch-comment-empty">No review comments yet.</li>
+        )}
+        {comments.map((c) => (
+          <li key={c.id} className={`patch-comment patch-comment-${c.severity} patch-comment-status-${c.status}`}>
+            <div className="patch-comment-meta">
+              <span className={`patch-comment-severity patch-comment-severity-${c.severity}`}>{c.severity}</span>
+              <code className="patch-comment-anchor">{c.filePath}:{c.startLine}</code>
+              <span className="patch-comment-status-pill">{c.status}</span>
+              <span className="patch-comment-author">{c.author}</span>
+            </div>
+            <div className="patch-comment-rationale">{c.rationale}</div>
+            {c.suggestedFix && <pre className="patch-comment-fix">{c.suggestedFix}</pre>}
+            <div className="patch-comment-actions">
+              {c.status === 'open' ? (
+                <button className="btn btn-ghost btn-small" onClick={() => onResolve(c.id, 'resolved')}>
+                  <Check size={10} /> Mark resolved
+                </button>
+              ) : (
+                <button className="btn btn-ghost btn-small" onClick={() => onResolve(c.id, 'open')}>
+                  Reopen
+                </button>
+              )}
+              <button className="btn btn-ghost btn-small" onClick={() => onDelete(c.id)}>
+                <Trash2 size={10} />
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CommitAndValidateSection({
+  proposal, commitMessage, validationGate, busyId,
+  onGenerate, onValidate, onCommit,
+}: {
+  proposal: PatchProposal;
+  commitMessage: CommitMessageResult | null;
+  validationGate: ValidationGateResult | null;
+  busyId: string | null;
+  onGenerate: () => void;
+  onValidate: () => void;
+  onCommit: () => void;
+}) {
+  const canCommit = (validationGate?.ok || (proposal.verificationCommands ?? []).length === 0) && proposal.status === 'open';
+  return (
+    <div className="patch-commit-section">
+      <div className="patch-commit-header">
+        <GitCommit size={12} />
+        <span>Release workflow</span>
+      </div>
+      <div className="patch-commit-actions">
+        <button
+          className="btn btn-ghost btn-small"
+          onClick={onGenerate}
+          disabled={busyId === 'commit-msg'}
+          title="Generate a commit message from this proposal"
+        >
+          {busyId === 'commit-msg' ? <Loader size={12} className="spin" /> : <MessageCircle size={12} />}
+          Generate message
+        </button>
+        <button
+          className="btn btn-ghost btn-small"
+          onClick={onValidate}
+          disabled={busyId === 'validate' || (proposal.verificationCommands ?? []).length === 0}
+          title="Run the configured validation commands"
+        >
+          {busyId === 'validate' ? <Loader size={12} className="spin" /> : <ListChecks size={12} />}
+          Run validation
+        </button>
+        <button
+          className="btn btn-secondary btn-small"
+          onClick={onCommit}
+          disabled={busyId === 'commit' || !canCommit}
+          title={canCommit ? 'Commit the proposal files using the generated message' : 'Run validation successfully first'}
+        >
+          {busyId === 'commit' ? <Loader size={12} className="spin" /> : <GitCommit size={12} />}
+          Commit
+        </button>
+      </div>
+      {validationGate && (
+        <div className={`patch-gate-result ${validationGate.ok ? 'ok' : 'fail'}`}>
+          {validationGate.bypassed ? (
+            <span><CheckCheck size={11} /> Validation bypassed</span>
+          ) : validationGate.ok ? (
+            <span><CheckCircle2 size={11} /> Validation passed ({validationGate.results.length} command{validationGate.results.length === 1 ? '' : 's'})</span>
+          ) : (
+            <span><ShieldAlert size={11} /> Validation failed — {validationGate.blockers} blocker{validationGate.blockers === 1 ? '' : 's'}</span>
+          )}
+        </div>
+      )}
+      {commitMessage && (
+        <pre className="patch-commit-message" title="Generated commit message">
+{commitMessage.fullText}
+        </pre>
       )}
     </div>
   );

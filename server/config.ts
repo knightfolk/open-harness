@@ -33,6 +33,40 @@ export interface StoredMCPServer {
   toolCount?: number;
 }
 
+
+/**
+ * Auto-router configuration for per-task model selection.
+ * When enabled, a cheap classifier model scores each candidate
+ * on task fitness; the cheapest viable candidate wins.
+ * Ported from UltraCode-Shim's auto-router design.
+ */
+export interface AutoRouterConfig {
+  /** Master switch — off by default */
+  enabled: boolean;
+  /** Classifier model ID (cheapest model for scoring) */
+  classifierModel: string;
+  /** Quality bar 0–1; cheapest candidate scoring >= this wins */
+  threshold: number;
+  /** Fallback model when classifier can't run */
+  defaultModel: string;
+  /** Per-task cache TTL in milliseconds */
+  cacheTTLMs: number;
+  /** Candidate models the router chooses among */
+  candidates: AutoRouterCandidateConfig[];
+}
+
+export interface AutoRouterCandidateConfig {
+  /** Model ID (must resolve to a configured provider) */
+  modelId: string;
+  /** Relative cost weight — only ordering matters */
+  cost: number;
+  /** Whether this model can accept image attachments */
+  supportsImages: boolean;
+  /** Short capability description for the classifier */
+  card: string;
+}
+
+
 export interface StoredConfig {
   version: number;
   providers: StoredProvider[];
@@ -41,6 +75,7 @@ export interface StoredConfig {
   activeModel: string;
   activeTheme: string;
   roleAssignments: Record<string, string>; // roleId -> modelId
+  autoRouter?: AutoRouterConfig;
   trustMode: string; // TrustMode
 }
 

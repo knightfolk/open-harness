@@ -5115,3 +5115,307 @@ button:focus-visible {
   color: var(--text-tertiary);
   background: var(--bg-tertiary);
 }
+
+/* ── Item 3: review comments + commit message + validation gate ── */
+
+.patch-comments-section,
+.patch-commit-section {
+  margin: 8px 12px;
+  padding: 10px;
+  background: var(--bg-secondary, #1a1d23);
+  border: 1px solid var(--border-primary, #2a2e35);
+  border-radius: 6px;
+}
+
+.patch-comments-header,
+.patch-commit-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #e6e6e6);
+  margin-bottom: 8px;
+}
+
+.patch-comments-count {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--text-tertiary, #888);
+  margin-left: auto;
+}
+
+.patch-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.patch-comment-form-row {
+  display: flex;
+  gap: 4px;
+}
+
+.patch-comment-input,
+.patch-comment-textarea {
+  background: var(--bg-primary, #11141a);
+  border: 1px solid var(--border-primary, #2a2e35);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-primary, #e6e6e6);
+  font-family: inherit;
+}
+
+.patch-comment-textarea {
+  resize: vertical;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.patch-comment-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.patch-comment-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.patch-comment-empty {
+  font-size: 11px;
+  color: var(--text-tertiary, #888);
+  padding: 8px;
+  text-align: center;
+}
+
+.patch-comment {
+  padding: 8px 10px;
+  border-radius: 4px;
+  border-left: 3px solid var(--accent-warning, #f59e0b);
+  background: var(--bg-tertiary, #1e2229);
+}
+
+.patch-comment-blocker { border-left-color: var(--accent-error, #ef4444); }
+.patch-comment-warning { border-left-color: var(--accent-warning, #f59e0b); }
+.patch-comment-nit { border-left-color: var(--text-tertiary, #888); }
+.patch-comment-suggestion { border-left-color: var(--accent-primary, #3b82f6); }
+.patch-comment-status-resolved { opacity: 0.55; }
+
+.patch-comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.patch-comment-severity {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 9px;
+}
+
+.patch-comment-severity-blocker { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+.patch-comment-severity-warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+.patch-comment-severity-nit { background: rgba(136, 136, 136, 0.2); color: #aaa; }
+.patch-comment-severity-suggestion { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+
+.patch-comment-anchor {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-tertiary, #888);
+}
+
+.patch-comment-status-pill {
+  background: var(--bg-secondary, #1a1d23);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text-tertiary, #888);
+}
+
+.patch-comment-author {
+  color: var(--text-tertiary, #888);
+  font-style: italic;
+  margin-left: auto;
+}
+
+.patch-comment-rationale {
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+  color: var(--text-primary, #e6e6e6);
+}
+
+.patch-comment-fix {
+  background: var(--bg-primary, #11141a);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre-wrap;
+  margin: 4px 0;
+  color: var(--accent-success, #10b981);
+}
+
+.patch-comment-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.patch-commit-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.patch-gate-result {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.patch-gate-result.ok { background: rgba(16, 185, 129, 0.15); color: var(--accent-success, #10b981); }
+.patch-gate-result.fail { background: rgba(239, 68, 68, 0.15); color: var(--accent-error, #ef4444); }
+
+.patch-commit-message {
+  background: var(--bg-primary, #11141a);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  color: var(--text-primary, #e6e6e6);
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ── Item 5: prompt microscope redaction + token pill ── */
+.pm-redact-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  padding: 1px 5px;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-success, #10b981);
+  border-radius: 8px;
+  margin-left: auto;
+}
+
+.pm-redact-toggle {
+  font-size: 10px;
+  color: var(--text-tertiary, #888);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+/* ── Item 5: project memory panel ── */
+.projmem-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary, #11141a);
+  color: var(--text-primary, #e6e6e6);
+}
+
+.projmem-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--bg-tertiary, #1e2229);
+  border-bottom: 1px solid var(--border-primary, #2a2e35);
+  gap: 8px;
+}
+
+.projmem-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.projmem-charcount {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--text-tertiary, #888);
+  margin-left: 6px;
+}
+
+.projmem-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.projmem-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-tertiary, #888);
+  font-size: 12px;
+}
+
+.projmem-banner {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-primary, #2a2e35);
+}
+
+.projmem-banner-error { background: rgba(239, 68, 68, 0.15); color: var(--accent-error, #ef4444); }
+.projmem-banner-ok { background: rgba(16, 185, 129, 0.15); color: var(--accent-success, #10b981); }
+
+.projmem-textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg-primary, #11141a);
+  color: var(--text-primary, #e6e6e6);
+}
+
+.projmem-foot {
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--text-tertiary, #888);
+  background: var(--bg-tertiary, #1e2229);
+  border-top: 1px solid var(--border-primary, #2a2e35);
+}
+
+/* ── Item 4: provider health badge ── */
+.prov-health-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  text-transform: none;
+}
+
+.prov-health-ok { color: var(--accent-success, #10b981); }
+.prov-health-stale { color: var(--accent-warning, #f59e0b); }
+.prov-health-fail { color: var(--accent-error, #ef4444); }

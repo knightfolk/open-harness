@@ -94,6 +94,31 @@ export interface StreamCallbacks {
 
 // ── Config API ─────────────────────────────────────────
 
+export interface AutoRouterState {
+  enabled: boolean;
+  classifierModel: string | null;
+  threshold: number;
+  candidateCount: number;
+  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean }>;
+  cacheSize: number;
+}
+
+export interface AutoRouterCandidateConfig {
+  modelId: string;
+  cost: number;
+  supportsImages: boolean;
+  card: string;
+}
+
+export interface AutoRouterConfig {
+  enabled: boolean;
+  classifierModel: string;
+  threshold: number;
+  defaultModel: string;
+  cacheTTLMs: number;
+  candidates: AutoRouterCandidateConfig[];
+}
+
 export interface AppConfig {
   version: number;
   providers: ProviderInfo[];
@@ -103,6 +128,7 @@ export interface AppConfig {
   activeTheme: string;
   roleAssignments: Record<string, string>;
   trustMode: string;
+  autoRouter?: AutoRouterConfig;
 }
 
 export async function getConfig(): Promise<AppConfig | null> {
@@ -119,6 +145,35 @@ export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   });
+}
+
+
+// ── Auto-Router APIs ───────────────────────────────────
+
+export async function getRouterState(): Promise<AutoRouterState> {
+  const res = await fetch(`${API_BASE}/api/router/state`);
+  if (!res.ok) throw new Error(`Failed to get router state: ${res.status}`);
+  return res.json();
+}
+
+export async function configureRouter(config: AutoRouterConfig): Promise<{ ok: boolean; state: AutoRouterState }> {
+  const res = await fetch(`${API_BASE}/api/router/configure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error(`Failed to configure router: ${res.status}`);
+  return res.json();
+}
+
+export async function clearRouterCache(): Promise<void> {
+  await fetch(`${API_BASE}/api/router/clear-cache`, { method: 'POST' });
+}
+
+export async function getRouterCandidates(): Promise<AutoRouterCandidateConfig[]> {
+  const res = await fetch(`${API_BASE}/api/router/candidates`);
+  if (!res.ok) throw new Error(`Failed to get router candidates: ${res.status}`);
+  return res.json();
 }
 
 // ── Provider APIs ──────────────────────────────────────

@@ -249,6 +249,35 @@ function ProvidersPane({ providers, onTest, onFetch, onRemove, onToggleModel, ac
   const [fetchingModels, setFetchingModels] = useState<string | null>(null);
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [healthByProvider, setHealthByProvider] = useState<Record<string, { summary: api.ProviderHealthSummary; history: api.ProviderHealthRecord[] }>>({});
+  const [probingHealth, setProbingHealth] = useState<string | null>(null);
+
+  // Load provider health history for the badge.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const out: Record<string, { summary: api.ProviderHealthSummary; history: api.ProviderHealthRecord[] }> = {};
+      await Promise.all(providers.map(async (p: any) => {
+        try {
+          const res = await api.getProviderHealth(p.id);
+          if (!cancelled) out[p.id] = res;
+        } catch { /* ignore */ }
+      }));
+      if (!cancelled) setHealthByProvider(out);
+    })();
+    return () => { cancelled = true; };
+  }, [providers]);
+
+  const probeHealth = async (providerId: string) => {
+    setProbingHealth(providerId);
+    try {
+      await api.probeProviderHealth(providerId);
+      const res = await api.getProviderHealth(providerId);
+      setHealthByProvider((prev) => ({ ...prev, [providerId]: res }));
+    } finally {
+      setProbingHealth(null);
+    }
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedProviders((prev) => {
@@ -305,6 +334,14 @@ function ProvidersPane({ providers, onTest, onFetch, onRemove, onToggleModel, ac
                 <div className="prov-card-body">
                   {/* Quick actions */}
                   <div className="prov-card-actions">
+                    {(healthByProvider[provider.id]?.summary || tr) && (
+                      <ProviderHealthBadge
+                        summary={healthByProvider[provider.id]?.summary}
+                        lastTest={tr}
+                        onProbe={() => probeHealth(provider.id)}
+                        probing={probingHealth === provider.id}
+                      />
+                    )}
                     <button className="settings-mini-button" onClick={() => { setTestingProvider(provider.id); onTest(provider.id).then((r: any) => setTestResults((p) => ({ ...p, [provider.id]: r }))).catch((e: any) => setTestResults((p) => ({ ...p, [provider.id]: { ok: false, error: e.message } }))).finally(() => setTestingProvider(null)); }} disabled={testingProvider === provider.id}>
                       {testingProvider === provider.id ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
                       {testingProvider === provider.id ? 'Testing...' : 'Test'}
@@ -1036,6 +1073,49 @@ function ThemePane({ activeTheme, onSelectTheme }: any) {
 
 function ChatSettingsPane() {
   const [settings, setSettings] = useState({ streamResponses: true, showToolCalls: true, autoScroll: true, soundEffects: false });
+  const [arEnabled, setArEnabled] = useState(false);
+  const [arThreshold, setArThreshold] = useState(0.7);
+  const [arClassifier, setArClassifier] = useState('');
+  const [arDefaultModel, setArDefaultModel] = useState('');
+  const [arCandidates, setArCandidates] = useState<api.AutoRouterCandidateConfig[]>([]);
+  const [arSaving, setArSaving] = useState(false);
+  const [_editCandidate, setEditCandidate] = useState<{ index: number } | null>(null);
+  const [newCandidate, setNewCandidate] = useState<api.AutoRouterCandidateConfig>({
+    modelId: '', cost: 0.5, supportsImages: false, card: ''
+  });
+
+  // Load router state and candidates on mount
+  useEffect(() => {
+    api.getRouterState().then((state) => {
+      setArEnabled(state.enabled);
+      setArThreshold(state.threshold);
+    }).catch(() => {});
+    api.getConfig().then((cfg) => {
+      if (cfg?.autoRouter) {
+        setArClassifier(cfg.autoRouter.classifierModel || '');
+        setArDefaultModel(cfg.autoRouter.defaultModel || '');
+        setArThreshold(cfg.autoRouter.threshold ?? 0.7);
+        setArCandidates(cfg.autoRouter.candidates || []);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const persistRouterConfig = async (partial: Partial<api.AutoRouterConfig>) => {
+    // Fetch fresh config, merge updates, write back
+    const cfg = await api.getConfig();
+    const current = cfg?.autoRouter || {
+      enabled: true,
+      classifierModel: 'minimax:MiniMax-M3',
+      threshold: 0.7,
+      defaultModel: 'minimax:MiniMax-M3',
+      cacheTTLMs: 300000,
+      candidates: [],
+    };
+    const merged = { ...current, ...partial };
+    await api.configureRouter(merged);
+    return merged;
+  };
+
   const toggle = (key: keyof typeof settings) => setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   const items = [
     { key: 'streamResponses' as const, label: 'Stream responses', desc: 'Show text as it generates' },
@@ -1043,6 +1123,65 @@ function ChatSettingsPane() {
     { key: 'autoScroll' as const, label: 'Auto-scroll', desc: 'Follow new messages automatically' },
     { key: 'soundEffects' as const, label: 'Sound effects', desc: 'Play sounds on completion' },
   ];
+
+  const toggleAutoRouter = async () => {
+    setArSaving(true);
+    try {
+      if (arEnabled) {
+        // Disable: keep current config but set enabled=false
+        const cfg = await api.getConfig();
+        const currentAr = cfg?.autoRouter;
+        await api.configureRouter({
+          enabled: false,
+          classifierModel: currentAr?.classifierModel || arClassifier || 'minimax:MiniMax-M3',
+          threshold: currentAr?.threshold ?? arThreshold,
+          defaultModel: currentAr?.defaultModel || arDefaultModel || 'minimax:MiniMax-M3',
+          cacheTTLMs: currentAr?.cacheTTLMs ?? 300000,
+          candidates: currentAr?.candidates || arCandidates,
+        });
+      } else {
+        // Enable: use existing config or defaults
+        const cfg = await api.getConfig();
+        const currentAr = cfg?.autoRouter;
+        const merged = await api.configureRouter({
+          enabled: true,
+          classifierModel: currentAr?.classifierModel || arClassifier || 'minimax:MiniMax-M3',
+          threshold: currentAr?.threshold ?? arThreshold,
+          defaultModel: currentAr?.defaultModel || arDefaultModel || 'minimax:MiniMax-M3',
+          cacheTTLMs: currentAr?.cacheTTLMs ?? 300000,
+          candidates: currentAr?.candidates && currentAr.candidates.length > 0
+            ? currentAr.candidates
+            : arCandidates.length > 0
+              ? arCandidates
+              : [
+                  { modelId: 'minimax:MiniMax-M3', cost: 0.3, supportsImages: false, card: 'Cheap, ~1M context. Strong on single-file edits, boilerplate, simple refactors.' },
+                  { modelId: 'anthropic:claude-sonnet-4-6', cost: 1.0, supportsImages: true, card: 'Mid-cost frontier. Strong on multi-file edits, architecture, images.' },
+                ],
+        });
+        setArCandidates(merged.state.candidates.map((c) => ({ modelId: c.modelId, cost: c.cost, supportsImages: c.supportsImages, card: '' })));
+      }
+      setArEnabled(!arEnabled);
+    } catch (err) {
+      console.error('Failed to toggle auto-router:', err);
+    }
+    setArSaving(false);
+  };
+
+  const addCandidate = async () => {
+    if (!newCandidate.modelId.trim()) return;
+    const updated = [...arCandidates, { ...newCandidate, modelId: newCandidate.modelId.trim() }];
+    setArCandidates(updated);
+    await persistRouterConfig({ candidates: updated });
+    setNewCandidate({ modelId: '', cost: 0.5, supportsImages: false, card: '' });
+    setEditCandidate(null);
+  };
+
+  const removeCandidate = async (index: number) => {
+    const updated = arCandidates.filter((_, i) => i !== index);
+    setArCandidates(updated);
+    await persistRouterConfig({ candidates: updated });
+  };
+
   return (
     <>
       <PaneTitle>Chat Settings</PaneTitle>
@@ -1057,6 +1196,129 @@ function ChatSettingsPane() {
             <div className={`toggle ${settings[item.key] ? 'active' : ''}`} onClick={() => toggle(item.key)} />
           </div>
         ))}
+
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-color, #e5e7eb)' }}>
+          <div className="settings-item">
+            <div>
+              <div className="settings-item-label">Auto-Router</div>
+              <div className="settings-item-desc">Use a classifier model to pick the best candidate model per task</div>
+            </div>
+            <div className={('toggle ' + (arEnabled ? 'active' : ''))} onClick={arSaving ? undefined : toggleAutoRouter} />
+          </div>
+          {arEnabled && (
+            <div className="settings-card" style={{ marginTop: 8, padding: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>Auto-Router Config</div>
+              <div className="settings-item" style={{ marginBottom: 4 }}>
+                <div>
+                  <div className="settings-item-label">Threshold</div>
+                  <div className="settings-item-desc">Quality bar (0–1). Higher = safer, lower = cheaper. ({arThreshold.toFixed(2)})</div>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={arThreshold}
+                  style={{ width: 120, accentColor: 'var(--accent-color, #6366f1)' }}
+                  onChange={async (e) => {
+                    const val = parseFloat(e.target.value);
+                    setArThreshold(val);
+                    const merged = await persistRouterConfig({ threshold: val });
+                    setArThreshold(merged.threshold);
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, marginBottom: 8 }}>
+                The auto-router uses a cheap classifier model to score each candidate on task fitness.
+                The cheapest candidate above the threshold wins.
+              </div>
+
+              {/* Candidate list */}
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>
+                Candidates ({arCandidates.length})
+              </div>
+              {arCandidates.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic', marginBottom: 8 }}>
+                  No candidates configured. Add at least one to enable routing.
+                </div>
+              )}
+              {arCandidates.map((c, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 6px', marginBottom: 2,
+                  borderRadius: 4, fontSize: 12,
+                  background: 'var(--bg-secondary, #f3f4f6)',
+                }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.modelId}
+                  </span>
+                  <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>
+                    cost={c.cost}
+                  </span>
+                  <button
+                    className="settings-btn-icon"
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 2, color: 'var(--text-danger, #ef4444)', fontSize: 14, lineHeight: 1 }}
+                    onClick={() => removeCandidate(i)}
+                    title="Remove candidate"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+
+              {/* Add candidate form */}
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border-color, #e5e7eb)', paddingTop: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)' }}>Add Candidate</div>
+                <input
+                  placeholder="Model ID (e.g. minimax:MiniMax-M3)"
+                  value={newCandidate.modelId}
+                  style={{ fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                  onChange={(e) => setNewCandidate({ ...newCandidate, modelId: e.target.value })}
+                />
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    placeholder="Cost"
+                    value={newCandidate.cost}
+                    style={{ width: 60, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                    onChange={(e) => setNewCandidate({ ...newCandidate, cost: parseFloat(e.target.value) || 0 })}
+                  />
+                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={newCandidate.supportsImages}
+                      style={{ accentColor: 'var(--accent-color, #6366f1)' }}
+                      onChange={(e) => setNewCandidate({ ...newCandidate, supportsImages: e.target.checked })}
+                    />
+                    Images
+                  </label>
+                </div>
+                <input
+                  placeholder="Capability card (describe what this model is good/bad at)"
+                  value={newCandidate.card}
+                  style={{ fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                  onChange={(e) => setNewCandidate({ ...newCandidate, card: e.target.value })}
+                />
+                <button
+                  className="settings-btn"
+                  style={{
+                    padding: '4px 10px', fontSize: 11, borderRadius: 4,
+                    border: 'none', cursor: 'pointer',
+                    background: 'var(--accent-color, #6366f1)', color: '#fff',
+                    alignSelf: 'flex-start',
+                  }}
+                  onClick={addCandidate}
+                  disabled={!newCandidate.modelId.trim()}
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
@@ -1085,5 +1347,42 @@ function AboutPane() {
         </div>
       </div>
     </>
+  );
+}
+
+// ── Item 4: provider health badge (M17) ──
+
+function ProviderHealthBadge({
+  summary, lastTest: _lastTest, onProbe, probing,
+}: {
+  summary?: api.ProviderHealthSummary;
+  lastTest?: { ok: boolean; latencyMs?: number; error?: string };
+  onProbe: () => void;
+  probing: boolean;
+}) {
+  if (!summary) {
+    return (
+      <button className="settings-mini-button" onClick={onProbe} disabled={probing} title="Probe this provider for live health and capabilities">
+        {probing ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
+        Probe health
+      </button>
+    );
+  }
+  const status = summary.failed ? 'fail' : summary.stale ? 'stale' : 'ok';
+  const label = summary.failed
+    ? `last probe failed${summary.latest?.error ? `: ${summary.latest.error.slice(0, 40)}` : ''}`
+    : summary.stale
+      ? 'health stale'
+      : `health OK (${summary.latest?.latencyMs ?? 0}ms, ${summary.latest?.capabilities.filter((c) => c.ok).length ?? 0}/${summary.latest?.capabilities.length ?? 0} caps)`;
+  return (
+    <button
+      className={`settings-mini-button prov-health-badge prov-health-${status}`}
+      onClick={onProbe}
+      disabled={probing}
+      title={`Total probes: ${summary.total}. Click to re-probe.`}
+    >
+      {probing ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
+      {label}
+    </button>
   );
 }

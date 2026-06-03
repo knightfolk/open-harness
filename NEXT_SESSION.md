@@ -1,150 +1,137 @@
-# Next Session — Tackle the Small Issues
+# Next Session — Open Issues Handoff
 
 ## Identity
 You are **Friday**, the AI assistant for OpenHarness. Follow all rules in `AGENTS.md`.
 
 ## Where We Are
 
-`/Users/kevink/Projects/OpenHarness` is clean at `643ff48` (after `d2ed092` and `183f9fc` from the same day). The big Assignment 0 (multi-provider onboarding + Docker MCP) and the follow-up native-adapter work are landed. Server is running on `:3001` (PID session in the TTY), Docker MCP connected with 34 tools, `smoke:minimax` and `test-adapter-registry` both pass.
+`/Users/kevink/Projects/OpenHarness` is on `main`. The repo was clean during the 2026-06-01 document reconciliation, and both `npm run lint` and `npm run build` passed after the review. Re-check `git status --short` before touching anything.
 
-Recent commit graph:
-- `d000eab` — pre-existing fix (small polish and correctness issues from dogfood)
-- `d2ed092` — fix: wire native provider adapters, fix Gemini SSE, refresh MCP status
-- `183f9fc` — feat: native provider tool loops, Gemini SSE, MCP log filter, smoke test
-- `643ff48` — chore: land prior-session dirty tree + onboarding work + new server modules
+The old Assignment 0 items are mostly landed: multi-provider onboarding, default personality/trust setup, Docker readiness, Docker MCP start/stop/restart controls, curated MCP suggestions, native Anthropic/Gemini tool loops, Gemini SSE parsing, and weighted eval score breakdowns exist in code. Do not redo that work unless current code proves it regressed.
 
-What is **not** done is the four small items below. Pick them up in this order.
+## Active Open Issues, In Recommended Order
 
----
+### 1. Worktree isolation, promotion, and post-patch browser verification
 
-## Small Issue 1 — Worktree isolation/promotion and browser verification depth
-
-Source: `docs/HARNESS_WORK_ROADMAP.md` Milestone 12 and the later worktree-related items.
+Source: `docs/HARNESS_WORK_ROADMAP.md` Milestone 12, Milestone 14, and the patch-review follow-ups.
 
 Current code state:
-- `server/worktrees.ts` exists with create/list/diff/promote/discard scaffolding.
-- `server/checkpoints.ts` exists with checkpoint create/restore APIs.
-- `server/processLedger.ts` exists with process registry.
-- `src/components/SafetyPanel.tsx` surfaces trust mode, command risk, worktree state in the UI.
+- `server/worktrees.ts` has create/list/status/diff/promote/discard scaffolding.
+- `server/checkpoints.ts` has checkpoint create/restore APIs.
+- `server/processLedger.ts` exists.
+- `src/components/SafetyPanel.tsx` surfaces worktree/checkpoint state.
+- `src/components/PatchReviewPanel.tsx` exists and can apply accepted patch hunks.
+- `server/browserPreview.ts` exposes preview capture and health checks, but it is still shallow.
 
 Open work:
-- A real "isolate in a worktree" affordance in the chat header — the model proposes a change, the user sees "Run in isolated worktree" as a button, the app creates a worktree, runs the change there, lets the user diff/promote/discard.
-- Promotion flow: when the user accepts a patch proposal that was made inside a worktree, the patch should be applied to the real working tree and the worktree cleaned up. If they reject, the worktree is just discarded.
-- Browser verification depth: `server/browserPreview.ts` already exposes `capturePreview` and `checkServerHealth`. The follow-up is to auto-screenshot a dev server after each patch (or on demand) and surface the result in `PatchReviewPanel.tsx` next to the diff.
-
-Files to touch (read first, do not rewrite):
-- `server/worktrees.ts`, `server/checkpoints.ts`, `server/processLedger.ts`
-- `server/patchProposals.ts`, `server/patchApply.ts`
-- `src/components/PatchReviewPanel.tsx`, `src/components/SafetyPanel.tsx`, `src/components/TerminalPanel.tsx`
-- `server/browserPreview.ts` for the screenshot side
+- Add a real "Run in isolated worktree" affordance for patch proposals inside the active project.
+- Let users promote or discard isolated worktree results from the review flow.
+- After successful patch apply, detect a local dev server and capture a screenshot or preview artifact on demand or automatically.
+- Surface the browser verification artifact in `PatchReviewPanel.tsx` next to apply/validation output.
 
 Success criteria:
-- "Run in isolated worktree" button appears in `PatchReviewPanel.tsx` for proposals that touched files inside the active project.
-- Promote applies the accepted hunks to the real working tree and tears down the worktree; discard does the same without applying.
-- After a successful patch apply against a detected dev server (port 3000, 5173, 8787, etc.), a screenshot is captured and shown in the patch panel.
-
----
-
-## Small Issue 2 — Eval validation weighting and eval-report UI polish
-
-Source: `docs/HARNESS_WORK_ROADMAP.md` Milestone 5 and the smaller "Model Lab" / eval-report items.
-
-Current code state:
-- `server/evals.ts` defines the validation signals (JSON validity, schema match, tool-call accuracy, format match, etc.) and computes a per-run score.
-- `server/benchRuns.ts` is the benchmark-run store.
-- `server/harnessTasks.ts` defines the task suite.
-- `src/components/ModelLabPanel.tsx` (~32KB) renders the eval results.
-
-Open work:
-- **Weighting:** validation signals are currently aggregated flat. Weight them: structural validation (JSON parses, schema matches) > runtime validation (tool succeeded, exit code 0) > style heuristics (length, formatting). Surface the per-signal breakdown in the report.
-- **Report UI:** in `ModelLabPanel.tsx`, replace the single score bar with a stacked breakdown (validation vs style), a "weakest signal" callout, and a small table of per-task scores.
-- **Diff against previous run:** when opening a saved run, show the delta against the most recent prior run on the same task suite (regressions in red, improvements in green).
-
-Files to touch:
-- `server/evals.ts` (the weighting)
-- `server/benchRuns.ts` (diff helper)
-- `src/components/ModelLabPanel.tsx` (the breakdown + delta UI)
-
-Success criteria:
-- The eval report shows per-signal scores (validation vs style) with the weighted aggregate.
-- Opening a saved run that is not the most recent shows a clear "+x% / -y% vs previous" summary.
+- A patch proposal can be isolated into a worktree, reviewed, promoted, or discarded without dirtying the main checkout unexpectedly.
+- Promotion applies accepted changes to the real working tree and cleans up the worktree.
+- A successful patch apply can produce a browser verification artifact visible from the patch review panel.
 - `npm run lint` and `npm run build` pass.
 
----
+### 2. Patch review workflow polish
 
-## Small Issue 3 — Collapse the remaining MCP gateway `Initialize request` JSON
-
-Source: the smoke test noted `[mcp-gw:err]` lines for `{`, `"capabilities":`, `}` etc. — the gateway prints the JSON of the initialize request split across several `data:` chunks, and the single-line filter in `server/index.ts` only checks the first line.
-
-Where the filter lives: `server/index.ts` inside the `mcpGateway.stderr?.on('data', ...)` block (search for `Strip the gateway's "- " / "> " line prefixes`).
-
-What to do:
-- Track "we are inside a multiline `Initialize request` payload" state across the loop in the `data` handler. Once you see the `Initialize request:` banner, swallow subsequent lines that are just `{`, `}`, `"key":`, `[`, `]`, `,` until the matching close brace, then optionally print one collapsed `…Initialize request (N lines)` line.
-- Apply the same treatment to any other multiline JSON the gateway emits (e.g., the `Read profile` payloads, if any).
-- Keep the same collapse-on-repeat behavior for these collapsed lines.
-
-Files to touch:
-- `server/index.ts` (one block, ~80 lines, the stderr handler)
-
-Success criteria:
-- After server restart, the `[mcp-gw:err]` log no longer contains the inner JSON of the initialize request — it either doesn't print, or prints one collapsed line.
-- Genuine errors (HTTP 4xx/5xx from the gateway, connection resets) still surface with full context.
-
----
-
-## Small Issue 4 — Re-tune `promptBuilder` / `contextManager` / `repoMap` for the native-adapter path
-
-Source: the previous session's "what's still left" notes. Anthropic and Gemini use the new `streamWithNativeAdapter` branch in `server/index.ts`, but `promptBuilder`, `contextManager`, and `repoMap` are still using the same defaults they used for the OpenAI-compatible path.
-
-Where to look:
-- `server/promptBuilder.ts` — `buildPromptForModel({ modelId, role, personality, workingDir, projectProfileSummary, tools, enableThinking })` adapts system prompt style by family profile, but the Anthropic / Gemini-specific `systemInstruction` block isn't separated.
-- `server/contextManager.ts` — `buildContextWindow(...)` uses the same context window + max_tokens for every family.
-- `server/repoMap.ts` — `summarizeRepoMap(...)` is provider-agnostic, but the Gemini context window and Claude context window differ substantially.
-- `server/modelProfiles.ts` — `getModelConfig(modelId)` already returns `contextWindowTokens` and per-family styles; check whether Anthropic + Gemini entries are tuned well enough for the new branch.
+Source: `docs/HARNESS_WORK_ROADMAP.md` Milestone 15.
 
 Open work:
-- For Anthropic: add a `systemInstruction` block in the prompt (Anthropic uses a top-level `system` field, not a system message) — verify that `buildPromptForModel` already does this. If not, factor it out.
-- For Gemini: add `systemInstruction` support and bump `maxOutputTokens` defaults if appropriate.
-- Tune `contextManager.ts` to honor the larger context window for Claude 3.5+ (200k) and Gemini 1.5+ (1M-2M) without over-compressing.
-- Make sure `repoMap.ts` doesn't try to inject a repo map into a session that has no working directory (already mostly handled, but verify).
-
-Files to touch:
-- `server/promptBuilder.ts`
-- `server/contextManager.ts`
-- `server/repoMap.ts`
-- `server/modelProfiles.ts` (only if a profile entry is wrong)
+- Link chat-created proposals, run traces, apply results, validation output, and browser verification in one obvious workflow.
+- Add manual or automated smoke coverage for empty proposal, rejected-all proposal, failed apply, failed validation, and hunk toggle states.
+- Improve accept/reject-per-file behavior if the current file rollup controls are not complete enough.
 
 Success criteria:
-- An Anthropic provider added in Settings with `claude-3-5-sonnet-*` shows a `systemInstruction`-style block in the rendered prompt (visible in a server log or test endpoint).
-- A Gemini provider with `gemini-1.5-pro-*` keeps more of the conversation history thanks to the larger context window.
-- `npm run lint` and `npm run build` pass; the existing `smoke:minimax` and `test-adapter-registry` tests still pass.
+- A user can move from chat/model output to proposal review to apply/validation results without hunting through panels.
+- Edge states are exercised and documented.
+- `npm run lint` and `npm run build` pass.
 
----
+### 3. Inline comments and release workflow
 
-## How to Run / Verify
+Source: `docs/HARNESS_WORK_ROADMAP.md` Milestone 15 P1.
+
+Open work:
+- Let reviewer agents attach comments to exact files/lines.
+- Show severity, rationale, suggested fix, and resolved/unresolved state.
+- Convert selected comments into follow-up tasks.
+- Add commit-message generation from run trace and diff.
+- Add validation gate before commit unless the user overrides.
+- Add optional branch creation and optional GitHub PR creation when configured.
+
+Success criteria:
+- Review findings are line-specific and resolvable.
+- User can go from accepted patch to commit/PR without leaving OpenHarness.
+- `npm run lint` and `npm run build` pass.
+
+### 4. Provider operations: health, cost, fallback, and IDs
+
+Source: `docs/HARNESS_WORK_ROADMAP.md` Milestone 17 and open decisions.
+
+Open work:
+- Add provider health probes for chat, streaming, tool calls, JSON mode, context length, and error handling.
+- Save provider health history and show stale/failed state in Settings/status.
+- Record real token/cost/latency data per run instead of placeholders.
+- Add routing/fallback policies based on task class, trust mode, model health, budget, and eval results.
+- Decide whether to fully migrate model IDs to `providerId:modelId`.
+- Run and record a credential-backed MiniMax smoke test when credentials are available.
+
+Success criteria:
+- Provider settings show real health/capability status.
+- Run traces include usable token/cost/latency data where providers expose it.
+- Failed providers fall back cleanly without losing run trace context.
+- `npm run lint` and `npm run build` pass.
+
+### 5. Context, prompt, and memory governance
+
+Source: `docs/HARNESS_WORK_ROADMAP.md` Milestone 16.
+
+Open work:
+- Redact secrets in prompt microscope while preserving debuggability.
+- Show token estimates per prompt section.
+- Link prompt sections back to source artifacts.
+- Add context budget controls and show omitted context.
+- Add include/never-include controls for files and paths.
+- Build project memory UI for view/edit/pin/archive/delete/export.
+
+Success criteria:
+- Users can inspect what was sent to the model and why.
+- Memory use is visible, editable, and removable.
+- Context trimming decisions are explicit.
+- `npm run lint` and `npm run build` pass.
+
+### 6. Deeper browser verification and multi-agent runtime
+
+Source: `docs/HARNESS_WORK_ROADMAP.md` Milestones 13 and 14.
+
+Open work:
+- Upgrade browser capture from shallow preview into DOM, accessibility tree, console, network, screenshot, and scripted journey artifacts.
+- Add built-in smoke checks for OpenHarness flows.
+- Add agent profiles for explorer, planner, implementer, reviewer, debugger, browser-tester, and eval-judge.
+- Add background read-only agents with independent traces, cancelation, and structured artifacts.
+
+Success criteria:
+- Browser smoke checks can run from UI and eval suites.
+- Multi-agent work is visible, cancelable, and structured.
+- Agent handoffs use patch proposals or artifacts rather than silent disk writes.
+- `npm run lint` and `npm run build` pass.
+
+## Validation Rules
+
+For implementation work:
 
 ```bash
-# from /Users/kevink/Projects/OpenHarness
-npx tsc --noEmit -p tsconfig.app.json
-npx tsc --noEmit -p tsconfig.server.json
 npm run lint
 npm run build
-cd OpenHarnessApp && swift build && cd ..
-
-# server
-pkill -f "tsx server/index" 2>/dev/null; sleep 1
-# (use a TTY exec_command so the process stays alive)
-npx tsx server/index.ts
-
-# smoke tests
-npx tsx scripts/test-adapter-registry.mjs
-node scripts/smoke-minimax.mjs
 ```
 
-If you change server code, restart the server (per AGENTS.md rule 1) and re-run the smoke tests. The Electron app picks up client changes via Vite HMR — no restart needed for client-only work, but a hard refresh is sometimes required.
+If server/runtime code changes, follow `AGENTS.md`: kill existing OpenHarness server/app processes, relaunch, and verify reachability. If only docs, client UI, or non-server files change, do not restart the running app/server; tell the user whether a browser refresh is enough.
 
-## Don't Touch
+## Do Not Do
 
-- The CMDui → OpenHarness rename is **landed**. Don't rename anything back.
-- The 3 prior commits (`d000eab`, `d2ed092`, `183f9fc`, `643ff48`) are stable. Don't rewrite history unless the user explicitly asks.
-- The Electron app is currently running on the user's machine. Leave it alone unless you need to test a code path that requires a fresh launch — and even then, ask first.
+- Do not rewrite history.
+- Do not rename OpenHarness back to CMDui.
+- Do not redo landed Assignment 0 work unless current code proves it is broken.
+- Do not silently apply model changes to disk; route model edits through patch proposals and trust-mode checks.
