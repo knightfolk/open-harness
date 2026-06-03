@@ -98,6 +98,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
   const [showMore, setShowMore] = useState(false);
   const [personality, setPersonality] = useState('');
   const [trustMode, setTrustMode] = useState<'chat-only' | 'read-only' | 'ask-before-write' | 'workspace-write'>('ask-before-write');
+  const [optimizationPref, setOptimizationPref] = useState<string>('balanced');
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dockerReadiness, setDockerReadiness] = useState<api.DockerReadiness | null>(null);
@@ -560,8 +561,51 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 5: Project folder ──
+  // ── Step 5: Optimization preference ──
   if (step === 5) {
+    return (
+      <div className="onboarding-root">
+        <div className="onboarding-card" style={{ maxWidth: 540 }}>
+          <h2 className="onboarding-step-title">
+            <Zap size={20} /> Pick your optimization preference
+          </h2>
+          <p className="onboarding-step-subtitle">This sets default model selections and auto-router candidates. You can change it anytime in Settings.</p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+            {[
+              { id: 'best-quality', label: 'Best Quality', desc: 'Use the most capable model for every task. Higher cost, best results.' },
+              { id: 'balanced', label: 'Balanced', desc: 'Good quality at reasonable cost. The default — works for most users.' },
+              { id: 'low-cost', label: 'Low Cost', desc: 'Prefer cheap, fast models for routine work. Escalate only when needed.' },
+              { id: 'local-private', label: 'Local & Private', desc: 'Use local models when available. Most tasks stay on your machine.' },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                className={`onboarding-pill-card ${optimizationPref === opt.id ? 'selected' : ''}`}
+                onClick={() => setOptimizationPref(opt.id)}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '12px 16px' }}
+              >
+                <div className="onboarding-pill-label" style={{ fontSize: 14 }}>{opt.label}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'left' }}>{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="onboarding-nav">
+            <button className="onboarding-btn-back" onClick={() => setStep(4)}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button className="onboarding-btn-primary" onClick={() => setStep(6)}>
+              Continue <ArrowRight size={16} />
+            </button>
+          </div>
+          {stepDots}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 6: Project folder ──
+  if (step === 7) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 480 }}>
@@ -590,10 +634,10 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(4)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(6)}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="onboarding-btn-primary" onClick={() => setStep(6)}>
+            <button className="onboarding-btn-primary" onClick={() => setStep(7)}>
               {folderPath ? 'Open project' : "Let's go"} <ArrowRight size={16} />
             </button>
           </div>
@@ -603,8 +647,8 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 6: Final review ──
-  if (step === 6) {
+  // ── Step 7: Final review ──
+  if (step === 7) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 540 }}>
@@ -676,7 +720,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(5)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(6)}>
               <ArrowLeft size={16} /> Back
             </button>
             <button className="onboarding-btn-primary" onClick={handleFinish} disabled={saving}>

@@ -176,6 +176,31 @@ export async function getRouterCandidates(): Promise<AutoRouterCandidateConfig[]
   return res.json();
 }
 
+
+// ── Cost estimation helpers ────────────────────────────
+
+/** Rough pricing per-million-tokens (USD). Same data as server/modelProfiles.ts. */
+export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'MiniMax-M3': { input: 0.15, output: 0.60 },
+  'MiniMax-M2.7': { input: 1.50, output: 6.00 },
+  'deepseek-chat': { input: 0.27, output: 1.10 },
+  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
+  'gpt-4.1': { input: 2.00, output: 8.00 },
+  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
+  'mistral-large': { input: 2.00, output: 8.00 },
+  'grok-3': { input: 3.00, output: 15.00 },
+  'qwen-3-235b': { input: 1.00, output: 4.00 },
+};
+
+export function estimateModelCost(modelId: string, inputTokens: number, outputTokens: number): { inputCost: number; outputCost: number; total: number } | null {
+  const bareId = modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId;
+  const pricing = MODEL_PRICING[bareId] || MODEL_PRICING[modelId];
+  if (!pricing) return null;
+  const inputCost = (inputTokens / 1_000_000) * pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * pricing.output;
+  return { inputCost, outputCost, total: inputCost + outputCost };
+}
+
 // ── Provider APIs ──────────────────────────────────────
 
 export interface ProviderInfo {

@@ -414,6 +414,44 @@ export function isReasoningModel(modelId: string): boolean {
   );
 }
 
+
+// ── Rough pricing data (per-million-tokens, USD) ──────
+// Input=prompt, output=generation. Used for cost estimation in the StatusBar.
+// Source: May 2026 public pricing. Update quarterly.
+export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  // MiniMax
+  'MiniMax-M3': { input: 0.15, output: 0.60 },
+  'MiniMax-M2.7': { input: 1.50, output: 6.00 },
+  // DeepSeek
+  'deepseek-chat': { input: 0.27, output: 1.10 },
+  'deepseek-reasoner': { input: 0.55, output: 2.19 },
+  // Anthropic
+  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
+  'claude-haiku-3-5': { input: 0.80, output: 4.00 },
+  // OpenAI
+  'gpt-4.1': { input: 2.00, output: 8.00 },
+  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
+  'gpt-4.1-nano': { input: 0.10, output: 0.40 },
+  // Qwen
+  'qwen-3-235b': { input: 1.00, output: 4.00 },
+  'qwen-3-32b': { input: 0.30, output: 1.20 },
+  // Mistral
+  'mistral-large': { input: 2.00, output: 8.00 },
+  'mistral-small': { input: 0.20, output: 0.80 },
+  // Grok
+  'grok-3': { input: 3.00, output: 15.00 },
+};
+
+/** Estimate cost in USD for a given model and token usage. Returns null if model has no pricing. */
+export function estimateCost(modelId: string, inputTokens: number, outputTokens: number): { inputCost: number; outputCost: number; total: number } | null {
+  const bareId = modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId;
+  const pricing = MODEL_PRICING[bareId] || MODEL_PRICING[modelId] || null;
+  if (!pricing) return null;
+  const inputCost = (inputTokens / 1_000_000) * pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * pricing.output;
+  return { inputCost, outputCost, total: inputCost + outputCost };
+}
+
 /** Get ordered model family recommendations for a given agent role. */
 export function getRoleModelRecommendation(role: string): string[] {
   const recommendations: Record<string, string[]> = {

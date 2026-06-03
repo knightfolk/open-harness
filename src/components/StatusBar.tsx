@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  Wifi, WifiOff, ChevronUp, Cpu, Zap, Brain,
+  Wifi, WifiOff, ChevronUp, Cpu, Zap, Brain, DollarSign,
   Check, Search, Shield,
 } from 'lucide-react';
+import { estimateModelCost } from '../utils/api';
 
 interface ModelOption {
   id: string;
@@ -219,6 +220,22 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
       )}
 
       <div style={{ flex: 1 }} />
+
+      {/* Cost estimate */}
+      {(() => {
+        // Rough estimate: ~500 input tokens + ~200 output tokens per message
+        const est = estimateModelCost(activeModel, messageCount * 300, messageCount * 150);
+        if (!est || est.total < 0.001) return null;
+        const label = est.total < 0.01 ? '< $0.01' : `~$${est.total.toFixed(2)}`;
+        return (
+          <div className="status-bar-item" title={`Est. cost: $${est.total.toFixed(4)} (${messageCount} msgs)`}>
+            <DollarSign size={12} />
+            {label}
+          </div>
+        );
+      })()}
+
+      <div className="status-bar-separator" />
 
       {/* Message count */}
       <div className="status-bar-item">

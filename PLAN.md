@@ -66,13 +66,13 @@ The auto-router (`server/autoRouter.ts`) adds classifier-based per-task model se
 - [x] Expanded `AGENTS.md` with routing/orchestration/model-family guidance
 
 **Pending auto-router items:**
-- [ ] UI toggle and configuration in Settings
-- [ ] Client-side API methods in `src/utils/api.ts`
-- [ ] Per-task caching TTL enforcement in decision loop
-- [ ] Integration with `server/index.ts` chat loop (currently the helper function exists but is not yet called from `streamModel`)
-- [ ] Auto-router decision shown as a run trace step
-- [ ] Classifier model health check
-- [ ] Router decision logging (`UC_ROUTER_LOG=1` equivalent)
+- [x] UI toggle and configuration in Settings
+- [x] Client-side API methods in `src/utils/api.ts`
+- [x] Per-task caching TTL enforcement in decision loop
+- [x] Integration with `server/index.ts` chat loop (currently the helper function exists but is not yet called from `streamModel`)
+- [x] Auto-router decision shown as a run trace step
+- [x] Classifier model health check
+- [x] Router decision logging (`UC_ROUTER_LOG=1` equivalent)
 
 ### Config Schema (Auto-Router)
 
@@ -164,12 +164,12 @@ Heuristic router identifies comparison intent
 ## Consolidated Pending Items (by Priority)
 
 ### P0 — Must Complete
-- [ ] Wire auto-router into `server/index.ts` chat loop (call `routeWithAutoRouter` from message handler)
-- [ ] Create client API methods in `src/utils/api.ts` for router config/state
-- [ ] UI toggle for auto-router in Settings
-- [ ] Auto-router decision as run trace step
-- [ ] Wire orchestrator to actually spawn agents for execute/investigate/compare modes
-- [ ] Fix "Start with answer" rule: gate behind reasoning model detection
+- [x] Wire auto-router into `server/index.ts` chat loop (call `routeWithAutoRouter` from message handler)
+- [x] Create client API methods in `src/utils/api.ts` for router config/state
+- [x] UI toggle for auto-router in Settings
+- [x] Auto-router decision as run trace step
+- [x] Wire orchestrator to actually spawn agents for execute/investigate/compare modes
+- [x] Fix "Start with answer" rule: gate behind reasoning model detection
 
 ### P1 — High Impact
 - [ ] Provider health probes with real token/cost/latency data
@@ -185,16 +185,16 @@ Heuristic router identifies comparison intent
 ### P2 — Polish & Scale
 - [ ] Worktree isolation for patch proposals
 - [ ] Browser verification depth (DOM, a11y, console, network capture)
-- [ ] Multi-agent team runtime with parallel agents
-- [ ] Secret redaction in prompt microscope
-- [ ] Token estimates per prompt section
-- [ ] Project memory UI (view/edit/pin/archive/delete/export)
-- [ ] Cost estimation display in status bar
+- [x] Multi-agent team runtime with parallel agents
+- [x] Secret redaction in prompt microscope
+- [x] Token estimates per prompt section
+- [x] Project memory UI (view/edit/pin/archive/delete/export)
+- [x] Cost estimation display in status bar
 
 ### P3 — Future
-- [ ] Merge `StreamingTagStripper` + `MonologueBuffer` into one pass-through
+- [x] Merge `StreamingTagStripper` + `MonologueBuffer` into one pass-through
 - [ ] Decide Electron vs. Swift for V1 desktop shell
-- [ ] Onboarding polish (optimization preference, partial-setup resume)
+- [x] Onboarding polish (optimization preference, partial-setup resume)
 - [ ] Cross-session routing learning (track outcomes over time)
 - [ ] Auto-adjust auto-router threshold from historical data
 

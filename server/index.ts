@@ -11,7 +11,7 @@ import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
 import { checkDockerReadiness } from './dockerReadiness';
 import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions } from './curatedMcp';
-import { getModelConfig, isReasoningModel, detectModelFamily } from './modelProfiles';
+import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost } from './modelProfiles';
 import { buildContextWindow } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
 import { formatProjectProfileForPrompt, getProjectProfile } from './projectProfile';
@@ -151,115 +151,79 @@ function stripThinkingTags(text: string): string {
 // Per-chunk regex misses them. This class accumulates raw text, applies
 // stripThinkingTags to the full buffer, and returns only newly-cleaned content.
 
-class StreamingTagStripper {
+/**
+ * Combined streaming cleaner: strips thinking/reasoning tags AND
+ * filters monologue preamble in a single pass through the stream.
+ * Merges the former StreamingTagStripper + MonologueBuffer into one class.
+ */
+class StreamCleaner {
   private raw = '';
   private emitted = 0;
+  private monologueBuffer = '';
+  private monologueFlushed = false;
+  private readonly maxMonologueBuffer = 1500;
 
   feed(chunk: string): string | null {
     this.raw += chunk;
-    const cleaned = stripThinkingTags(this.raw);
-    if (cleaned.length > this.emitted) {
-      const newContent = cleaned.slice(this.emitted);
-      this.emitted = cleaned.length;
-      return newContent;
+    const tagCleaned = stripThinkingTags(this.raw);
+    const tagNewContent = tagCleaned.length > this.emitted ? tagCleaned.slice(this.emitted) : null;
+    if (tagNewContent !== null) this.emitted = tagCleaned.length;
+    const input = tagNewContent;
+    if (!input || input.length === 0) return null;
+    if (this.monologueFlushed) return input;
+    this.monologueBuffer += input;
+    const lines = this.monologueBuffer.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
+        this.monologueFlushed = true;
+        const beforeAnswer = lines.slice(0, i).join('\n');
+        const monoLines = beforeAnswer.split('\n').filter((l: string) => l.trim());
+        const allMono = monoLines.every((l: string) => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
+        this.monologueBuffer = '';
+        if (allMono) return lines.slice(i).join('\n');
+        return beforeAnswer + lines.slice(i).join('\n');
+      }
+    }
+    if (this.monologueBuffer.length > this.maxMonologueBuffer) {
+      this.monologueFlushed = true;
+      const out = stripThinkingTags(this.monologueBuffer);
+      this.monologueBuffer = '';
+      return out;
     }
     return null;
   }
 
-  flush(): string | null {
-    const cleaned = stripThinkingTags(this.raw);
-    const remaining = cleaned.slice(this.emitted);
-    this.emitted = cleaned.length;
-    return remaining || null;
+  flush(): string {
+    const tagRest = stripThinkingTags(this.raw).slice(this.emitted) || '';
+    this.emitted = stripThinkingTags(this.raw).length;
+    const monoRest = this.monologueFlushed ? '' : stripThinkingTags(this.monologueBuffer);
+    this.monologueBuffer = '';
+    this.monologueFlushed = true;
+    const combined = tagRest + monoRest;
+    return combined || '';
   }
 }
 
+// ── Monologue stripping (standalone, used outside streaming too) ──
+const MONOLOGUE_PATTERNS = /^(The user (wants|asked|is asking)|Let me |I need to |I should |I'll start|I will now|Now I (have|need|will)|First,? I|I'm going to|I should |To (do|answer|complete) this)/i;
 
-// ── Monologue stripping ──────────────────────────────────
-// Models sometimes narrate their thinking as plain text before the actual answer.
-// "The user wants me to... Let me explore... Now I have a comprehensive view..."
-// This buffer holds initial text and releases it once structured content begins.
-
-/**
- * Filter monologue preamble from a complete text response.
- * Strips initial lines that match narration patterns, keeping the first structured line onward.
- */
 function filterMonologue(text: string): string {
   if (!text || !text.trim()) return text;
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    // Found the first non-monologue line — drop everything before it
     if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
-      if (i === 0) return text; // First line is already the answer
-      // Check if everything before was monologue
+      if (i === 0) return text;
       const before = lines.slice(0, i).filter(l => l.trim());
       const allMonologue = before.every(l => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
-      if (allMonologue) {
-        return lines.slice(i).join('\n');
-      }
-      return text; // Mixed content — keep it all
+      if (allMonologue) return lines.slice(i).join('\n');
+      return text;
     }
   }
   return text;
-}
-
-const MONOLOGUE_PATTERNS = /^(The user (wants|asked|is asking)|Let me |I need to |I should |I'll start|I will now|Now I (have|need|will)|First,? I|I'm going to|I should |To (do|answer|complete) this)/i;
-
-class MonologueBuffer {
-  private buffer = '';
-  private flushed = false;
-  private readonly maxBuffer = 1500;
-
-  feed(text: string): string | null {
-    if (this.flushed) return text;
-
-    this.buffer += text;
-
-    // Check if we've hit structured content (answer started)
-    const lines = this.buffer.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      // A non-monologue line = the answer has started
-      if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
-        this.flushed = true;
-        // Return everything from this point on
-        const beforeAnswer = lines.slice(0, i).join('\n');
-        // Check if the pre-answer text is all monologue — if so, drop it
-        const monologueLines = beforeAnswer.split('\n').filter(l => l.trim());
-        const allMonologue = monologueLines.every(l => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
-        this.buffer = '';
-        if (allMonologue) {
-          // Drop the monologue, return from answer start
-          return lines.slice(i).join('\n');
-        } else {
-          // Mixed content — keep it all
-          return this.buffer;
-        }
-      }
-    }
-
-    // Buffer full but no answer detected — flush everything (it's a plain answer)
-    if (this.buffer.length > this.maxBuffer) {
-      this.flushed = true;
-      const out = filterMonologue(this.buffer);
-      this.buffer = '';
-      return out;
-    }
-
-    // Still buffering — don't emit anything yet
-    return null;
-  }
-
-  flush(): string {
-    if (this.flushed) return '';
-    this.flushed = true;
-    const remaining = filterMonologue(this.buffer);
-    this.buffer = '';
-    return remaining;
-  }
 }
 
 // ── Tool dedup tracking ────────────────────────────────
@@ -1782,8 +1746,7 @@ async function parseStreamForContentAndTools(
   let buffer = '';
   let content = '';
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
-  const tagStripper = new StreamingTagStripper();
-  const monologueBuf = new MonologueBuffer();
+  const cleaner = new StreamCleaner();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1807,11 +1770,8 @@ async function parseStreamForContentAndTools(
         if (delta.content) {
           content += delta.content;
           if (streamText) {
-            const cleaned = tagStripper.feed(delta.content);
-            if (cleaned) {
-              const filtered = monologueBuf.feed(cleaned);
-              if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
-            }
+            const filtered = cleaner.feed(delta.content);
+            if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
           }
         }
 
@@ -1834,12 +1794,7 @@ async function parseStreamForContentAndTools(
 
   // Flush any remaining tag-stripped content
   if (streamText) {
-    const remainingClean = tagStripper.flush();
-    if (remainingClean) {
-      const filtered = monologueBuf.feed(remainingClean);
-      if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
-    }
-    const remaining = monologueBuf.flush();
+    const remaining = cleaner.flush();
     if (remaining) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: remaining }) + '\n\n');
   }
 
@@ -3668,6 +3623,19 @@ app.get('/api/agents/background/:id/result', async (_req, res) => {
   // The runtime returns a handle whose promise resolves with the artifact.
   // We do not keep handles across restarts, so unknown ids return 404.
   res.status(404).json({ error: 'Live result fetch is not supported; the artifact is returned in the POST response' });
+});
+
+// ── Cost estimation ────────────────────────────────────
+
+app.post('/api/cost/estimate', (req, res) => {
+  const { model, inputTokens = 0, outputTokens = 0 } = (req.body || {}) as { model?: string; inputTokens?: number; outputTokens?: number };
+  if (!model) return res.status(400).json({ error: 'model is required' });
+  try {
+    const cost = estimateCost(model, inputTokens, outputTokens);
+    res.json({ model, inputTokens, outputTokens, cost });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Cost estimation failed' });
+  }
 });
 
 process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignoring'); });
