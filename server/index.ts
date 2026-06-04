@@ -2486,7 +2486,7 @@ app.post('/api/test/run', async (req, res) => {
 
   const tid = testId || 'test-' + Date.now();
   const targetModel = modelId || appConfig.activeModel;
-  const targetDir = workingDir || '/Users/kevink/Projects/Chains';
+  const targetDir = workingDir || process.cwd();
 
   // Create a temporary session for the test
   const testSession: SessionRow = {
@@ -2609,7 +2609,7 @@ app.post('/api/test/batch', async (req, res) => {
   }
 
   const tid = runId || 'batch-' + Date.now();
-  const targetDir = workingDir || '/Users/kevink/Projects/Chains';
+  const targetDir = workingDir || process.cwd();
   const total = prompts.length * modelIds.length;
 
   activeTestRuns.set(tid, { total, completed: 0, status: 'running', results: [] });
