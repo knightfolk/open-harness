@@ -146,6 +146,14 @@ async function runTest(prompt, modelId) {
   return result;
 }
 
+function promptRequiresFilesystemTools(prompt) {
+  return /filesystem tools available/i.test(prompt.prompt);
+}
+
+function responseLeaksToolMarkup(response = '') {
+  return /<tool_call>/i.test(response);
+}
+
 // ── Incremental file writers ───────────────────────────
 
 function createResultWriter(resultsDir, timestamp) {
@@ -289,6 +297,32 @@ async function main() {
           const respLen = result.response?.length || 0;
           const tools = result.toolCallCount || 0;
           const usedFS = result.toolCalls?.some(tc => tc.name === 'list_directory' || tc.name === 'read_file') ?? false;
+          const leakedToolMarkup = responseLeaksToolMarkup(result.response || '');
+          const missingRequiredTools = promptRequiresFilesystemTools(p) && !usedFS;
+          if (leakedToolMarkup || missingRequiredTools) {
+            const reason = leakedToolMarkup
+              ? 'Raw tool markup leaked into the response'
+              : 'Prompt required filesystem tools, but none executed';
+            console.log(`FAIL: ${reason}`);
+            failed++;
+            writer.appendResult({
+              model: model.id,
+              modelProvider: model.providerName,
+              prompt: p.id,
+              promptName: p.name,
+              status: 'fail',
+              error: reason,
+              toolCallCount: tools,
+              toolCalls: result.toolCalls,
+              responseLength: respLen,
+              responsePreview: result.response?.slice(0, 300) || '',
+              response: result.response || '',
+              wallMs: result.wallMs,
+              messageCount: result.messageCount,
+              usedTools: usedFS,
+            });
+            continue;
+          }
           console.log(`OK (${respLen} chars, ${tools} tools, ${result.wallMs}ms)`);
           const entry = {
             model: model.id,
