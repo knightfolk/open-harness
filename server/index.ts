@@ -329,6 +329,11 @@ for (const s of persisted) {
   });
 }
 if (persisted.length > 0) console.log(`✓ Loaded ${persisted.length} persisted session(s)`);
+
+function disposeEphemeralSession(sessionId: string) {
+  sessions.delete(sessionId);
+  sessionStore.deleteSession(sessionId);
+}
 // ── Session Routes ─────────────────────────────────────
 
 // Validate all curated MCP server prerequisites (binary availability, endpoint reachability)
@@ -2544,6 +2549,8 @@ app.post('/api/test/run', async (req, res) => {
     );
   } catch (testErr: any) {
     console.error('[test] streamModel error:', testErr.message);
+  } finally {
+    disposeEphemeralSession(testSession.id);
   }
 
   // Update status
@@ -2669,6 +2676,8 @@ app.post('/api/test/batch', async (req, res) => {
         );
       } catch (err: any) {
         console.error(`[test-batch] ${modelId}/${p.id} error:`, err.message);
+      } finally {
+        disposeEphemeralSession(testSession.id);
       }
 
       const response = chunks.join('');
@@ -3217,6 +3226,8 @@ app.post('/api/evals/run', async (req, res) => {
         );
       } catch (err: any) {
         console.error(`[eval] ${modelId}/${p.id} error:`, err.message);
+      } finally {
+        disposeEphemeralSession(testSession.id);
       }
 
       const response = chunks.join('');
