@@ -12,7 +12,7 @@ export function ConfidenceMeter({ signals }: Props) {
   return (
     <div className="confidence-meter">
       <button className="confidence-badge" onClick={() => setExpanded(!expanded)}>
-        <Shield size={12} style={{ color: signals.qualityColor }} />
+        <Shield size={10} style={{ color: signals.qualityColor }} />
         <span className="confidence-label" style={{ color: signals.qualityColor }}>
           {signals.qualityLabel}
         </span>
@@ -25,12 +25,12 @@ export function ConfidenceMeter({ signals }: Props) {
       {expanded && (
         <div className="confidence-panel">
           <div className="confidence-row">
-            <FileText size={12} />
+            <FileText size={11} />
             <span>Grounding</span>
             <span className="confidence-value">{signals.filesRead} file{signals.filesRead !== 1 ? 's' : ''} read</span>
           </div>
           <div className="confidence-row">
-            <Wrench size={12} />
+            <Wrench size={11} />
             <span>Tools used</span>
             <span className="confidence-value">{signals.toolsUsed}</span>
           </div>
@@ -58,7 +58,7 @@ export function ConfidenceMeter({ signals }: Props) {
               background: signals.qualityColor,
             }} />
           </div>
-          <div className="confidence-score">Grounding score: {signals.groundingScore}/100</div>
+          <div className="confidence-score">Confidence score: {signals.groundingScore}/100</div>
           {signals.orchestrationMode && (
             <div className="confidence-row">
               <span>Mode</span>
@@ -66,7 +66,7 @@ export function ConfidenceMeter({ signals }: Props) {
             </div>
           )}
           <div className="confidence-row">
-            <span>Risk</span>
+            <span>Reliability risk</span>
             <span className="confidence-value" style={{
               color: signals.riskLevel === 'low' ? '#22c55e' : signals.riskLevel === 'medium' ? '#f59e0b' : '#ef4444',
             }}>{signals.riskLevel}</span>

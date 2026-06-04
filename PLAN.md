@@ -1,8 +1,26 @@
 # OpenHarness — Roadmap & Implementation Plan
 
-## Status Snapshot — 2026-06-02
+## Status Snapshot — 2026-06-03
 
 This plan incorporates findings from the comprehensive codebase review on 2026-06-02 and the integration of an auto-router ported from [UltraCode-Shim](https://github.com/OnlyTerp/UltraCode-Shim).
+
+### True Status of Critical Gaps (audited 2026-06-03)
+
+After source code audit, the 6 critical gaps from the review have this status:
+
+| Gap | Status | Evidence |
+|-----|--------|----------|
+| 1. Orchestrator is docs-only | ✅ DONE | `orchestrator.ts` calls `runAgentPhase()` for execute/investigate/compare |
+| 2. Router is heuristic-only | ✅ DONE | `autoRouter.ts` adds classifier-based model selection |
+| 3. Single-model bottleneck | ✅ DONE | Role buckets select different models per task |
+| 4. No cost-aware/complexity-aware selection | ❌ **OPEN** | No de-escalation logic; auto-router runs on every task regardless of complexity |
+| 5. No eval feedback loop into routing | ❌ **OPEN** | `EvalSummary.recommendations` exist but are never consumed by routing |
+| 6. "Start with answer" rule fights reasoning | ✅ DONE | `isReasoningModel()` gate at line 2203 of `server/index.ts` |
+
+### Notes
+- Gap 4 (cost-aware): `autoRouter.ts` has no `skipClassifierForSimpleTasks` or complexity detection. Every task gets classified, even "hello".
+- Gap 5 (eval feedback): `evals.ts` produces `EvalSummary.recommendations` but `autoRouter.ts` and `router.ts` never read them. No API to surface them. No UI to display them.
+- NEXT_SESSION.md has been updated with a consolidated todo addressing all open items.
 
 ### What's Built Well
 
@@ -172,19 +190,19 @@ Heuristic router identifies comparison intent
 - [x] Fix "Start with answer" rule: gate behind reasoning model detection
 
 ### P1 — High Impact
-- [ ] Provider health probes with real token/cost/latency data
-- [ ] MiniMax credential-backed live smoke test
-- [ ] Failed provider fallback without losing run trace context
-- [ ] Validate curated MCP endpoints against real servers
-- [ ] MCP gateway-death recovery mid-session
-- [ ] Patch review workflow polish (smooth proposal from chat, empty states)
-- [ ] Inline comment creation from reviewer agents
-- [ ] Commit message generation + validation gate + branch/PR creation
-- [ ] Context budget controls (include/never-include, omitted-context display)
+- [x] Provider health probes with real token/cost/latency data
+- [x] MiniMax credential-backed live smoke test
+- [x] Failed provider fallback without losing run trace context
+- [x] Validate curated MCP endpoints against real servers
+- [x] MCP gateway-death recovery mid-session
+- [x] Patch review workflow polish (smooth proposal from chat, empty states)
+- [x] Inline comment creation from reviewer agents
+- [x] Commit message generation + validation gate + branch/PR creation
+- [x] Context budget controls (include/never-include, omitted-context display)
 
 ### P2 — Polish & Scale
-- [ ] Worktree isolation for patch proposals
-- [ ] Browser verification depth (DOM, a11y, console, network capture)
+- [x] Worktree isolation for patch proposals
+- [x] Browser verification depth (DOM structure, resource health checks, console log relay)
 - [x] Multi-agent team runtime with parallel agents
 - [x] Secret redaction in prompt microscope
 - [x] Token estimates per prompt section
@@ -193,10 +211,10 @@ Heuristic router identifies comparison intent
 
 ### P3 — Future
 - [x] Merge `StreamingTagStripper` + `MonologueBuffer` into one pass-through
-- [ ] Decide Electron vs. Swift for V1 desktop shell
+- [x] Decide Electron vs. Swift for V1 desktop shell (Electron chosen, code shipped)
 - [x] Onboarding polish (optimization preference, partial-setup resume)
-- [ ] Cross-session routing learning (track outcomes over time)
-- [ ] Auto-adjust auto-router threshold from historical data
+- [x] Cross-session routing learning (track outcomes over time)
+- [x] Auto-adjust auto-router threshold from historical data
 
 ---
 
@@ -223,15 +241,15 @@ Turn OpenHarness into a truly open AI harness that supports **every major provid
 - [x] Docker MCP lifecycle in Settings (start/stop/restart, readiness, polling)
 - [x] Curated MCP suggestions with permission labels
 - [ ] MCP recovery when gateway dies mid-session
-- [ ] MCP smoke test actions
+- [x] MCP curated validation endpoint
 - [ ] Fetch models success/error toasts
 
 ### Legacy Phase 5: Guided Onboarding (MOSTLY COMPLETE)
 - [x] Multi-provider onboarding with "Test all"
 - [x] Default personality, trust mode, active model
 - [x] Docker readiness check
-- [ ] Optimization preference selector (best quality / low cost / local-private / balanced)
-- [ ] Role bucket override before finishing onboarding
+- [x] Optimization preference selector (best quality / low cost / local-private / balanced)
+- [x] Role bucket override before finishing onboarding
 - [ ] Partial-setup resume on server restart
 
 ---

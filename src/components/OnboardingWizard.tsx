@@ -103,6 +103,20 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
   const [saving, setSaving] = useState(false);
   const [dockerReadiness, setDockerReadiness] = useState<api.DockerReadiness | null>(null);
 
+  // Load saved onboarding step on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await api.getConfig();
+        const savedStep = (cfg as any).onboardingStep;
+        if (typeof savedStep === 'number' && savedStep > 0 && savedStep <= 5) {
+          setStep(savedStep);
+        }
+      } catch {}
+
+    })();
+  }, []);
+
   // Auto-detect local providers + docker readiness on mount
   useEffect(() => {
     (async () => {
@@ -280,7 +294,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           )}
 
           <div style={{ display: 'flex', gap: 12, marginTop: 32 }}>
-            <button className="onboarding-btn-primary" onClick={() => setStep(1)}>
+            <button className="onboarding-btn-primary" onClick={async () => { setStep(1); try { await api.updateConfig({ onboardingStep: 1 } as any); } catch {} }}>
               Get started <ArrowRight size={16} />
             </button>
             <button className="onboarding-btn-secondary" onClick={onSkip}>
@@ -373,7 +387,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           )}
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(0)}>
+            <button className="onboarding-btn-back" onClick={async () => { setStep(0); try { await api.updateConfig({ onboardingStep: 0 } as any); } catch {} }}>
               <ArrowLeft size={16} /> Back
             </button>
             <button

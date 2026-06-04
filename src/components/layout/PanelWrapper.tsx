@@ -56,7 +56,7 @@ export function PanelWrapper({ panelId, onClose, onSwap, children }: Props) {
   return (
     <div
       ref={frameRef}
-      className={`panel-frame ${dragOver ? 'panel-drop-target' : ''}`}
+      className={`panel-frame panel-frame--${panelId} ${dragOver ? 'panel-drop-target' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -68,7 +68,7 @@ export function PanelWrapper({ panelId, onClose, onSwap, children }: Props) {
         onDragEnd={handleDragEnd}
       >
         <div className="panel-header-title">
-          <GripVertical size={14} className="panel-grip" />
+          <GripVertical size={12} className="panel-grip" />
           <Icon size={14} />
           <span>{config.label}</span>
         </div>

@@ -85,6 +85,9 @@ class MCPClient {
   private connected = false;
   private buffer = '';
   public lastError?: string;
+  private reconnectAttempts = 0;
+  public readonly maxRetries = 3;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     public readonly id: string,
@@ -155,11 +158,36 @@ class MCPClient {
   }
 
   async disconnect(): Promise<void> {
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.process && !this.process.killed) {
       this.process.kill('SIGTERM');
       this.process = null;
     }
     this.connected = false;
+  }
+
+  /** Attempt to reconnect if the process died and we haven't exceeded max retries. */
+  async reconnect(): Promise<boolean> {
+    if (this.reconnectAttempts >= this.maxRetries) {
+      console.log(`[MCP] ${this.name}: max reconnection attempts (${this.maxRetries}) reached, giving up`);
+      return false;
+    }
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 16000);
+    console.log(`[MCP] ${this.name}: reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxRetries})`);
+    return new Promise((resolve) => {
+      this.reconnectTimer = setTimeout(async () => {
+        try {
+          await this.connect();
+          console.log(`[MCP] ${this.name}: reconnected successfully`);
+          this.reconnectAttempts = 0;
+          resolve(true);
+        } catch (err) {
+          console.warn(`[MCP] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${err}`);
+          resolve(await this.reconnect());
+        }
+      }, delay);
+    });
   }
 
   getTools(): MCPTool[] { return this.tools; }
@@ -267,6 +295,9 @@ class MCPHttpTransport {
   private connected = false;
   private requestId = 0;
   public lastError?: string;
+  private reconnectAttempts = 0;
+  public readonly maxRetries = 3;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     public readonly id: string,
@@ -293,7 +324,32 @@ class MCPHttpTransport {
   }
 
   async disconnect(): Promise<void> {
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.connected = false;
+  }
+
+  /** Attempt to reconnect if transport is down and we haven't exceeded max retries. */
+  async reconnect(): Promise<boolean> {
+    if (this.reconnectAttempts >= this.maxRetries) {
+      console.log(`[MCP:http] ${this.name}: max reconnection attempts (${this.maxRetries}) reached, giving up`);
+      return false;
+    }
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 16000);
+    console.log(`[MCP:http] ${this.name}: reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxRetries})`);
+    return new Promise((resolve) => {
+      this.reconnectTimer = setTimeout(async () => {
+        try {
+          await this.connect();
+          console.log(`[MCP:http] ${this.name}: reconnected successfully`);
+          this.reconnectAttempts = 0;
+          resolve(true);
+        } catch (err) {
+          console.warn(`[MCP:http] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${err}`);
+          resolve(await this.reconnect());
+        }
+      }, delay);
+    });
   }
 
   getTools(): MCPTool[] { return this.tools; }
@@ -358,19 +414,50 @@ class StdioMCPClient {
   private connected = false;
   private buffer = '';
   public lastError?: string;
+  private reconnectAttempts = 0;
+  public readonly maxRetries = 3;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     public readonly id: string,
     public readonly name: string,
     private process: ChildProcess,
-  ) {}
+    private respawnCommand?: string,
+    private respawnArgs?: string[],
+  ) {
+    // Monitor the initial process for exit so connected flag stays accurate
+    if (this.process) {
+      this.process.on('exit', (code: number | null) => {
+        this.connected = false;
+        this.lastError = `Process exited with code ${code}`;
+      });
+    }
+  }
 
   async connect(): Promise<void> {
+    // If the existing process is dead and we have respawn info, create a new one
+    if ((!this.process || this.process.killed || !this.process.stdout) && this.respawnCommand) {
+      // spawn is imported at module level
+      console.log(`[MCP:stdio] ${this.name}: respawning process: ${this.respawnCommand} ${(this.respawnArgs || []).join(' ')}`);
+      this.process = spawn(this.respawnCommand, this.respawnArgs || [], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+        detached: false,
+      });
+      this.process.on('exit', (code) => {
+        console.log(`[MCP:stdio] ${this.name}: process exited with code ${code}`);
+        this.connected = false;
+        this.lastError = `Process exited with code ${code}`;
+      });
+    }
+
     return new Promise((resolve, reject) => {
-      if (!this.process.stdout || !this.process.stdin) {
-        return reject(new Error('Child process has no stdin/stdout pipes'));
+      if (!this.process || !this.process.stdout || !this.process.stdin) {
+        return reject(new Error('Child process has no stdin/stdout pipes and no respawn info'));
       }
 
+      // Clean up old listeners before adding new ones
+      this.process.stdout.removeAllListeners('data');
       this.process.stdout.on('data', (chunk: Buffer) => {
         this.buffer += chunk.toString();
         this.processBuffer();
@@ -399,8 +486,33 @@ class StdioMCPClient {
   }
 
   async disconnect(): Promise<void> {
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.connected = false;
     // Don't kill the process — it's managed by the caller
+  }
+
+  /** Attempt to reconnect if the process died and we haven't exceeded max retries. */
+  async reconnect(): Promise<boolean> {
+    if (this.reconnectAttempts >= this.maxRetries) {
+      console.log(`[MCP:stdio] ${this.name}: max reconnection attempts (${this.maxRetries}) reached, giving up`);
+      return false;
+    }
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 16000);
+    console.log(`[MCP:stdio] ${this.name}: reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxRetries})`);
+    return new Promise((resolve) => {
+      this.reconnectTimer = setTimeout(async () => {
+        try {
+          await this.connect();
+          console.log(`[MCP:stdio] ${this.name}: reconnected successfully`);
+          this.reconnectAttempts = 0;
+          resolve(true);
+        } catch (err) {
+          console.warn(`[MCP:stdio] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${err}`);
+          resolve(await this.reconnect());
+        }
+      }, delay);
+    });
   }
 
   getTools(): MCPTool[] { return this.tools; }
@@ -517,12 +629,19 @@ class MCPManager {
   }
 
   // Connect to a running MCP gateway child process via stdio
-  async startStdioClient(id: string, name: string, childProcess: ChildProcess): Promise<MCPClient> {
+  async startStdioClient(
+    id: string,
+    name: string,
+    childProcess: ChildProcess,
+    respawnCommand?: string,
+    respawnArgs?: string[],
+  ): Promise<MCPClient> {
     const existing = this.clients.get(id);
     if (existing) await existing.disconnect();
 
     // Create a stdio-connected client that uses the existing process
-    const client = new StdioMCPClient(id, name, childProcess);
+    // and knows how to respawn if the process dies
+    const client = new StdioMCPClient(id, name, childProcess, respawnCommand, respawnArgs);
     await client.connect();
     this.clients.set(id, client as any);
     return client as any;
@@ -534,6 +653,72 @@ class MCPManager {
     }
     this.clients.clear();
   }
+
+  // ── Watchdog ──────────────────────────────────────────
+  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private isWatchdogRunning = false;
+
+  /**
+   * Start a periodic watchdog that checks connection health and
+   * attempts to reconnect any disconnected clients.
+   * Checks every 30s. Uses incremental backoff per-client.
+   */
+  startWatchdog(intervalMs: number = 30_000): void {
+    if (this.isWatchdogRunning) return;
+    this.isWatchdogRunning = true;
+    console.log(`[MCP:watchdog] Starting health checks every ${intervalMs}ms`);
+    const tick = async () => {
+      if (!this.isWatchdogRunning) return;
+      for (const [id, client] of this.clients) {
+        const c = client as any;
+        if (!c.isConnected && typeof c.isConnected === 'undefined') continue;
+        const connected = typeof c.isConnected === 'function' ? c.isConnected() : c.isConnected;
+        if (!connected && c.reconnect) {
+          try {
+            await c.reconnect();
+          } catch (err) {
+            console.warn(`[MCP:watchdog] Reconnect failed for ${id}:`, err);
+          }
+        }
+      }
+      this.watchdogTimer = setTimeout(tick, intervalMs);
+    };
+    this.watchdogTimer = setTimeout(tick, intervalMs);
+  }
+
+  /** Stop the watchdog timer. */
+  stopWatchdog(): void {
+    this.isWatchdogRunning = false;
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  /**
+   * Get status with reconnection metadata for the UI.
+   */
+  getVerboseStatus(): Array<MCPServerStatus & {
+    reconnectAttempts: number;
+    maxRetries: number;
+  }> {
+    return Array.from(this.clients.entries()).map(([id, client]) => {
+      const c = client as any;
+      const connected = typeof c.isConnected === 'function' ? c.isConnected() : c.isConnected;
+      return {
+        id,
+        name: c.name || id,
+        running: !!connected,
+        toolCount: c.getTools ? c.getTools().length : 0,
+        tools: c.getTools ? c.getTools() : [],
+        resourceCount: c.getResources ? c.getResources().length : 0,
+        error: c.lastError,
+        reconnectAttempts: c.reconnectAttempts ?? 0,
+        maxRetries: c.maxRetries ?? 3,
+      };
+    });
+  }
+
 }
 
 // Export singleton

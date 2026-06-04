@@ -10,7 +10,7 @@ import type { StoredMCPServer, StoredProvider } from './config';
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
 import { checkDockerReadiness } from './dockerReadiness';
-import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions } from './curatedMcp';
+import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAllCuratedServers } from './curatedMcp';
 import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost } from './modelProfiles';
 import { buildContextWindow } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
@@ -29,6 +29,8 @@ import {
 import { routeRequest, routeWithAutoRouter } from './router';
 import type { RouteDecision } from './router';
 import { configureAutoRouter, getAutoRouterState, clearRouterCache, getAvailableCandidates, checkRouterHealth } from './autoRouter';
+import { recordRoutingDecision, recordOutcome, getRoutingEvents, getLearningSummary, suggestThresholdAdjustment, getModelSuccessRates } from './routerLearning';
+import { recordUsage, checkBudget, getAllUsageSummaries } from './usageTracker';
 import { orchestrationInstruction, orchestrationTraceSteps, runOrchestratorPipeline } from './orchestrator';
 import type { ProjectProfile } from './projectProfile';
 import { appendRunStep, completeHarnessRun, createHarnessRun } from './runTrace';
@@ -42,6 +44,7 @@ import * as commitMessage from './commitMessage';
 import * as agentProfiles from './agentProfiles';
 import * as agentRuntime from './agentRuntime';
 import { captureDeepBrowser } from './browserCapture';
+import { analyzeDomStructure, checkResourceHealth } from './browserCaptureEnhancements';
 import { estimateSections, redactSecrets } from "./sectionRedaction";
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import {
@@ -328,6 +331,30 @@ for (const s of persisted) {
 if (persisted.length > 0) console.log(`✓ Loaded ${persisted.length} persisted session(s)`);
 // ── Session Routes ─────────────────────────────────────
 
+// Validate all curated MCP server prerequisites (binary availability, endpoint reachability)
+app.get('/api/mcp/curated/validate', async (_req, res) => {
+  try {
+    const results = await validateAllCuratedServers();
+    res.json({ results, ok: results.every((r) => r.ok) });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Validation failed' });
+  }
+});
+// MCP watchdog status and control
+app.get('/api/mcp/watchdog', (_req, res) => {
+  const status = mcpManager.getVerboseStatus();
+  res.json({ status, connected: status.filter((s) => s.running).length, total: status.length });
+});
+
+app.post('/api/mcp/watchdog/restart', async (_req, res) => {
+  try {
+    mcpManager.stopWatchdog();
+    mcpManager.startWatchdog(30_000);
+    res.json({ ok: true, message: 'Watchdog restarted' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to restart watchdog' });
+  }
+});
 app.get('/api/sessions', (_req, res) => {
   const list = Array.from(sessions.values())
     .map(({ id, title, workingDir, createdAt, updatedAt, messages }) => ({
@@ -402,6 +429,9 @@ app.put('/api/config', (req, res) => {
     (appConfig as any).autoRouter = updates.autoRouter;
     configureAutoRouter(appConfig);
   }
+  if (updates.onboardingStep !== undefined) {
+    (appConfig as any).onboardingStep = updates.onboardingStep;
+  }
   saveConfig(appConfig);
   res.json({ ok: true });
 });
@@ -436,8 +466,69 @@ app.get('/api/router/health', async (_req, res) => {
 });
 
 
+
+// ── Usage Tracking ────────────────────────────────
+app.get('/api/usage', (_req, res) => {
+  const budgets: any[] = []; // loaded from config if configured
+  res.json(getAllUsageSummaries(budgets));
+});
+
+app.post('/api/usage/record', (req, res) => {
+  const { modelId, inputTokens, outputTokens, cost, sessionId } = (req.body || {}) as any;
+  if (!modelId) return res.status(400).json({ error: 'modelId required' });
+  recordUsage({
+    timestamp: new Date().toISOString(),
+    modelId,
+    inputTokens: inputTokens || 0,
+    outputTokens: outputTokens || 0,
+    cost: cost || 0,
+    sessionId: sessionId || 'unknown',
+  });
+  res.json({ ok: true });
+});
+
+app.get('/api/usage/check', (req, res) => {
+  const modelId = (req.query.modelId as string) || '';
+  const estimatedInput = parseInt(String(req.query.estimatedInput || '0'), 10);
+  const estimatedOutput = parseInt(String(req.query.estimatedOutput || '0'), 10);
+  const estimatedCost = parseFloat(String(req.query.estimatedCost || '0'));
+  if (!modelId) return res.status(400).json({ error: 'modelId required' });
+  const budgets: any[] = []; // loaded from config if configured
+  res.json(checkBudget(modelId, budgets, estimatedInput, estimatedOutput, estimatedCost));
+});
 // ── Provider endpoints ─────────────────────────────────
 
+// ── Router Learning (M19) ────────────────────────────
+app.get('/api/router/learning', (_req, res) => {
+  res.json(getLearningSummary());
+});
+
+app.get('/api/router/learning/events', (req, res) => {
+  const sessionId = req.query.sessionId as string | undefined;
+  const limit = parseInt(String(req.query.limit || '100'), 10);
+  res.json(getRoutingEvents(sessionId, limit));
+});
+
+app.get('/api/router/learning/success-rates', (_req, res) => {
+  res.json(getModelSuccessRates());
+});
+
+app.post('/api/router/learning/suggest-threshold', async (req, res) => {
+  const currentThreshold = (req.body?.currentThreshold as number) ?? 0.7;
+  res.json(suggestThresholdAdjustment(currentThreshold));
+});
+
+// Record a routing outcome signal (called by the frontend when a user rates a response)
+app.post('/api/router/learning/outcome', (req, res) => {
+  const { eventId, outcome, note } = (req.body || {}) as { eventId?: string; outcome?: string; note?: string };
+  if (!eventId || !outcome) return res.status(400).json({ error: 'eventId and outcome required' });
+  if (!['success', 'failure', 'ambiguous'].includes(outcome)) {
+    return res.status(400).json({ error: 'outcome must be success, failure, or ambiguous' });
+  }
+  const ok = recordOutcome(eventId, outcome as any, note);
+  if (!ok) return res.status(404).json({ error: 'Event not found' });
+  res.json({ ok: true });
+});
 app.get('/api/providers', (_req, res) => {
   const providers = appConfig.providers.map((p) => ({
     ...p,
@@ -1554,6 +1645,24 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       fallback: rd.fallback ?? false,
       classifierModel: rd.classifierModel ?? null,
     });
+
+  // Record routing decision for cross-session learning
+  if (rd && rd.source === 'auto') {
+    recordRoutingDecision({
+      timestamp: new Date().toISOString(),
+      sessionId: session.id,
+      taskHash: String(Math.abs(content.split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0)).toString(36)),
+      selectedModel: route.suggestedModels[0] || requestedModel,
+      score: rd.score ?? 0,
+      candidateScores: {},
+      wasFallback: rd.fallback ?? false,
+      wasCached: rd.cached ?? false,
+      classifierModel: rd.classifierModel ?? null,
+      surface: 'orchestrator',
+      complexity: route.complexity,
+      userTurns: session.messages.length,
+    });
+  }
   }
 
   // Non-direct modes run multi-agent orchestration instead of single-stream model
@@ -1591,7 +1700,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   } else if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session, run);
   } else {
-    await streamModel(resolved.chatURL, resolved.apiKey, resolved.providerId, session.messages, res, assistantId, session, undefined, run, route);
+    await streamModelWithFallback(resolved, session, res, assistantId, run, route);
   }
 
   completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
@@ -3539,11 +3648,103 @@ app.post('/api/browser/deep', async (req, res) => {
     if (!artifact) {
       return res.status(400).json({ error: 'Only localhost URLs are supported' });
     }
+    // Add enhanced DOM structure analysis if HTML was captured
+    if (artifact.bodyTextPreview && !artifact.domStructure) {
+      try {
+        // Re-fetch to get full HTML for structure analysis
+        const htmlRes = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        if (htmlRes.ok) {
+          const buf = await htmlRes.arrayBuffer();
+          const html = new TextDecoder('utf-8').decode(buf.slice(0, 2 * 1024 * 1024));
+          artifact.domStructure = analyzeDomStructure(html);
+          try {
+            artifact.resourceHealth = await checkResourceHealth(html, url);
+          } catch {}
+        }
+      } catch {
+        // Enhancement is best-effort
+      }
+    }
     res.json(artifact);
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Deep capture failed' });
   }
 });
+// ── Console Log Relay ──────────────────────────────
+// In-memory store of console logs collected from the SPA
+// during deep browser verification. SPAs push console entries
+// by POSTing to this endpoint (e.g., via a Vite plugin or
+// injected script).
+const consoleLogStore: Array<{ sessionId: string; level: string; message: string; timestamp: string }> = [];
+const MAX_CONSOLE_LOGS = 500;
+
+// SPA pushes console entries here
+app.post('/api/browser/console-log', (req, res) => {
+  const { sessionId, level, message, timestamp } = (req.body || {}) as { sessionId?: string; level?: string; message?: string; timestamp?: string };
+  if (!message) return res.status(400).json({ error: 'message is required' });
+  const entry = {
+    sessionId: sessionId || 'anonymous',
+    level: level || 'log',
+    message: String(message).slice(0, 2000),
+    timestamp: timestamp || new Date().toISOString(),
+  };
+  consoleLogStore.push(entry);
+  if (consoleLogStore.length > MAX_CONSOLE_LOGS) {
+    consoleLogStore.splice(0, consoleLogStore.length - MAX_CONSOLE_LOGS);
+  }
+  res.json({ ok: true });
+});
+
+// Retrieve console logs for a session (used by deep browser result)
+app.get('/api/browser/console-log', (req, res) => {
+  const sessionId = req.query.sessionId as string | undefined;
+  const limit = parseInt(String(req.query.limit || '200'), 10);
+  let entries = consoleLogStore;
+  if (sessionId) entries = entries.filter((e) => e.sessionId === sessionId);
+  res.json(entries.slice(-limit));
+});
+
+// Clear console logs for a session
+app.delete('/api/browser/console-log', (req, res) => {
+  const sessionId = req.query.sessionId as string | undefined;
+  if (sessionId) {
+    let removed = 0;
+    for (let i = consoleLogStore.length - 1; i >= 0; i--) {
+      if (consoleLogStore[i].sessionId === sessionId) {
+        consoleLogStore.splice(i, 1);
+        removed++;
+      }
+    }
+    res.json({ removed });
+  } else {
+    const count = consoleLogStore.length;
+    consoleLogStore.length = 0;
+    res.json({ removed: count });
+  }
+});
+
+// Suggested Vite plugin snippet (shown in console relay docs):
+// Add to vite.config.ts to forward console logs to OpenHarness:
+// export default {
+//   plugins: [{
+//     name: 'openharness-console-log',
+//     transformIndexHtml() {
+//       return [{
+//         tag: 'script',
+//         children: `
+//           (function(){
+//             const orig = console.error;
+//             console.error = function(...args) {
+//               orig.apply(console, args);
+//               fetch('/api/browser/console-log', {
+//                 method: 'POST',
+//                 headers: {'Content-Type':'application/json'},
+//                 body: JSON.stringify({level:'error',message:args.join(' ')})
+//               }).catch(()=>{});
+//             };
+//           })();
+//         `}],
+//       }}}]};
 
 // ── Prompt Microscope helpers (M16) ───────────────────
 
@@ -3624,6 +3825,83 @@ app.get('/api/agents/background/:id/result', async (_req, res) => {
   // We do not keep handles across restarts, so unknown ids return 404.
   res.status(404).json({ error: 'Live result fetch is not supported; the artifact is returned in the POST response' });
 });
+
+
+
+// ── Provider fallback ─────────────────────────────────
+/**
+ * Stream a model response with automatic provider fallback.
+ * Tries all available providers that serve the effective model, in order.
+ * Each fallback attempt gets a run trace step so the user sees the recovery.
+ * If all providers fail, the final error from the last attempt is preserved.
+ */
+async function streamModelWithFallback(
+  primaryResolved: { chatURL: string; apiKey: string; providerId: string; provider?: any },
+  session: SessionRow,
+  res: express.Response,
+  assistantId: string,
+  run: HarnessRun | undefined,
+  routeOverride: RouteDecision | undefined,
+): Promise<void> {
+  // Collect all providers that can serve the effective model
+  const effectiveModel = run?.effectiveModel || getActiveModel();
+  const providers: Array<{ chatURL: string; apiKey: string; providerId: string }> = [];
+  const seen = new Set<string>();
+
+  // Primary provider first
+  if (primaryResolved && !seen.has(primaryResolved.providerId)) {
+    seen.add(primaryResolved.providerId);
+    providers.push({ chatURL: primaryResolved.chatURL, apiKey: primaryResolved.apiKey, providerId: primaryResolved.providerId });
+  }
+
+  // Scan all other providers for the same model (loose match)
+  for (const p of appConfig.providers) {
+    if (seen.has(p.id)) continue;
+    const bareModelId = effectiveModel.includes(":") ? effectiveModel.split(":").slice(1).join(":") : effectiveModel;
+    const hasModel = p.models.some((m) => m.id === bareModelId || m.id === effectiveModel);
+    if (hasModel && p.apiKey) {
+      seen.add(p.id);
+      const baseURL = p.baseURL.replace(/\/+$/, "");
+      let chatURL = baseURL;
+      if (!/\/chat\/completions$/i.test(baseURL)) {
+        if (/\/v\d+$/i.test(baseURL)) chatURL = `${baseURL}/chat/completions`;
+        else chatURL = `${baseURL}/v1/chat/completions`;
+      }
+      providers.push({ chatURL, apiKey: p.apiKey, providerId: p.id });
+    }
+  }
+
+  let lastError;
+  for (let attempt = 0; attempt < providers.length; attempt++) {
+    const p = providers[attempt];
+    if (attempt > 0) {
+      const msg = `Provider ${providers[attempt - 1].providerId} failed, falling back to ${p.providerId}`;
+      console.log(`[fallback] ${msg}`);
+      if (run) emitRunStep(res, run, { type: "error", message: msg });
+      const sseData = JSON.stringify({ from: providers[attempt - 1].providerId, to: p.providerId, reason: lastError });
+      res.write("event: fallback\n");
+      res.write("data: " + sseData + "\n");
+      res.write("\n");
+    }
+    try {
+      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, undefined, run, routeOverride);
+      // If here, streaming succeeded
+      return;
+    } catch (err: any) {
+      lastError = err?.message || "Unknown error";
+      console.error(`[fallback] provider ${p.providerId} failed: ${lastError}`);
+    }
+  }
+
+  const failureMessage = `All ${providers.length} provider attempt${providers.length === 1 ? '' : 's'} failed${lastError ? `: ${lastError}` : '.'}`;
+  console.error(`[fallback] ${failureMessage}`);
+  if (run) {
+    run.status = 'error';
+    emitRunStep(res, run, { type: 'error', message: failureMessage });
+  }
+  writeSSE(res, 'text', { id: assistantId, text: failureMessage });
+  writeSSE(res, 'error', { error: failureMessage });
+}
 
 // ── Cost estimation ────────────────────────────────────
 
@@ -3780,7 +4058,7 @@ app.listen(PORT, () => {
     // Connect via stdio using the MCP client after the gateway initializes
     setTimeout(async () => {
       try {
-        await mcpManager.startStdioClient('docker-mcp', 'Docker MCP', mcpGateway);
+        await mcpManager.startStdioClient('docker-mcp', 'Docker MCP', mcpGateway, 'docker', ['mcp', 'gateway', 'run', '--transport', 'stdio', '--profile', 'ai_coding']);
         const c = mcpManager.getClient('docker-mcp');
         console.log('✓ Docker MCP connected — tools:', c?.getTools?.()?.length || 0);
       } catch (err: any) {
@@ -3788,6 +4066,11 @@ app.listen(PORT, () => {
       }
     }, 5000);
     console.log('✓ Docker MCP gateway starting (stdio)');
+  // Start MCP connection watchdog (checks every 30s and auto-reconnects)
+  setTimeout(() => {
+    mcpManager.startWatchdog(30_000);
+    console.log('✓ MCP watchdog started (30s interval)');
+  }, 8000);
   } catch {
     console.log('  Docker not found — Docker MCP will show as unavailable');
   }

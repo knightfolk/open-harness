@@ -11,7 +11,7 @@ export interface ConfidenceSignals {
   hasValidation: boolean;
   groundingScore: number;   // 0-100
   riskLevel: 'low' | 'medium' | 'high';
-  qualityLabel: 'High' | 'Medium' | 'Low';
+  qualityLabel: 'High confidence' | 'Medium confidence' | 'Low confidence';
   qualityColor: string;
 }
 
@@ -72,15 +72,15 @@ export function analyzeConfidence(message: Message): ConfidenceSignals {
   let riskLevel: ConfidenceSignals['riskLevel'];
 
   if (grounding >= 60) {
-    qualityLabel = 'High';
+    qualityLabel = 'High confidence';
     qualityColor = '#22c55e';
     riskLevel = 'low';
   } else if (grounding >= 30) {
-    qualityLabel = 'Medium';
+    qualityLabel = 'Medium confidence';
     qualityColor = '#f59e0b';
     riskLevel = 'medium';
   } else {
-    qualityLabel = 'Low';
+    qualityLabel = 'Low confidence';
     qualityColor = '#ef4444';
     riskLevel = 'high';
   }
@@ -240,7 +240,7 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
   }
 
   // If confidence is low, suggest comparing with another model
-  if (signals.qualityLabel !== 'High') {
+  if (signals.qualityLabel !== 'High confidence') {
     actions.push({
       id: 'compare-model',
       label: 'Compare another model',

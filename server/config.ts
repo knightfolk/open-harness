@@ -66,6 +66,26 @@ export interface AutoRouterCandidateConfig {
   card: string;
 }
 
+/**
+ * Context budget configuration controls.
+ * Controls which sections are included or excluded from the context window.
+ */
+export interface ContextConfig {
+  /** Maximum tokens for repo map summary */
+  repoMapBudget: number;
+  /** Maximum tokens for context pack */
+  contextPackBudget: number;
+  /** Always include these section IDs in the context window */
+  includePatterns: string[];
+  /** Never include these section IDs in the context window */
+  neverIncludePatterns: string[];
+  /** Compress tool outputs aggressively to save tokens */
+  compressToolOutputs: boolean;
+  /** Safety margin as fraction of total (0.0-0.2) */
+  safetyMargin: number;
+  /** Minimum recent pairs to always keep intact */
+  minRecentPairs: number;
+}
 
 export interface StoredConfig {
   version: number;
@@ -76,6 +96,7 @@ export interface StoredConfig {
   activeTheme: string;
   roleAssignments: Record<string, string>; // roleId -> modelId
   autoRouter?: AutoRouterConfig;
+  contextConfig?: Partial<ContextConfig>;
   trustMode: string; // TrustMode
 }
 
@@ -113,6 +134,15 @@ const DEFAULT_CONFIG: StoredConfig = {
     planner: 'MiniMax-M3',       // Task decomposition
     reviewer: 'MiniMax-M3',      // Code review
     worker: 'MiniMax-M3',        // Fast parallel tasks
+  },
+  contextConfig: {
+    repoMapBudget: 2000,
+    contextPackBudget: 3000,
+    includePatterns: ['system', 'projectProfile'],
+    neverIncludePatterns: [],
+    compressToolOutputs: true,
+    safetyMargin: 0.05,
+    minRecentPairs: 2,
   },
 };
 

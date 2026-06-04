@@ -12,7 +12,7 @@
  */
 
 import { writeFileSync, mkdirSync, existsSync, appendFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +24,7 @@ const quickMode = args.includes('--quick');
 const modelFlag = args.indexOf('--model');
 const modelsFlag = args.indexOf('--models');
 const outputDirFlag = args.indexOf('--output-dir');
+const targetDirFlag = args.indexOf('--target-dir');
 
 // Parse model(s)
 let forcedModels = null;
@@ -36,7 +37,7 @@ if (modelsFlag >= 0) {
 // Parse output dir
 const outputDir = outputDirFlag >= 0 ? args[outputDirFlag + 1] : null;
 
-const CHAINS_DIR = '/Users/kevink/Projects/Chains';
+const TARGET_DIR = targetDirFlag >= 0 ? resolve(args[targetDirFlag + 1]) : ROOT;
 
 // ── Test prompts ───────────────────────────────────────
 
@@ -46,7 +47,7 @@ const PROMPTS = [
     name: 'Full Project Review',
     prompt: `You have filesystem tools available. Use them.
 
-Review the project at ${CHAINS_DIR}. Start by listing the directory structure, then read key files (README, package.json, main source files). Give a detailed summary covering:
+Review the project at ${TARGET_DIR}. Start by listing the directory structure, then read key files (README, package.json, main source files). Give a detailed summary covering:
 1. What the project does
 2. Architecture and tech stack
 3. Code quality observations
@@ -57,7 +58,7 @@ Review the project at ${CHAINS_DIR}. Start by listing the directory structure, t
     name: 'Architecture Scan',
     prompt: `You have filesystem tools available. Use them.
 
-Analyze the architecture of the project at ${CHAINS_DIR}. List all directories and key files, then identify:
+Analyze the architecture of the project at ${TARGET_DIR}. List all directories and key files, then identify:
 1. Entry points and main modules
 2. Data flow patterns
 3. How components connect to each other
@@ -68,7 +69,7 @@ Analyze the architecture of the project at ${CHAINS_DIR}. List all directories a
     name: 'README + Config Summary',
     prompt: `You have filesystem tools available. Use them.
 
-Read the README.md and any config files (package.json, tsconfig, etc.) from ${CHAINS_DIR}. Summarize:
+Read the README.md and any config files (package.json, tsconfig, etc.) from ${TARGET_DIR}. Summarize:
 1. The project's purpose and goals
 2. How to install and run it
 3. Key dependencies and scripts
@@ -79,7 +80,7 @@ Read the README.md and any config files (package.json, tsconfig, etc.) from ${CH
     name: 'Code Quality Spot-Check',
     prompt: `You have filesystem tools available. Use them.
 
-Examine 3-5 source files from ${CHAINS_DIR}. For each file, assess:
+Examine 3-5 source files from ${TARGET_DIR}. For each file, assess:
 1. Readability and naming conventions
 2. Error handling patterns
 3. Type safety (if TypeScript)
@@ -91,7 +92,7 @@ Examine 3-5 source files from ${CHAINS_DIR}. For each file, assess:
     name: 'Dependency Audit',
     prompt: `You have filesystem tools available. Use them.
 
-List the contents of ${CHAINS_DIR}, then read package.json and any lock files. Analyze:
+List the contents of ${TARGET_DIR}, then read package.json and any lock files. Analyze:
 1. Number and purpose of dependencies
 2. Any outdated or risky packages
 3. Dev vs production dependency split
@@ -102,7 +103,7 @@ List the contents of ${CHAINS_DIR}, then read package.json and any lock files. A
     name: 'Bug Hunt',
     prompt: `You have filesystem tools available. Use them.
 
-Look through the source code in ${CHAINS_DIR} for potential bugs. Check for:
+Look through the source code in ${TARGET_DIR} for potential bugs. Check for:
 1. Unhandled error cases
 2. Race conditions
 3. Off-by-one errors
@@ -123,7 +124,7 @@ async function getModels() {
 }
 
 async function runTest(prompt, modelId) {
-  const body = { prompt: prompt.prompt, modelId, workingDir: CHAINS_DIR, testId: `${modelId}--${prompt.id}` };
+  const body = { prompt: prompt.prompt, modelId, workingDir: TARGET_DIR, testId: `${modelId}--${prompt.id}` };
   const start = Date.now();
   const res = await fetch(`${API}/api/test/run`, {
     method: 'POST',
@@ -160,7 +161,7 @@ function createResultWriter(resultsDir, timestamp) {
       // Rewrite JSON each time with all results so far
       writeFileSync(jsonPath, JSON.stringify({
         timestamp,
-        targetDir: CHAINS_DIR,
+        targetDir: TARGET_DIR,
         completed: allResults.length,
         results: allResults,
       }, null, 2));
@@ -180,7 +181,7 @@ function buildMarkdownSummary(results, models, prompts) {
     `# OpenHarness Test Results`,
     ``,
     `**Date:** ${new Date().toISOString()}`,
-    `**Target:** ${CHAINS_DIR}`,
+    `**Target:** ${TARGET_DIR}`,
     `**Models tested:** ${models.length}`,
     `**Prompts:** ${prompts.length}`,
     `**Total runs:** ${results.length} (${results.filter(r => r.status === 'ok').length} ok, ${results.filter(r => r.status !== 'ok').length} failed)`,
@@ -243,7 +244,7 @@ function buildMarkdownSummary(results, models, prompts) {
 
 async function main() {
   console.log('═══ OpenHarness Test Harness ═══\n');
-  console.log(`Target: ${CHAINS_DIR}`);
+  console.log(`Target: ${TARGET_DIR}`);
   console.log(`Prompts: ${PROMPTS.length}`);
 
   // Get models

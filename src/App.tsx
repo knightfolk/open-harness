@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, Plan, HarnessRunStep, ProjectProfile } from './types';
 import type { PanelId } from './types/layout';
 import { Sidebar } from './components/Sidebar';
@@ -8,11 +8,17 @@ import { SettingsModal } from './components/SettingsModal';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
+import { EnvironmentRail } from './components/EnvironmentRail';
+import { ReviewChangesFlyout } from './components/ReviewChangesFlyout';
+import { AgentFocusPanel } from './components/AgentFocusPanel';
+import { RunningAgentsStrip } from './components/RunningAgentsStrip';
+import { PanelRightOpen } from 'lucide-react';
 import * as api from './utils/api';
 import './styles/global.css';
 import './styles/components.css';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+const RIGHT_SIDE_PANELS = new Set<PanelId>(['side-chat', 'diffs', 'browser', 'sub-agents', 'files', 'model-lab', 'safety', 'patches']);
 
 
 function describeRunStep(step: HarnessRunStep): string {
@@ -95,6 +101,10 @@ function App() {
   const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [reviewFlyoutOpen, setReviewFlyoutOpen] = useState(false);
+  const [superPanelOpen, setSuperPanelOpen] = useState(true);
+  const [focusedSubAgentId, setFocusedSubAgentId] = useState<string | null>(null);
+  const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout, addPanel } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
@@ -165,6 +175,28 @@ function App() {
     } catch { /* ignore */ }
   }, []);
 
+  // Keyboard shortcut: ⇧⌘S or ⌘\ toggles the Super Panel.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      // ⇧⌘S — explicit toggle
+      if (e.shiftKey && key === 's') {
+        e.preventDefault();
+        setSuperPanelOpen((prev) => !prev);
+        return;
+      }
+      // ⌘\ — also toggles
+      if (!e.shiftKey && e.key === '\\') {
+        e.preventDefault();
+        setSuperPanelOpen((prev) => !prev);
+        return;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Load project profile whenever the active folder changes.
   useEffect(() => {
@@ -174,6 +206,30 @@ function App() {
       .then((profile) => { if (!cancelled) setProjectProfile(profile as ProjectProfile); })
       .catch((err) => { console.error('Failed to load project profile:', err); if (!cancelled) setProjectProfile(null); });
     return () => { cancelled = true; };
+  }, [workingDir]);
+
+  // Track whether the repo currently has pending changes so the Super Panel can
+  // reopen itself even when the rail is hidden.
+  useEffect(() => {
+    let cancelled = false;
+    if (!workingDir) {
+      setHasPendingChanges(false);
+      return;
+    }
+    const poll = async () => {
+      try {
+        const status = await api.getGitStatus(workingDir);
+        if (!cancelled) setHasPendingChanges(!status.clean);
+      } catch {
+        if (!cancelled) setHasPendingChanges(false);
+      }
+    };
+    poll();
+    const interval = window.setInterval(poll, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [workingDir]);
 
   // Load config from server on mount
@@ -484,7 +540,12 @@ function App() {
       startTime: new Date(),
       tokensUsed: 0,
     };
-    setSubAgents([activityAgent]);
+    // Keep any prior agents and seed the activity placeholder without clobbering
+    // existing entries, so multi-run messages accumulate visible sub-agent cards.
+    setSubAgents((prev) => {
+      if (prev.some((a) => a.id === activityAgent.id)) return prev;
+      return [...prev, activityAgent];
+    });
 
     const assistantId = uid();
     streamingTextRef.current.set(assistantId, '');
@@ -540,17 +601,28 @@ function App() {
         },
         onRunStart: (run) => {
           setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, runTrace: run } : m)));
-          setSubAgents([{
-            id: run.id,
-            name: `${run.role} run`,
-            model: run.effectiveModel,
-            status: 'running',
-            task: 'Starting run...',
-            progress: 5,
-            startTime: new Date(run.startedAt),
-            messages: [],
-            runTrace: run,
-          }]);
+          // Promote the optimistic activity placeholder into the real run card
+          // so a single active task does not render as two agents.
+          setSubAgents((prev) => {
+            const next: SubAgent = {
+              id: run.id,
+              name: `${run.role} run`,
+              model: run.effectiveModel,
+              status: 'running',
+              task: 'Starting run...',
+              progress: 5,
+              startTime: new Date(run.startedAt),
+              messages: [],
+              runTrace: run,
+            };
+            const idx = prev.findIndex((a) => a.id === run.id || a.id === activityAgent.id);
+            if (idx >= 0) {
+              const copy = prev.slice();
+              copy[idx] = { ...prev[idx], ...next };
+              return copy.filter((agent, agentIdx) => agentIdx === idx || agent.id !== activityAgent.id);
+            }
+            return [...prev, next];
+          });
         },
         onRunStep: (runId, step) => {
           const stepText = describeRunStep(step);
@@ -710,13 +782,45 @@ function App() {
     setTrustMode(mode);
     api.updateConfig({ trustMode: mode }).catch(() => {});
   }, []);
-  // Build visible panel set
-  const visiblePanels = new Set<PanelId>();
-  const collectPanels = (node: any) => {
-    if (typeof node === 'string') visiblePanels.add(node as PanelId);
-    else if (node?.children) node.children.forEach(collectPanels);
-  };
-  collectPanels(layout);
+  const visiblePanels = useMemo(() => {
+    const set = new Set<PanelId>();
+    const collect = (node: any) => {
+      if (typeof node === 'string') set.add(node as PanelId);
+      else if (node?.children) node.children.forEach(collect);
+    };
+    collect(layout);
+    return set;
+  }, [layout]);
+
+  const bottomBarOpen = visiblePanels.has('terminal');
+  const hasRightWorkspacePanelOpen = useMemo(
+    () => Array.from(visiblePanels).some((panelId) => RIGHT_SIDE_PANELS.has(panelId)),
+    [visiblePanels],
+  );
+  const hasActiveSubAgents = subAgents.some((agent) => agent.status === 'running');
+  const superPanelPinned = !hasRightWorkspacePanelOpen;
+
+  useEffect(() => {
+    if (superPanelPinned || hasPendingChanges || hasActiveSubAgents) {
+      setSuperPanelOpen(true);
+    }
+  }, [superPanelPinned, hasPendingChanges, hasActiveSubAgents]);
+
+  const handleToggleRightRail = useCallback(() => {
+    if (superPanelPinned) {
+      setSuperPanelOpen(true);
+      return;
+    }
+    setSuperPanelOpen((prev) => !prev);
+  }, [superPanelPinned]);
+
+  const handleToggleBottomBar = useCallback(() => {
+    if (visiblePanels.has('terminal')) {
+      removePanel('terminal');
+    } else {
+      addPanel('terminal');
+    }
+  }, [visiblePanels, removePanel, addPanel]);
 
   // Compute enabled tool count: 3 built-in + MCP tools from running servers
   const builtinToolCount = trustMode === "chat-only" ? 0 : trustMode === "read-only" ? 2 : 3;
@@ -789,6 +893,7 @@ function App() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onOpenFolder={handleOpenFolder}
+        onFocusAgent={(id) => setFocusedSubAgentId(id)}
       />
 
       <main className="main-area">
@@ -802,6 +907,11 @@ function App() {
           activeModel={activeModel}
           workingDir={workingDir}
           onOpenFolder={handleOpenFolder}
+          rightRailOpen={superPanelOpen}
+          onToggleRightRail={handleToggleRightRail}
+          rightRailPinned={superPanelPinned}
+          bottomBarOpen={bottomBarOpen}
+          onToggleBottomBar={handleToggleBottomBar}
         />
 
         <div className="content-area">
@@ -814,31 +924,81 @@ function App() {
               </div>
             </div>
           ) : (
-            <LayoutEngine
-              layout={layout}
-              onRemovePanel={removePanel}
-              onSwapPanels={swapPanels}
-              subAgents={subAgents}
-              plan={chatPlan}
-              fileChanges={[]}
-              terminalCommands={[]}
-              messages={messages}
-              isTyping={isTyping}
-              onSendMessage={handleSendMessage}
-              activeModel={activeModel}
-              workingDir={workingDir}
-              projectProfile={projectProfile}
-              sessionId={activeSessionId}
-              pendingPatchProposalId={pendingPatchProposalId}
-              clearPendingPatchProposalId={clearPendingPatchProposalId}
-              onSendToChat={handleSendToChat}
-              onReviewDiff={handleReviewDiff}
-              onProposePatch={handleProposePatch}
-              onExplainChange={handleExplainChange}
-              onAskAboutScreenshot={handleAskAboutScreenshot}
-              onCompareModel={handleCompareModel}
-              models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
-            />
+            <>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, position: 'relative' }}>
+              {focusedSubAgentId != null ? (
+                <AgentFocusPanel
+                  agents={subAgents}
+                  focusedId={focusedSubAgentId}
+                  onFocus={(id) => setFocusedSubAgentId(id)}
+                  onExit={() => setFocusedSubAgentId(null)}
+                />
+              ) : (
+                <>
+                  <LayoutEngine
+                    layout={layout}
+                    onRemovePanel={removePanel}
+                    onSwapPanels={swapPanels}
+                    subAgents={subAgents}
+                    plan={chatPlan}
+                    fileChanges={[]}
+                    terminalCommands={[]}
+                    messages={messages}
+                    isTyping={isTyping}
+                    onSendMessage={handleSendMessage}
+                    activeModel={activeModel}
+                    workingDir={workingDir}
+                    projectProfile={projectProfile}
+                    sessionId={activeSessionId}
+                    pendingPatchProposalId={pendingPatchProposalId}
+                    clearPendingPatchProposalId={clearPendingPatchProposalId}
+                    onSendToChat={handleSendToChat}
+                    onReviewDiff={handleReviewDiff}
+                    onProposePatch={handleProposePatch}
+                    onExplainChange={handleExplainChange}
+                    onAskAboutScreenshot={handleAskAboutScreenshot}
+                    onCompareModel={handleCompareModel}
+                    models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
+                  />
+                  {subAgents.length > 0 && (
+                    <div className="running-agents-strip-host">
+                      <RunningAgentsStrip
+                        agents={subAgents}
+                        onFocus={() => {
+                          const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
+                          setFocusedSubAgentId(next);
+                        }}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            {superPanelOpen ? (
+              <EnvironmentRail
+                workingDir={workingDir}
+                trustMode={trustMode}
+                subAgents={subAgents}
+                onReviewChanges={() => setReviewFlyoutOpen(true)}
+                rightRailPinned={superPanelPinned}
+                onFocusAgents={() => {
+                  const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
+                  setFocusedSubAgentId(next);
+                }}
+                onHide={() => setSuperPanelOpen(false)}
+              />
+            ) : (
+              <button
+                className="env-rail-reveal super-panel-reveal"
+                onClick={() => setSuperPanelOpen(true)}
+                title="Show Super Panel (⇧⌘S)"
+                aria-label="Show Super Panel"
+              >
+                <PanelRightOpen size={15} />
+                <span>Super Panel</span>
+              </button>
+            )}
+          </>
           )}
         </div>
 
@@ -912,6 +1072,18 @@ function App() {
             setShowOnboarding(false);
           }}
           onSkip={() => setShowOnboarding(false)}
+        />
+      )}
+
+      {/* Review Changes Flyout */}
+      {reviewFlyoutOpen && (
+        <ReviewChangesFlyout
+          workingDir={workingDir}
+          _sessionId={activeSessionId}
+          onClose={() => setReviewFlyoutOpen(false)}
+          onReviewDiff={handleReviewDiff}
+          onProposePatch={handleProposePatch}
+          onExplainChange={handleExplainChange}
         />
       )}
 

@@ -153,3 +153,111 @@ export function describePermissions(perms: CuratedPermission[]): string {
   };
   return perms.map((p) => map[p]).join(', ');
 }
+
+/**
+ * Validate a curated MCP server's prerequisites.
+ * For stdio: check that the command binary is available.
+ * For HTTP: check endpoint reachability with a simple GET.
+ */
+import { execSync } from 'child_process';
+
+export interface McpValidationResult {
+  id: string;
+  name: string;
+  ok: boolean;
+  transport: string;
+  command?: string;
+  check: string;
+  detail: string;
+  error?: string;
+}
+
+const VALIDATE_TIMEOUT = 5_000; // 5s per check
+
+function checkCommandAvailable(cmd: string): McpValidationResult['check'] {
+  try {
+    // Extract the base command (first token after path)
+    const binary = cmd.split(' ')[0];
+    execSync(`which "${binary}"`, {
+      encoding: 'utf-8',
+      timeout: VALIDATE_TIMEOUT,
+      stdio: 'pipe',
+    });
+    return 'available';
+  } catch {
+    return 'unavailable';
+  }
+}
+
+/**
+ * Validate a curated MCP server entry.
+ * Does NOT start the server or make an MCP initialize call —
+ * only checks prerequisites (binary availability, endpoint reachability).
+ */
+export async function validateCuratedServer(
+  server: CuratedMcpServer,
+): Promise<McpValidationResult> {
+  const result: McpValidationResult = {
+    id: server.id,
+    name: server.name,
+    ok: false,
+    transport: server.transport,
+    command: server.command,
+    check: 'unknown',
+    detail: '',
+  };
+
+  if (server.transport === 'stdio' && server.command) {
+    const baseCmd = server.command.split(' ')[0];
+    const check = checkCommandAvailable(baseCmd);
+    result.check = check;
+    if (check === 'available') {
+      result.ok = true;
+      result.detail = `${baseCmd} is installed and on PATH`;
+    } else {
+      result.ok = false;
+      result.detail = `Command not found: ${baseCmd}`;
+      result.error = `The \`${baseCmd}\` command is not installed or not on your PATH. ${server.installHint}`;
+    }
+    return result;
+  }
+
+  if (server.transport === 'http' && server.endpoint) {
+    result.check = 'reachability';
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), VALIDATE_TIMEOUT);
+      const res = await fetch(server.endpoint, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      result.ok = res.ok || res.status < 500;
+      result.detail = `HTTP ${res.status} from ${server.endpoint}`;
+      if (!result.ok) {
+        result.error = `Endpoint returned HTTP ${res.status}`;
+      }
+    } catch (err: any) {
+      result.ok = false;
+      result.detail = `Cannot reach ${server.endpoint}`;
+      result.error = err?.message || 'Connection failed';
+    }
+    return result;
+  }
+
+  result.check = 'noop';
+  result.ok = true;
+  result.detail = 'No prerequisites to validate';
+  return result;
+}
+
+/**
+ * Validate all curated MCP servers.
+ */
+export async function validateAllCuratedServers(): Promise<McpValidationResult[]> {
+  const results: McpValidationResult[] = [];
+  for (const server of CURATED_MCP_SERVERS) {
+    results.push(await validateCuratedServer(server));
+  }
+  return results;
+}

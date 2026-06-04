@@ -8,12 +8,27 @@ interface Props {
   onCompareModel?: () => void;
   onProposePatch?: (diffText: string, explanation?: string) => void;
   messageContent?: string;
+  collapseAt?: number;
 }
 
-export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompareModel, onProposePatch, messageContent }: Props) {
+export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompareModel, onProposePatch, messageContent, collapseAt = 0 }: Props) {
   const [dismissed, setDismissed] = useState(false);
+  const [collapsed, setCollapsed] = useState(actions.length >= collapseAt && collapseAt > 0);
 
   if (dismissed || actions.length === 0) return null;
+
+  // When collapsed, show a single "Actions" button that expands
+  if (collapsed) {
+    return (
+      <div className="next-best-actions collapsed">
+        <button className="nba-expand-btn" onClick={() => setCollapsed(false)}>
+          <span className="nba-expand-label">Actions</span>
+          <span className="nba-expand-count">{actions.length}</span>
+        </button>
+        <button className="nba-dismiss-inline" onClick={() => setDismissed(true)} title="Dismiss">×</button>
+      </div>
+    );
+  }
 
   return (
     <div className="next-best-actions">

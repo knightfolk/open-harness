@@ -16,18 +16,6 @@ export interface PanelConfig {
   minSize: number; // min px
 }
 
-export const DEFAULT_LAYOUT: LayoutNode = {
-  direction: 'horizontal',
-  children: [
-    {
-      direction: 'vertical',
-      children: ['chat', 'terminal'],
-    },
-    {
-      direction: 'vertical',
-      children: ['sub-agents', 'plan'],
-    },
-  ],
-};
+export const DEFAULT_LAYOUT: LayoutNode = 'chat';
 
 export const ALL_PANELS: PanelId[] = ['chat', 'side-chat', 'diffs', 'browser', 'terminal', 'sub-agents', 'plan', 'files', 'model-lab', 'safety', 'patches'];

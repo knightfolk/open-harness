@@ -333,12 +333,10 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
     setActionError(null);
     try {
       const res = await api.captureProposalPreview(selected.id);
-      if (res.ok && res.preview) {
-        // The apply result is null here; reuse the proposal.preview slot.
+      if (res?.ok && res.preview) {
         updateProposal({ ...selected, preview: res.preview });
-        setProposals((prev) => (prev ?? []).map((p) => (p.id === selected.id ? { ...p, preview: res.preview } : p)));
       } else {
-        setActionError(res.error || 'No dev server detected on common ports');
+        setActionError(res?.error || 'No dev server detected on common ports');
       }
     } catch (err: any) {
       setActionError(err?.message || 'Preview capture failed');
@@ -382,15 +380,26 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
     setActionError(null);
     try {
       const result = await api.commitProposal(selected.id, { subjectOverride: commitMessage?.subject });
+      if (!result.ok) {
+        if (result.gate) setValidationGate(result.gate);
+        throw new Error(result.error || 'Commit failed');
+      }
+      const commitHash = result.hash;
+      if (!commitHash) {
+        throw new Error('Commit completed but the server did not return a hash');
+      }
       setActionError(null);
       // Refresh the list so the user can see the new commit happened.
       refresh();
-      // Show a success pill by setting validationGate to ok.
-      setValidationGate({ ok: true, bypassed: false, results: [], blockers: 0 });
-      // Stash the commit hash in a friendly message.
-      setActionError(null);
-      // We don't have a dedicated commit-result slot; embed the hash in commitMessage.
-      setCommitMessage((prev) => prev ? { ...prev, body: `${prev.body}\n\nCommitted as ${result.hash.slice(0, 12)}`.trim() } : prev);
+      setCommitMessage((prev) => {
+        if (!prev) return prev;
+        const body = `${prev.body}\n\nCommitted as ${commitHash.slice(0, 12)}`.trim();
+        return {
+          ...prev,
+          body,
+          fullText: `${prev.subject}\n\n${body}`.trimEnd(),
+        };
+      });
     } catch (err: any) {
       setActionError(err?.message || 'Commit failed');
     } finally {
@@ -406,7 +415,7 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
     if (!selected) return null;
     try {
       const created = await api.addReviewComment({ proposalId: selected.id, ...input });
-      setComments((prev) => [...prev, created]);
+      setComments((prev) => created ? [...prev, created] : prev);
       return created;
     } catch (err: any) {
       setActionError(err?.message || 'Failed to add comment');
@@ -418,7 +427,7 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
     if (!selected) return;
     try {
       const updated = await api.updateReviewComment(selected.id, commentId, { status, resolvedBy: 'user' });
-      setComments((prev) => prev.map((c) => (c.id === commentId ? updated : c)));
+      setComments((prev) => prev.map((c) => (c.id === commentId ? (updated ?? c) : c)));
     } catch (err: any) {
       setActionError(err?.message || 'Failed to update comment');
     }

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, RotateCcw, FolderOpen,
-  ChevronDown, Check, LayoutGrid,
+  ChevronDown, Check, Wrench, PanelRightOpen, PanelRightClose, Terminal,
 } from 'lucide-react';
 import type { PanelId } from '../types/layout';
 import { ALL_PANELS } from '../types/layout';
@@ -17,9 +17,18 @@ interface Props {
   activeModel: string;
   workingDir: string | null;
   onOpenFolder: () => void;
+  rightRailOpen: boolean;
+  onToggleRightRail: () => void;
+  rightRailPinned?: boolean;
+  bottomBarOpen: boolean;
+  onToggleBottomBar: () => void;
 }
 
-export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout, sessionTitle, activeModel, workingDir, onOpenFolder }: Props) {
+export function TopBar({
+  sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout,
+  sessionTitle, activeModel, workingDir, onOpenFolder,
+  rightRailOpen, onToggleRightRail, rightRailPinned = false, bottomBarOpen, onToggleBottomBar,
+}: Props) {
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const visibleCount = visiblePanels.size;
@@ -34,19 +43,6 @@ export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePa
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [panelMenuOpen]);
-
-  const panelToggles = ALL_PANELS.map((id) => {
-    const Icon = getPanelIcon(id);
-    const config = getPanelConfig(id);
-    const active = visiblePanels.has(id);
-    const label = (active ? 'Hide ' : 'Show ') + config.label;
-    const cls = 'top-bar-action' + (active ? ' active' : '');
-    return (
-      <button key={id} className={cls} onClick={() => onTogglePanel(id)} title={label}>
-        <Icon size={16} />
-      </button>
-    );
-  });
 
   const panelMenuItems = ALL_PANELS.map((id) => {
     const Icon = getPanelIcon(id);
@@ -90,26 +86,44 @@ export function TopBar({ sidebarOpen, onToggleSidebar, visiblePanels, onTogglePa
           <FolderOpen size={16} />
         </button>
 
-        <div style={{ width: 1, height: 20, background: 'var(--border-primary)', margin: '0 4px' }} />
+        <button
+          className={'top-bar-action' + (bottomBarOpen ? ' active' : '')}
+          onClick={onToggleBottomBar}
+          title={bottomBarOpen ? 'Hide bottom bar' : 'Show bottom bar (terminal)'}
+          aria-label={bottomBarOpen ? 'Hide bottom bar' : 'Show bottom bar'}
+        >
+          <Terminal size={16} />
+        </button>
 
-        {panelToggles}
+        <button
+          className={'top-bar-action' + (rightRailOpen ? ' active' : '')}
+          onClick={onToggleRightRail}
+          title={rightRailPinned
+            ? 'Right panel stays visible while no workspace panel is open'
+            : rightRailOpen ? 'Hide right panel' : 'Show right panel'}
+          aria-label={rightRailPinned
+            ? 'Right panel pinned open'
+            : rightRailOpen ? 'Hide right panel' : 'Show right panel'}
+        >
+          {rightRailOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+        </button>
 
         <div ref={menuRef} style={{ position: 'relative' }}>
           <button
             className={'top-bar-action top-bar-panels-btn' + (panelMenuOpen ? ' active' : '')}
             onClick={() => setPanelMenuOpen(!panelMenuOpen)}
-            title="Manage panels"
+            title="Tools and panels"
           >
-            <LayoutGrid size={16} />
-            <span className="top-bar-panels-label">Panels</span>
+            <Wrench size={16} />
+            <span className="top-bar-panels-label">Tools</span>
             <ChevronDown size={12} />
           </button>
 
           {panelMenuOpen && (
             <div className="panel-menu">
               <div className="panel-menu-header">
-                <span>Panels</span>
-                <span className="panel-menu-count">{visibleCount} active</span>
+                <span>Tools</span>
+                <span className="panel-menu-count">{visibleCount} panels open</span>
               </div>
               {panelMenuItems}
               <div className="panel-menu-separator" />

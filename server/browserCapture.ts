@@ -36,6 +36,19 @@ export interface DeepBrowserArtifact {
   screenshotPath?: string;
   errors: Array<{ type: 'error' | 'warning'; message: string; source?: string; line?: number }>;
   capturedAt: string;
+  /** Enhanced DOM structure analysis (populated by browserCaptureEnhancements) */
+  domStructure?: {
+    ids: string[];
+    classNames: string[];
+    headings: Array<{ level: number; text: string }>;
+    interactiveElements: Array<{ tag: string; text: string; selector: string }>;
+    forms: Array<{ action: string; method: string; inputs: Array<{ name: string; type: string; placeholder: string }> }>;
+    images: Array<{ src: string; alt: string }>;
+    links: Array<{ href: string; text: string }>;
+    metaDescription?: string;
+  };
+  /** Resource health check results */
+  resourceHealth?: Array<{ url: string; status: number; ok: boolean }>;
 }
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024; // 2MB cap to keep the artifact bounded

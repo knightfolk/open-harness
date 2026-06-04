@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ContextBudgetControls } from './ContextBudgetControls';
+import { RoutingLearningPane } from './RoutingLearningPane';
 import {
   X, KeyRound, Brain, FileCode,
   PlayCircle, ShieldCheck, Server, MessageCircle, Palette as ThemeIcon,
@@ -33,6 +35,7 @@ const CATEGORIES: SettingsCategory[] = [
   { id: 'personality', label: 'Personality', icon: MessageCircle },
   { id: 'onboarding', label: 'Onboarding', icon: ArrowRight },
   { id: 'theme', label: 'Theme', icon: ThemeIcon },
+  { id: 'routing', label: 'Routing Learn', icon: Brain },
   { id: 'chat', label: 'Chat Settings', icon: Settings },
   { id: 'about', label: 'About', icon: CheckCircle2 },
 ];
@@ -198,6 +201,7 @@ export function SettingsModal({
             {contentKey === 'onboarding' && <OnboardingPane onRestartOnboarding={onRestartOnboarding} />}
             {contentKey === 'personality' && <PersonalityPane personalityText={personalityText} onChange={onPersonalityChange} />}
             {contentKey === 'theme' && <ThemePane activeTheme={activeTheme} onSelectTheme={onSelectTheme} />}
+            {contentKey === 'routing' && <RoutingLearningPane />}
             {contentKey === 'chat' && <ChatSettingsPane />}
             {contentKey === 'about' && <AboutPane />}
           </div>
@@ -247,6 +251,7 @@ function ProvidersPane({ providers, onTest, onFetch, onRemove, onToggleModel, ac
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, any>>({});
   const [fetchingModels, setFetchingModels] = useState<string | null>(null);
+  const [fetchResults, setFetchResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [healthByProvider, setHealthByProvider] = useState<Record<string, { summary: api.ProviderHealthSummary; history: api.ProviderHealthRecord[] }>>({});
@@ -346,10 +351,28 @@ function ProvidersPane({ providers, onTest, onFetch, onRemove, onToggleModel, ac
                       {testingProvider === provider.id ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
                       {testingProvider === provider.id ? 'Testing...' : 'Test'}
                     </button>
-                    <button className="settings-mini-button" onClick={() => { setFetchingModels(provider.id); onFetch(provider.id).finally(() => setFetchingModels(null)); }} disabled={fetchingModels === provider.id}>
+                    <button className="settings-mini-button" onClick={async () => {
+                      setFetchingModels(provider.id);
+                      try {
+                        const result = await onFetch(provider.id);
+                        const count = Array.isArray(result) ? result.length : (result?.length || 0);
+                        setFetchResults((prev) => ({ ...prev, [provider.id]: { ok: true, msg: 'Found ' + count + ' model' + (count === 1 ? '' : 's') } }));
+                      } catch (err: any) {
+                        setFetchResults((prev) => ({ ...prev, [provider.id]: { ok: false, msg: err?.message || 'Failed' } }));
+                      }
+                      setFetchingModels(null);
+                    }} disabled={fetchingModels === provider.id}>
                       {fetchingModels === provider.id ? <Loader size={11} className="spin" /> : <RefreshCw size={11} />}
                       {fetchingModels === provider.id ? 'Fetching...' : 'Fetch Models'}
                     </button>
+                    {fetchResults[provider.id] && fetchingModels !== provider.id && (
+                      <span style={{
+                        fontSize: 11, marginLeft: 4,
+                        color: fetchResults[provider.id].ok ? 'var(--accent-color, #16a34a)' : 'var(--accent-error, #ef4444)',
+                      }}>
+                        {fetchResults[provider.id].ok ? "\u2713" : "\u2717"} {fetchResults[provider.id].msg}
+                      </span>
+                    )}
                     {confirmRemove === provider.id ? (
                       <>
                         <span style={{ fontSize: 11, color: 'var(--accent-error)', marginLeft: 8 }}>Remove?</span>
@@ -1327,6 +1350,7 @@ function ChatSettingsPane() {
 /* ================================================================== */
 /*  ABOUT                                                              */
 /* ================================================================== */
+        <ContextBudgetControls />
 
 function AboutPane() {
   return (

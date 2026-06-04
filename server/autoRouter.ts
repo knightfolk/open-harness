@@ -16,6 +16,7 @@
  */
 
 import { getProviderForModel, splitModelRef } from './config';
+import { suggestThresholdAdjustment } from './routerLearning';
 import type { StoredConfig, StoredProvider } from './config';
 
 // ── Types ──────────────────────────────────────────────
@@ -113,6 +114,17 @@ export function configureAutoRouter(config: StoredConfig): void {
     cacheTTLMs: typeof ar.cacheTTLMs === 'number' ? ar.cacheTTLMs : 300_000,
     candidates: validCandidates,
   };
+
+  // Auto-adjust threshold from historical data if available
+  try {
+    const adj = suggestThresholdAdjustment(autoRouterConfig.threshold);
+    if (adj.dataPoints >= 10 && adj.suggestedThreshold !== autoRouterConfig.threshold) {
+      console.log("[autoRouter] Auto-adjusting threshold from " + autoRouterConfig.threshold.toFixed(2) + " to " + adj.suggestedThreshold.toFixed(2) + " — " + adj.reason);
+      autoRouterConfig.threshold = adj.suggestedThreshold;
+    }
+  } catch {
+    // Best-effort; learning data may not exist yet
+  }
 }
 
 /** Check if the auto-router is configured and enabled. */

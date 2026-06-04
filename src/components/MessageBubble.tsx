@@ -285,6 +285,7 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
                   onCompareModel={onCompareModel}
                   onProposePatch={onProposePatch}
                   messageContent={visibleContent}
+                  collapseAt={2}
                 />
               )}
             </>

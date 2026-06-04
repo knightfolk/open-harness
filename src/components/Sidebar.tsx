@@ -35,6 +35,7 @@ interface Props {
   onSelectTheme: (themeId: string) => void;
   onPersonalityChange: (text: string) => void;
   onOpenFolder?: () => void;
+  onFocusAgent?: (agentId: string) => void;
 }
 
 const tabConfig = [
@@ -61,7 +62,7 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onOpenSettings, onSelectSession, onNewSession, onOpenFolder }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onOpenSettings, onSelectSession, onNewSession, onOpenFolder, onFocusAgent }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
@@ -90,6 +91,7 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
             onSelectSession={onSelectSession}
             onNewSession={onNewSession}
             onOpenFolder={onOpenFolder}
+            onFocusAgent={onFocusAgent}
           />
         )}
         {activeTab === 'skills' && <SkillsTab skills={mockSkills} plugins={mockPlugins} />}
@@ -120,13 +122,14 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
 /*  Chat Tab — sessions with nested sub-agents                        */
 /* ------------------------------------------------------------------ */
 
-function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder }: {
+function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder, onFocusAgent }: {
   sessions: Session[];
   activeSessionId?: string;
   activeSubAgents: SubAgent[];
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onOpenFolder?: () => void;
+  onFocusAgent?: (agentId: string) => void;
 }) {
   return (
     <>
@@ -173,7 +176,7 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
             {isActive && activeSubAgents.length > 0 && (
               <div className="sub-agent-tree">
                 {activeSubAgents.map((agent) => (
-                  <SubAgentRow key={agent.id} agent={agent} />
+                  <SubAgentRow key={agent.id} agent={agent} onFocus={onFocusAgent ? () => onFocusAgent(agent.id) : undefined} />
                 ))}
               </div>
             )}
@@ -188,7 +191,7 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
 /*  Single sub-agent row in sidebar                                    */
 /* ------------------------------------------------------------------ */
 
-function SubAgentRow({ agent }: { agent: SubAgent }) {
+function SubAgentRow({ agent, onFocus }: { agent: SubAgent; onFocus?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const statusColor = {
     idle: 'var(--text-tertiary)',
@@ -208,12 +211,20 @@ function SubAgentRow({ agent }: { agent: SubAgent }) {
     <div style={{ marginBottom: 2 }}>
       <div
         className="sub-agent-row"
-        onClick={() => setExpanded(!expanded)}
+        onClick={onFocus}
+        role={onFocus ? "button" : undefined}
+        tabIndex={onFocus ? 0 : undefined}
+        title={onFocus ? "Focus on this agent" : undefined}
       >
-        {expanded
-          ? <ChevronDown size={12} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-          : <ChevronRight size={12} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-        }
+        <span
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          style={{ display: 'inline-flex', cursor: 'pointer' }}
+        >
+          {expanded
+            ? <ChevronDown size={12} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
+            : <ChevronRight size={12} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
+          }
+        </span>
         <Bot size={13} style={{ color: statusColor, flexShrink: 0 }} />
         <span className={`sub-agent-name-text ${agent.status === 'running' ? 'running' : ''}`}>
           {agent.name}

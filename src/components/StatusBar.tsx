@@ -52,7 +52,9 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [trustPickerOpen, setTrustPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [pickerPos, setPickerPos] = useState<{ left: number; bottom: number } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const modelBtnRef = useRef<HTMLButtonElement>(null);
   const trustRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -153,8 +155,19 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
       {/* Model switcher */}
       <div ref={pickerRef} style={{ position: 'relative' }}>
         <button
+          ref={modelBtnRef}
           className="status-bar-item status-bar-model-btn"
-          onClick={() => { setModelPickerOpen(!modelPickerOpen); setTrustPickerOpen(false); }}
+          onClick={() => {
+            const nextOpen = !modelPickerOpen;
+            setModelPickerOpen(nextOpen);
+            setTrustPickerOpen(false);
+            if (nextOpen && modelBtnRef.current) {
+              // Anchor the floating picker above the button so it escapes
+              // any overflow-hidden ancestor in the chat panel column.
+              const rect = modelBtnRef.current.getBoundingClientRect();
+              setPickerPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
+            }
+          }}
         >
           <Cpu size={12} />
           <span className="status-bar-model-name">{activeModel}</span>
@@ -164,8 +177,11 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
           <ChevronUp size={10} style={{ transform: modelPickerOpen ? 'rotate(0)' : 'rotate(180deg)', transition: 'transform 0.15s' }} />
         </button>
 
-        {modelPickerOpen && (
-          <div className="model-picker">
+        {modelPickerOpen && pickerPos && (
+          <div
+            className="model-picker"
+            style={{ position: 'fixed', left: pickerPos.left, bottom: pickerPos.bottom, zIndex: 20001 }}
+          >
             <div className="model-picker-search">
               <Search size={14} />
               <input

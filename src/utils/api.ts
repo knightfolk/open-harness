@@ -1,3 +1,5 @@
+import type { BrowserPreviewResult, PatchValidationResult } from '../types';
+
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // ── Types ──────────────────────────────────────────────
@@ -119,6 +121,16 @@ export interface AutoRouterConfig {
   candidates: AutoRouterCandidateConfig[];
 }
 
+export interface ContextConfig {
+  repoMapBudget: number;
+  contextPackBudget: number;
+  includePatterns: string[];
+  neverIncludePatterns: string[];
+  compressToolOutputs: boolean;
+  safetyMargin: number;
+  minRecentPairs: number;
+}
+
 export interface AppConfig {
   version: number;
   providers: ProviderInfo[];
@@ -129,6 +141,7 @@ export interface AppConfig {
   roleAssignments: Record<string, string>;
   trustMode: string;
   autoRouter?: AutoRouterConfig;
+  contextConfig?: ContextConfig;
 }
 
 export async function getConfig(): Promise<AppConfig | null> {
@@ -139,7 +152,7 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'trustMode'>>): Promise<void> {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'trustMode' | 'contextConfig'>>): Promise<void> {
   await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -1765,4 +1778,329 @@ export async function getSafetySummary(dir: string): Promise<SafetySummary> {
   const res = await fetch(`${API_BASE}/api/safety/summary?dir=${encodeURIComponent(dir)}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+// ── Router Learning API ─────────────────────────────
+export interface RouterLearningSummary {
+  totalEvents: number;
+  models: Record<string, { total: number; success: number; rate: number }>;
+  successRate: number;
+  outdated: boolean;
+}
+
+export interface RoutingEvent {
+  id: string;
+  timestamp: string;
+  sessionId: string;
+  selectedModel: string;
+  score: number;
+  wasFallback: boolean;
+  wasCached: boolean;
+  outcome: 'success' | 'failure' | 'ambiguous' | null;
+}
+
+export async function getRouterLearning(): Promise<RouterLearningSummary> {
+  const res = await fetch(`${API_BASE}/api/router/learning`);
+  if (!res.ok) return { totalEvents: 0, models: {}, successRate: 0, outdated: true };
+  return res.json();
+}
+
+export async function getRouterLearningEvents(sessionId?: string, limit = 50): Promise<RoutingEvent[]> {
+  const params = new URLSearchParams();
+  if (sessionId) params.set('sessionId', sessionId);
+  params.set('limit', String(limit));
+  const res = await fetch(`${API_BASE}/api/router/learning/events?${params}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function getModelSuccessRates(): Promise<Record<string, { total: number; success: number; rate: number }>> {
+  const res = await fetch(`${API_BASE}/api/router/learning/success-rates`);
+  if (!res.ok) return {};
+  return res.json();
+}
+
+export async function suggestRouterThreshold(currentThreshold: number): Promise<{ suggestedThreshold: number; reason: string; dataPoints: number }> {
+  const res = await fetch(`${API_BASE}/api/router/learning/suggest-threshold`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentThreshold }),
+  });
+  if (!res.ok) return { suggestedThreshold: currentThreshold, reason: 'Failed', dataPoints: 0 };
+  return res.json();
+}
+
+export async function recordRoutingOutcome(eventId: string, outcome: 'success' | 'failure' | 'ambiguous', note?: string): Promise<boolean> {
+  const res = await fetch(`${API_BASE}/api/router/learning/outcome`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventId, outcome, note }),
+  });
+  return res.ok;
+}
+
+
+// ============================================================================
+// Patch Review / Commit Validation stubs (server endpoints TBD)
+// These functions were introduced by PatchReviewPanel and related UI work.
+// The corresponding server endpoints are not yet implemented; the stubs
+// return safe defaults so the frontend builds and renders. When the server
+// routes land, replace the body with real fetch calls.
+// ============================================================================
+
+export type ReviewCommentSeverity = 'info' | 'warning' | 'error' | 'blocker';
+
+export interface ReviewComment {
+  id: string;
+  proposalId: string;
+  filePath: string;
+  startLine: number;
+  endLine?: number;
+  severity: ReviewCommentSeverity;
+  rationale: string;
+  suggestedFix?: string;
+  status: 'open' | 'resolved' | 'dismissed';
+  resolvedBy?: string;
+  author?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CommitMessageResult {
+  subject: string;
+  body: string;
+  fullText: string;
+  scope?: string;
+  breaking?: boolean;
+}
+
+export interface ValidationGateResult {
+  ok: boolean;
+  bypassed: boolean;
+  results: PatchValidationResult[];
+  blockers: number;
+}
+
+export interface CaptureProposalPreviewResult {
+  ok: boolean;
+  preview?: BrowserPreviewResult;
+  error?: string;
+}
+
+export interface CommitProposalResult {
+  ok: boolean;
+  hash?: string;
+  subject?: string;
+  bypassed?: boolean;
+  error?: string;
+  gate?: ValidationGateResult;
+  blockedBy?: number;
+}
+
+async function safeJson<T>(res: Response, fallback: T): Promise<T> {
+  if (!res.ok) return fallback;
+  try { return await res.json() as T; } catch { return fallback; }
+}
+
+async function readJson<T>(res: Response, fallback: T): Promise<T> {
+  try { return await res.json() as T; } catch { return fallback; }
+}
+
+export async function listReviewComments(proposalId: string): Promise<ReviewComment[]> {
+  const res = await fetch(`${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/comments`);
+  return safeJson<ReviewComment[]>(res, []);
+}
+
+export async function addReviewComment(input: {
+  proposalId: string;
+  filePath: string;
+  startLine: number;
+  endLine?: number;
+  severity: ReviewCommentSeverity;
+  rationale: string;
+  suggestedFix?: string;
+}): Promise<ReviewComment | null> {
+  const { proposalId, ...body } = input;
+  const res = await fetch(`${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return safeJson<ReviewComment | null>(res, null);
+}
+
+export async function updateReviewComment(
+  proposalId: string,
+  commentId: string,
+  update: { status?: 'open' | 'resolved' | 'dismissed'; rationale?: string; resolvedBy?: string },
+): Promise<ReviewComment | null> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/comments/${encodeURIComponent(commentId)}`,
+    { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update) },
+  );
+  return safeJson<ReviewComment | null>(res, null);
+}
+
+export async function deleteReviewComment(proposalId: string, commentId: string): Promise<boolean> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/comments/${encodeURIComponent(commentId)}`,
+    { method: 'DELETE' },
+  );
+  return res.ok;
+}
+
+export async function captureProposalPreview(proposalId: string): Promise<CaptureProposalPreviewResult | null> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/preview`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+  );
+  return safeJson<CaptureProposalPreviewResult | null>(res, null);
+}
+
+export async function generateProposalCommitMessage(
+  proposalId: string,
+  _opts: Record<string, unknown>,
+): Promise<CommitMessageResult | null> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/commit-message`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+  );
+  return safeJson<CommitMessageResult | null>(res, null);
+}
+
+export async function runProposalValidationGate(
+  proposalId: string,
+  opts: { force: boolean },
+): Promise<ValidationGateResult | null> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/validate`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts) },
+  );
+  return safeJson<ValidationGateResult | null>(res, null);
+}
+
+export async function commitProposal(
+  proposalId: string,
+  opts: { subjectOverride?: string },
+): Promise<CommitProposalResult> {
+  const res = await fetch(
+    `${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/commit`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts) },
+  );
+  const fallback = { ok: false, error: res.ok ? 'Commit failed' : `Commit failed (${res.status})` };
+  const parsed = await readJson<CommitProposalResult>(res, fallback);
+  if (!res.ok) return { ...parsed, ok: false };
+  return parsed;
+}
+
+// ============================================================================
+// Project Memory stubs (server endpoints TBD)
+// ============================================================================
+
+export async function archiveProjectMemory(workingDir: string): Promise<{ ok: boolean; archivedAt?: string; error?: string }> {
+  const res = await fetch(`${API_BASE}/api/project-memory/archive`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workingDir }),
+  });
+  return safeJson<{ ok: boolean; archivedAt?: string; error?: string }>(res, { ok: false, error: 'Not yet implemented on the server' });
+}
+
+export async function exportProjectMemory(workingDir: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/project-memory/export?workingDir=${encodeURIComponent(workingDir)}`);
+  if (!res.ok) return '';
+  return res.text();
+}
+
+// ============================================================================
+// Prompt Microscope stubs
+// ============================================================================
+
+export interface SectionEstimate {
+  id: string;
+  label: string;
+  tokens: number;
+  truncated: boolean;
+  text: string;
+  redactedHits: number;
+}
+
+export async function estimatePromptSections(sections: Array<{ id: string; label: string; text: string }>): Promise<SectionEstimate[]> {
+  // Client-side fallback: estimate ~4 chars per token. Used until the
+  // server-side estimator lands.
+  return sections.map((s) => {
+    const text = s.text || '';
+    const tokens = Math.ceil(text.length / 4);
+    return { id: s.id, label: s.label, tokens, truncated: tokens > 4000, text, redactedHits: 0 };
+  });
+}
+
+// ============================================================================
+// Provider Health stubs
+// ============================================================================
+
+export interface ProviderHealthSummary {
+  providerId: string;
+  providerName: string;
+  lastChecked: string;
+  status: 'ok' | 'stale' | 'fail';
+  lastLatencyMs?: number;
+  lastError?: string;
+  // Aggregated view used by the SettingsModal badge.
+  failed: boolean;
+  stale: boolean;
+  total: number;
+  latest?: {
+    latencyMs?: number;
+    error?: string;
+    capabilities: Array<{ ok: boolean; name?: string }>;
+  };
+}
+
+export interface ProviderHealthRecord {
+  id: string;
+  providerId: string;
+  timestamp: string;
+  status: 'ok' | 'stale' | 'fail';
+  latencyMs?: number;
+  tokens?: { input: number; output: number };
+  cost?: number;
+  error?: string;
+}
+
+export interface ProviderHealthBundle {
+  summary: ProviderHealthSummary;
+  history: ProviderHealthRecord[];
+}
+
+export interface ProviderHealthIndex {
+  providers: ProviderHealthSummary[];
+  history: Record<string, ProviderHealthRecord[]>;
+}
+
+export async function getProviderHealth(providerId: string): Promise<ProviderHealthBundle>;
+export async function getProviderHealth(): Promise<ProviderHealthIndex>;
+export async function getProviderHealth(providerId?: string): Promise<ProviderHealthBundle | ProviderHealthIndex> {
+  if (providerId) {
+    const res = await fetch(`${API_BASE}/api/providers/${encodeURIComponent(providerId)}/health`);
+    const fallback: ProviderHealthBundle = {
+      summary: {
+        providerId,
+        providerName: providerId,
+        lastChecked: new Date().toISOString(),
+        status: 'stale',
+        failed: false,
+        stale: true,
+        total: 0,
+      },
+      history: [],
+    };
+    return safeJson<ProviderHealthBundle>(res, fallback);
+  }
+  const res = await fetch(`${API_BASE}/api/providers/health`);
+  return safeJson<ProviderHealthIndex>(res, { providers: [], history: {} });
+}
+
+export async function probeProviderHealth(providerId: string): Promise<ProviderHealthRecord | null> {
+  const res = await fetch(`${API_BASE}/api/providers/${encodeURIComponent(providerId)}/health/probe`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  return safeJson<ProviderHealthRecord | null>(res, null);
 }
