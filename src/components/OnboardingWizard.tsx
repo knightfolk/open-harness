@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Zap, Brain, FolderOpen, ArrowRight, ArrowLeft, Check,
   Wifi, Loader, Sparkles, Rocket, ChevronDown,
-  MessageCircle, Shield, ShieldCheck, ShieldAlert, Cpu,
+  MessageCircle, Shield, ShieldCheck, ShieldAlert, Cpu, Sun, Moon,
   CheckCircle2, Circle, X, Container, Eye,
 } from 'lucide-react';
 import * as api from '../utils/api';
@@ -54,6 +54,17 @@ const PERSONALITIES: PersonalityPreset[] = [
   { id: 'creative', label: 'Creative', text: 'Think outside the box. Suggest unconventional approaches when appropriate. Prioritize elegance and developer experience.' },
 ];
 
+const THEME_CHOICES = [
+  { id: 'midnight', label: 'Midnight', group: 'dark', color: '#6366f1' },
+  { id: 'charcoal', label: 'Charcoal', group: 'dark', color: '#a1a1aa' },
+  { id: 'forest', label: 'Forest', group: 'dark', color: '#10b981' },
+  { id: 'crimson', label: 'Crimson', group: 'dark', color: '#f43f5e' },
+  { id: 'daylight', label: 'Daylight', group: 'light', color: '#6366f1' },
+  { id: 'silver', label: 'Silver', group: 'light', color: '#3b82f6' },
+  { id: 'sage', label: 'Sage', group: 'light', color: '#10b981' },
+  { id: 'blush', label: 'Blush', group: 'light', color: '#f43f5e' },
+];
+
 // ── Trust mode options ─────────────────────────────────
 const TRUST_OPTIONS: { id: 'chat-only' | 'read-only' | 'ask-before-write' | 'workspace-write'; label: string; icon: any; desc: string }[] = [
   { id: 'chat-only', label: 'Chat only', icon: MessageCircle, desc: 'AI can read files and chat. No commands, no edits. Safest option.' },
@@ -76,6 +87,7 @@ const ROLE_BUCKETS = [
 interface OnboardingResult {
   providers: any[];
   activeModel: string;
+  activeTheme: string;
   personality: string;
   trustMode: string;
   roleAssignments: Record<string, string>;
@@ -102,6 +114,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dockerReadiness, setDockerReadiness] = useState<api.DockerReadiness | null>(null);
+  const [activeTheme, setActiveTheme] = useState('midnight');
 
   // Load saved onboarding step on mount
   useEffect(() => {
@@ -109,8 +122,13 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
       try {
         const cfg = await api.getConfig();
         const savedStep = (cfg as any).onboardingStep;
-        if (typeof savedStep === 'number' && savedStep > 0 && savedStep <= 5) {
+        if (typeof savedStep === 'number' && savedStep > 0 && savedStep <= 8) {
           setStep(savedStep);
+        }
+        if (typeof (cfg as any).activeTheme === 'string' && (cfg as any).activeTheme) {
+          const themeId = (cfg as any).activeTheme as string;
+          setActiveTheme(themeId);
+          document.documentElement.setAttribute('data-theme', themeId);
         }
       } catch {}
 
@@ -206,6 +224,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
 
       // Persist personality + trust + active model + role assignments
       await api.updateConfig({
+        activeTheme,
         personality,
         activeModel,
         trustMode,
@@ -214,6 +233,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
 
       onComplete({
         providers: toSave,
+        activeTheme,
         activeModel,
         personality,
         trustMode,
@@ -224,6 +244,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
       // Best-effort: still hand off to parent so they can refresh state.
       onComplete({
         providers: [],
+        activeTheme,
         activeModel: '',
         personality,
         trustMode,
@@ -237,7 +258,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
 
   const stepDots = (
     <div className="onboarding-step-dots">
-      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
         <div key={i} className={`onboarding-dot ${i === step ? 'active' : ''}`} />
       ))}
     </div>
@@ -302,8 +323,63 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 1: Pick providers ──
+  // ── Step 1: Theme choice ──
   if (step === 1) {
+    return (
+      <div className="onboarding-root">
+        <div className="onboarding-card" style={{ maxWidth: 620 }}>
+          <h2 className="onboarding-step-title">
+            <Sun size={20} /> Pick a theme
+          </h2>
+          <p className="onboarding-step-subtitle">Choose a UI theme first, then continue through setup.</p>
+
+          {['dark', 'light'].map((group) => (
+            <div key={group} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-tertiary)', marginBottom: 8 }}>
+                {group === 'dark' ? 'Dark themes' : 'Light themes'}
+              </div>
+              <div className="onboarding-theme-grid">
+                {THEME_CHOICES.filter((theme) => theme.group === group).map((theme) => {
+                  const isSelected = activeTheme === theme.id;
+                  return (
+                    <button
+                      key={theme.id}
+                      className={`onboarding-theme-card ${isSelected ? 'selected' : ''}`}
+                      onClick={async () => {
+                        setActiveTheme(theme.id);
+                        document.documentElement.setAttribute('data-theme', theme.id);
+                        try { await api.updateConfig({ activeTheme: theme.id } as any); } catch {}
+                      }}
+                    >
+                      <div className="onboarding-theme-swatch" style={{ background: theme.color }} />
+                      <div className="onboarding-theme-info">
+                        <div className="onboarding-theme-label">{theme.label}</div>
+                        {isSelected && <div className="onboarding-theme-active">Active</div>}
+                      </div>
+                      <Moon size={14} style={{ color: isSelected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          <div className="onboarding-nav">
+            <button className="onboarding-btn-back" onClick={async () => { setStep(0); try { await api.updateConfig({ onboardingStep: 0 } as any); } catch {} }}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button className="onboarding-btn-primary" onClick={() => setStep(2)}>
+              Continue <ArrowRight size={16} />
+            </button>
+          </div>
+          {stepDots}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 2: Pick providers ──
+  if (step === 2) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 620 }}>
@@ -382,13 +458,13 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           )}
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={async () => { setStep(0); try { await api.updateConfig({ onboardingStep: 0 } as any); } catch {} }}>
+            <button className="onboarding-btn-back" onClick={async () => { setStep(1); try { await api.updateConfig({ onboardingStep: 1 } as any); } catch {} }}>
               <ArrowLeft size={16} /> Back
             </button>
             <button
               className="onboarding-btn-primary"
               disabled={selectedProviders.size === 0}
-              onClick={() => setStep(2)}
+              onClick={() => setStep(3)}
             >
               {selectedProviders.size > 0 ? `${selectedProviders.size} selected` : 'Select at least one'} <ArrowRight size={16} />
             </button>
@@ -399,8 +475,8 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 2: Enter keys ──
-  if (step === 2) {
+  // ── Step 3: Enter keys ──
+  if (step === 3) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 560 }}>
@@ -464,10 +540,10 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(1)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(2)}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="onboarding-btn-primary" onClick={() => setStep(3)}>
+            <button className="onboarding-btn-primary" onClick={() => setStep(4)}>
               Continue <ArrowRight size={16} />
             </button>
           </div>
@@ -477,8 +553,8 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 3: Personality ──
-  if (step === 3) {
+  // ── Step 4: Personality ──
+  if (step === 4) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 540 }}>
@@ -503,7 +579,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
 
           <textarea
-            className="personality-textarea"
+            className="onboarding-textarea"
             placeholder="Or write your own personality instructions (optional)..."
             value={personality}
             onChange={(e) => setPersonality(e.target.value)}
@@ -512,10 +588,10 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           />
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(2)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(3)}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="onboarding-btn-primary" onClick={() => setStep(4)}>
+            <button className="onboarding-btn-primary" onClick={() => setStep(5)}>
               Continue <ArrowRight size={16} />
             </button>
           </div>
@@ -525,8 +601,8 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 4: Trust mode ──
-  if (step === 4) {
+  // ── Step 5: Trust mode ──
+  if (step === 5) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 540 }}>
@@ -557,10 +633,10 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(3)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(4)}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="onboarding-btn-primary" onClick={() => setStep(5)}>
+            <button className="onboarding-btn-primary" onClick={() => setStep(6)}>
               Continue <ArrowRight size={16} />
             </button>
           </div>
@@ -570,8 +646,8 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 5: Optimization preference ──
-  if (step === 5) {
+  // ── Step 6: Optimization preference ──
+  if (step === 6) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 540 }}>
@@ -600,10 +676,10 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(4)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(5)}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="onboarding-btn-primary" onClick={() => setStep(6)}>
+            <button className="onboarding-btn-primary" onClick={() => setStep(7)}>
               Continue <ArrowRight size={16} />
             </button>
           </div>
@@ -613,7 +689,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 6: Project folder ──
+  // ── Step 7: Project folder ──
   if (step === 7) {
     return (
       <div className="onboarding-root">
@@ -646,7 +722,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
             <button className="onboarding-btn-back" onClick={() => setStep(6)}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="onboarding-btn-primary" onClick={() => setStep(7)}>
+            <button className="onboarding-btn-primary" onClick={() => setStep(8)}>
               {folderPath ? 'Open project' : "Let's go"} <ArrowRight size={16} />
             </button>
           </div>
@@ -656,8 +732,8 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
     );
   }
 
-  // ── Step 7: Final review ──
-  if (step === 7) {
+  // ── Step 8: Final review ──
+  if (step === 8) {
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 540 }}>
@@ -708,6 +784,13 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
             </div>
 
             <div className="onboarding-review-section">
+              <div className="onboarding-review-label">Theme</div>
+              <div className="onboarding-review-value">
+                {THEME_CHOICES.find((theme) => theme.id === activeTheme)?.label || activeTheme}
+              </div>
+            </div>
+
+            <div className="onboarding-review-section">
               <div className="onboarding-review-label">Project</div>
               <div className="onboarding-review-value">
                 {folderPath || 'Start from scratch'}
@@ -729,7 +812,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
 
           <div className="onboarding-nav">
-            <button className="onboarding-btn-back" onClick={() => setStep(6)}>
+            <button className="onboarding-btn-back" onClick={() => setStep(7)}>
               <ArrowLeft size={16} /> Back
             </button>
             <button className="onboarding-btn-primary" onClick={handleFinish} disabled={saving}>

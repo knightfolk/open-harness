@@ -1115,9 +1115,13 @@ function App() {
                 else setActiveModel(models[0].id);
               }
               // Adopt personality, trust mode, and role buckets from onboarding.
-              if (result?.personality) setPersonalityText(result.personality);
+                if (result?.personality) setPersonalityText(result.personality);
               if (result?.trustMode) setTrustMode(result.trustMode as any);
               if (result?.roleAssignments) setRoleAssignments(roleMapToAssignments(result.roleAssignments));
+              if (result?.activeTheme) {
+                setActiveTheme(result.activeTheme);
+                document.documentElement.setAttribute('data-theme', result.activeTheme);
+              }
               // If the user picked a folder, open it as a session.
               if (result?.folderPath) {
                 try { await api.createSession('Onboarding project', result.folderPath); } catch { /* ignore */ }
