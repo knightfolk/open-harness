@@ -8,7 +8,7 @@ const KNOWN_PANELS = new Set<string>(ALL_PANELS);
 /** Panels that prefer to split vertically (top/bottom) when added */
 const VERTICAL_PANELS: Set<PanelId> = new Set(['terminal']);
 /** Panels that prefer to split horizontally (left/right) when added */
-const HORIZONTAL_PANELS: Set<PanelId> = new Set(['sub-agents', 'diffs', 'browser', 'files', 'side-chat', 'model-lab', 'safety', 'patches']);
+const HORIZONTAL_PANELS: Set<PanelId> = new Set(['environment', 'sub-agents', 'diffs', 'browser', 'files', 'side-chat', 'model-lab', 'safety', 'patches']);
 
 function loadLayout(): LayoutNode {
   try {

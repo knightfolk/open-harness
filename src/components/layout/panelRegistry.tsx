@@ -1,7 +1,7 @@
 import type { PanelId, PanelConfig } from '../../types/layout';
 import {
   MessageSquare, GitCompare, Globe, Terminal,
-  Bot, FolderOpen, FlaskConical, Shield, GitPullRequestArrow,
+  Bot, FolderOpen, FlaskConical, Shield, GitPullRequestArrow, Activity,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -11,6 +11,7 @@ export interface PanelDefinition extends PanelConfig {
 
 const iconMap: Record<PanelId, ComponentType<{ size?: number }>> = {
   chat: MessageSquare,
+  environment: Activity,
   diffs: GitCompare,
   browser: Globe,
   terminal: Terminal,
@@ -24,6 +25,7 @@ const iconMap: Record<PanelId, ComponentType<{ size?: number }>> = {
 
 export const panelConfigs: Record<PanelId, PanelConfig> = {
   chat:        { id: 'chat',        label: 'Chat',        icon: 'MessageSquare', defaultSize: 500, minSize: 280 },
+  environment: { id: 'environment', label: 'Environment', icon: 'Activity',      defaultSize: 340, minSize: 280 },
   diffs:       { id: 'diffs',       label: 'Diffs',       icon: 'GitCompare',    defaultSize: 400, minSize: 200 },
   browser:     { id: 'browser',     label: 'Browser',     icon: 'Globe',         defaultSize: 400, minSize: 200 },
   terminal:    { id: 'terminal',    label: 'Terminal',     icon: 'Terminal',      defaultSize: 200, minSize: 120 },

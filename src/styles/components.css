@@ -412,57 +412,25 @@
   position: relative;
 }
 
-.floating-super-panel {
-  position: absolute;
-  top: 16px;
-  right: 46px;
-  z-index: 8;
-  min-width: 260px;
-  max-width: 520px;
-  max-height: calc(100% - 190px);
-  display: flex;
-  pointer-events: auto;
-  transform: translateX(0);
-  opacity: 1;
-  transition: transform 180ms ease, opacity 160ms ease;
-  will-change: transform, opacity;
-}
-
-.floating-super-panel.hidden {
-  transform: translateX(calc(100% + 36px));
-  opacity: 0;
-  pointer-events: none;
-}
-
-.floating-super-resizer {
-  width: 8px;
-  min-width: 8px;
-  margin-right: -4px;
-  cursor: col-resize;
-  background: transparent;
-  z-index: 2;
-}
-
-.floating-super-resizer:hover {
-  background: color-mix(in srgb, var(--accent-primary) 24%, transparent);
-}
-
-.has-floating-super .messages {
-  padding-right: calc(var(--floating-super-width, 330px) + 64px);
-}
-
-.floating-super-reveal {
+.app-tool-tabs {
   position: absolute;
   top: 96px;
-  right: 14px;
-  z-index: 9;
+  right: 0;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.app-tool-tab {
   width: 30px;
   min-height: 116px;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid var(--border-accent);
   border-right: 0;
   border-radius: 10px 0 0 10px;
@@ -473,65 +441,14 @@
   transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 
-.floating-super-reveal:hover {
+.app-tool-tab:hover,
+.app-tool-tab.active {
   color: var(--text-primary);
   background: var(--bg-secondary);
   transform: translateX(-2px);
 }
 
-.floating-super-reveal span {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-}
-
-.floating-tool-tabs {
-  position: absolute;
-  top: 96px;
-  right: 0;
-  z-index: 9;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: auto;
-}
-
-.floating-tool-tabs.with-super-tab {
-  top: 264px;
-}
-
-.floating-tool-tabs.with-super-open {
-  right: 14px;
-}
-
-.floating-tool-tab {
-  width: 30px;
-  min-height: 116px;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid var(--border-accent);
-  border-right: 0;
-  border-radius: 10px 0 0 10px;
-  background: color-mix(in srgb, var(--bg-elevated) 92%, #fff 3%);
-  color: var(--text-secondary);
-  cursor: pointer;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
-  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
-}
-
-.floating-tool-tab:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-  transform: translateX(-2px);
-}
-
-.floating-tool-tab span {
+.app-tool-tab span {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
   font-size: 10px;
@@ -3246,13 +3163,7 @@ button:focus-visible {
   padding-top: 12px;
 }
 
-.chat-panel-root.has-floating-super .input-area {
-  width: min(860px, calc(100% - var(--floating-super-width, 330px) - 96px));
-  margin-left: auto;
-  margin-right: calc(var(--floating-super-width, 330px) + 76px);
-}
-
-.chat-panel-root.has-hidden-super .input-area {
+.chat-panel-root .input-area {
   width: min(860px, calc(100% - 72px));
   margin-left: auto;
   margin-right: auto;

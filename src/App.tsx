@@ -6,6 +6,7 @@ import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
+import { getPanelConfig, getPanelIcon } from './components/layout/panelRegistry';
 import * as api from './utils/api';
 import './styles/global.css';
 import './styles/components.css';
@@ -896,6 +897,10 @@ function App() {
   const handleToggleRightRail = useCallback(() => {
     togglePanel('side-chat');
   }, [togglePanel]);
+  const visibleShellTabs = useMemo(() => {
+    const ordered: PanelId[] = ['environment', ...pinnedTools.filter((id) => id !== 'environment')];
+    return ordered.filter((id, index) => ordered.indexOf(id) === index);
+  }, [pinnedTools]);
 
   const startResizeSidebar = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1052,6 +1057,27 @@ function App() {
             </div>
           </>
           )}
+        </div>
+
+        <div className="app-tool-tabs" aria-label="Window tool tabs">
+          {visibleShellTabs.map((id) => {
+            const Icon = getPanelIcon(id);
+            const config = getPanelConfig(id);
+            const active = visiblePanels.has(id);
+            return (
+              <button
+                key={id}
+                className={`app-tool-tab ${active ? 'active' : ''}`}
+                type="button"
+                onClick={() => id === 'environment' ? togglePanel(id) : addPanel(id)}
+                title={active ? `${config.label} open` : `Open ${config.label}`}
+                aria-label={active ? `${config.label} open` : `Open ${config.label}`}
+              >
+                <Icon size={15} />
+                <span>{config.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Enhanced Status Bar */}
