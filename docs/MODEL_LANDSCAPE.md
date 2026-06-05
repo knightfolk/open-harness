@@ -1,6 +1,30 @@
 # OpenHarness — AI Model Landscape for Coding
 
-> Research snapshot: May 2026. Prices and capabilities shift fast — update quarterly.
+> Research snapshot: June 5, 2026. Prices and capabilities shift fast — update quarterly.
+
+## Built-In Model Catalog
+
+OpenHarness keeps the UI-facing model database in `src/data/modelCatalog.ts`.
+Update that file whenever you add or change any of the following:
+
+- provider presets in Settings or onboarding
+- default active models or role bucket recommendations
+- auto-router candidate cards, relative cost weights, or image/tool support
+- model-specific prompting, context-window, or pricing assumptions
+- new help/docs surfaces that describe models, providers, or routing behavior
+
+Each catalog entry should include:
+
+- a dense card summary: provider, context, relative cost, strengths, weaknesses, comparable models, and review notes
+- `compactDescription` for hover text, menus, wizards, and condensed UI
+- `bestCategory` when a model should be color-coded explicitly; otherwise the UI infers the category from the card text
+- aliases and provider hints so fetched provider models can be matched to catalog entries
+
+Current external refresh anchors:
+
+- Vellum LLM Leaderboard — task rankings, context, speed, and public price comparison
+- OpenRouter `/api/v1/models` — live model metadata, modality, context, supported parameters, and gateway pricing
+- Provider pricing/docs — authoritative cost confirmation when a card is used for budgeting
 
 ## Summary Table
 

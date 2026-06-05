@@ -6,10 +6,22 @@ import {
   PlayCircle, ShieldCheck, Server, MessageCircle, Palette as ThemeIcon,
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
   Check, ChevronDown, ChevronRight, CheckCircle2, Bot, Container,
-  ArrowRight,
+  ArrowRight, BookOpen, Search,
 } from 'lucide-react';
 import type { ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
 import * as api from '../utils/api';
+import {
+  findModelCatalogCard,
+  formatContextWindow,
+  formatModelCost,
+  MODEL_CATALOG_MAINTENANCE_NOTE,
+  MODEL_CATALOG_SOURCES,
+  MODEL_CATALOG_UPDATED_AT,
+  MODEL_CATEGORY_META,
+  modelBestCategory,
+  modelCatalogTooltip,
+  TOP_MODEL_CATALOG,
+} from '../data/modelCatalog';
 
 // ── Category definition ────────────────────────────────
 interface SettingsCategory {
@@ -21,6 +33,7 @@ interface SettingsCategory {
 
 const CATEGORIES: SettingsCategory[] = [
   { id: 'model', label: 'Active Model', icon: Brain },
+  { id: 'model-library', label: 'Model Library', icon: BookOpen },
   { id: 'providers', label: 'Providers', icon: KeyRound, subcategories: [
     { id: 'manage', label: 'Manage Providers' },
     { id: 'add', label: 'Add Provider' },
@@ -189,6 +202,7 @@ export function SettingsModal({
           </nav>
           <div className="settings-content">
             {contentKey === 'model' && <ActiveModelPane activeModel={activeModel} enabledModels={enabledModels} onSelectModel={onSelectModel} />}
+            {contentKey === 'model-library' && <ModelLibraryPane providers={providers} />}
             {contentKey === 'providers/manage' && (
               <ProvidersPane
                 providers={providers}
@@ -251,9 +265,197 @@ function ActiveModelPane({ activeModel, enabledModels, onSelectModel }: any) {
         <select className="settings-select settings-select-wide" value={activeModel} onChange={(e) => onSelectModel(e.target.value)}>
           <option value="Auto">Auto</option>
           {enabledModels.map((model: any) => (
-            <option key={`${model.providerId}:${model.id}`} value={model.id}>{model.providerName} — {model.name}</option>
+            <option key={`${model.providerId}:${model.id}`} value={model.id} title={modelCatalogTooltip(model.id, model.providerId)}>{model.providerName} — {model.name}</option>
           ))}
         </select>
+      </div>
+    </>
+  );
+}
+
+/* ================================================================== */
+/*  MODEL LIBRARY                                                      */
+/* ================================================================== */
+
+function modelMatchesCatalogId(modelId: string, providerId: string, catalogId: string) {
+  return findModelCatalogCard(modelId, providerId)?.id === catalogId;
+}
+
+function getCatalogAccess(cardId: string, providers: ProviderConfig[]) {
+  const matches = providers.flatMap((provider) =>
+    provider.models
+      .filter((model) => modelMatchesCatalogId(model.id, provider.id, cardId))
+      .map((model) => ({
+        providerName: provider.name,
+        providerId: provider.id,
+        configured: provider.configured,
+        enabled: model.enabled,
+        modelName: model.name,
+      }))
+  );
+  const enabled = matches.filter((match) => match.configured && match.enabled);
+  const configured = matches.filter((match) => match.configured);
+  return {
+    matches,
+    enabled,
+    label: enabled.length > 0 ? 'Enabled' : configured.length > 0 ? 'Available' : matches.length > 0 ? 'Fetched' : 'Catalog',
+    providerLabel: (enabled[0] || configured[0] || matches[0])?.providerName || '',
+  };
+}
+
+function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
+  const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | keyof typeof MODEL_CATEGORY_META>('all');
+  const [accessOnly, setAccessOnly] = useState(false);
+
+  const categoryCounts = TOP_MODEL_CATALOG.reduce<Record<string, number>>((acc, card) => {
+    const category = modelBestCategory(card);
+    acc[category] = (acc[category] || 0) + 1;
+    return acc;
+  }, {});
+
+  const filtered = TOP_MODEL_CATALOG.filter((card) => {
+    const access = getCatalogAccess(card.id, providers);
+    const category = modelBestCategory(card);
+    const haystack = [
+      card.displayName,
+      card.provider,
+      card.family,
+      card.compactDescription,
+      card.reviewSummary,
+      ...card.strengths,
+      ...card.weaknesses,
+      ...card.bestFor,
+      ...card.comparableTo,
+    ].join(' ').toLowerCase();
+    const queryMatch = !query.trim() || haystack.includes(query.trim().toLowerCase());
+    const categoryMatch = categoryFilter === 'all' || category === categoryFilter;
+    const accessMatch = !accessOnly || access.enabled.length > 0 || access.matches.length > 0;
+    return queryMatch && categoryMatch && accessMatch;
+  });
+
+  return (
+    <>
+      <PaneTitle>Model Library</PaneTitle>
+      <PaneDesc>Dense model cards for the top tracked models, with live access badges for your configured providers.</PaneDesc>
+
+      <div className="model-library-toolbar">
+        <label className="model-library-search">
+          <Search size={14} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search models, strengths, providers, comparisons"
+          />
+        </label>
+        <select
+          className="settings-select"
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value as 'all' | keyof typeof MODEL_CATEGORY_META)}
+          title="Filter by best-rated category"
+        >
+          <option value="all">All categories</option>
+          {Object.entries(MODEL_CATEGORY_META).map(([id, meta]) => (
+            <option key={id} value={id}>{meta.label} ({categoryCounts[id] || 0})</option>
+          ))}
+        </select>
+        <button
+          className={`settings-mini-button ${accessOnly ? 'active' : ''}`}
+          onClick={() => setAccessOnly((prev) => !prev)}
+          title="Show only models that match fetched provider models"
+        >
+          {accessOnly ? <Check size={11} /> : <Bot size={11} />}
+          Access
+        </button>
+      </div>
+
+      <div className="model-library-summary">
+        <div><strong>{TOP_MODEL_CATALOG.length}</strong> catalog cards</div>
+        <div><strong>{providers.flatMap((p) => p.models.filter((m) => m.enabled)).length}</strong> enabled provider models</div>
+        <div>Updated {MODEL_CATALOG_UPDATED_AT}</div>
+      </div>
+
+      <div className="model-category-legend">
+        {Object.entries(MODEL_CATEGORY_META).map(([id, meta]) => (
+          <button
+            key={id}
+            className={`model-category-chip ${categoryFilter === id ? 'active' : ''}`}
+            style={{ ['--category-color' as any]: meta.color, ['--category-bg' as any]: meta.background }}
+            onClick={() => setCategoryFilter(categoryFilter === id ? 'all' : id as keyof typeof MODEL_CATEGORY_META)}
+            title={`Best-rated category: ${meta.label}`}
+          >
+            {meta.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="model-library-grid">
+        {filtered.map((card) => {
+          const access = getCatalogAccess(card.id, providers);
+          const category = modelBestCategory(card);
+          const categoryMeta = MODEL_CATEGORY_META[category];
+          const accessClass = access.label.toLowerCase();
+          return (
+            <article
+              key={card.id}
+              className="model-card"
+              style={{ ['--model-category-color' as any]: categoryMeta.color, ['--model-category-bg' as any]: categoryMeta.background }}
+              title={modelCatalogTooltip(card.id)}
+            >
+              <div className="model-card-top">
+                <div className="model-card-title-block">
+                  <div className="model-card-provider">{card.provider}</div>
+                  <h3>{card.displayName}</h3>
+                </div>
+                <div className={`model-card-access ${accessClass}`}>
+                  {access.label}
+                  {access.providerLabel && <span>{access.providerLabel}</span>}
+                </div>
+              </div>
+              <div className="model-card-category">{categoryMeta.label}</div>
+              <p className="model-card-compact">{card.compactDescription}</p>
+              <div className="model-card-metrics">
+                <div><span>Context</span><strong>{formatContextWindow(card.contextWindowTokens)}</strong></div>
+                <div><span>Cost</span><strong>{formatModelCost(card)}</strong></div>
+                <div><span>Tools</span><strong>{card.supportsTools ? 'Yes' : 'Basic'}</strong></div>
+                <div><span>Vision</span><strong>{card.supportsImages ? 'Yes' : 'No'}</strong></div>
+              </div>
+              <div className="model-card-review">{card.reviewSummary}</div>
+              <div className="model-card-columns">
+                <div>
+                  <span>Good at</span>
+                  <p>{card.strengths.join(', ')}</p>
+                </div>
+                <div>
+                  <span>Bad at</span>
+                  <p>{card.weaknesses.join(', ')}</p>
+                </div>
+              </div>
+              <div className="model-card-compare">
+                Comparable to: {card.comparableTo.join(', ')}
+              </div>
+              <div className="model-card-benchmark">{card.benchmarkHighlights[0]}</div>
+            </article>
+          );
+        })}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="settings-card" style={{ marginTop: 16, textAlign: 'center' }}>
+          <div className="settings-item-label">No matching model cards</div>
+          <div className="settings-item-desc">Clear filters or fetch models from a configured provider.</div>
+        </div>
+      )}
+
+      <div className="model-library-sources">
+        <div className="model-library-sources-title">Research and maintenance</div>
+        {MODEL_CATALOG_SOURCES.map((source) => (
+          <div key={source.label}>
+            <a href={source.url} target="_blank" rel="noreferrer">{source.label}</a>
+            <span>{source.note}</span>
+          </div>
+        ))}
+        <p>{MODEL_CATALOG_MAINTENANCE_NOTE}</p>
       </div>
     </>
   );
@@ -511,7 +713,7 @@ function ModelList({ models, providerId, activeModel, onToggle }: any) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {models.map((model: any) => (
-          <div key={model.id} className="prov-model-row">
+          <div key={model.id} className="prov-model-row" title={modelCatalogTooltip(model.id, providerId)}>
             <div className="prov-model-info">
               <span className="prov-model-name">{model.name}</span>
               <span className="prov-model-id">{model.id}</span>
@@ -740,6 +942,11 @@ function RoleBucketsPane({ roleAssignments, enabledModels, onAssignRoleModel }: 
                     );
                   })}
                 </select>
+                {findModelCatalogCard(role.modelId) && (
+                  <div className="role-bucket-model-note" title={modelCatalogTooltip(role.modelId)}>
+                    {findModelCatalogCard(role.modelId)?.compactDescription}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -1205,49 +1412,14 @@ type RouterModelCard = {
   card: string;
 };
 
-const TOP_ROUTER_MODEL_CARDS: RouterModelCard[] = [
-  { id: 'gpt-5.4', aliases: ['gpt-5.4'], providerHints: ['openai'], cost: 1.4, supportsImages: true, card: 'Premium flagship. Best for hard planning, architecture, and high-stakes coding; expensive for routine edits.' },
-  { id: 'gpt-5.3-codex', aliases: ['gpt-5.3-codex', 'gpt-5.3 codex'], providerHints: ['openai'], cost: 1.3, supportsImages: true, card: 'Specialized coding model. Strong implementation and refactors; premium cost means reserve for demanding code work.' },
-  { id: 'o3', aliases: ['o3'], providerHints: ['openai'], cost: 1.25, supportsImages: true, card: 'Deep reasoning specialist. Excellent planning and code review; slower and expensive for simple tasks.' },
-  { id: 'o4-mini', aliases: ['o4-mini', 'o4 mini'], providerHints: ['openai'], cost: 0.7, supportsImages: true, card: 'Mid-cost reasoning model. Good bug fixing and reviews; less exhaustive than premium reasoning models.' },
-  { id: 'gpt-4.1', aliases: ['gpt-4.1'], providerHints: ['openai'], cost: 1.0, supportsImages: true, card: 'Premium general coder. Strong architecture and instruction following; higher cost than flash or mini models.' },
-  { id: 'gpt-4.1-mini', aliases: ['gpt-4.1-mini', 'gpt-4.1 mini'], providerHints: ['openai'], cost: 0.45, supportsImages: true, card: 'Fast mid-cost coder. Good for bug fixes and tool work; weaker than flagship models on subtle architecture.' },
-  { id: 'gpt-4.1-nano', aliases: ['gpt-4.1-nano', 'gpt-4.1 nano'], providerHints: ['openai'], cost: 0.15, supportsImages: true, card: 'Very cheap tool runner. Best for tiny edits and routing support; too narrow for complex coding.' },
-  { id: 'claude-opus-4', aliases: ['claude-opus-4', 'claude opus 4'], providerHints: ['anthropic'], cost: 1.35, supportsImages: true, card: 'Premium analysis model. Excellent deep review and planning; expensive and often more than routine edits need.' },
-  { id: 'claude-sonnet-4', aliases: ['claude-sonnet-4', 'claude sonnet 4', 'claude-sonnet-4-6'], providerHints: ['anthropic'], cost: 1.0, supportsImages: true, card: 'Frontier coding model. Strong multi-file edits, tool use, and UI work; premium cost versus budget coders.' },
-  { id: 'claude-haiku-3-5', aliases: ['claude-haiku-3-5', 'claude haiku 3.5'], providerHints: ['anthropic'], cost: 0.4, supportsImages: true, card: 'Fast Anthropic model. Good summaries and small changes; not ideal for deep architecture.' },
-  { id: 'gemini-2.5-pro', aliases: ['gemini-2.5-pro', 'gemini 2.5 pro'], providerHints: ['google', 'gemini'], cost: 1.0, supportsImages: true, card: 'Large-context planner. Great for broad codebase analysis and design work; can be slower than flash models.' },
-  { id: 'gemini-2.5-flash', aliases: ['gemini-2.5-flash', 'gemini 2.5 flash'], providerHints: ['google', 'gemini'], cost: 0.35, supportsImages: true, card: 'Fast large-context worker. Good for iteration and bug fixing; less careful than Pro on hard reasoning.' },
-  { id: 'MiniMax-M3', aliases: ['minimax-m3', 'minimax m3', 'm3'], providerHints: ['minimax'], cost: 0.3, supportsImages: true, card: 'Low-cost 1M-context agent model. Strong coding, planning, and multimodal work; may need routing away from niche deep review.' },
-  { id: 'MiniMax-M2.7', aliases: ['minimax-m2.7', 'minimax m2.7', 'm2.7'], providerHints: ['minimax'], cost: 1.0, supportsImages: false, card: 'Older MiniMax code model. Useful fallback, but M3 is stronger and much cheaper per token.' },
-  { id: 'deepseek-v4', aliases: ['deepseek-v4', 'deepseek v4', 'deepseek-chat'], providerHints: ['deepseek'], cost: 0.25, supportsImages: false, card: 'Cheap top-tier coder. Excellent implementation and planning for text tasks; no image support.' },
-  { id: 'deepseek-v4-flash', aliases: ['deepseek-v4-flash', 'deepseek v4 flash'], providerHints: ['deepseek'], cost: 0.15, supportsImages: false, card: 'Very cheap fast coder. Great for iteration and small fixes; weaker for subtle multi-file design.' },
-  { id: 'deepseek-v3', aliases: ['deepseek-v3', 'deepseek v3'], providerHints: ['deepseek'], cost: 0.1, supportsImages: false, card: 'Budget bug fixer. Solid older coding model; not first choice for complex architecture.' },
-  { id: 'deepseek-r2', aliases: ['deepseek-r2', 'deepseek r2', 'deepseek-reasoner'], providerHints: ['deepseek'], cost: 0.35, supportsImages: false, card: 'Low-cost reasoning specialist. Strong planning and review; slower and text-only.' },
-  { id: 'glm-5.1', aliases: ['glm-5.1', 'glm 5.1'], providerHints: ['zhipu', 'z.ai', 'glm'], cost: 0.55, supportsImages: false, card: 'Bilingual planner. Strong architecture sense in English and Chinese; not as proven for tool-heavy coding.' },
-  { id: 'glm-5', aliases: ['glm-5', 'glm 5'], providerHints: ['zhipu', 'z.ai', 'glm'], cost: 0.45, supportsImages: false, card: 'Mid-cost code generator. Good implementation model; less specialized for review than reasoning models.' },
-  { id: 'glm-4.7', aliases: ['glm-4.7', 'glm 4.7'], providerHints: ['zhipu', 'z.ai', 'glm'], cost: 0.2, supportsImages: false, card: 'Cheap tool runner. Good for quick calls and routine work; limited for deep reasoning.' },
-  { id: 'llama-4-maverick', aliases: ['llama-4-maverick', 'llama 4 maverick'], providerHints: ['meta', 'llama', 'ollama', 'lmstudio', 'openrouter'], cost: 0.2, supportsImages: false, card: 'Strong open-weight general coder. Good local/proxy option; quality depends on hosting and quantization.' },
-  { id: 'llama-4-scout', aliases: ['llama-4-scout', 'llama 4 scout'], providerHints: ['meta', 'llama', 'ollama', 'lmstudio', 'openrouter'], cost: 0.2, supportsImages: false, card: 'Massive-context open model. Useful for large repo sweeps; less reliable for precise edits than top coders.' },
-  { id: 'mistral-large', aliases: ['mistral-large', 'mistral large'], providerHints: ['mistral'], cost: 0.75, supportsImages: false, card: 'Strong reviewer and planner. Excellent structured analysis; higher cost than small/flash models.' },
-  { id: 'mistral-small', aliases: ['mistral-small', 'mistral small'], providerHints: ['mistral'], cost: 0.25, supportsImages: false, card: 'Cheap summarizer and worker. Fast for routine tasks; less capable for complex coding.' },
-  { id: 'codestral', aliases: ['codestral'], providerHints: ['mistral'], cost: 0.45, supportsImages: false, card: 'Code-specialized model. Strong completion and bug fixing; weaker for broad product reasoning.' },
-  { id: 'devstral', aliases: ['devstral'], providerHints: ['mistral'], cost: 0.4, supportsImages: false, card: 'Agentic coding model. Good repository work and fixes; validate shell/tool outputs carefully.' },
-  { id: 'grok-4', aliases: ['grok-4', 'grok 4'], providerHints: ['xai', 'grok'], cost: 1.15, supportsImages: true, card: 'Premium reasoning and creative coding. Good design sense; can be opinionated and costly.' },
-  { id: 'grok-3', aliases: ['grok-3', 'grok 3'], providerHints: ['xai', 'grok'], cost: 1.0, supportsImages: true, card: 'Fast creative coder. Strong UI and product tasks; premium cost for routine work.' },
-  { id: 'grok-3-mini', aliases: ['grok-3-mini', 'grok 3 mini'], providerHints: ['xai', 'grok'], cost: 0.45, supportsImages: true, card: 'Lightweight xAI model. Good quick tasks and tool running; less depth than Grok 3.' },
-  { id: 'qwen-3-235b', aliases: ['qwen-3-235b', 'qwen3-235b', 'qwen 3 235b'], providerHints: ['qwen', 'alibaba', 'ollama', 'lmstudio', 'openrouter'], cost: 0.25, supportsImages: false, card: 'Top open-source coder and planner. Excellent reasoning for local/proxy use; hosting quality matters.' },
-  { id: 'qwen-3-32b', aliases: ['qwen-3-32b', 'qwen3-32b', 'qwen 3 32b'], providerHints: ['qwen', 'alibaba', 'ollama', 'lmstudio', 'openrouter'], cost: 0.12, supportsImages: false, card: 'Fast open-source worker. Good local bug fixer and tool runner; limited on complex architecture.' },
-  { id: 'qwen3-coder', aliases: ['qwen3-coder', 'qwen 3 coder', 'qwen3 coder'], providerHints: ['qwen', 'alibaba', 'ollama', 'lmstudio', 'openrouter'], cost: 0.35, supportsImages: false, card: 'Code-focused Qwen model. Strong implementation and tool use; not ideal for image tasks.' },
-  { id: 'qwen3-max-thinking', aliases: ['qwen3-max-thinking', 'qwen 3 max thinking'], providerHints: ['qwen', 'alibaba'], cost: 0.75, supportsImages: false, card: 'Reasoning-heavy Qwen model. Strong planning and review; can be slower and verbose.' },
-  { id: 'kimi-k2.6', aliases: ['kimi-k2.6', 'kimi k2.6'], providerHints: ['moonshot', 'kimi'], cost: 0.55, supportsImages: false, card: 'Analytical code implementer. Good generation and planning; less broadly integrated than major providers.' },
-  { id: 'kimi-k2.5', aliases: ['kimi-k2.5', 'kimi k2.5'], providerHints: ['moonshot', 'kimi'], cost: 0.5, supportsImages: false, card: 'Strong analytical planner. Useful for decomposition and review; less proven for tool-heavy coding.' },
-  { id: 'mimo-v2.5-pro', aliases: ['mimo-v2.5-pro', 'mimo v2.5 pro'], providerHints: ['xiaomi', 'mimo'], cost: 0.25, supportsImages: false, card: 'Cheap code analysis model. Good review support; not first choice for complex implementation.' },
-  { id: 'gemma-3', aliases: ['gemma-3', 'gemma 3'], providerHints: ['google', 'gemma', 'ollama', 'lmstudio'], cost: 0.1, supportsImages: false, card: 'Lightweight open model. Useful for summaries and tiny tasks; weak tool reliability.' },
-  { id: 'phi-4', aliases: ['phi-4', 'phi 4'], providerHints: ['microsoft', 'phi', 'ollama', 'lmstudio'], cost: 0.08, supportsImages: false, card: 'Small local model. Cheap for short structured outputs; avoid complex coding and tool routing.' },
-  { id: 'command-r-plus', aliases: ['command-r-plus', 'command r plus'], providerHints: ['cohere'], cost: 0.7, supportsImages: false, card: 'RAG-oriented model. Good retrieval synthesis; expensive and less code-specialized.' },
-  { id: 'jamba-1.5-large', aliases: ['jamba-1.5-large', 'jamba 1.5 large'], providerHints: ['ai21', 'jamba'], cost: 0.65, supportsImages: false, card: 'Long-context summarizer. Useful for synthesis; limited output budget and not code-specialized.' },
-];
+const TOP_ROUTER_MODEL_CARDS: RouterModelCard[] = TOP_MODEL_CATALOG.map((card) => ({
+  id: card.id,
+  aliases: [card.displayName, ...card.aliases],
+  providerHints: card.providerHints,
+  cost: card.routerCost,
+  supportsImages: card.supportsImages,
+  card: card.compactDescription,
+}));
 
 const normalizeModelKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
 

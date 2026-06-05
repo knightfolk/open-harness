@@ -1,4 +1,5 @@
 import type { BrowserPreviewResult, PatchValidationResult } from '../types';
+import { TOP_MODEL_CATALOG } from '../data/modelCatalog';
 
 function defaultApiBase(): string {
   if (typeof window === 'undefined' || !window.location.hostname) return 'http://localhost:3001';
@@ -216,6 +217,9 @@ export async function getRouterCandidates(): Promise<AutoRouterCandidateConfig[]
 
 /** Rough pricing per-million-tokens (USD). Same data as server/modelProfiles.ts. */
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  ...Object.fromEntries(TOP_MODEL_CATALOG
+    .filter((card) => card.inputCostPerMTok != null && card.outputCostPerMTok != null)
+    .flatMap((card) => [card.id, ...card.aliases].map((id) => [id, { input: card.inputCostPerMTok!, output: card.outputCostPerMTok! }]))),
   'MiniMax-M3': { input: 0.15, output: 0.60 },
   'MiniMax-M2.7': { input: 1.50, output: 6.00 },
   'deepseek-chat': { input: 0.27, output: 1.10 },

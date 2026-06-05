@@ -4,6 +4,7 @@ import {
   Check, Search, Shield, Settings,
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
+import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 
 interface ModelOption {
   id: string;
@@ -79,7 +80,8 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
 
   const filtered = models.filter(m =>
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.providerName.toLowerCase().includes(searchQuery.toLowerCase())
+    m.providerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (modelCatalogSummary(m.id, m.providerName) || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
   const hasSearch = searchQuery.trim().length > 0;
   const pickerModels = [
@@ -184,6 +186,7 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
         <button
           ref={modelBtnRef}
           className={`status-bar-item status-bar-model-btn ${isAuto ? 'status-bar-model-btn-auto' : ''}`}
+          title={isAuto ? 'Auto: route each request to the best configured candidate model.' : modelCatalogTooltip(activeModel, providerName)}
           onClick={() => {
             const nextOpen = !modelPickerOpen;
             setModelPickerOpen(nextOpen);
@@ -223,17 +226,26 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
               {Array.from(grouped.entries()).map(([provider, providerModels]) => (
                 <div key={provider} className="model-picker-group">
                   <div className="model-picker-group-label">{provider}</div>
-                  {providerModels.map(m => (
-                    <button
-                      key={m.id}
-                      className={`model-picker-item ${m.id === activeModel ? 'active' : ''}`}
-                      onClick={() => { onModelChange(m.id); setModelPickerOpen(false); setSearchQuery(''); }}
-                    >
-                      <span className="model-picker-item-name">{m.name}</span>
-                      {!!m.contextWindow && <span className="model-picker-item-ctx">{formatContext(m.contextWindow)}</span>}
-                      {m.id === activeModel && <Check size={14} className="model-picker-item-check" />}
-                    </button>
-                  ))}
+                  {providerModels.map(m => {
+                    const description = m.id === AUTO_MODEL_ID
+                      ? 'Route each request through configured Auto-Router candidates.'
+                      : modelCatalogSummary(m.id, m.providerName);
+                    return (
+                      <button
+                        key={m.id}
+                        className={`model-picker-item ${m.id === activeModel ? 'active' : ''}`}
+                        onClick={() => { onModelChange(m.id); setModelPickerOpen(false); setSearchQuery(''); }}
+                        title={m.id === AUTO_MODEL_ID ? description || undefined : modelCatalogTooltip(m.id, m.providerName)}
+                      >
+                        <span className="model-picker-item-main">
+                          <span className="model-picker-item-name">{m.name}</span>
+                          {description && <span className="model-picker-item-desc">{description}</span>}
+                        </span>
+                        {!!m.contextWindow && <span className="model-picker-item-ctx">{formatContext(m.contextWindow)}</span>}
+                        {m.id === activeModel && <Check size={14} className="model-picker-item-check" />}
+                      </button>
+                    );
+                  })}
                 </div>
               ))}
               {hasSearch && filtered.length === 0 && (
