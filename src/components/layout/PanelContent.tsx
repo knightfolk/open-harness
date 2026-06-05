@@ -7,7 +7,6 @@ const DiffViewer = lazy(() => import('../DiffViewer').then((m) => ({ default: m.
 const BrowserPanel = lazy(() => import('../BrowserPanel').then((m) => ({ default: m.BrowserPanel })));
 const TerminalPanel = lazy(() => import('../TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 const FilesPanel = lazy(() => import('../FilesPanel').then((m) => ({ default: m.FilesPanel })));
-const EnvironmentRail = lazy(() => import('../EnvironmentRail').then((m) => ({ default: m.EnvironmentRail })));
 const SideChatPanel = lazy(() => import('../SideChatPanel').then((m) => ({ default: m.SideChatPanel })));
 const ModelLabPanel = lazy(() => import('../ModelLabPanel').then((m) => ({ default: m.ModelLabPanel })));
 const SafetyPanel = lazy(() => import('../SafetyPanel').then((m) => ({ default: m.SafetyPanel })));
@@ -67,9 +66,7 @@ export function PanelContent({ panelId, context }: Props) {
   );
   switch (panelId) {
     case 'chat':
-      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} />);
-    case 'environment':
-      return wrapped(<EnvironmentRail workingDir={context.workingDir} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} variant="panel" />);
+      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} pinnedTools={context.pinnedTools || []} onOpenPinnedTool={context.onOpenPinnedTool || (() => {})} />);
     case 'side-chat':
       return wrapped(<SideChatPanel activeModel={context.activeModel} models={context.models || []} />);
     case 'diffs':

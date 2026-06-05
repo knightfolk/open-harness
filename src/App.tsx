@@ -897,10 +897,9 @@ function App() {
   const handleToggleRightRail = useCallback(() => {
     togglePanel('side-chat');
   }, [togglePanel]);
-  const visibleShellTabs = useMemo(() => {
-    const ordered: PanelId[] = ['environment', ...pinnedTools.filter((id) => id !== 'environment')];
-    return ordered.filter((id, index) => ordered.indexOf(id) === index);
-  }, [pinnedTools]);
+  const visibleShellTabs = useMemo(() => (
+    pinnedTools.filter((id, index) => pinnedTools.indexOf(id) === index)
+  ), [pinnedTools]);
 
   const startResizeSidebar = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1069,7 +1068,7 @@ function App() {
                 key={id}
                 className={`app-tool-tab ${active ? 'active' : ''}`}
                 type="button"
-                onClick={() => id === 'environment' ? togglePanel(id) : addPanel(id)}
+                onClick={() => addPanel(id)}
                 title={active ? `${config.label} open` : `Open ${config.label}`}
                 aria-label={active ? `${config.label} open` : `Open ${config.label}`}
               >

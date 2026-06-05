@@ -412,18 +412,94 @@
   position: relative;
 }
 
-.app-tool-tabs {
+.floating-super-panel {
+  position: absolute;
+  top: 48px;
+  right: 46px;
+  z-index: 8;
+  min-width: 260px;
+  max-width: 520px;
+  max-height: calc(100% - 190px);
+  display: flex;
+  pointer-events: auto;
+  transform: translateX(0);
+  opacity: 1;
+  transition: transform 180ms ease, opacity 160ms ease;
+  will-change: transform, opacity;
+}
+
+.floating-super-panel.hidden {
+  transform: translateX(calc(100% + 36px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.floating-super-resizer {
+  width: 8px;
+  min-width: 8px;
+  margin-right: -4px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 2;
+}
+
+.floating-super-resizer:hover {
+  background: color-mix(in srgb, var(--accent-primary) 24%, transparent);
+}
+
+.has-floating-super .messages {
+  padding-right: calc(var(--floating-super-width, 330px) + 64px);
+}
+
+.chat-env-toggle {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 10;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, #fff 3%);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+
+.chat-env-toggle:hover,
+.chat-env-toggle.active {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.chat-env-toggle:active {
+  transform: translateY(1px);
+}
+
+.floating-tool-tabs {
   position: absolute;
   top: 96px;
   right: 0;
-  z-index: 25;
+  z-index: 9;
   display: flex;
   flex-direction: column;
   gap: 8px;
   pointer-events: auto;
 }
 
-.app-tool-tab {
+.floating-tool-tabs.with-super-tab {
+  top: 144px;
+}
+
+.floating-tool-tabs.with-super-open {
+  right: 14px;
+}
+
+.floating-tool-tab {
   width: 30px;
   min-height: 116px;
   display: inline-flex;
@@ -441,14 +517,13 @@
   transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 
-.app-tool-tab:hover,
-.app-tool-tab.active {
+.floating-tool-tab:hover {
   color: var(--text-primary);
   background: var(--bg-secondary);
   transform: translateX(-2px);
 }
 
-.app-tool-tab span {
+.floating-tool-tab span {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
   font-size: 10px;
@@ -3452,7 +3527,13 @@ button:focus-visible {
   padding-top: 12px;
 }
 
-.chat-panel-root .input-area {
+.chat-panel-root.has-floating-super .input-area {
+  width: min(860px, calc(100% - var(--floating-super-width, 330px) - 96px));
+  margin-left: auto;
+  margin-right: calc(var(--floating-super-width, 330px) + 76px);
+}
+
+.chat-panel-root.has-hidden-super .input-area {
   width: min(860px, calc(100% - 72px));
   margin-left: auto;
   margin-right: auto;
