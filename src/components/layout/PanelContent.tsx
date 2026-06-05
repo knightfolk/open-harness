@@ -66,7 +66,7 @@ export function PanelContent({ panelId, context }: Props) {
   );
   switch (panelId) {
     case 'chat':
-      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} pinnedTools={context.pinnedTools || []} onOpenPinnedTool={context.onOpenPinnedTool || (() => {})} />);
+      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} />);
     case 'side-chat':
       return wrapped(<SideChatPanel activeModel={context.activeModel} models={context.models || []} />);
     case 'diffs':

@@ -2,13 +2,11 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Send, Paperclip, Image, AtSign, Command, Activity } from 'lucide-react';
 import type { Message, SubAgent } from '../types';
-import type { PanelId } from '../types/layout';
 import { MessageBubble } from './MessageBubble';
 import { shortModelName } from '../utils/modelDisplay';
 import { SmartWelcome } from './SmartWelcome';
 import type { ProjectProfile } from '../types';
 import { EnvironmentRail } from './EnvironmentRail';
-import { getPanelConfig, getPanelIcon } from './layout/panelRegistry';
 
 interface Props {
   messages: Message[];
@@ -23,8 +21,6 @@ interface Props {
   subAgents: SubAgent[];
   onReviewChanges: () => void;
   onFocusAgents: () => void;
-  pinnedTools: PanelId[];
-  onOpenPinnedTool: (id: PanelId) => void;
 }
 
 const SUPER_WIDTH_KEY = 'openharness.chat-super.width.v1';
@@ -48,7 +44,7 @@ function loadSuperHidden() {
   }
 }
 
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, pinnedTools, onOpenPinnedTool }: Props) {
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
@@ -201,27 +197,6 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
           variant="floating"
         />
       </div>
-      {pinnedTools.length > 0 && (
-        <div className={`floating-tool-tabs ${superHidden ? 'with-super-tab' : 'with-super-open'}`} aria-label="Pinned tools">
-          {pinnedTools.map((id) => {
-            const Icon = getPanelIcon(id);
-            const config = getPanelConfig(id);
-            return (
-              <button
-                key={id}
-                className="floating-tool-tab"
-                type="button"
-                onClick={() => onOpenPinnedTool(id)}
-                title={config.label}
-                aria-label={`Open ${config.label}`}
-              >
-                <Icon size={15} />
-                <span>{config.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
       <ChatInputInline onSend={onSendMessage} disabled={isTyping} />
     </div>
   );

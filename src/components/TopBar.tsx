@@ -47,7 +47,16 @@ export function TopBar({
     return () => document.removeEventListener('mousedown', handler);
   }, [panelMenuOpen]);
 
-  const panelMenuItems = ALL_PANELS.filter((id) => id !== 'side-chat' && id !== 'terminal').map((id) => {
+  const menuPanelIds = ALL_PANELS
+    .filter((id) => id !== 'side-chat' && id !== 'terminal')
+    .map((id, index) => ({ id, index }))
+    .sort((a, b) => {
+      const pinnedDelta = Number(pinnedTools.includes(b.id)) - Number(pinnedTools.includes(a.id));
+      return pinnedDelta || a.index - b.index;
+    })
+    .map(({ id }) => id);
+
+  const panelMenuItems = menuPanelIds.map((id) => {
     const Icon = getPanelIcon(id);
     const config = getPanelConfig(id);
     const active = visiblePanels.has(id);

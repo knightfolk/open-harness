@@ -480,59 +480,6 @@
   transform: translateY(1px);
 }
 
-.floating-tool-tabs {
-  position: absolute;
-  top: 96px;
-  right: 0;
-  z-index: 9;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: auto;
-}
-
-.floating-tool-tabs.with-super-tab {
-  top: 144px;
-}
-
-.floating-tool-tabs.with-super-open {
-  right: 14px;
-}
-
-.floating-tool-tab {
-  width: 30px;
-  min-height: 116px;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid var(--border-accent);
-  border-right: 0;
-  border-radius: 10px 0 0 10px;
-  background: color-mix(in srgb, var(--bg-elevated) 92%, #fff 3%);
-  color: var(--text-secondary);
-  cursor: pointer;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
-  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
-}
-
-.floating-tool-tab:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-  transform: translateX(-2px);
-}
-
-.floating-tool-tab span {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.35px;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
 .is-resizing-panel,
 .is-resizing-panel * {
   cursor: col-resize !important;
