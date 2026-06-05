@@ -2830,10 +2830,12 @@ button:focus-visible {
   to { opacity: 1; }
 }
 .settings-modal {
-  width: 820px;
-  max-width: 90vw;
-  height: 600px;
-  max-height: 85vh;
+  width: 80vw;
+  max-width: 1400px;
+  min-width: min(820px, 94vw);
+  height: 80vh;
+  max-height: 900px;
+  min-height: min(600px, 88vh);
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-lg);
