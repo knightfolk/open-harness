@@ -39,7 +39,7 @@ export interface HarnessRun {
 }
 
 export type HarnessRunStep =
-  | { type: 'orchestration'; mode: 'direct' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
+  | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string }
   | { type: 'prompt_built'; promptPreview: string; toolCount: number }
   | { type: 'model_request'; round: number; model: string }

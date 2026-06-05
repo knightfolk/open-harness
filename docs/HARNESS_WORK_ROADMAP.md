@@ -4,6 +4,15 @@ Purpose: turn OpenHarness from a model chat interface into a local coding harnes
 
 Use this document for work assignment, issue creation, milestone planning, and progress tracking.
 
+## Source of Truth — Planning Room First
+
+OpenHarness's next product center is **Planning Room + Project Companion**:
+
+- Planning Room is the primary killer feature: for planning, roadmap, strategy, design, and architecture requests, multiple selected models draft independently, read each other's output, cross-check disagreements, and synthesize one final team plan.
+- Planning Room is read-only by design. It produces a source-of-truth plan before code execution, which keeps risk and cost controlled.
+- Project Companion is the follow-on cheap/local assistant. It should answer quick project questions from plans, run traces, repo maps, and summaries so users do not need to spend expensive main-model tokens for single-line questions.
+
+This direction supersedes older single-agent planning language. Future orchestration work should preserve the dedicated `plan` mode and build execution, review, and companion workflows around the Planning Room artifact.
 
 ## Correctness Review — 2026-06-01
 
@@ -274,6 +283,19 @@ For simple questions.
 User → selected role model → answer
 ```
 
+### Planning Room Mode
+
+For planning, roadmap, strategy, design, and architecture requests.
+
+```text
+User → planner model A
+     → planner model B
+     → planner model C
+     → peer cross-checks
+     → final synthesis
+     → source-of-truth team plan
+```
+
 ### Investigate Mode
 
 For review/debug/explain tasks.
@@ -321,7 +343,7 @@ Suggested type:
 
 ```ts
 interface RouteDecision {
-  mode: 'direct' | 'investigate' | 'execute' | 'compare';
+  mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare';
   role: 'coder' | 'planner' | 'reviewer' | 'summarizer' | 'worker' | 'reasoner';
   complexity: 'simple' | 'medium' | 'deep';
   needsTools: boolean;
@@ -336,9 +358,18 @@ interface RouteDecision {
 - [x] Create `/Users/kevink/Projects/OpenHarness/server/orchestrator.ts`
 - [x] Move streaming loop out of `/Users/kevink/Projects/OpenHarness/server/index.ts`
 - [x] Support direct mode
+- [x] Support Planning Room mode
 - [x] Support investigate mode
 - [x] Preserve existing SSE behavior
 - [x] Emit run trace steps
+
+### P1 — Add Planning Room mode
+
+- [x] Route planning/roadmap/design/strategy requests to `mode: 'plan'`
+- [x] Run up to 3 configured participant models in parallel for independent plans
+- [x] Have participants read peer output and cross-check disagreements, missing steps, and risks
+- [x] Synthesize one final team plan as the source-of-truth artifact
+- [x] Keep planning mode read-only; execution remains a separate mode
 
 ### P2 — Add execute mode
 
@@ -359,6 +390,7 @@ interface RouteDecision {
 ## Acceptance Criteria
 
 - [x] Simple prompts still use one model.
+- [x] Planning prompts use Planning Room.
 - [x] Review/debug prompts use investigate mode.
 - [x] Run trace shows each orchestration step.
 - [x] Existing chat behavior is not regressed.

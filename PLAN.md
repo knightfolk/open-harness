@@ -1,5 +1,32 @@
 # OpenHarness — Roadmap & Implementation Plan
 
+## Source of Truth — 2026-06-05
+
+OpenHarness is moving from "single assistant with optional model comparison" toward a **Planning Room + Project Companion** product model.
+
+The new default high-value workflow is:
+
+```text
+Planning request
+  -> multiple selected planner models draft independently
+  -> the same models read peer plans and cross-check disagreements
+  -> a synthesis pass produces one final team plan
+  -> the cheap Project Companion can later explain that plan, the run trace, and project context
+```
+
+Planning Room is the first killer feature. It gives vibe coders a better-than-single-model plan before execution, while keeping writes out of the loop. Project Companion is the follow-on cost-saver: a cheap/local side assistant that answers quick project questions from plans, run traces, repo maps, and summaries instead of spending main-model tokens.
+
+### Planning Room v1 Status
+
+| Capability | Status | Evidence |
+|------------|--------|----------|
+| Dedicated planning mode | ✅ DONE | `server/router.ts` can route planning/roadmap/design/strategy requests to `mode: 'plan'` |
+| Multi-model independent plans | ✅ DONE | `server/orchestrator.ts` runs up to 3 configured planning participants in parallel |
+| Peer cross-check | ✅ DONE | Participants read peer plans and report disagreements, missing steps, risks, and strongest ideas |
+| Final team plan | ✅ DONE | A synthesis pass emits one source-of-truth plan artifact |
+| Run trace visibility | ✅ DONE | Planning Room emits orchestration steps for independent planning, peer cross-check, and synthesis |
+| Project Companion | ❌ NEXT | Cheap/local side assistant still needs storage, settings, and UI |
+
 ## Status Snapshot — 2026-06-03
 
 This plan incorporates findings from the comprehensive codebase review on 2026-06-02 and the integration of an auto-router ported from [UltraCode-Shim](https://github.com/OnlyTerp/UltraCode-Shim).
@@ -12,7 +39,7 @@ After source code audit, the 6 critical gaps from the review have this status:
 |-----|--------|----------|
 | 1. Orchestrator is docs-only | ✅ DONE | `orchestrator.ts` calls `runAgentPhase()` for execute/investigate/compare |
 | 2. Router is heuristic-only | ✅ DONE | `autoRouter.ts` adds classifier-based model selection |
-| 3. Single-model bottleneck | ✅ DONE | Role buckets select different models per task |
+| 3. Single-model bottleneck | ✅ DONE | Role buckets select different models per task; Planning Room now runs multiple planners on planning requests |
 | 4. No cost-aware/complexity-aware selection | ❌ **OPEN** | No de-escalation logic; auto-router runs on every task regardless of complexity |
 | 5. No eval feedback loop into routing | ❌ **OPEN** | `EvalSummary.recommendations` exist but are never consumed by routing |
 | 6. "Start with answer" rule fights reasoning | ✅ DONE | `isReasoningModel()` gate at line 2203 of `server/index.ts` |
@@ -48,7 +75,7 @@ After source code audit, the 6 critical gaps from the review have this status:
 
 2. **Router is heuristic-only.** No model-based classifier step. Static keyword regexes can't detect subtle distinctions, ambiguous requests, or novel task types.
 
-3. **Single-model bottleneck.** Even though role buckets select different models, only ONE model call happens per user message. A task classified as "execute" should call planner, implementer, and reviewer with different models.
+3. **Single-model bottleneck.** ✅ Addressed for core orchestrated workflows. Execute/investigate/compare use real sub-agent calls, and planning requests now use Planning Room with multiple planner participants when configured.
 
 4. **No cost-aware or complexity-aware selection.** Simple questions use the same model as complex ones. No automatic de-escalation to cheap models for trivial tasks.
 
@@ -153,6 +180,16 @@ Heuristic router identifies comparison intent
   → Each model runs the prompt independently
   → Judge agent scores and compares outputs
   → Comparison artifact
+```
+
+**Planning Room pipeline (source of truth):**
+```
+Heuristic router identifies planning intent
+  → Select up to 3 configured planner/reasoner/reviewer models
+  → Each model drafts an independent plan
+  → Each model reads peer plans and cross-checks disagreements
+  → Planner synthesizer produces one final team plan
+  → Final plan becomes the source-of-truth artifact for the next execution pass
 ```
 
 **Implementation order:**

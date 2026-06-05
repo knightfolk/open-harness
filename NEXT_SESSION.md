@@ -5,17 +5,16 @@ You are **Friday**, the AI assistant for OpenHarness. Follow all rules in `AGENT
 
 ## Repository State
 
-`/Users/kevink/Projects/OpenHarness` on `main`. All commits pushed.
+`/Users/kevink/Projects/OpenHarness` on `main`. Latest local work adds Planning Room; check `git status -sb` before assuming remote push state.
 - `npm run lint` — PASSED
-- `npx tsc --noEmit --project tsconfig.server.json` — PASSED
-- `npx tsc --noEmit --project tsconfig.json` — PASSED
+- `npm run build` — PASSED
 
 ## Current Runtime Status
-- ✅ **Server**: Running on `http://localhost:3001` (via `screen -S oh-server`)
-- ✅ **Frontend**: Running on `http://localhost:5173` (via `screen -S oh-vite`)
-- ✅ `POST /api/providers` — returns MiniMax provider
+- ✅ **Server**: Running on `http://127.0.0.1:3001` (via `screen -S oh-server`)
+- ✅ **Frontend**: Running on `http://127.0.0.1:5173` (via `screen -S oh-vite`)
+- ✅ `GET /api/providers` — returns MiniMax provider
 - ✅ `GET /api/router/state` — auto-router enabled with 2 candidates, threshold 0.7
-- ✅ `GET /api/router/learning` — 0 events logged so far
+- ✅ `GET /` on server returns Express 404, which is expected because no root API route is defined
 
 ### Restart if killed
 ```bash
@@ -27,19 +26,25 @@ screen -dmS oh-vite bash -c 'cd /Users/kevink/Projects/OpenHarness && npx vite -
 
 ## What's Truly Implemented vs. Still Open
 
-After auditing the source code against the 6 Critical Gaps from PLAN.md:
+After auditing the source code against the 6 Critical Gaps from PLAN.md and adding Planning Room:
 
 ### ✅ Fully Addressed (4 of 6)
 1. **Orchestrator spawns agents** — Execute/investigate/compare modes use `agentRuntime.ts` with sub-agents
 2. **Auto-router (classifier-based)** — `server/autoRouter.ts` scores candidates on capability
-3. **Role buckets** — Different models per role (coder, reasoner, planner, etc.)
+3. **Role buckets + Planning Room** — Different models per role, and planning requests now run multiple planner participants when configured
 6. **"Start with answer" rule gated** — `isReasoningModel()` check at line 2203 of `server/index.ts`
+
+### ✅ New Source of Truth
+- **Planning Room is the core product direction** — planning/roadmap/design/strategy requests route to `mode: 'plan'`
+- **Planning Room v1** — independent model plans, peer cross-checks, and final team-plan synthesis are implemented in `server/orchestrator.ts`
+- **Project Companion is next** — cheap/local side assistant that answers quick questions from plans, run traces, repo maps, and summaries
 
 ### ❌ Still Open (2 of 6)
 4. **No cost-aware/complexity-aware selection** — Auto-router always classifies regardless of task complexity. No de-escalation to cheap models for trivial tasks. Bypass-classifier-for-simple-tasks logic is missing.
 5. **No eval feedback loop into routing** — `EvalSummary.recommendations` exist but nothing consumes them to update role assignments or auto-router candidate cards.
 
 ### From NEXT_SESSION.md "What Could Be Next" — Also Open
+- **Project Companion** — cheap/local side assistant for quick project questions and token savings
 - **Rate limiting / token budget enforcement** in provider adapter layer
 - **Electron app polish** — packaging, auto-update, native window chrome
 - **Decision tree visualization** for routing decisions in Settings

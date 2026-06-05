@@ -61,6 +61,7 @@ export function analyzeConfidence(message: Message): ConfidenceSignals {
   if (finalAnswerLength > 500) grounding += 15;
   else if (finalAnswerLength > 100) grounding += 8;
   if (orchestrationMode === 'execute') grounding += 10;
+  if (orchestrationMode === 'plan') grounding += 8;
   if (orchestrationMode === 'investigate') grounding += 5;
 
   // Penalty for errors

@@ -43,6 +43,8 @@ export async function runOrchestratorPipeline(
   workingDir?: string,
 ): Promise<OrchestrationResult> {
   switch (route.mode) {
+    case 'plan':
+      return runPlanningRoomPipeline(route, userMessage, config, workingDir);
     case 'execute':
       return runExecutePipeline(route, userMessage, config, workingDir);
     case 'investigate':
@@ -56,6 +58,237 @@ export async function runOrchestratorPipeline(
         ok: true,
       };
   }
+}
+
+// ── Pipeline: Planning Room ───────────────────────────
+
+async function runPlanningRoomPipeline(
+  route: RouteDecision,
+  userMessage: string,
+  config: StoredConfig,
+  workingDir?: string,
+): Promise<OrchestrationResult> {
+  const phases: OrchestrationPhase[] = [];
+  const targetModels = buildPlanningRoomModelSet(route, config);
+
+  if (targetModels.length === 0) {
+    return {
+      finalText: 'Planning Room needs at least one configured model. Add a provider model in Settings, then try the planning request again.',
+      phases,
+      ok: false,
+      error: 'No configured models available for Planning Room',
+    };
+  }
+
+  const roomContext = [
+    workingDir ? `Working directory: ${workingDir}` : '(no project folder open)',
+    `Planning Room participants: ${targetModels.join(', ')}`,
+    targetModels.length === 1
+      ? 'Only one distinct model is configured, so Planning Room will produce a single plan and a synthesis pass.'
+      : 'Each participant first plans independently, then reads the peer plans before final synthesis.',
+  ].join('\n');
+
+  const independentPrompt = [
+    `## Planning Room: Independent Plan`,
+    ``,
+    `## Task`,
+    userMessage,
+    ``,
+    `## Context`,
+    roomContext,
+    ``,
+    `You are one participant in a planning room. Produce your own best plan before seeing any peer output.`,
+    `Do not write code. Do not propose a patch. Be decisive and practical.`,
+    ``,
+    `Return these sections:`,
+    `1. Recommendation`,
+    `2. Success criteria`,
+    `3. Step-by-step plan`,
+    `4. Risks and unknowns`,
+    `5. Validation proof`,
+  ].join('\n');
+
+  const independentPlans = await Promise.all(targetModels.map(async (modelId) => {
+    try {
+      const artifact = await runAgentPhase(config, {
+        profileId: 'planner',
+        prompt: independentPrompt,
+        modelId,
+        workingDir,
+      });
+      phases.push({
+        label: `planning-room:plan:${modelId}`,
+        modelId,
+        durationMs: artifact.durationMs,
+        status: artifact.status === 'complete' ? 'complete' : 'error',
+        artifact,
+        summary: artifact.status === 'complete'
+          ? artifact.response.slice(0, 200)
+          : `Planning participant error: ${artifact.error}`,
+      });
+      return { modelId, text: artifact.response || '', ok: artifact.status === 'complete' };
+    } catch (err: any) {
+      phases.push({
+        label: `planning-room:plan:${modelId}`,
+        modelId,
+        durationMs: 0,
+        status: 'error',
+        summary: `Planning participant failed: ${err?.message || err}`,
+      });
+      return { modelId, text: '', ok: false };
+    }
+  }));
+
+  const usablePlans = independentPlans.filter((plan) => plan.ok && plan.text.trim());
+  if (usablePlans.length === 0) {
+    return {
+      finalText: 'Planning Room failed because no participant returned a usable plan.',
+      phases,
+      ok: false,
+      error: 'No usable planning outputs',
+    };
+  }
+
+  const crossChecks = targetModels.length > 1
+    ? await Promise.all(usablePlans.map(async (plan) => {
+      const peerPrompt = [
+        `## Planning Room: Peer Review`,
+        ``,
+        `## Original Task`,
+        userMessage,
+        ``,
+        `## Your Independent Plan (${plan.modelId})`,
+        plan.text,
+        ``,
+        `## Peer Plans`,
+        ...usablePlans
+          .filter((peer) => peer.modelId !== plan.modelId)
+          .map((peer) => [`### ${peer.modelId}`, peer.text].join('\n')),
+        ``,
+        `Read the peer plans and improve the shared direction.`,
+        `Call out: strongest ideas, disagreements, missing steps, risky assumptions, and what should make the final plan.`,
+        `Keep this concise. Do not write code.`,
+      ].join('\n');
+
+      try {
+        const artifact = await runAgentPhase(config, {
+          profileId: 'planner',
+          prompt: peerPrompt,
+          modelId: plan.modelId,
+          workingDir,
+        });
+        phases.push({
+          label: `planning-room:cross-check:${plan.modelId}`,
+          modelId: plan.modelId,
+          durationMs: artifact.durationMs,
+          status: artifact.status === 'complete' ? 'complete' : 'error',
+          artifact,
+          summary: artifact.status === 'complete'
+            ? artifact.response.slice(0, 200)
+            : `Cross-check error: ${artifact.error}`,
+        });
+        return { modelId: plan.modelId, text: artifact.response || '', ok: artifact.status === 'complete' };
+      } catch (err: any) {
+        phases.push({
+          label: `planning-room:cross-check:${plan.modelId}`,
+          modelId: plan.modelId,
+          durationMs: 0,
+          status: 'error',
+          summary: `Cross-check failed: ${err?.message || err}`,
+        });
+        return { modelId: plan.modelId, text: '', ok: false };
+      }
+    }))
+    : [];
+
+  const synthesisModel = resolveAgentModel(config, 'planner', route, targetModels[0]);
+  const synthesisPrompt = [
+    `## Planning Room: Final Synthesis`,
+    ``,
+    `## Original Task`,
+    userMessage,
+    ``,
+    `## Context`,
+    roomContext,
+    ``,
+    `## Independent Plans`,
+    ...usablePlans.map((plan) => [`### ${plan.modelId}`, plan.text].join('\n')),
+    ``,
+    `## Cross-Checks`,
+    ...(crossChecks.length > 0
+      ? crossChecks.filter((check) => check.ok && check.text.trim()).map((check) => [`### ${check.modelId}`, check.text].join('\n'))
+      : ['(No peer cross-checks ran because only one distinct model was available.)']),
+    ``,
+    `Produce the final team plan. This is the source-of-truth artifact for what should happen next.`,
+    `Prefer the best ideas even when they came from different models. Resolve disagreements explicitly.`,
+    ``,
+    `Return these sections:`,
+    `1. Final recommendation`,
+    `2. Success criteria`,
+    `3. Ordered implementation plan`,
+    `4. Risks, tradeoffs, and assumptions`,
+    `5. Validation checklist`,
+    `6. What the Planning Room changed or improved`,
+  ].join('\n');
+
+  let synthesisArtifact: BackgroundAgentArtifact | null = null;
+  try {
+    synthesisArtifact = await runAgentPhase(config, {
+      profileId: 'planner',
+      prompt: synthesisPrompt,
+      modelId: synthesisModel,
+      workingDir,
+    });
+    phases.push({
+      label: 'planning-room:synthesis',
+      modelId: synthesisModel,
+      durationMs: synthesisArtifact.durationMs,
+      status: synthesisArtifact.status === 'complete' ? 'complete' : 'error',
+      artifact: synthesisArtifact,
+      summary: synthesisArtifact.status === 'complete'
+        ? synthesisArtifact.response.slice(0, 200)
+        : `Synthesis error: ${synthesisArtifact.error}`,
+    });
+  } catch (err: any) {
+    phases.push({
+      label: 'planning-room:synthesis',
+      modelId: synthesisModel,
+      durationMs: 0,
+      status: 'error',
+      summary: `Synthesis failed: ${err?.message || err}`,
+    });
+  }
+
+  const participantLine = targetModels.length === 1
+    ? `${targetModels[0]} (single configured participant)`
+    : targetModels.join(', ');
+  const finalPlan = synthesisArtifact?.response?.trim()
+    || usablePlans[0]?.text
+    || 'Planning Room did not produce a final plan.';
+  const ok = phases.every((p) => p.status === 'complete');
+  const planSummaries = usablePlans
+    .map((plan) => `- ${plan.modelId}: ${oneLine(plan.text)}`)
+    .join('\n');
+
+  return {
+    finalText: [
+      `## Planning Room`,
+      ``,
+      `Participants: ${participantLine}`,
+      ``,
+      `### Final Team Plan`,
+      finalPlan,
+      ``,
+      `### Participant Signals`,
+      planSummaries || '- No participant summaries available.',
+      ``,
+      `---`,
+      `*Planning Room complete - ${ok ? 'all phases passed' : 'some phases had errors'}*`,
+    ].join('\n'),
+    phases,
+    ok,
+    error: ok ? undefined : 'One or more Planning Room phases failed',
+  };
 }
 
 // ── Pipeline: Execute ─────────────────────────────────
@@ -484,10 +717,75 @@ function buildCompareModelSet(route: RouteDecision, config: StoredConfig): strin
   return models.slice(0, 3); // max 3 models for comparison
 }
 
+function buildPlanningRoomModelSet(route: RouteDecision, config: StoredConfig): string[] {
+  const candidates = [
+    ...(route.suggestedModels || []),
+    config.roleAssignments?.planner,
+    config.roleAssignments?.reasoner,
+    config.roleAssignments?.reviewer,
+    config.roleAssignments?.summarizer,
+    config.activeModel,
+    ...(config.autoRouter?.candidates || []).map((candidate) => candidate.modelId),
+    ...configuredProviderModels(config),
+  ];
+  const models: string[] = [];
+  const seen = new Set<string>();
+  for (const modelId of candidates) {
+    if (!modelId || seen.has(modelId) || !canResolveModel(config, modelId)) continue;
+    seen.add(modelId);
+    models.push(modelId);
+    if (models.length >= 3) break;
+  }
+  return models;
+}
+
+function configuredProviderModels(config: StoredConfig): string[] {
+  const models: string[] = [];
+  for (const provider of config.providers || []) {
+    for (const model of provider.models || []) {
+      if (!model.enabled) continue;
+      models.push(`${provider.id}:${model.id}`);
+      models.push(model.id);
+    }
+  }
+  return models;
+}
+
+function canResolveModel(config: StoredConfig, modelId: string): boolean {
+  let providerId: string | null = null;
+  let bareId = modelId;
+  if (modelId.includes(':')) {
+    const idx = modelId.indexOf(':');
+    providerId = modelId.slice(0, idx);
+    bareId = modelId.slice(idx + 1);
+  }
+  const providers = providerId
+    ? (config.providers || []).filter((provider) => provider.id === providerId)
+    : (config.providers || []);
+  return providers.some((provider) =>
+    (provider.models || []).some((model) => model.id === modelId || model.id === bareId)
+  );
+}
+
+function oneLine(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180) || '(empty)';
+}
+
 // ── Legacy exports (used by streamModel fallback and trace steps) ──
 
 export function orchestrationInstruction(route: RouteDecision): string {
   if (route.mode === 'direct') return '';
+  if (route.mode === 'plan') {
+    return [
+      '## Orchestration Mode: Planning Room',
+      'Use multiple planning participants when available.',
+      'First collect independent plans, then have participants cross-check peer output, then synthesize one final team plan.',
+      'Do not write files in planning mode.',
+    ].join('\n');
+  }
   if (route.mode === 'investigate') {
     return [
       '## Orchestration Mode: Investigate',
@@ -511,6 +809,11 @@ export function orchestrationInstruction(route: RouteDecision): string {
 
 export function orchestrationTraceSteps(route: RouteDecision) {
   const steps = [{ type: 'orchestration' as const, mode: route.mode, label: `${route.mode} mode`, detail: route.reason }];
+  if (route.mode === 'plan') {
+    steps.push({ type: 'orchestration' as const, mode: route.mode, label: 'independent planning', detail: 'Run selected planning participants on the same task.' });
+    steps.push({ type: 'orchestration' as const, mode: route.mode, label: 'peer cross-check', detail: 'Participants read peer plans and surface disagreements, risks, and stronger ideas.' });
+    steps.push({ type: 'orchestration' as const, mode: route.mode, label: 'team synthesis', detail: 'Merge the best ideas into one source-of-truth plan.' });
+  }
   if (route.mode === 'investigate') {
     steps.push({ type: 'orchestration' as const, mode: route.mode, label: 'explorer pass', detail: 'Inspect context and collect evidence before final synthesis.' });
     steps.push({ type: 'orchestration' as const, mode: route.mode, label: 'final synthesis', detail: 'Produce a grounded answer from gathered evidence.' });
