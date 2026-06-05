@@ -15,6 +15,7 @@ export interface RouteDecision {
   reason: string;
   routerData?: {
     source: 'heuristic' | 'auto';
+    candidateScores?: Record<string, number>;
     score?: number;
     cached?: boolean;
     fallback?: boolean;
@@ -22,19 +23,57 @@ export interface RouteDecision {
   };
 }
 
+const FILE_REFERENCE_RE = /\b(?:[\w-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|py|java|go|rs|cpp|c|cs|rb|swift|kt|php|html|css|scss|less|md|json|yml|yaml|toml|sh|bash|mjs|cjs|sql|txt|lock)\b/g;
+const CODE_BLOCK_RE = /```[\s\S]*?```/;
+
+function detectFileReferences(text: string): string[] {
+  const refs = new Set<string>();
+  const matches = text.match(FILE_REFERENCE_RE);
+  if (!matches) return [];
+  for (const match of matches) refs.add(match.toLowerCase());
+  return [...refs];
+}
+
+function detectComplexitySignals(text: string, lower: string, fileRefs: string[]) {
+  const hasCodeBlock = CODE_BLOCK_RE.test(text);
+  const hasShortLength = text.length < 100;
+  const hasNoCodeOrFiles = !hasCodeBlock && fileRefs.length === 0;
+  const hasLongTask = text.length > 800;
+  const hasArchitectureSignal = /\b(architecture|system design|design|refactor|rewrite|migration|multi.?file|comprehensive|large|security|performance|scaling|deployment|pipeline|trade.?off|tradeoffs)\b/.test(lower);
+  const hasMultipleFileRefs = fileRefs.length >= 2;
+  return {
+    hasCodeBlock,
+    hasShortLength,
+    hasNoCodeOrFiles,
+    hasLongTask,
+    hasArchitectureSignal,
+    hasMultipleFileRefs,
+  };
+}
+
 export function routeRequest(content: string, activeModel: string, roleAssignments: Record<string, string> = {}): RouteDecision {
   const lower = content.toLowerCase();
-  const long = content.length > 600;
+  const fileRefs = detectFileReferences(lower);
+  const complexitySignals = detectComplexitySignals(content, lower, fileRefs);
   const asksCompare = /\b(compare|versus|vs\.?|which model|model a|model b|judge|evaluate outputs?)\b/.test(lower);
   const asksExecute = /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(lower);
   const asksPlan = /\b(plan|planning mode|roadmap|design|architect|architecture|strategy|proposal|approach)\b/.test(lower);
   const asksReview = /\b(review|audit|inspect|investigate|analy[sz]e|explain|summar|overview|find bugs|security|vuln|performance)\b/.test(lower);
+  const asksProjectOverview = /\b(overview|summar|explain|describe)\b[\s\S]{0,80}\b(project|codebase|repo|repository|architecture|components)\b/.test(lower)
+    || /\b(project|codebase|repo|repository)\b[\s\S]{0,80}\b(overview|summar|explain|describe|architecture|components)\b/.test(lower);
   const asksValidation = /\b(test|lint|build|typecheck|validate|verify|smoke)\b/.test(lower);
-  const simpleQuestion = !long && /^(what|why|how|is|are|can|should|tell me|say|summarize in one)/.test(lower) && !asksExecute && !asksCompare;
+  const simpleQuestion = complexitySignals.hasShortLength
+    && complexitySignals.hasNoCodeOrFiles
+    && /^(what|why|how|is|are|can|should|tell me|say|summarize in one|hello|hi|hey|please|help|show me|show)/.test(lower)
+    && !asksExecute
+    && !asksReview
+    && !asksCompare
+    && !asksValidation;
 
   let mode: OrchestrationMode = 'direct';
   if (asksCompare) mode = 'compare';
   else if (asksExecute) mode = 'execute';
+  else if (asksProjectOverview) mode = 'investigate';
   else if (asksPlan) mode = 'plan';
   else if (asksReview && !simpleQuestion) mode = 'investigate';
 
@@ -42,13 +81,20 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   if (mode === 'compare') role = 'reviewer';
   else if (mode === 'plan') role = 'planner';
   else if (mode === 'execute') role = asksValidation ? 'coder' : 'planner';
+  else if (asksProjectOverview) role = 'summarizer';
   else if (/\b(review|audit|security|vuln|performance|bugs?)\b/.test(lower)) role = 'reviewer';
   else if (/\b(plan|roadmap|design|architect|strategy)\b/.test(lower)) role = 'planner';
   else if (/\b(summar|overview|explain|describe)\b/.test(lower)) role = 'summarizer';
   else if (/\b(why|reason|trade.?off|pros? and cons?)\b/.test(lower)) role = 'reasoner';
   else if (/\b(rename|move|delete|create|add|remove|install|update|bump)\b/.test(lower) && lower.length < 140) role = 'worker';
 
-  const complexity: Complexity = long || /\b(deep|comprehensive|full|entire|all|thorough|architecture)\b/.test(lower) ? 'deep'
+  const explicitDeepSignal = /\b(deep|comprehensive|full|entire|all|thorough|architecture)\b/.test(lower);
+  const complexity: Complexity = complexitySignals.hasLongTask
+    || complexitySignals.hasCodeBlock
+    || complexitySignals.hasArchitectureSignal
+    || complexitySignals.hasMultipleFileRefs
+    || explicitDeepSignal
+      ? 'deep'
     : mode === 'direct' && simpleQuestion ? 'simple'
       : 'medium';
   const needsTools = mode !== 'direct' || /\b(repo|project|folder|file|codebase|current|this app|this project)\b/.test(lower);
@@ -94,20 +140,27 @@ export async function routeWithAutoRouter(
       route.needsTools ? 5 : 0,  // approximate tool count
     );
     try {
-      const decision = await routeTask(signal, config);
-      if (decision) {
-        const isFallback = decision.fallback || decision.score === 0;
-        if (!isFallback) {
-          route.suggestedModels = [decision.modelId];
-        }
-        route.reason += ` | auto-router: ${decision.reason}`;
-        route.routerData = {
-          source: isFallback ? 'heuristic' : 'auto',
-          score: decision.score,
-          cached: decision.cached,
-          fallback: decision.fallback,
-          classifierModel: decision.classifierModel,
-        };
+      const decision = await routeTask(signal, config, {
+        forceCostStrategy: route.complexity === 'simple'
+          ? 'cheapest'
+          : route.complexity === 'deep' && route.mode !== 'investigate'
+            ? 'strongest'
+            : undefined,
+      });
+    if (decision) {
+      const isFallback = decision.fallback || decision.score === 0;
+      if (!isFallback) {
+        route.suggestedModels = [decision.modelId];
+      }
+      route.reason += ` | auto-router: ${decision.reason}`;
+      route.routerData = {
+        source: isFallback ? 'heuristic' : 'auto',
+        candidateScores: decision.scores,
+        score: decision.score,
+        cached: decision.cached,
+        fallback: decision.fallback,
+        classifierModel: decision.classifierModel,
+      };
         console.log(
           `[route] auto-router: ${isFallback ? 'fallback' : 'active'} ` +
           `model=${decision.modelId} score=${decision.score.toFixed(2)} ` +

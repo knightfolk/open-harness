@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import { v4 as uuid } from 'uuid';
+import { redactSecrets } from './sectionRedaction';
 
 export interface TerminalSession {
   id: string;
@@ -76,7 +77,7 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
   const entry: TerminalCommandEntry = {
     id: uuid(),
     sessionId: opts.sessionId,
-    command: opts.command,
+    command: redactSecrets(opts.command).redacted,
     cwd,
     status: 'running',
     exitCode: null,
@@ -97,8 +98,9 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
     if (output.length < OUTPUT_LIMIT) {
       const text = chunk.toString();
       output += text;
-      entry.output = output;
-      opts.onChunk?.(text);
+      const redacted = redactSecrets(output).redacted;
+      entry.output = redacted;
+      opts.onChunk?.(redactSecrets(text).redacted);
     }
   };
 
@@ -120,7 +122,7 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
     clearTimeout(timer);
     entry.status = 'error';
     entry.exitCode = 1;
-    entry.output += '\n' + err.message;
+    entry.output = redactSecrets(entry.output + '\n' + err.message).redacted;
     entry.completedAt = new Date().toISOString();
     entry.durationMs = Date.now() - startTime;
     activeProcesses.delete(entry.id);
@@ -132,7 +134,7 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
       entry.status = code === 0 ? 'complete' : 'error';
     }
     entry.exitCode = code ?? 0;
-    entry.output = output;
+    entry.output = redactSecrets(output).redacted;
     entry.completedAt = new Date().toISOString();
     entry.durationMs = Date.now() - startTime;
     activeProcesses.delete(entry.id);

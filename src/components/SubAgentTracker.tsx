@@ -4,6 +4,7 @@ import type { HarnessRunStep, SubAgent } from '../types';
 
 interface Props {
   agents: SubAgent[];
+  focusedAgentId?: string | null;
 }
 
 const statusLabels = {
@@ -85,7 +86,7 @@ function stepDetail(step: HarnessRunStep): string | null {
   }
 }
 
-export function SubAgentTracker({ agents }: Props) {
+export function SubAgentTracker({ agents, focusedAgentId }: Props) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const toggle = (id: string) => {
@@ -105,6 +106,13 @@ export function SubAgentTracker({ agents }: Props) {
   const completed = agents.filter((a) => a.status === 'complete').length;
   const totalTokens = agents.reduce((sum, a) => sum + (a.tokensUsed || 0), 0);
 
+  const orderedAgents = focusedAgentId
+    ? [
+        ...agents.filter((agent) => agent.id === focusedAgentId),
+        ...agents.filter((agent) => agent.id !== focusedAgentId),
+      ]
+    : agents;
+
   return (
     <div>
       <div style={{ display: 'flex', gap: 12, marginBottom: 12, fontSize: 11, color: 'var(--text-tertiary)' }}>
@@ -113,13 +121,14 @@ export function SubAgentTracker({ agents }: Props) {
         <span>{formatTokens(totalTokens)} tokens</span>
       </div>
 
-      {agents.map((agent) => {
+      {orderedAgents.map((agent) => {
         const trace = agent.runTrace;
         const steps = trace?.steps || [];
-        const isExpanded = expanded[agent.id] ?? true;
+        const isFocused = agent.id === focusedAgentId;
+        const isExpanded = expanded[agent.id] ?? (isFocused || agents.length === 1);
 
         return (
-          <div key={agent.id} className="sub-agent-card">
+          <div key={agent.id} className={`sub-agent-card ${isFocused ? 'focused' : ''}`}>
             <div className="sub-agent-header">
               <div className="sub-agent-name">
                 {isExpanded ? (

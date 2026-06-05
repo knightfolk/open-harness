@@ -1,13 +1,14 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
-import { DEFAULT_LAYOUT } from '../../types/layout';
+import { DEFAULT_LAYOUT, ALL_PANELS } from '../../types/layout';
 
-const STORAGE_KEY = 'openharness-layout';
+const STORAGE_KEY = 'openharness-layout.v3';
+const KNOWN_PANELS = new Set<string>(ALL_PANELS);
 
 /** Panels that prefer to split vertically (top/bottom) when added */
-const VERTICAL_PANELS: Set<PanelId> = new Set(['terminal', 'plan']);
+const VERTICAL_PANELS: Set<PanelId> = new Set(['terminal']);
 /** Panels that prefer to split horizontally (left/right) when added */
-const HORIZONTAL_PANELS: Set<PanelId> = new Set(['sub-agents', 'diffs', 'browser', 'files']);
+const HORIZONTAL_PANELS: Set<PanelId> = new Set(['sub-agents', 'diffs', 'browser', 'files', 'side-chat', 'model-lab', 'safety', 'patches']);
 
 function loadLayout(): LayoutNode {
   try {
@@ -21,7 +22,7 @@ function loadLayout(): LayoutNode {
 }
 
 function validateLayout(node: LayoutNode): boolean {
-  if (typeof node === 'string') return true;
+  if (typeof node === 'string') return KNOWN_PANELS.has(node);
   if (typeof node === 'object' && node !== null && 'direction' in node && 'children' in node) {
     const split = node as SplitNode;
     if (!Array.isArray(split.children) || split.children.length === 0) return false;
@@ -139,7 +140,7 @@ export function useLayoutState() {
     setLayout((prev) => {
       if (!containsPanel(prev, id)) return prev;
       const result = removePanelFromTree(prev, id);
-      return result ?? { direction: 'horizontal', children: ['chat'] as LayoutNode[] };
+      return result ?? structuredClone(DEFAULT_LAYOUT);
     });
   }, [setLayout]);
 
@@ -147,7 +148,7 @@ export function useLayoutState() {
     setLayout((prev) => {
       if (containsPanel(prev, id)) {
         const result = removePanelFromTree(prev, id);
-        return result ?? { direction: 'horizontal', children: ['chat'] as LayoutNode[] };
+        return result ?? structuredClone(DEFAULT_LAYOUT);
       }
       const direction = preferredDirection(id);
       return splitLargestLeaf(prev, id, direction);

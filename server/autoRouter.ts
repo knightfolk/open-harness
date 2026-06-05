@@ -17,6 +17,9 @@
 
 import { getProviderForModel, splitModelRef } from './config';
 import { suggestThresholdAdjustment } from './routerLearning';
+import { getLatestEvalRecommendations } from './evals';
+import { estimateTokens } from './contextManager';
+import { getModelConfig } from './modelProfiles';
 import type { StoredConfig, StoredProvider } from './config';
 
 // ── Types ──────────────────────────────────────────────
@@ -58,6 +61,8 @@ export interface AutoRouterSignal {
   turns: number;
   /** Number of tools available */
   toolCount: number;
+  /** Estimated input tokens that must fit in the selected model context */
+  estimatedInputTokens: number;
 }
 
 export interface AutoRouterDecision {
@@ -77,12 +82,45 @@ export interface AutoRouterDecision {
   classifierModel: string | null;
 }
 
+export interface AutoRouterDecisionOptions {
+  /** Force a deterministic cost-aware fallback mode, bypassing classification. */
+  forceCostStrategy?: 'cheapest' | 'strongest';
+}
+
 // ── State ──────────────────────────────────────────────
 
 let autoRouterConfig: AutoRouterConfig | null = null;
 
 const decisionCache = new Map<string, { decision: AutoRouterDecision; expiresAt: number }>();
 const CACHE_MAX_ENTRIES = 256;
+
+function annotateCandidatesWithEvalRecommendations(
+  candidates: AutoRouterCandidate[],
+): AutoRouterCandidate[] {
+  const recommendations = getLatestEvalRecommendations();
+  if (recommendations.length === 0) return candidates;
+
+  const byModel = new Map<string, Array<{ role: string; reason: string }>>();
+  for (const rec of recommendations) {
+    if (!rec.modelId || !rec.role || !rec.reason) continue;
+    if (!byModel.has(rec.modelId)) byModel.set(rec.modelId, []);
+    byModel.get(rec.modelId)!.push({ role: rec.role, reason: rec.reason });
+  }
+
+  return candidates.map((candidate) => {
+    const recs = byModel.get(candidate.modelId);
+    if (!recs || recs.length === 0) return candidate;
+
+    const base = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
+    const evalLine = recs.map((r) => `${r.role}: ${r.reason}`).join(' | ');
+    const merged = `${base} Eval recommendation: ${evalLine}`;
+
+    return {
+      ...candidate,
+      card: merged.length > 360 ? `${merged.slice(0, 357)}…` : merged,
+    };
+  });
+}
 
 // ── Public API ─────────────────────────────────────────
 
@@ -112,7 +150,7 @@ export function configureAutoRouter(config: StoredConfig): void {
     threshold: typeof ar.threshold === 'number' ? ar.threshold : 0.7,
     defaultModel: ar.defaultModel || validCandidates[0].modelId,
     cacheTTLMs: typeof ar.cacheTTLMs === 'number' ? ar.cacheTTLMs : 300_000,
-    candidates: validCandidates,
+    candidates: annotateCandidatesWithEvalRecommendations(validCandidates),
   };
 
   // Auto-adjust threshold from historical data if available
@@ -138,7 +176,7 @@ export function getAutoRouterState(): {
   classifierModel: string | null;
   threshold: number;
   candidateCount: number;
-  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean }>;
+  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; contextWindowTokens: number }>;
   cacheSize: number;
 } {
   if (!autoRouterConfig) {
@@ -153,6 +191,7 @@ export function getAutoRouterState(): {
       modelId: c.modelId,
       cost: c.cost,
       supportsImages: c.supportsImages,
+      contextWindowTokens: candidateContextWindow(c),
     })),
     cacheSize: decisionCache.size,
   };
@@ -174,6 +213,7 @@ export function getAvailableCandidates(): AutoRouterCandidate[] {
 export async function routeTask(
   signal: AutoRouterSignal,
   config: StoredConfig,
+  options: AutoRouterDecisionOptions = {},
 ): Promise<AutoRouterDecision | null> {
   if (!autoRouterConfig || !autoRouterConfig.enabled) return null;
 
@@ -191,6 +231,10 @@ export async function routeTask(
       fallback: false,
       classifierModel: autoRouterConfig.classifierModel,
     };
+  }
+
+  if (options.forceCostStrategy) {
+    return pickByCost(candidates, options.forceCostStrategy, signal.hasImages, signal.estimatedInputTokens, autoRouterConfig);
   }
 
   // Check cache
@@ -227,6 +271,7 @@ export async function routeTask(
       candidates,
       autoRouterConfig.threshold,
       signal.hasImages,
+      signal.estimatedInputTokens,
       autoRouterConfig.defaultModel,
     );
 
@@ -451,6 +496,7 @@ function buildClassifierSystemPrompt(candidates: AutoRouterCandidate[]): string 
     const card = c.card.trim() || 'General-purpose model. No capability card provided.';
     lines.push(`- modelId: ${c.modelId}`);
     lines.push(`  images: ${c.supportsImages ? 'yes' : 'no'}`);
+    lines.push(`  context_window_tokens: ${candidateContextWindow(c)}`);
     lines.push(`  capability: ${card}`);
   }
 
@@ -478,6 +524,8 @@ function buildClassifierUserContent(signal: AutoRouterSignal, candidates: AutoRo
     `  images_present: ${signal.hasImages ? 'yes' : 'no'}`,
     `  user_turns: ${signal.turns}`,
     `  tools_available: ${signal.toolCount}`,
+    `  estimated_input_tokens: ${signal.estimatedInputTokens}`,
+    '  note: Score models near 0.0 when the estimated input cannot fit their context window.',
     '  current_task: |',
     ...truncated.split('\n').map((l) => '    ' + l),
     '</session>',
@@ -539,12 +587,16 @@ function pickCandidate(
   candidates: AutoRouterCandidate[],
   threshold: number,
   hasImages: boolean,
+  estimatedInputTokens: number,
   defaultModel: string,
 ): AutoRouterDecision {
   // Build scored list with image-incapable models hard-zeroed
   const scored: Array<{ candidate: AutoRouterCandidate; score: number }> = candidates.map((c) => {
     let score = scores[c.modelId] ?? 0;
     if (hasImages && !c.supportsImages) {
+      score = 0;
+    }
+    if (!candidateFitsContext(c, estimatedInputTokens)) {
       score = 0;
     }
     return { candidate: c, score };
@@ -591,6 +643,49 @@ function pickCandidate(
     cached: false,
     fallback: true,
     classifierModel: null,
+  };
+}
+
+function pickByCost(
+  candidates: AutoRouterCandidate[],
+  strategy: 'cheapest' | 'strongest',
+  hasImages: boolean,
+  estimatedInputTokens: number,
+  config: AutoRouterConfig,
+): AutoRouterDecision {
+  const imageSafeCandidates = hasImages
+    ? candidates.filter((c) => c.supportsImages)
+    : candidates;
+  const contextSafeCandidates = imageSafeCandidates.filter((c) => candidateFitsContext(c, estimatedInputTokens));
+  const usableCandidates = contextSafeCandidates.length > 0 ? contextSafeCandidates : imageSafeCandidates;
+
+  if (usableCandidates.length === 0) {
+    return fallbackDecision(candidates, config, `No viable candidates for image/context strategy ${strategy}`);
+  }
+
+  const ordered = [...usableCandidates].sort((a, b) => {
+    return strategy === 'cheapest'
+      ? a.cost - b.cost
+      : b.cost - a.cost;
+  });
+
+  const selected = ordered[0];
+  const skippedForContext = imageSafeCandidates.length - contextSafeCandidates.length;
+  const contextReason = skippedForContext > 0
+    ? ` Skipped ${skippedForContext} candidate(s) that could not fit ~${estimatedInputTokens} input tokens.`
+    : '';
+  const reason = (strategy === 'cheapest'
+    ? 'Simple task bypassed classifier; using cheapest viable candidate.'
+    : 'Complex task escalated; using strongest viable candidate.') + contextReason;
+  const scores = Object.fromEntries(candidates.map((c) => [c.modelId, c.modelId === selected.modelId ? 1.0 : 0]));
+  return {
+    modelId: selected.modelId,
+    score: 1.0,
+    reason,
+    scores,
+    cached: false,
+    fallback: false,
+    classifierModel: config.classifierModel,
   };
 }
 
@@ -655,7 +750,22 @@ export function buildRouterSignal(
     hasImages,
     turns: totalUserTurns,
     toolCount,
+    estimatedInputTokens: Math.max(estimateTokens(latestUserMessage), 1),
   };
+}
+
+const ROUTER_OUTPUT_RESERVE_TOKENS = 16_000;
+
+function candidateContextWindow(candidate: AutoRouterCandidate): number {
+  return getModelConfig(candidate.modelId).contextWindowTokens;
+}
+
+function candidateFitsContext(candidate: AutoRouterCandidate, estimatedInputTokens: number): boolean {
+  const config = getModelConfig(candidate.modelId);
+  const contextWindow = config.contextWindowTokens;
+  const outputReserve = Math.min(ROUTER_OUTPUT_RESERVE_TOKENS, config.recommendedMaxTokens);
+  const safetyMargin = Math.ceil(contextWindow * 0.05);
+  return estimatedInputTokens + outputReserve + safetyMargin <= contextWindow;
 }
 
 /**
@@ -686,6 +796,7 @@ export async function checkRouterHealth(config: StoredConfig): Promise<{
       hasImages: false,
       turns: 0,
       toolCount: 0,
+      estimatedInputTokens: 10,
     };
     const result = await callClassifier(
       resolved.provider,

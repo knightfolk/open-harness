@@ -6,13 +6,14 @@
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { dockerDesktopEnv } from './dockerDesktopEnv';
 
 const exec = promisify(execFile);
 const TIMEOUT_MS = 4000;
 
 async function tryExec(file: string, args: string[]): Promise<{ ok: boolean; stdout: string; error?: string }> {
   try {
-    const { stdout } = await exec(file, args, { timeout: TIMEOUT_MS, maxBuffer: 1 << 20 });
+    const { stdout } = await exec(file, args, { timeout: TIMEOUT_MS, maxBuffer: 1 << 20, env: dockerDesktopEnv() });
     return { ok: true, stdout: String(stdout || '').trim() };
   } catch (err: any) {
     return { ok: false, stdout: '', error: err?.stderr?.toString()?.trim() || err?.message || 'failed' };
@@ -72,7 +73,7 @@ export async function checkDockerReadiness(): Promise<DockerReadiness> {
     profiles = profileRes.stdout
       .split('\n')
       .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith('NAME'));
+      .filter((l) => l && !/^(-+|\s*ID\s+Name|NAME\b)/i.test(l));
     profileReady = profiles.some((p) => /ai[-_ ]?coding/i.test(p));
     if (!profileReady) {
       hints.push('No `ai_coding` MCP profile found. Open Docker Desktop -> MCP Toolkit -> Profiles and enable one that includes AI coding tools.');

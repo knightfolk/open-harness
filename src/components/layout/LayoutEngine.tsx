@@ -13,6 +13,7 @@ interface Props {
   plan: any;
   fileChanges: any;
   terminalCommands: any;
+  focusedSubAgentId?: string | null;
   messages: any;
   isTyping: boolean;
   onSendMessage: (msg: string) => void;
@@ -28,7 +29,12 @@ interface Props {
   onExplainChange?: (filePath: string) => void;
   onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
   onCompareModel?: () => void;
+  onReviewChanges?: () => void;
+  onFocusAgents?: () => void;
+  trustMode?: string;
   models?: Array<{ id: string; name: string }>;
+  pinnedTools?: PanelId[];
+  onOpenPinnedTool?: (id: PanelId) => void;
 }
 
 export function LayoutEngine({
@@ -39,6 +45,7 @@ export function LayoutEngine({
   plan,
   fileChanges,
   terminalCommands,
+  focusedSubAgentId,
   messages,
   isTyping,
   onSendMessage,
@@ -54,16 +61,26 @@ export function LayoutEngine({
   onExplainChange,
   onAskAboutScreenshot,
   onCompareModel,
+  onReviewChanges,
+  onFocusAgents,
+  trustMode,
   models,
+  pinnedTools,
+  onOpenPinnedTool,
 }: Props) {
   return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{
-    subAgents, plan, fileChanges, terminalCommands, messages, isTyping,
+    subAgents, plan, fileChanges, terminalCommands, focusedSubAgentId, messages, isTyping,
     onSendMessage, activeModel, workingDir, projectProfile, sessionId,
     pendingPatchProposalId, clearPendingPatchProposalId,
     onSwap: onSwapPanels,
     onSendToChat, onReviewDiff, onProposePatch, onExplainChange, onAskAboutScreenshot,
     onCompareModel,
+    onReviewChanges,
+    onFocusAgents,
+    trustMode,
     models,
+    pinnedTools,
+    onOpenPinnedTool,
   }} />;
 }
 
@@ -71,19 +88,20 @@ interface RenderProps {
   node: LayoutNode;
   onRemovePanel: (id: PanelId) => void;
   context: any;
+  withinSplit?: boolean;
 }
 
-function RenderNode({ node, onRemovePanel, context }: RenderProps) {
+function RenderNode({ node, onRemovePanel, context, withinSplit = false }: RenderProps) {
   if (typeof node === 'string') {
     const panelId = node as PanelId;
     const config = getPanelConfig(panelId);
-    return (
-      <Allotment.Pane minSize={config.minSize} preferredSize={config.defaultSize}>
-        <PanelWrapper panelId={panelId} onClose={onRemovePanel} onSwap={context.onSwap}>
-          <PanelContent panelId={panelId} context={context} />
-        </PanelWrapper>
-      </Allotment.Pane>
+    const panel = (
+      <PanelWrapper panelId={panelId} onClose={onRemovePanel} onSwap={context.onSwap}>
+        <PanelContent panelId={panelId} context={context} />
+      </PanelWrapper>
     );
+    if (!withinSplit) return panel;
+    return <Allotment.Pane minSize={config.minSize} preferredSize={config.defaultSize}>{panel}</Allotment.Pane>;
   }
 
   const split = node as SplitNode;
@@ -95,7 +113,7 @@ function RenderNode({ node, onRemovePanel, context }: RenderProps) {
       )}
     >
       {split.children.map((child, i) => (
-        <RenderNode key={typeof child === 'string' ? child : `split-${i}`} node={child} onRemovePanel={onRemovePanel} context={context} />
+        <RenderNode key={typeof child === 'string' ? child : `split-${i}`} node={child} onRemovePanel={onRemovePanel} context={context} withinSplit />
       ))}
     </Allotment>
   );

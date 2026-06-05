@@ -1,6 +1,16 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Send, MessageSquare, Trash2 } from 'lucide-react';
 import * as api from '../utils/api';
+
+interface SideChatModel {
+  id: string;
+  name: string;
+}
+
+interface Props {
+  activeModel: string;
+  models: SideChatModel[];
+}
 
 interface SideMessage {
   id: string;
@@ -20,17 +30,37 @@ interface SideToolCall {
   duration?: number;
 }
 
-export function SideChatPanel() {
+const SIDE_CHAT_MODEL_KEY = 'openharness.side-chat.model.v1';
+
+function loadSideChatModel(activeModel: string) {
+  try {
+    return localStorage.getItem(SIDE_CHAT_MODEL_KEY) || activeModel;
+  } catch {
+    return activeModel;
+  }
+}
+
+export function SideChatPanel({ activeModel, models }: Props) {
   const [messages, setMessages] = useState<SideMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(() => loadSideChatModel(activeModel));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef<Map<string, string>>(new Map());
+  const modelOptions = useMemo(
+    () => models.length > 0 ? models : [{ id: activeModel, name: activeModel }],
+    [activeModel, models],
+  );
+  const effectiveModel = modelOptions.some((m) => m.id === selectedModel) ? selectedModel : activeModel;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (!modelOptions.some((m) => m.id === selectedModel)) setSelectedModel(activeModel);
+  }, [activeModel, modelOptions, selectedModel]);
 
   const ensureSession = async (): Promise<string | null> => {
     if (sessionId) return sessionId;
@@ -94,7 +124,7 @@ export function SideChatPanel() {
           ));
           setIsTyping(false);
         },
-      });
+      }, { modelId: effectiveModel });
     } catch {
       setIsTyping(false);
     }
@@ -110,6 +140,11 @@ export function SideChatPanel() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
+  const handleModelChange = (modelId: string) => {
+    setSelectedModel(modelId);
+    try { localStorage.setItem(SIDE_CHAT_MODEL_KEY, modelId); } catch { /* ignore */ }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Mini header */}
@@ -118,9 +153,32 @@ export function SideChatPanel() {
         padding: '6px 8px', borderBottom: '1px solid var(--border-primary)',
         background: 'var(--bg-secondary)', flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <MessageSquare size={12} style={{ color: 'var(--accent-primary)' }} />
-          Side Chat
+          <select
+            value={effectiveModel}
+            onChange={(e) => handleModelChange(e.target.value)}
+            disabled={isTyping || modelOptions.length <= 1}
+            title="Side chat model"
+            aria-label="Side chat model"
+            style={{
+              minWidth: 0,
+              width: '100%',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-primary)',
+              color: 'var(--text-secondary)',
+              borderRadius: 5,
+              padding: '3px 22px 3px 7px',
+              fontSize: 11,
+              fontWeight: 600,
+              fontFamily: 'inherit',
+              outline: 'none',
+            }}
+          >
+            {modelOptions.map((model) => (
+              <option key={model.id} value={model.id}>{model.name || model.id}</option>
+            ))}
+          </select>
         </div>
         {messages.length > 0 && (
           <button onClick={clearChat} title="Clear chat" style={{

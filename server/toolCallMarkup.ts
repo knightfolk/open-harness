@@ -33,8 +33,8 @@ export interface MarkupParseResult {
   matchedAny: boolean;
 }
 
-const XML_TAG_PATTERN = /<([A-Za-z_][A-Za-z0-9_]*)>([\s\S]*?)<\/\1>/g;
-const CHILD_TAG_PATTERN = /<([A-Za-z_][A-Za-z0-9_]*)>([\s\S]*?)<\/\1>/g;
+const XML_TAG_PATTERN = /<([A-Za-z_][A-Za-z0-9_]*)([^>]*)>([\s\S]*?)<\/\1>/g;
+const CHILD_TAG_PATTERN = /<([A-Za-z_][A-Za-z0-9_]*)([^>]*)>([\s\S]*?)<\/\1>/g;
 
 // Match a tool-call envelope opener or closer. We accept any of:
 //   <tool_call>    <|tool_call|>    <|tool_call_begin|>    <|tool_call_end|>
@@ -61,13 +61,13 @@ export function parseToolCallMarkup(
   // 1) XML-style `<toolName>...</toolName>` blocks.
   XML_TAG_PATTERN.lastIndex = 0;
   while ((m = XML_TAG_PATTERN.exec(buffer)) !== null) {
-    const [full, tag, inner] = m;
+    const [full, tag, attrs, inner] = m;
     const alias = aliasToolName(tag, known);
     const canonical = alias || tag;
     if (!known.has(canonical)) continue;
     calls.push({
       name: canonical,
-      arguments: normalizeToolArguments(canonical, parseToolArguments(inner)),
+      arguments: normalizeToolArguments(canonical, { ...parseAttributes(attrs), ...parseToolArguments(inner) }),
       consumed: m.index + full.length,
     });
     consumed.push({ start: m.index, end: m.index + full.length });
@@ -166,7 +166,8 @@ function parseToolArguments(inner: string): Record<string, unknown> {
   let anyChild = false;
   CHILD_TAG_PATTERN.lastIndex = 0;
   while ((m = CHILD_TAG_PATTERN.exec(inner)) !== null) {
-    const [, key, raw] = m;
+    const [, key, attrs, raw] = m;
+    Object.assign(args, parseAttributes(attrs));
     const trimmed = raw.trim();
     anyChild = true;
     if (!trimmed) {
@@ -186,6 +187,17 @@ function parseToolArguments(inner: string): Record<string, unknown> {
   if (!anyChild) {
     const trimmed = inner.trim();
     if (trimmed) args['input'] = trimmed;
+  }
+  return args;
+}
+
+function parseAttributes(raw: string): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  if (!raw) return args;
+  const ATTR_PATTERN = /\s+([A-Za-z_][A-Za-z0-9_-]*)=(?:"([^"]*)"|'([^']*)')/g;
+  let m: RegExpExecArray | null;
+  while ((m = ATTR_PATTERN.exec(raw)) !== null) {
+    args[m[1]] = m[2] ?? m[3] ?? '';
   }
   return args;
 }
@@ -435,6 +447,8 @@ const TOOL_ALIASES: Record<string, string> = {
   shell: 'exec_command',
   terminal: 'exec_command',
   fs_read: 'read_file',
+  file_read: 'read_file',
+  get_file_content: 'read_file',
   fs_list: 'list_directory',
   fs_write: 'exec_command',
   list_dir: 'list_directory',

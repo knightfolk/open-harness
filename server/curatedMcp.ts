@@ -159,7 +159,7 @@ export function describePermissions(perms: CuratedPermission[]): string {
  * For stdio: check that the command binary is available.
  * For HTTP: check endpoint reachability with a simple GET.
  */
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 export interface McpValidationResult {
   id: string;
@@ -178,7 +178,7 @@ function checkCommandAvailable(cmd: string): McpValidationResult['check'] {
   try {
     // Extract the base command (first token after path)
     const binary = cmd.split(' ')[0];
-    execSync(`which "${binary}"`, {
+    execFileSync('sh', ['-c', 'command -v "$1"', 'openharness-command-check', binary], {
       encoding: 'utf-8',
       timeout: VALIDATE_TIMEOUT,
       stdio: 'pipe',

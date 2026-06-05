@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { basename, extname, join, relative } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -94,9 +94,9 @@ const CHARS_PER_TOKEN = 3.6;
 
 // ── Helpers ────────────────────────────────────────────
 
-function shell(command: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(command, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }
@@ -130,13 +130,13 @@ function readText(path: string, maxChars: number): string {
 }
 
 function findGitRoot(path: string): string {
-  const root = shell('git rev-parse --show-toplevel', path);
+  const root = git(['rev-parse', '--show-toplevel'], path);
   return root || path;
 }
 
 function listChangedFiles(root: string): Set<string> {
   const out = new Set<string>();
-  const porcelain = shell('git status --porcelain', root);
+  const porcelain = git(['status', '--porcelain'], root);
   for (const line of porcelain.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -153,7 +153,7 @@ function listChangedFiles(root: string): Set<string> {
 }
 
 function recentlyTrackedFiles(root: string, limit = 30): string[] {
-  const out = shell('git log --name-only --pretty=format: -n 80', root);
+  const out = git(['log', '--name-only', '--pretty=format:', '-n', '80'], root);
   const seen = new Set<string>();
   const order: string[] = [];
   for (const line of out.split('\n')) {
@@ -946,7 +946,7 @@ const cache = new Map<string, CacheEntry>();
 
 export function getRepoMap(inputPath: string): RepoMap {
   const root = findGitRoot(inputPath);
-  const mtimeMarker = shell('git rev-parse HEAD', root) + '|' + shell('git status --porcelain', root).slice(0, 256);
+  const mtimeMarker = git(['rev-parse', 'HEAD'], root) + '|' + git(['status', '--porcelain'], root).slice(0, 256);
   const cached = cache.get(root);
   if (cached && cached.mtime === hashString(mtimeMarker)) {
     return cached.map;

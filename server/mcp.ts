@@ -3,6 +3,7 @@
  * Manages MCP server processes, tool discovery, and invocation
  */
 import { spawn, ChildProcess } from 'child_process';
+import { redactSecrets } from './sectionRedaction';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -37,6 +38,21 @@ interface MCPMessage {
   error?: { code: number; message: string; data?: any };
 }
 
+export function redactMcpText(value: string): string {
+  return redactSecrets(value).redacted;
+}
+
+export function redactMcpValue<T>(value: T): T {
+  if (typeof value === 'string') return redactMcpText(value) as T;
+  if (Array.isArray(value)) return value.map((item) => redactMcpValue(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactMcpValue(item)]),
+    ) as T;
+  }
+  return value;
+}
+
 function createMcpStderrLogger(name: string): (chunk: Buffer) => void {
   let multilineJson: { label: string; lines: number; started: boolean } | null = null;
   const isMultilineJsonBanner = (line: string) =>
@@ -69,7 +85,7 @@ function createMcpStderrLogger(name: string): (chunk: Buffer) => void {
         multilineJson = { label: line.replace(/:$/, ''), lines: 0, started: false };
         continue;
       }
-      console.error(`[MCP:${name}] ${line}`);
+      console.error(`[MCP:${name}] ${redactMcpText(line)}`);
     }
   };
 }
@@ -117,7 +133,7 @@ class MCPClient {
         });
 
         this.process.on('error', (err) => {
-          this.lastError = err.message;
+          this.lastError = redactMcpText(err.message);
           this.connected = false;
           reject(err);
         });
@@ -183,7 +199,7 @@ class MCPClient {
           this.reconnectAttempts = 0;
           resolve(true);
         } catch (err) {
-          console.warn(`[MCP] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${err}`);
+          console.warn(`[MCP] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${redactMcpText(String(err))}`);
           resolve(await this.reconnect());
         }
       }, delay);
@@ -276,9 +292,9 @@ class MCPClient {
           const { resolve, reject } = this.pending.get(msg.id)!;
           this.pending.delete(msg.id);
           if (msg.error) {
-            reject(new Error(msg.error.message));
+            reject(new Error(redactMcpText(msg.error.message)));
           } else {
-            resolve(msg.result);
+            resolve(redactMcpValue(msg.result));
           }
         }
       } catch { /* skip malformed */ }
@@ -318,7 +334,7 @@ class MCPHttpTransport {
       this.sendNotification('notifications/initialized', {}).catch(() => {});
       await this.discover();
     } catch (err: any) {
-      this.lastError = err.message;
+      this.lastError = redactMcpText(err.message);
       throw err;
     }
   }
@@ -345,7 +361,7 @@ class MCPHttpTransport {
           this.reconnectAttempts = 0;
           resolve(true);
         } catch (err) {
-          console.warn(`[MCP:http] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${err}`);
+          console.warn(`[MCP:http] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${redactMcpText(String(err))}`);
           resolve(await this.reconnect());
         }
       }, delay);
@@ -386,11 +402,11 @@ class MCPHttpTransport {
       body: JSON.stringify(msg),
     });
     if (!response.ok) {
-      throw new Error('MCP HTTP ' + response.status + ': ' + await response.text().catch(() => ''));
+      throw new Error(redactMcpText('MCP HTTP ' + response.status + ': ' + await response.text().catch(() => '')));
     }
     const data = await response.json() as any;
-    if (data.error) throw new Error(data.error.message || 'MCP error');
-    return data.result;
+    if (data.error) throw new Error(redactMcpText(data.error.message || 'MCP error'));
+    return redactMcpValue(data.result);
   }
 
   private async sendNotification(method: string, params: any): Promise<void> {
@@ -438,7 +454,7 @@ class StdioMCPClient {
     // If the existing process is dead and we have respawn info, create a new one
     if ((!this.process || this.process.killed || !this.process.stdout) && this.respawnCommand) {
       // spawn is imported at module level
-      console.log(`[MCP:stdio] ${this.name}: respawning process: ${this.respawnCommand} ${(this.respawnArgs || []).join(' ')}`);
+      console.log(`[MCP:stdio] ${this.name}: respawning process: ${redactMcpText(`${this.respawnCommand} ${(this.respawnArgs || []).join(' ')}`)}`);
       this.process = spawn(this.respawnCommand, this.respawnArgs || [], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env },
@@ -467,7 +483,7 @@ class StdioMCPClient {
       this.process.stderr?.on('data', logStderr);
 
       this.process.on('error', (err) => {
-        this.lastError = err.message;
+        this.lastError = redactMcpText(err.message);
         this.connected = false;
         reject(err);
       });
@@ -508,7 +524,7 @@ class StdioMCPClient {
           this.reconnectAttempts = 0;
           resolve(true);
         } catch (err) {
-          console.warn(`[MCP:stdio] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${err}`);
+          console.warn(`[MCP:stdio] ${this.name}: reconnect attempt ${this.reconnectAttempts} failed: ${redactMcpText(String(err))}`);
           resolve(await this.reconnect());
         }
       }, delay);
@@ -564,8 +580,8 @@ class StdioMCPClient {
         if (msg.id !== undefined && this.pending.has(msg.id)) {
           const { resolve, reject } = this.pending.get(msg.id)!;
           this.pending.delete(msg.id);
-          if (msg.error) reject(new Error(msg.error.message || 'MCP error'));
-          else resolve(msg.result);
+          if (msg.error) reject(new Error(redactMcpText(msg.error.message || 'MCP error')));
+          else resolve(redactMcpValue(msg.result));
         }
       } catch {}
     }
@@ -608,7 +624,7 @@ class MCPManager {
       toolCount: c.getTools().length,
       tools: c.getTools(),
       resourceCount: c.getResources().length,
-      error: c.lastError,
+      error: c.lastError ? redactMcpText(c.lastError) : undefined,
     }));
   }
 
@@ -677,7 +693,7 @@ class MCPManager {
           try {
             await c.reconnect();
           } catch (err) {
-            console.warn(`[MCP:watchdog] Reconnect failed for ${id}:`, err);
+            console.warn(`[MCP:watchdog] Reconnect failed for ${id}:`, redactMcpText(String(err)));
           }
         }
       }
@@ -712,7 +728,7 @@ class MCPManager {
         toolCount: c.getTools ? c.getTools().length : 0,
         tools: c.getTools ? c.getTools() : [],
         resourceCount: c.getResources ? c.getResources().length : 0,
-        error: c.lastError,
+        error: c.lastError ? redactMcpText(c.lastError) : undefined,
         reconnectAttempts: c.reconnectAttempts ?? 0,
         maxRetries: c.maxRetries ?? 3,
       };

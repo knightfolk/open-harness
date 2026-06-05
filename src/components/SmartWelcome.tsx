@@ -4,6 +4,7 @@ import {
   Cpu, Folder,
 } from 'lucide-react';
 import type { ProjectProfile } from '../types';
+import { API_BASE } from '../utils/api';
 
 // ── Project detection ──
 interface ProjectContext {
@@ -18,7 +19,8 @@ async function detectProject(workingDir: string | null): Promise<ProjectContext>
   if (!workingDir) return { type: 'unknown', framework: '', hasTests: false, hasGit: false, fileCount: 0 };
 
   try {
-    const dir = await (await fetch(`http://localhost:3001/api/fs/list?path=${encodeURIComponent(workingDir)}`)).json();
+    const dirParams = new URLSearchParams({ path: workingDir, workingDir });
+    const dir = await (await fetch(`${API_BASE}/api/fs/list?${dirParams.toString()}`)).json();
     const names = (dir.entries || []).map((e: any) => e.name);
 
     const hasPkg = names.includes('package.json');
@@ -37,7 +39,8 @@ async function detectProject(workingDir: string | null): Promise<ProjectContext>
     else if (hasPkg && hasVue) { type = 'vue'; framework = 'Vue'; }
     else if (hasPkg) {
       try {
-        const pkg = await (await fetch(`http://localhost:3001/api/fs/read?path=${encodeURIComponent(workingDir + '/package.json')}`)).json();
+        const pkgParams = new URLSearchParams({ path: `${workingDir}/package.json`, workingDir });
+        const pkg = await (await fetch(`${API_BASE}/api/fs/read?${pkgParams.toString()}`)).json();
         const deps = { ...pkg.content?.dependencies, ...pkg.content?.devDependencies };
         if (deps) {
           const parsed = JSON.parse(pkg.content);

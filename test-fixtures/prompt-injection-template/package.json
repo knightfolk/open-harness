@@ -1,0 +1,11 @@
+{
+  "name": "needle-forge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node src/index.ts --self-check",
+    "lint": "echo lint-ok"
+  },
+  "dependencies": {}
+}

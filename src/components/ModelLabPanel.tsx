@@ -441,16 +441,19 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                           <StackedScoreBreakdown breakdown={r.scores.breakdown} compact />
                         </td>
                         <td style={tdStyle}>{r.scores.breakdown?.weakestSignal?.label ?? '—'}</td>
-                        <td style={{ ...tdStyle, color: r.validationPassed ? '#22c55e' : '#ef4444' }}>
-                          {r.validationResults.length > 0 ? (r.validationPassed ? '✓ Pass' : '✗ Fail') : '—'}
-                        </td>
+	                        <td style={{ ...tdStyle, color: r.validationPassed ? '#22c55e' : '#ef4444' }}>
+	                          {r.validationResults.length > 0 ? (
+	                            r.validationPassed ? '✓ Pass' : `✗ ${firstValidationFinding(r) || 'Fail'}`
+	                          ) : '—'}
+	                        </td>
                         <td style={tdStyle}>{(r.wallMs / 1000).toFixed(1)}s</td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </>
-            )}
+	                </table>
+	                <ValidationFindingsPanel run={selectedBenchRun} />
+	              </>
+	            )}
           </div>
         )}
 
@@ -720,6 +723,43 @@ function PerTaskScoreTable({ run }: { run: api.BenchRun }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function firstValidationFinding(result: api.BenchRunResult): string {
+  const finding = result.validationResults.flatMap(v => v.findings || [])[0];
+  if (!finding) return '';
+  return finding.length > 48 ? `${finding.slice(0, 45)}...` : finding;
+}
+
+function ValidationFindingsPanel({ run }: { run: api.BenchRun }) {
+  const failed = run.results
+    .map(result => ({
+      result,
+      findings: result.validationResults.flatMap(v => v.findings || []),
+    }))
+    .filter(row => !row.result.validationPassed || row.findings.length > 0);
+
+  if (failed.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 12, padding: 8, borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <div style={sectionLabelStyle}>Validation findings</div>
+      {failed.slice(0, 8).map(({ result, findings }, index) => (
+        <div key={`${result.taskId}-${result.modelId}-${index}`} style={{ marginTop: index === 0 ? 0 : 8, fontSize: 10, color: 'var(--text-secondary)' }}>
+          <div style={{ fontWeight: 600, color: result.validationPassed ? 'var(--accent-success)' : 'var(--accent-error)' }}>
+            {result.taskName} · {result.modelId}
+          </div>
+          {findings.length > 0 ? (
+            findings.slice(0, 4).map((finding, i) => (
+              <div key={i} style={{ marginTop: 2, color: 'var(--text-tertiary)' }}>- {finding}</div>
+            ))
+          ) : (
+            <div style={{ marginTop: 2, color: 'var(--text-tertiary)' }}>Validation command failed without structured findings.</div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

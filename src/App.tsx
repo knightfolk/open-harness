@@ -1,13 +1,11 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, Plan, HarnessRunStep, ProjectProfile } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRunStep, ProjectProfile } from './types';
 import type { PanelId } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
-import { EnvironmentRail } from './components/EnvironmentRail';
-import { PanelRightOpen } from 'lucide-react';
 import * as api from './utils/api';
 import './styles/global.css';
 import './styles/components.css';
@@ -18,12 +16,29 @@ import './styles/components.css';
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
 const OnboardingWizard = lazy(() => import('./components/OnboardingWizard').then((m) => ({ default: m.OnboardingWizard })));
 const ReviewChangesFlyout = lazy(() => import('./components/ReviewChangesFlyout').then((m) => ({ default: m.ReviewChangesFlyout })));
-const AgentFocusPanel = lazy(() => import('./components/AgentFocusPanel').then((m) => ({ default: m.AgentFocusPanel })));
-const RunningAgentsStrip = lazy(() => import('./components/RunningAgentsStrip').then((m) => ({ default: m.RunningAgentsStrip })));
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const RIGHT_SIDE_PANELS = new Set<PanelId>(['side-chat', 'diffs', 'browser', 'sub-agents', 'files', 'model-lab', 'safety', 'patches']);
+const SIDEBAR_WIDTH_KEY = 'openharness.sidebar.width.v1';
+const PINNED_TOOLS_KEY = 'openharness.pinned-tools.v1';
 
+function loadSidebarWidth() {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    const width = raw ? Number(raw) : 260;
+    return Number.isFinite(width) ? Math.min(420, Math.max(200, width)) : 260;
+  } catch {
+    return 260;
+  }
+}
+
+function loadPinnedTools(): PanelId[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PINNED_TOOLS_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((id): id is PanelId => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 function describeRunStep(step: HarnessRunStep): string {
   switch (step.type) {
@@ -72,6 +87,8 @@ function roleMapToAssignments(assignments: Record<string, string>): CodingRoleAs
 
 function App() {
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const [pinnedTools, setPinnedTools] = useState<PanelId[]>(loadPinnedTools);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [workingDir, setWorkingDir] = useState<string | null>(null);
@@ -106,9 +123,7 @@ function App() {
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [reviewFlyoutOpen, setReviewFlyoutOpen] = useState(false);
-  const [superPanelOpen, setSuperPanelOpen] = useState(true);
   const [focusedSubAgentId, setFocusedSubAgentId] = useState<string | null>(null);
-  const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout, addPanel } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
@@ -179,7 +194,7 @@ function App() {
     } catch { /* ignore */ }
   }, []);
 
-  // Keyboard shortcut: ⇧⌘S or ⌘\ toggles the Super Panel.
+  // Keyboard shortcut: ⇧⌘S or ⌘\ toggles the side-chat tools panel.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -188,19 +203,19 @@ function App() {
       // ⇧⌘S — explicit toggle
       if (e.shiftKey && key === 's') {
         e.preventDefault();
-        setSuperPanelOpen((prev) => !prev);
+        togglePanel('side-chat');
         return;
       }
       // ⌘\ — also toggles
       if (!e.shiftKey && e.key === '\\') {
         e.preventDefault();
-        setSuperPanelOpen((prev) => !prev);
+        togglePanel('side-chat');
         return;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [togglePanel]);
 
   // Load project profile whenever the active folder changes.
   useEffect(() => {
@@ -210,30 +225,6 @@ function App() {
       .then((profile) => { if (!cancelled) setProjectProfile(profile as ProjectProfile); })
       .catch((err) => { console.error('Failed to load project profile:', err); if (!cancelled) setProjectProfile(null); });
     return () => { cancelled = true; };
-  }, [workingDir]);
-
-  // Track whether the repo currently has pending changes so the Super Panel can
-  // reopen itself even when the rail is hidden.
-  useEffect(() => {
-    let cancelled = false;
-    if (!workingDir) {
-      setHasPendingChanges(false);
-      return;
-    }
-    const poll = async () => {
-      try {
-        const status = await api.getGitStatus(workingDir);
-        if (!cancelled) setHasPendingChanges(!status.clean);
-      } catch {
-        if (!cancelled) setHasPendingChanges(false);
-      }
-    };
-    poll();
-    const interval = window.setInterval(poll, 10000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
   }, [workingDir]);
 
   // Load config from server on mount
@@ -449,9 +440,71 @@ function App() {
     }
   }, [activeSessionId]);
 
-  const handleNewSession = useCallback(async () => {
+  const handleDeleteSession = useCallback(async (id: string) => {
     try {
-      const session = await api.createSession();
+      await api.deleteSession(id);
+      let fresh = await api.listSessions();
+      if (fresh.length === 0) {
+        const session = await api.createSession();
+        fresh = [{
+          id: session.id,
+          title: session.title,
+          workingDir: session.workingDir || null,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          preview: '',
+          messageCount: 0,
+        }];
+      }
+      setSessions(fresh);
+      if (id === activeSessionId) {
+        const next = fresh[0];
+        setActiveSessionId(next.id);
+        setWorkingDir(next.workingDir || null);
+        const detail = await api.getSession(next.id);
+        setMessages(detail.messages.map(mapApiMessage));
+        setSubAgents([]);
+      }
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+    }
+  }, [activeSessionId]);
+
+  const handleDeleteProject = useCallback(async (workingDir: string | null) => {
+    try {
+      const targets = sessions.filter((session) => (session.workingDir || null) === workingDir);
+      await Promise.all(targets.map((session) => api.deleteSession(session.id)));
+      let fresh = await api.listSessions();
+      if (fresh.length === 0) {
+        const session = await api.createSession();
+        fresh = [{
+          id: session.id,
+          title: session.title,
+          workingDir: session.workingDir || null,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          preview: '',
+          messageCount: 0,
+        }];
+      }
+      setSessions(fresh);
+      if (targets.some((session) => session.id === activeSessionId)) {
+        const next = fresh[0];
+        setActiveSessionId(next.id);
+        setWorkingDir(next.workingDir || null);
+        const detail = await api.getSession(next.id);
+        setMessages(detail.messages.map(mapApiMessage));
+        setSubAgents([]);
+      }
+    } catch (err) {
+      console.error('Failed to delete project sessions:', err);
+    }
+  }, [activeSessionId, sessions]);
+
+  const handleNewSession = useCallback(async (targetWorkingDir?: string | null) => {
+    try {
+      const sessionWorkingDir = targetWorkingDir === undefined ? workingDir : targetWorkingDir;
+      const session = await api.createSession(undefined, sessionWorkingDir || undefined);
       setSessions((prev) => [{
         id: session.id,
         title: session.title,
@@ -468,7 +521,7 @@ function App() {
     } catch (err) {
       console.error('Failed to create session:', err);
     }
-  }, []);
+  }, [workingDir]);
 
   const handleOpenFolder = useCallback(async () => {
     try {
@@ -500,7 +553,7 @@ function App() {
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (activeSessionId) return activeSessionId;
     try {
-      const session = await api.createSession();
+      const session = await api.createSession(undefined, workingDir || undefined);
       setSessions((prev) => [{
         id: session.id,
         title: session.title,
@@ -511,12 +564,13 @@ function App() {
         messageCount: 0,
       }, ...prev]);
       setActiveSessionId(session.id);
+      setWorkingDir(session.workingDir || null);
       return session.id;
     } catch (err) {
       console.error('Failed to create session:', err);
       return null;
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, workingDir]);
 
   const handleSendMessage = useCallback(async (content: string) => {
     if (isTyping) return;
@@ -579,6 +633,17 @@ function App() {
             )
           );
         },
+        onAssistantMessage: (msg) => {
+          const finalContent = msg.content || streamingTextRef.current.get(assistantId) || '';
+          streamingTextRef.current.set(assistantId, finalContent);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: finalContent, status: 'complete' as const }
+                : m
+            )
+          );
+        },
         onToolCall: (tc) => {
           setMessages((prev) =>
             prev.map((m) => {
@@ -632,7 +697,22 @@ function App() {
           const stepText = describeRunStep(step);
           setMessages((prev) => prev.map((m) => {
             if (m.id !== assistantId || !m.runTrace) return m;
-            return { ...m, runTrace: { ...m.runTrace, steps: [...m.runTrace.steps, step] } };
+            const nextMessage = { ...m, runTrace: { ...m.runTrace, steps: [...m.runTrace.steps, step] } };
+            if (step.type !== 'tool_call') return nextMessage;
+            const existing = nextMessage.toolCalls || [];
+            const index = existing.findIndex((tool) => tool.id === step.id);
+            const nextTool = {
+              id: step.id,
+              name: step.name,
+              status: step.durationMs == null ? 'running' as const : 'complete' as const,
+              input: typeof step.input === 'string' ? step.input : JSON.stringify(step.input),
+              output: step.outputPreview,
+              duration: step.durationMs,
+            };
+            const toolCalls = index >= 0
+              ? existing.map((tool, i) => (i === index ? { ...tool, ...nextTool } : tool))
+              : [...existing, nextTool];
+            return { ...nextMessage, toolCalls };
           }));
           setSubAgents((prev) => prev.map((a) => a.id === runId ? {
             ...a,
@@ -797,26 +877,29 @@ function App() {
   }, [layout]);
 
   const bottomBarOpen = visiblePanels.has('terminal');
-  const hasRightWorkspacePanelOpen = useMemo(
-    () => Array.from(visiblePanels).some((panelId) => RIGHT_SIDE_PANELS.has(panelId)),
-    [visiblePanels],
-  );
-  const hasActiveSubAgents = subAgents.some((agent) => agent.status === 'running');
-  const superPanelPinned = !hasRightWorkspacePanelOpen;
-
-  useEffect(() => {
-    if (superPanelPinned || hasPendingChanges || hasActiveSubAgents) {
-      setSuperPanelOpen(true);
-    }
-  }, [superPanelPinned, hasPendingChanges, hasActiveSubAgents]);
 
   const handleToggleRightRail = useCallback(() => {
-    if (superPanelPinned) {
-      setSuperPanelOpen(true);
-      return;
-    }
-    setSuperPanelOpen((prev) => !prev);
-  }, [superPanelPinned]);
+    togglePanel('side-chat');
+  }, [togglePanel]);
+
+  const startResizeSidebar = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (moveEvent: MouseEvent) => {
+      const next = Math.min(420, Math.max(200, startWidth + (moveEvent.clientX - startX)));
+      setSidebarWidth(next);
+      try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next)); } catch { /* ignore */ }
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('is-resizing-panel');
+    };
+    document.body.classList.add('is-resizing-panel');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [sidebarWidth]);
 
   const handleToggleBottomBar = useCallback(() => {
     if (visiblePanels.has('terminal')) {
@@ -828,51 +911,30 @@ function App() {
 
   // Compute enabled tool count: 3 built-in + MCP tools from running servers
   const builtinToolCount = trustMode === "chat-only" ? 0 : trustMode === "read-only" ? 2 : 3;
-  const mcpToolCount = mcpStatus.filter(s => s.running).reduce((sum, s) => sum + (s.toolCount || 0), 0);
+  const mcpToolCount = mcpStatus
+    .filter(s => s.running)
+    .reduce((sum, s) => sum + (s.usableToolCount ?? s.toolCount ?? 0), 0);
   const enabledToolCount = builtinToolCount + mcpToolCount;
 
   const msgCount = messages.length;
   const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'OpenHarness';
-  const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
-  const latestToolCalls = latestAssistantMessage?.toolCalls || [];
-  const hasRunningTools = latestToolCalls.some((tool) => tool.status === 'running');
-  const hasToolCalls = latestToolCalls.length > 0;
-  const chatPlan: Plan | null = messages.length === 0 ? null : {
-    explanation: isTyping ? 'Current response progress' : 'Last response completed',
-    steps: [
-      { id: 'request', step: 'Receive user request', status: 'completed' },
-      {
-        id: 'response',
-        step: 'Generate model response',
-        status: isTyping && !hasToolCalls ? 'in_progress' : 'completed',
-      },
-      {
-        id: 'tools',
-        step: hasToolCalls ? `Use ${latestToolCalls.length} tool${latestToolCalls.length === 1 ? '' : 's'} as needed` : 'Use tools only if needed',
-        status: hasRunningTools ? 'in_progress' : hasToolCalls ? 'completed' : isTyping ? 'pending' : 'completed',
-      },
-      {
-        id: 'final',
-        step: 'Deliver final answer',
-        status: isTyping ? 'pending' : 'completed',
-      },
-    ],
+  const focusSubAgentInPanel = (agentId: string | null) => {
+    if (agentId) setFocusedSubAgentId(agentId);
+    addPanel('sub-agents');
   };
+  const togglePinnedTool = useCallback((id: PanelId) => {
+    setPinnedTools((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      try { localStorage.setItem(PINNED_TOOLS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   return (
     <div className="app-layout">
       <Sidebar
         isOpen={sidebarOpen}
-        sessions={sessions.map(s => ({
-          id: s.id,
-          title: s.title,
-          createdAt: new Date(s.createdAt),
-          updatedAt: new Date(s.updatedAt),
-          messages: [],
-          subAgents: [],
-          fileChanges: [],
-          terminalCommands: [],
-        }))}
+        sessions={sessions}
         activeSessionId={activeSessionId || undefined}
         activeSubAgents={subAgents}
         activeModel={activeModel}
@@ -897,8 +959,12 @@ function App() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onOpenFolder={handleOpenFolder}
-        onFocusAgent={(id) => setFocusedSubAgentId(id)}
+        onFocusAgent={(id) => focusSubAgentInPanel(id)}
+        width={sidebarWidth}
+        onDeleteSession={handleDeleteSession}
+        onDeleteProject={handleDeleteProject}
       />
+      {sidebarOpen && <div className="sidebar-resizer" onMouseDown={startResizeSidebar} role="separator" aria-orientation="vertical" aria-label="Resize sidebar" />}
 
       <main className="main-area">
         <TopBar
@@ -908,14 +974,15 @@ function App() {
           onTogglePanel={togglePanel}
           onResetLayout={resetLayout}
           sessionTitle={sessionTitle}
-          activeModel={activeModel}
           workingDir={workingDir}
           onOpenFolder={handleOpenFolder}
-          rightRailOpen={superPanelOpen}
+          rightRailOpen={visiblePanels.has('side-chat')}
           onToggleRightRail={handleToggleRightRail}
-          rightRailPinned={superPanelPinned}
+          rightRailPinned={false}
           bottomBarOpen={bottomBarOpen}
           onToggleBottomBar={handleToggleBottomBar}
+          pinnedTools={pinnedTools}
+          onTogglePinnedTool={togglePinnedTool}
         />
 
         <div className="content-area">
@@ -930,25 +997,16 @@ function App() {
           ) : (
             <>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, position: 'relative' }}>
-              {focusedSubAgentId != null ? (
-                <Suspense fallback={null}>
-                  <AgentFocusPanel
-                    agents={subAgents}
-                    focusedId={focusedSubAgentId}
-                    onFocus={(id) => setFocusedSubAgentId(id)}
-                    onExit={() => setFocusedSubAgentId(null)}
-                  />
-                </Suspense>
-              ) : (
-                <>
+              <>
                   <LayoutEngine
                     layout={layout}
                     onRemovePanel={removePanel}
                     onSwapPanels={swapPanels}
                     subAgents={subAgents}
-                    plan={chatPlan}
+                    plan={null}
                     fileChanges={[]}
                     terminalCommands={[]}
+                    focusedSubAgentId={focusedSubAgentId}
                     messages={messages}
                     isTyping={isTyping}
                     onSendMessage={handleSendMessage}
@@ -964,48 +1022,18 @@ function App() {
                     onExplainChange={handleExplainChange}
                     onAskAboutScreenshot={handleAskAboutScreenshot}
                     onCompareModel={handleCompareModel}
+                    onReviewChanges={() => setReviewFlyoutOpen(true)}
+                    onFocusAgents={() => {
+                      const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
+                      focusSubAgentInPanel(next);
+                    }}
+                    trustMode={trustMode}
                     models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
+                    pinnedTools={pinnedTools}
+                    onOpenPinnedTool={addPanel}
                   />
-                  {subAgents.length > 0 && (
-                    <div className="running-agents-strip-host">
-                      <Suspense fallback={null}>
-                        <RunningAgentsStrip
-                          agents={subAgents}
-                          onFocus={() => {
-                            const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
-                            setFocusedSubAgentId(next);
-                          }}
-                        />
-                      </Suspense>
-                    </div>
-                  )}
-                </>
-              )}
+              </>
             </div>
-            {superPanelOpen ? (
-              <EnvironmentRail
-                workingDir={workingDir}
-                trustMode={trustMode}
-                subAgents={subAgents}
-                onReviewChanges={() => setReviewFlyoutOpen(true)}
-                rightRailPinned={superPanelPinned}
-                onFocusAgents={() => {
-                  const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
-                  setFocusedSubAgentId(next);
-                }}
-                onHide={() => setSuperPanelOpen(false)}
-              />
-            ) : (
-              <button
-                className="env-rail-reveal super-panel-reveal"
-                onClick={() => setSuperPanelOpen(true)}
-                title="Show Super Panel (⇧⌘S)"
-                aria-label="Show Super Panel"
-              >
-                <PanelRightOpen size={15} />
-                <span>Super Panel</span>
-              </button>
-            )}
           </>
           )}
         </div>
@@ -1124,6 +1152,7 @@ function App() {
         onRestartOnboarding={() => { setSettingsOpen(false); setShowOnboarding(true); }}
         onMcpStatusRefresh={refreshMcpStatus}
       />
+      {sidebarOpen && <div className="sidebar-resizer" onMouseDown={startResizeSidebar} role="separator" aria-orientation="vertical" aria-label="Resize sidebar" />}
       </Suspense>
     </div>
   );

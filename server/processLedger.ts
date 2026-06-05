@@ -12,11 +12,11 @@ import {
   closeSync,
   readSync,
 } from 'fs';
-import { execSync as _execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
-import { spawn, ChildProcess, execSync } from 'child_process';
+import { spawn, ChildProcess, execFileSync } from 'child_process';
 import { v4 as uuid } from 'uuid';
+import { redactSecrets } from './sectionRedaction';
 
 export type ProcessKind =
   | 'server'
@@ -67,6 +67,21 @@ ensureDir(LOGS_DIR);
 let ledger: OwnedProcess[] = [];
 let loaded = false;
 
+function redactText(value: string): string {
+  return redactSecrets(value).redacted;
+}
+
+function redactPersistedValue<T>(value: T): T {
+  if (typeof value === 'string') return redactText(value) as T;
+  if (Array.isArray(value)) return value.map((item) => redactPersistedValue(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactPersistedValue(item)]),
+    ) as T;
+  }
+  return value;
+}
+
 function loadLedger(): void {
   if (loaded) return;
   if (existsSync(LEDGER_PATH)) {
@@ -82,7 +97,7 @@ function loadLedger(): void {
 }
 
 function persistLedger(): void {
-  writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2), 'utf-8');
+  writeFileSync(LEDGER_PATH, JSON.stringify(redactPersistedValue(ledger), null, 2), 'utf-8');
 }
 
 // ── Registration ──────────────────────────────────────
@@ -110,14 +125,14 @@ export function registerProcess(child: ChildProcess, opts: RegisterOptions): Own
     id,
     kind: opts.kind,
     name: opts.name,
-    command: opts.command,
-    args: opts.args || [],
-    cwd: opts.cwd,
+    command: redactText(opts.command),
+    args: redactPersistedValue(opts.args || []),
+    cwd: opts.cwd ? redactText(opts.cwd) : undefined,
     parentPid: process.pid,
     startedAt: new Date().toISOString(),
     status: 'running',
     logFile,
-    notes: opts.notes,
+    notes: opts.notes ? redactText(opts.notes) : undefined,
   };
 
   ledger.push(entry);
@@ -126,12 +141,12 @@ export function registerProcess(child: ChildProcess, opts: RegisterOptions): Own
   // Pipe child stdio to the log file
   if (child.stdout) {
     child.stdout.on('data', (chunk: Buffer) => {
-      try { appendFileSync(logFile, chunk); } catch { /* ignore */ }
+      try { appendFileSync(logFile, redactText(chunk.toString())); } catch { /* ignore */ }
     });
   }
   if (child.stderr) {
     child.stderr.on('data', (chunk: Buffer) => {
-      try { appendFileSync(logFile, chunk); } catch { /* ignore */ }
+      try { appendFileSync(logFile, redactText(chunk.toString())); } catch { /* ignore */ }
     });
   }
 
@@ -146,7 +161,7 @@ export function registerProcess(child: ChildProcess, opts: RegisterOptions): Own
     entry.exitedAt = new Date().toISOString();
     entry.exitCode = -1;
     entry.status = 'failed';
-    entry.notes = `${entry.notes ? entry.notes + '\n' : ''}${err.message}`;
+    entry.notes = redactText(`${entry.notes ? entry.notes + '\n' : ''}${err.message}`);
     persistLedger();
   });
 
@@ -166,14 +181,14 @@ export function registerExternal(opts: RegisterOptions & { pid: number; status?:
     id,
     kind: opts.kind,
     name: opts.name,
-    command: opts.command,
-    args: opts.args || [],
-    cwd: opts.cwd,
+    command: redactText(opts.command),
+    args: redactPersistedValue(opts.args || []),
+    cwd: opts.cwd ? redactText(opts.cwd) : undefined,
     parentPid: process.pid,
     startedAt: new Date().toISOString(),
     status: opts.status || 'running',
     logFile,
-    notes: opts.notes,
+    notes: opts.notes ? redactText(opts.notes) : undefined,
   };
   ledger.push(entry);
   persistLedger();
@@ -193,9 +208,7 @@ export function reconcileLedger(): { cleaned: number } {
   for (const entry of ledger) {
     if (entry.status !== 'running') continue;
     if (entry.pid <= 0) continue;
-    let alive = false;
-    try { _execSync(`kill -0 ${entry.pid} 2>/dev/null`, { stdio: 'ignore' }); alive = true; } catch { /* dead */ }
-    if (!alive) {
+    if (!isAlive(entry.pid)) {
       entry.status = 'exited';
       entry.exitedAt = entry.exitedAt || new Date().toISOString();
       entry.exitCode = entry.exitCode ?? null;
@@ -277,7 +290,7 @@ export function killProcess(pid: number, opts: { signal?: NodeJS.Signals; timeou
 
   // Reap zombies
   try {
-    if (isAlive(pid)) execSync(`kill -9 ${pid} 2>/dev/null || true`, { stdio: 'ignore' });
+    if (isAlive(pid)) execFileSync('kill', ['-9', String(pid)], { stdio: 'ignore' });
   } catch { /* ignore */ }
 
   updateEntry(pid, (e) => {
@@ -312,7 +325,7 @@ export function killAll(opts: { kinds?: ProcessKind[] } = {}): { killed: number[
 /** Walk up the process tree of a pid (best-effort on macOS/Linux via ps). */
 export function getProcessTree(pid: number): Array<{ pid: number; ppid: number; command: string }> {
   try {
-    const raw = execSync(`ps -axo pid=,ppid=,comm= -p ${pid}`, { encoding: 'utf-8' });
+    const raw = execFileSync('ps', ['-axo', 'pid=,ppid=,comm=', '-p', String(pid)], { encoding: 'utf-8' });
     return raw
       .trim()
       .split('\n')
@@ -377,7 +390,7 @@ export function tailLog(pid: number, maxBytes: number = TAIL_BYTES): LogTail | n
       logFile: entry.logFile,
       exists: true,
       sizeBytes,
-      tail: tailBuf.toString('utf-8'),
+      tail: redactText(tailBuf.toString('utf-8')),
     };
   } finally {
     closeSync(fd);

@@ -36,6 +36,18 @@ const TERMINAL_TOOLS = [
   'exec_command', 'run_command', 'shell_exec',
 ];
 
+const HIGH_RISK_TOOLS = [
+  // Executes arbitrary Playwright JavaScript in the browser MCP process.
+  'browser_run_code_unsafe',
+  // Mutates the MCP gateway/profile rather than the active workspace.
+  'code-mode',
+  'mcp-add',
+  'mcp-remove',
+  'mcp-config-set',
+  'mcp-create-profile',
+  'mcp-activate-profile',
+];
+
 // ── Tool filtering by trust mode ───────────────────────
 
 export function filterToolsForTrustMode(
@@ -59,6 +71,7 @@ function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {
   const isRead = READ_TOOLS.includes(toolName);
   const isWrite = WRITE_TOOLS.includes(toolName);
   const isTerminal = TERMINAL_TOOLS.includes(toolName);
+  const isHighRisk = HIGH_RISK_TOOLS.includes(toolName);
 
   switch (trustMode) {
     case 'chat-only':
@@ -66,9 +79,9 @@ function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {
     case 'read-only':
       return isRead && !isWrite && !isTerminal;
     case 'ask-before-write':
-      return true;
+      return !isHighRisk;
     case 'workspace-write':
-      return true;
+      return !isHighRisk;
     case 'full-local':
       return true;
     default:
@@ -126,12 +139,29 @@ export function isPathAllowed(filePath: string, trustMode: TrustMode, workingDir
   return { allowed: true };
 }
 
+export function isReadPathAllowed(filePath: string, trustMode: TrustMode, workingDir?: string): ToolPolicyResult {
+  if (trustMode === 'chat-only') {
+    return { allowed: false, reason: 'Read operations not allowed in chat-only mode' };
+  }
+  if (trustMode === 'full-local') return { allowed: true };
+  if (!workingDir) return { allowed: false, reason: 'No working directory set' };
+  if (isPathWithin(filePath, workingDir)) return { allowed: true };
+  return {
+    allowed: false,
+    reason: `Path ${filePath} is outside workspace ${workingDir}`,
+  };
+}
+
 // ── Command risk classification ────────────────────────
 
 const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+|-[-\w\s]*\brecursive\b)/i, reason: 'Recursive delete' },
   { pattern: /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|(--force\s+)?--recursive\s+)/i, reason: 'Recursive/forced delete' },
   { pattern: /\brm\s+-rf\b/i, reason: 'Recursive forced delete' },
   { pattern: /\brm\s+--no-preserve-root/i, reason: 'Destructive root delete' },
+  { pattern: /\bgit\s+reset\s+--hard\b/i, reason: 'Destructive git reset' },
+  { pattern: /\bgit\s+clean\b[^;&|]*\s-[a-zA-Z]*[dfx][a-zA-Z]*\b/i, reason: 'Destructive git clean' },
+  { pattern: /\bgit\s+checkout\s+-f\b/i, reason: 'Forced git checkout' },
   { pattern: /\bsudo\b/i, reason: 'Requires root privileges' },
   { pattern: /\bchmod\b/i, reason: 'Changes file permissions' },
   { pattern: /\bchown\b/i, reason: 'Changes file ownership' },
@@ -180,6 +210,9 @@ export function checkCommandPolicy(
   if (trustMode === 'chat-only') {
     return { allowed: false, reason: 'Terminal commands not allowed in chat-only mode' };
   }
+  if (trustMode === 'read-only') {
+    return { allowed: false, reason: 'Terminal commands not allowed in read-only mode' };
+  }
 
   const risk = classifyCommand(command);
 
@@ -191,9 +224,6 @@ export function checkCommandPolicy(
   }
 
   if (risk.level === 'caution') {
-    if (trustMode === 'read-only') {
-      return { allowed: false, reason: `Blocked in read-only mode (${risk.reason})` };
-    }
     return { allowed: true, reason: `⚠️ Caution: ${risk.reason}` };
   }
 
@@ -208,6 +238,24 @@ export function checkToolActionPolicy(
   trustMode: TrustMode,
   workingDir?: string,
 ): ToolPolicyResult {
+  if (trustMode === 'chat-only') {
+    return { allowed: false, reason: 'Tools not allowed in chat-only mode' };
+  }
+
+  if (HIGH_RISK_TOOLS.includes(toolName) && trustMode !== 'full-local') {
+    return { allowed: false, reason: `${toolName} requires full-local trust mode` };
+  }
+
+  if (READ_TOOLS.includes(toolName)) {
+    const targetPath = args.path || args.file_path || args.filePath || args.dir || args.root || '';
+    if (targetPath) {
+      return isReadPathAllowed(targetPath, trustMode, workingDir);
+    }
+    if (toolName === 'read_file' || toolName === 'list_directory') {
+      return { allowed: false, reason: `Missing path for ${toolName}` };
+    }
+  }
+
   if (WRITE_TOOLS.includes(toolName) || toolName === 'write_file' || toolName === 'edit_file') {
     const targetPath = args.path || args.file_path || args.filePath || '';
     if (targetPath) {
@@ -216,6 +264,10 @@ export function checkToolActionPolicy(
   }
 
   if (TERMINAL_TOOLS.includes(toolName) || toolName === 'exec_command' || toolName === 'run_command') {
+    const cwd = args.cwd || args.workingDir || args.working_directory;
+    if (cwd && workingDir && !isPathWithin(String(cwd), workingDir)) {
+      return { allowed: false, reason: `Command cwd ${cwd} is outside workspace ${workingDir}` };
+    }
     const cmd = args.command || args.cmd || '';
     if (cmd) {
       return checkCommandPolicy(cmd, trustMode);

@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { v4 as uuid } from 'uuid';
 
 import { buildScoreBreakdown, type EvalScores, type EvalScoreBreakdown } from './evals';
+import { redactSecrets } from './sectionRedaction';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ export interface ValidationCommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  findings: string[];
   durationMs: number;
   passed: boolean;
 }
@@ -101,6 +103,17 @@ export interface BenchSummary {
 
 const BENCH_DIR = join(homedir(), '.openharness', 'bench-runs');
 
+function redactPersistedValue<T>(value: T): T {
+  if (typeof value === 'string') return redactSecrets(value).redacted as T;
+  if (Array.isArray(value)) return value.map((item) => redactPersistedValue(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactPersistedValue(item)]),
+    ) as T;
+  }
+  return value;
+}
+
 function ensureDir() {
   mkdirSync(BENCH_DIR, { recursive: true });
 }
@@ -112,12 +125,13 @@ ensureDir();
 export function runValidation(
   commands: string[],
   workingDir: string,
+  env: Record<string, string> = {},
 ): Promise<ValidationCommandResult[]> {
   
 
   return Promise.all(commands.map(cmd => new Promise<ValidationCommandResult>((resolve) => {
     const start = Date.now();
-    const child = spawn('/bin/zsh', ['-lc', cmd], { cwd: workingDir });
+    const child = spawn('/bin/zsh', ['-lc', cmd], { cwd: workingDir, env: { ...process.env, ...env } });
     let stdout = '';
     let stderr = '';
     const limit = 512 * 1024;
@@ -132,10 +146,11 @@ export function runValidation(
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
       resolve({
-        command: cmd,
+        command: redactSecrets(cmd).redacted,
         exitCode: 124,
-        stdout: stdout.slice(0, 2000),
-        stderr: stderr.slice(0, 2000),
+        stdout: redactSecrets(stdout.slice(0, 2000)).redacted,
+        stderr: redactSecrets(stderr.slice(0, 2000)).redacted,
+        findings: extractValidationFindings(redactSecrets(`${stdout}\n${stderr}`).redacted),
         durationMs: Date.now() - start,
         passed: false,
       });
@@ -144,10 +159,11 @@ export function runValidation(
     child.on('close', (code: number | null) => {
       clearTimeout(timer);
       resolve({
-        command: cmd,
+        command: redactSecrets(cmd).redacted,
         exitCode: code ?? 1,
-        stdout: stdout.slice(0, 2000),
-        stderr: stderr.slice(0, 2000),
+        stdout: redactSecrets(stdout.slice(0, 2000)).redacted,
+        stderr: redactSecrets(stderr.slice(0, 2000)).redacted,
+        findings: extractValidationFindings(redactSecrets(`${stdout}\n${stderr}`).redacted),
         durationMs: Date.now() - start,
         passed: (code ?? 1) === 0,
       });
@@ -160,11 +176,23 @@ export function runValidation(
         exitCode: 1,
         stdout: '',
         stderr: 'Failed to spawn command',
+        findings: ['Failed to spawn command'],
         durationMs: Date.now() - start,
         passed: false,
       });
     });
   })));
+}
+
+function extractValidationFindings(output: string): string[] {
+  const findings: string[] = [];
+  for (const line of output.split('\n')) {
+    const trimmed = line.trim();
+    if (/^- /.test(trimmed)) {
+      findings.push(trimmed.slice(2).trim());
+    }
+  }
+  return findings.slice(0, 20);
 }
 
 export function computeBenchScores(params: {
@@ -257,7 +285,7 @@ export function createBenchRun(params: {
 
 export function saveBenchRun(run: BenchRun): void {
   const path = join(BENCH_DIR, `${run.id}.json`);
-  writeFileSync(path, JSON.stringify(run, null, 2), 'utf-8');
+  writeFileSync(path, JSON.stringify(redactPersistedValue(run), null, 2), 'utf-8');
 }
 
 export function getBenchRun(id: string): BenchRun | null {
@@ -432,10 +460,13 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
   // Flag regressions: tasks that failed validation or had low scores
   for (const r of results) {
     if (!r.validationPassed) {
+      const findings = r.validationResults.flatMap(v => v.findings || []).slice(0, 3);
       summary.regressionFlags.push({
         taskId: r.taskId,
         modelId: r.modelId,
-        reason: `Validation failed: ${r.validationResults.filter(v => !v.passed).map(v => v.command).join(', ')}`,
+        reason: findings.length > 0
+          ? `Validation failed: ${findings.join('; ')}`
+          : `Validation failed: ${r.validationResults.filter(v => !v.passed).map(v => v.command).join(', ')}`,
       });
     }
     if (r.scores.overallScore < 3) {

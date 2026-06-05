@@ -45,12 +45,40 @@ export interface RoutingEvent {
   surface: string;
   /** Complexity as determined by heuristic router */
   complexity: string;
+  /** Routed task intent (direct, execute, investigate, plan, compare) */
+  taskType: string;
+  /** Role bucket used for routing */
+  role: string;
   /** User turns at time of routing */
   userTurns: number;
   /** Outcome signal (null until received) */
   outcome: 'success' | 'failure' | 'ambiguous' | null;
   /** Human-readable note about the outcome */
   outcomeNote?: string;
+}
+
+export interface TaskTypeModelSuccess {
+  total: number;
+  success: number;
+  rate: number;
+}
+
+export interface TaskTypeRoutingSummary {
+  total: number;
+  success: number;
+  rate: number;
+  byModel: Record<string, TaskTypeModelSuccess>;
+}
+
+export interface LearningSummary {
+  totalEvents: number;
+  models: Record<string, { total: number; success: number; rate: number }>;
+  successRate: number;
+  outdated: boolean;
+  byTaskType: Record<string, TaskTypeRoutingSummary>;
+  byRole: Record<string, TaskTypeRoutingSummary>;
+  byComplexity: Record<string, TaskTypeRoutingSummary>;
+  bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
 }
 
 // ── Storage ────────────────────────────────────────────
@@ -63,6 +91,105 @@ function ensureDir(): void {
 
 function eventsPath(): string {
   return join(BASE_DIR, 'events.jsonl');
+}
+
+function readEvents(path: string): RoutingEvent[] {
+  if (!existsSync(path)) return [];
+  const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
+  const events: RoutingEvent[] = [];
+  for (const line of lines) {
+    try {
+      const e = JSON.parse(line) as RoutingEvent;
+      events.push(e);
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return events;
+}
+
+function normalizeString(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function addSuccess(statMap: Record<string, { total: number; success: number }>, key: string, isSuccess: boolean): void {
+  if (!statMap[key]) statMap[key] = { total: 0, success: 0 };
+  statMap[key].total += 1;
+  if (isSuccess) statMap[key].success += 1;
+}
+
+function toRate(stats: Record<string, { total: number; success: number }>): Record<string, { total: number; success: number; rate: number }> {
+  const out: Record<string, { total: number; success: number; rate: number }> = {};
+  for (const [model, s] of Object.entries(stats)) {
+    out[model] = {
+      ...s,
+      rate: s.total > 0 ? s.success / s.total : 0,
+    };
+  }
+  return out;
+}
+
+function buildSummaryByKey(
+  events: RoutingEvent[],
+  getKey: (event: RoutingEvent) => string,
+): Record<string, TaskTypeRoutingSummary> {
+  const grouped: Record<string, { total: number; success: number; byModel: Record<string, { total: number; success: number }> }> = {};
+
+  for (const event of events) {
+    if (!event.outcome) continue;
+    const key = normalizeString(getKey(event), 'unknown');
+    const model = event.selectedModel || 'unknown';
+    if (!grouped[key]) grouped[key] = { total: 0, success: 0, byModel: {} };
+    grouped[key].total += 1;
+    if (event.outcome === 'success') grouped[key].success += 1;
+    addSuccess(grouped[key].byModel, model, event.outcome === 'success');
+  }
+
+  const output: Record<string, TaskTypeRoutingSummary> = {};
+  for (const [taskType, agg] of Object.entries(grouped)) {
+    output[taskType] = {
+      total: agg.total,
+      success: agg.success,
+      rate: agg.total > 0 ? agg.success / agg.total : 0,
+      byModel: toRate(agg.byModel),
+    };
+  }
+
+  return output;
+}
+
+function buildTaskTypeSummary(events: RoutingEvent[]): Record<string, TaskTypeRoutingSummary> {
+  return buildSummaryByKey(events, (event) => event.taskType);
+}
+
+function buildRoleSummary(events: RoutingEvent[]): Record<string, TaskTypeRoutingSummary> {
+  return buildSummaryByKey(events, (event) => event.role);
+}
+
+function buildComplexitySummary(events: RoutingEvent[]): Record<string, TaskTypeRoutingSummary> {
+  return buildSummaryByKey(events, (event) => event.complexity);
+}
+
+function bestByTaskType(taskTypeSummary: Record<string, TaskTypeRoutingSummary>): Array<{ taskType: string; model: string; total: number; success: number; rate: number }> {
+  return Object.entries(taskTypeSummary).map(([taskType, data]) => {
+    let bestModel = '';
+    let best: { total: number; success: number; rate: number } | null = null;
+    for (const [model, modelData] of Object.entries(data.byModel)) {
+      if (!best || modelData.rate > best.rate || (modelData.rate === best.rate && modelData.total > best.total)) {
+        best = modelData;
+        bestModel = model;
+      }
+    }
+    return {
+      taskType,
+      model: bestModel || 'unknown',
+      total: best?.total || 0,
+      success: best?.success || 0,
+      rate: best?.rate || 0,
+    };
+  }).filter((row) => row.model !== 'unknown');
 }
 
 
@@ -117,22 +244,8 @@ export function recordOutcome(eventId: string, outcome: RoutingEvent['outcome'],
  * Get all routing events, newest first. Optionally filter by session.
  */
 export function getRoutingEvents(sessionId?: string, limit = 100): RoutingEvent[] {
-  const path = eventsPath();
-  if (!existsSync(path)) return [];
-
-  const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
-  const events: RoutingEvent[] = [];
-  for (const line of lines) {
-    try {
-      const e = JSON.parse(line) as RoutingEvent;
-      if (sessionId && e.sessionId !== sessionId) continue;
-      events.push(e);
-    } catch {
-      // skip
-    }
-  }
-
-  return events
+  return readEvents(eventsPath())
+    .filter((event) => !sessionId || event.sessionId === sessionId)
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, limit);
 }
@@ -145,30 +258,19 @@ export function getModelSuccessRates(): Record<string, { total: number; success:
   const path = eventsPath();
   if (!existsSync(path)) return {};
 
-  const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
+  const events = readEvents(path);
+
   const stats: Record<string, { total: number; success: number }> = {};
 
-  for (const line of lines) {
-    try {
-      const e = JSON.parse(line) as RoutingEvent;
-      if (!e.selectedModel) continue;
-      if (e.outcome === null) continue;
-      if (!stats[e.selectedModel]) stats[e.selectedModel] = { total: 0, success: 0 };
-      stats[e.selectedModel].total++;
-      if (e.outcome === 'success') stats[e.selectedModel].success++;
-    } catch {
-      // skip
-    }
+  for (const e of events) {
+    if (!e.selectedModel) continue;
+    if (e.outcome === null) continue;
+    if (!stats[e.selectedModel]) stats[e.selectedModel] = { total: 0, success: 0 };
+    stats[e.selectedModel].total++;
+    if (e.outcome === 'success') stats[e.selectedModel].success++;
   }
 
-  const result: Record<string, { total: number; success: number; rate: number }> = {};
-  for (const [model, s] of Object.entries(stats)) {
-    result[model] = {
-      ...s,
-      rate: s.total > 0 ? s.success / s.total : 0,
-    };
-  }
-  return result;
+  return toRate(stats);
 }
 
 /**
@@ -228,10 +330,24 @@ export function suggestThresholdAdjustment(
 export function getLearningSummary() {
   const path = eventsPath();
   if (!existsSync(path)) {
-    return { totalEvents: 0, models: {}, successRate: 0, outdated: true };
+    return {
+      totalEvents: 0,
+      models: {},
+      successRate: 0,
+      outdated: true,
+      byTaskType: {},
+      byRole: {},
+      byComplexity: {},
+      bestByTaskType: [],
+    } as LearningSummary;
   }
 
   const rates = getModelSuccessRates();
+  const events = readEvents(path).filter((event) => event.outcome !== null);
+  const byTaskType = buildTaskTypeSummary(events);
+  const byRole = buildRoleSummary(events);
+  const byComplexity = buildComplexitySummary(events);
+
   let total = 0;
   let successes = 0;
   for (const m of Object.keys(rates)) {
@@ -244,5 +360,13 @@ export function getLearningSummary() {
     models: rates,
     successRate: total > 0 ? successes / total : 0,
     outdated: false,
+    byTaskType,
+    byRole,
+    byComplexity,
+    bestByTaskType: bestByTaskType(byTaskType),
   };
+}
+
+export function getLearningSummaryByTaskType(): LearningSummary {
+  return getLearningSummary();
 }

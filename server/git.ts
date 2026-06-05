@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 
 
@@ -33,7 +33,7 @@ export interface GitDiffResult {
 
 function runGit(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args.join(' ')}`, {
+    return execFileSync('git', args, {
       cwd,
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
@@ -46,7 +46,7 @@ function runGit(args: string[], cwd: string): string {
 
 function getGitRoot(dir: string): string | null {
   try {
-    return execSync('git rev-parse --show-toplevel', {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: dir,
       encoding: 'utf-8',
       timeout: 5000,
@@ -273,7 +273,7 @@ export function commit(dir: string, message: string): { hash: string } {
   const root = getGitRoot(dir);
   if (!root) throw new Error('Not a git repository');
 
-  const hash = runGit(['commit', '-m', JSON.stringify(message)], root);
+  const hash = runGit(['commit', '-m', message], root);
   const match = hash.match(/\[[\w-]+ ([a-f0-9]+)\]/);
   return { hash: match?.[1] || 'unknown' };
 }

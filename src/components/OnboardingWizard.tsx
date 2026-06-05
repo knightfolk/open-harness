@@ -48,7 +48,7 @@ interface PersonalityPreset { id: string; label: string; text: string; }
 const PERSONALITIES: PersonalityPreset[] = [
   { id: 'business', label: 'Business-only', text: 'You are a professional software engineering assistant. Be thorough, well-structured, and prioritize code quality and best practices.' },
   { id: 'concise', label: 'Concise', text: 'Be brief and direct. Show code, skip preamble. Focus on what changed and why.' },
-  { id: 'detailed', label: 'Detailed', text: 'Explain your reasoning step by step. Include context, alternatives considered, and tradeoffs. Teach while you code.' },
+  { id: 'detailed', label: 'Detailed', text: 'Provide a concise rationale. Include relevant context, alternatives considered, and tradeoffs when useful. Teach while you code.' },
   { id: 'chatty', label: 'Chatty', text: 'Be warm, friendly, and conversational. Use humor when it fits and explain things in plain English.' },
   { id: 'teacher', label: 'Helpful teacher', text: 'Explain the why behind every change. When you write code, teach the underlying patterns. Be patient and supportive.' },
   { id: 'creative', label: 'Creative', text: 'Think outside the box. Suggest unconventional approaches when appropriate. Prioritize elegance and developer experience.' },
@@ -120,14 +120,9 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
   // Auto-detect local providers + docker readiness on mount
   useEffect(() => {
     (async () => {
-      try {
-        const r = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) });
-        if (r.ok) setOllamaDetected(true);
-      } catch { /* not running */ }
-      try {
-        const r = await fetch('http://localhost:1234/v1/models', { signal: AbortSignal.timeout(2000) });
-        if (r.ok) setLmstudioDetected(true);
-      } catch { /* not running */ }
+      const localProviders = await api.discoverLocalProviders();
+      setOllamaDetected(localProviders.some((p) => p.id === 'ollama' && p.reachable));
+      setLmstudioDetected(localProviders.some((p) => p.id === 'lmstudio' && p.reachable));
       const readiness = await api.getDockerReadiness();
       if (readiness) setDockerReadiness(readiness);
     })();

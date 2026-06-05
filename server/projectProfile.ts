@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { basename, extname, join } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 export interface ProjectProfile {
   root: string;
@@ -39,9 +39,9 @@ const IMPORTANT_NAMES = new Set([
   'requirements.txt', 'Makefile', 'Dockerfile', 'docker-compose.yml', 'netlify.toml',
 ]);
 
-function shell(command: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(command, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }
@@ -57,7 +57,7 @@ function readText(path: string, maxChars = 12000): string | undefined {
 }
 
 function findGitRoot(path: string): string {
-  const root = shell('git rev-parse --show-toplevel', path);
+  const root = git(['rev-parse', '--show-toplevel'], path);
   return root || path;
 }
 
@@ -148,8 +148,8 @@ function packageData(root: string): { scripts: Record<string, string>; framework
 
 export function getProjectProfile(path: string): ProjectProfile {
   const root = findGitRoot(path);
-  const branch = shell('git branch --show-current', root) || 'unknown';
-  const changedFiles = shell('git status --short', root)
+  const branch = git(['branch', '--show-current'], root) || 'unknown';
+  const changedFiles = git(['status', '--short'], root)
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)

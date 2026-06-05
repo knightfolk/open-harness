@@ -7,6 +7,7 @@
 import { runAgentPhase, type BackgroundAgentArtifact } from './agentRuntime';
 import type { RouteDecision } from './router';
 import type { StoredConfig } from './config';
+import type { HarnessRunStep } from './runTrace';
 
 export interface OrchestrationResult {
   /** The final merged text to show the user */
@@ -28,6 +29,10 @@ export interface OrchestrationPhase {
   summary: string;
 }
 
+export interface OrchestrationCallbacks {
+  onStep?: (step: HarnessRunStep) => void;
+}
+
 // ── Public API ─────────────────────────────────────────
 
 /**
@@ -41,6 +46,7 @@ export async function runOrchestratorPipeline(
   userMessage: string,
   config: StoredConfig,
   workingDir?: string,
+  callbacks: OrchestrationCallbacks = {},
 ): Promise<OrchestrationResult> {
   switch (route.mode) {
     case 'plan':
@@ -48,7 +54,7 @@ export async function runOrchestratorPipeline(
     case 'execute':
       return runExecutePipeline(route, userMessage, config, workingDir);
     case 'investigate':
-      return runInvestigatePipeline(route, userMessage, config, workingDir);
+      return runInvestigatePipeline(route, userMessage, config, workingDir, callbacks);
     case 'compare':
       return runComparePipeline(route, userMessage, config, workingDir);
     default:
@@ -483,6 +489,7 @@ async function runInvestigatePipeline(
   userMessage: string,
   config: StoredConfig,
   workingDir?: string,
+  callbacks: OrchestrationCallbacks = {},
 ): Promise<OrchestrationResult> {
   const phases: OrchestrationPhase[] = [];
 
@@ -496,12 +503,13 @@ async function runInvestigatePipeline(
     `## Instructions`,
     workingDir ? `Working directory: ${workingDir}` : '(no project folder open)',
     '',
-    `Inspect the relevant project context using available tools.`,
+    `Inspect the relevant project context using available read-only tools.`,
+    workingDir ? `Start by listing the working directory with <list_directory><path>${workingDir}</path></list_directory>.` : '',
     `Ground every claim in a specific file path and line number.`,
     `Synthesize findings into a direct answer with risks and next actions.`,
     `If the request is about the codebase, reference concrete code.`,
     `If the request is about the user's question, answer directly.`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   let exploreArtifact: BackgroundAgentArtifact | null = null;
   try {
@@ -510,6 +518,7 @@ async function runInvestigatePipeline(
       prompt: explorePrompt,
       modelId: exploreModel,
       workingDir,
+      onStep: callbacks.onStep,
     });
     phases.push({
       label: 'explorer',

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Bot, ChevronDown, ChevronRight, GitBranch, GripVertical, Laptop, ListPlus, Loader,
-  PanelRightClose, Send, Settings, Shield, Eye, EyeOff,
+  Bot, ChevronDown, ChevronRight, CircleGauge, FileSearch, GitBranch, Laptop,
+  ListPlus, Loader, PanelRightClose, Send, Shield, ShieldCheck, Eye, EyeOff,
+  X,
 } from 'lucide-react';
 import * as api from '../utils/api';
 import type { SubAgent } from '../types';
@@ -13,15 +14,16 @@ interface Props {
   onReviewChanges: () => void;
   onFocusAgents: () => void;
   rightRailPinned?: boolean;
-  onHide: () => void;
+  onHide?: () => void;
+  variant?: 'rail' | 'panel' | 'floating';
 }
 
 const TRUST_ICONS: Record<string, React.ReactNode> = {
-  'chat-only': <EyeOff size={12} />,
-  'read-only': <Eye size={12} />,
-  'ask-before-write': <Shield size={12} />,
-  'workspace-write': <Shield size={12} />,
-  'full-local': <Shield size={12} />,
+  'chat-only': <EyeOff size={16} />,
+  'read-only': <Eye size={16} />,
+  'ask-before-write': <Shield size={16} />,
+  'workspace-write': <ShieldCheck size={16} />,
+  'full-local': <Shield size={16} />,
 };
 
 const TRUST_COLORS: Record<string, string> = {
@@ -42,8 +44,8 @@ const TRUST_LABELS: Record<string, string> = {
 
 type SectionId = 'git' | 'agents' | 'access' | 'progress' | 'sources';
 const DEFAULT_ORDER: SectionId[] = ['git', 'agents', 'access', 'progress', 'sources'];
-const ORDER_KEY = 'openharness.wunderbar.order.v1';
-const COLLAPSED_KEY = 'openharness.wunderbar.collapsed.v1';
+const ORDER_KEY = 'openharness.right-panel.order.v1';
+const COLLAPSED_KEY = 'openharness.right-panel.collapsed.v1';
 
 function loadOrder(): SectionId[] {
   try {
@@ -77,6 +79,7 @@ export function EnvironmentRail({
   onReviewChanges,
   onFocusAgents,
   rightRailPinned = false,
+  variant = 'rail',
   onHide,
 }: Props) {
   const [branch, setBranch] = useState<string | null>(null);
@@ -193,7 +196,7 @@ export function EnvironmentRail({
     const defs: Record<SectionId, { title: string; icon: React.ReactNode; body: React.ReactNode; summary: React.ReactNode }> = {
       git: {
         title: 'Git',
-        icon: <GitBranch size={14} />,
+        icon: <GitBranch size={16} />,
         summary: clean ? <span className="env-clean">Clean</span> : (
           <span className="env-change-count">{fileCount} file{fileCount !== 1 ? 's' : ''}</span>
         ),
@@ -236,7 +239,7 @@ export function EnvironmentRail({
       },
       agents: {
         title: 'Agents',
-        icon: <Bot size={14} />,
+        icon: <Bot size={16} />,
         summary: totalAgents === 0 ? <span className="env-clean">None</span> : (
           <span className="env-change-count">
             {runningCount} of {totalAgents} running
@@ -269,7 +272,7 @@ export function EnvironmentRail({
       },
       access: {
         title: 'Access',
-        icon: TRUST_ICONS[trustMode] || <Shield size={14} />,
+        icon: TRUST_ICONS[trustMode] || <Shield size={16} />,
         summary: <span className="env-access" style={{ color: accessColor }}>{accessLabel}</span>,
         body: (
           <div className="env-card-row env-card-row-static">
@@ -281,7 +284,7 @@ export function EnvironmentRail({
       },
       progress: {
         title: 'Progress',
-        icon: <ListPlus size={14} />,
+        icon: <CircleGauge size={16} />,
         summary: null,
         body: (
           <div className="env-card-section-empty">
@@ -291,7 +294,7 @@ export function EnvironmentRail({
       },
       sources: {
         title: 'Sources',
-        icon: <ListPlus size={14} />,
+        icon: <FileSearch size={16} />,
         summary: null,
         body: (
           <div className="env-card-section-empty">
@@ -304,47 +307,60 @@ export function EnvironmentRail({
   }, [branch, fileCount, additions, deletions, clean, totalAgents, runningCount, trustMode, accessLabel, accessColor, onReviewChanges, onFocusAgents]);
 
   return (
-    <aside className="env-rail super-panel" data-super-panel="visible" aria-label="Super Panel">
+    <aside className={`env-rail ${variant === 'panel' ? 'env-rail-panel' : ''} ${variant === 'floating' ? 'env-rail-floating' : ''} ${variant === 'rail' ? 'right-panel-overlay' : ''}`} data-right-panel="visible" aria-label={variant === 'rail' ? 'Right panel' : 'Super panel'}>
       <div className="env-card">
         <div className="env-card-header">
           <div>
-            <div className="env-card-title super-panel-title">Super Panel</div>
-            <div className="env-card-subtitle">{projectName}</div>
+            <div className="env-card-title right-panel-project">{variant === 'floating' ? 'Environment' : projectName}</div>
+            {variant === 'floating' && projectName !== 'No project' && (
+              <div className="env-card-subtitle">{projectName}</div>
+            )}
           </div>
-          <div className="env-card-header-actions">
-            <button className="env-icon-btn" type="button" title="Super Panel settings" aria-label="Super Panel settings">
-              <Settings size={17} />
-            </button>
-            {!rightRailPinned && (
+          {variant === 'floating' && onHide && (
+            <div className="env-card-header-actions">
               <button
                 className="env-icon-btn super-panel-hide"
                 type="button"
                 onClick={onHide}
-                title="Hide Super Panel (⇧⌘S)"
-                aria-label="Hide Super Panel"
+                title="Hide Super panel"
+                aria-label="Hide Super panel"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          {variant === 'rail' && !rightRailPinned && onHide && (
+            <div className="env-card-header-actions">
+              <button
+                className="env-icon-btn right-panel-hide"
+                type="button"
+                onClick={onHide}
+                title="Hide right panel (⇧⌘S)"
+                aria-label="Hide right panel"
               >
                 <PanelRightClose size={17} />
               </button>
+            </div>
+          )}
+          {variant === 'rail' && (
+          <div className="right-panel-quickbar">
+            <span className="right-panel-quickbar-label">
+              {rightRailPinned ? 'Pinned while no workspace panel is open' : 'Hide panel'}
+            </span>
+            {!rightRailPinned && onHide && (
+              <button
+                className="right-panel-hide-labeled"
+                type="button"
+                onClick={onHide}
+                title="Hide right panel (⇧⌘S)"
+                aria-label="Hide right panel"
+              >
+                <PanelRightClose size={14} />
+                <span>Hide</span>
+                <kbd className="right-panel-kbd" aria-hidden="true">⇧⌘S</kbd>
+              </button>
             )}
           </div>
-        </div>
-
-        <div className="super-panel-quickbar">
-          <span className="super-panel-quickbar-label">
-            {rightRailPinned ? 'Pinned while no workspace panel is open' : 'Quickly hide'}
-          </span>
-          {!rightRailPinned && (
-            <button
-              className="super-panel-hide-labeled"
-              type="button"
-              onClick={onHide}
-              title="Hide Super Panel (⇧⌘S)"
-              aria-label="Hide Super Panel"
-            >
-              <PanelRightClose size={14} />
-              <span>Hide Super Panel</span>
-              <kbd className="super-panel-kbd" aria-hidden="true">⇧⌘S</kbd>
-            </button>
           )}
         </div>
 
@@ -362,17 +378,6 @@ export function EnvironmentRail({
                 onDrop={onDrop(id)}
               >
                 <div className="env-section-header">
-                  <span
-                    className="env-section-grip"
-                    draggable
-                    onDragStart={onDragStart(id)}
-                    onDragEnd={onDragEnd}
-                    title="Drag to reorder"
-                    role="button"
-                    aria-label={`Reorder ${def.title} section`}
-                  >
-                    <GripVertical size={12} />
-                  </span>
                   <button
                     type="button"
                     className="env-section-toggle"
@@ -382,7 +387,16 @@ export function EnvironmentRail({
                     <span className="env-section-toggle-icon">
                       {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                     </span>
-                    <span className="env-section-icon">{def.icon}</span>
+                    <span
+                      className="env-section-icon"
+                      draggable
+                      onDragStart={onDragStart(id)}
+                      onDragEnd={onDragEnd}
+                      title="Drag to reorder"
+                      aria-label={`Drag ${def.title} section`}
+                    >
+                      {def.icon}
+                    </span>
                     <span className="env-section-title">{def.title}</span>
                     <span className="env-section-summary">{def.summary}</span>
                   </button>

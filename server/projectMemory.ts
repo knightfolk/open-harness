@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
+import { redactSecrets } from './sectionRedaction';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ export function loadProfile(projectPath: string): any | null {
 export function saveMemory(projectPath: string, content: string): void {
   const dir = projectDir(projectPath);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(memoryPath(projectPath), content, 'utf-8');
+  writeFileSync(memoryPath(projectPath), redactSecrets(content).redacted, 'utf-8');
 }
 
 export function loadMemory(projectPath: string): string {

@@ -390,6 +390,9 @@ export function getModelConfig(modelId: string): ModelPromptConfig {
   const family = detectModelFamily(modelId);
   const base = MODEL_FAMILY_CONFIGS[family] || MODEL_FAMILY_CONFIGS['unknown'];
   const lower = modelId.toLowerCase();
+  if (family === 'minimax' && /m2[.-]?7/.test(lower)) {
+    return { ...base, contextWindowTokens: 204800, recommendedMaxTokens: 16000 };
+  }
   if (family === 'gemini' && /gemini-1\.5-pro/.test(lower)) {
     return { ...base, contextWindowTokens: 2000000, recommendedMaxTokens: 32768 };
   }

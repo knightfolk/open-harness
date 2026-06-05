@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, RotateCcw, FolderOpen,
   ChevronDown, Check, Wrench, PanelRightOpen, PanelRightClose, Terminal,
+  Heart,
 } from 'lucide-react';
 import type { PanelId } from '../types/layout';
 import { ALL_PANELS } from '../types/layout';
@@ -14,7 +15,6 @@ interface Props {
   onTogglePanel: (id: PanelId) => void;
   onResetLayout: () => void;
   sessionTitle: string;
-  activeModel: string;
   workingDir: string | null;
   onOpenFolder: () => void;
   rightRailOpen: boolean;
@@ -22,12 +22,15 @@ interface Props {
   rightRailPinned?: boolean;
   bottomBarOpen: boolean;
   onToggleBottomBar: () => void;
+  pinnedTools: PanelId[];
+  onTogglePinnedTool: (id: PanelId) => void;
 }
 
 export function TopBar({
   sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout,
-  sessionTitle, activeModel, workingDir, onOpenFolder,
+  sessionTitle, workingDir, onOpenFolder,
   rightRailOpen, onToggleRightRail, rightRailPinned = false, bottomBarOpen, onToggleBottomBar,
+  pinnedTools, onTogglePinnedTool,
 }: Props) {
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -44,7 +47,7 @@ export function TopBar({
     return () => document.removeEventListener('mousedown', handler);
   }, [panelMenuOpen]);
 
-  const panelMenuItems = ALL_PANELS.map((id) => {
+  const panelMenuItems = ALL_PANELS.filter((id) => id !== 'side-chat' && id !== 'terminal').map((id) => {
     const Icon = getPanelIcon(id);
     const config = getPanelConfig(id);
     const active = visiblePanels.has(id);
@@ -52,10 +55,30 @@ export function TopBar({
       <button
         key={id}
         className={'panel-menu-item' + (active ? ' active' : '')}
+        data-panel-menu-id={id}
         onClick={() => { onTogglePanel(id); setPanelMenuOpen(false); }}
       >
         <Icon size={14} />
         <span className="panel-menu-item-label">{config.label}</span>
+        <span
+          className={'panel-menu-heart' + (pinnedTools.includes(id) ? ' pinned' : '')}
+          role="button"
+          tabIndex={0}
+          title={pinnedTools.includes(id) ? 'Remove from sidebar' : 'Add to sidebar'}
+          aria-label={pinnedTools.includes(id) ? `Remove ${config.label} from sidebar` : `Add ${config.label} to sidebar`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePinnedTool(id);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            e.stopPropagation();
+            onTogglePinnedTool(id);
+          }}
+        >
+          <Heart size={13} />
+        </span>
         {active && <Check size={14} className="panel-menu-check" />}
       </button>
     );
@@ -76,11 +99,6 @@ export function TopBar({
         )}
       </div>
 
-      <div className="top-bar-model">
-        <span className="top-bar-model-dot" />
-        {activeModel}
-      </div>
-
       <div className="top-bar-actions">
         <button className="top-bar-action" onClick={onOpenFolder} title="Open folder">
           <FolderOpen size={16} />
@@ -99,11 +117,11 @@ export function TopBar({
           className={'top-bar-action' + (rightRailOpen ? ' active' : '')}
           onClick={onToggleRightRail}
           title={rightRailPinned
-            ? 'Right panel stays visible while no workspace panel is open'
-            : rightRailOpen ? 'Hide right panel' : 'Show right panel'}
+            ? 'Right tools panel stays visible while no workspace panel is open'
+            : rightRailOpen ? 'Hide right tools panel' : 'Show right tools panel'}
           aria-label={rightRailPinned
-            ? 'Right panel pinned open'
-            : rightRailOpen ? 'Hide right panel' : 'Show right panel'}
+            ? 'Right tools panel pinned open'
+            : rightRailOpen ? 'Hide right tools panel' : 'Show right tools panel'}
         >
           {rightRailOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </button>

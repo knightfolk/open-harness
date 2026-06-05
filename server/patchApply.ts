@@ -1,8 +1,6 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
-import { writeFileSync, unlinkSync, mkdtempSync } from 'fs';
 import { isAbsolute, relative, resolve } from 'path';
-import { tmpdir } from 'os';
 
 export interface PatchResult {
   files: string[];
@@ -11,10 +9,9 @@ export interface PatchResult {
 
 /**
  * Apply a unified diff patch using the system `patch` command, scoped to
- * `workingDir`. The patch is written to a temp file in the OS tmpdir (never
- * in the project being patched) and then applied via `patch -p1` with
- * `cwd = workingDir`, so the system `patch` binary only ever touches the
- * directory the caller asked for.
+ * `workingDir`. The patch text is passed over stdin with `cwd = workingDir`,
+ * so the system `patch` binary only ever touches the directory the caller
+ * asked for.
  *
  * `workingDir` is required. The function also performs a static pre-flight
  * scan: any `diff --git a/X b/X` line whose `X` resolves to an absolute
@@ -65,25 +62,21 @@ export function applyPatch(patchText: string, workingDir: string): PatchResult {
     }
   }
 
-  // Write the patch into the OS tmpdir, not the project, so scratch data
-  // never lands in the working tree we are about to mutate.
-  const tmpDir = mkdtempSync(joinSafe(tmpdir(), 'openharness-patch-'));
-  const patchFile = joinSafe(tmpDir, 'patch.diff');
-  writeFileSync(patchFile, patchText, 'utf-8');
-
   try {
     // 1) Dry-run. If the patch is malformed, abort before touching disk.
-    execSync(`patch --dry-run -p1 --no-backup-if-mismatch < "${patchFile}" 2>&1`, {
+    execFileSync('patch', ['--dry-run', '-p1', '--no-backup-if-mismatch'], {
       encoding: 'utf-8',
       timeout: 10_000,
       cwd: safeWorkingDir,
+      input: patchText,
     });
 
     // 2) Real apply, again scoped to workingDir.
-    const stdout = execSync(`patch -p1 --no-backup-if-mismatch < "${patchFile}" 2>&1`, {
+    const stdout = execFileSync('patch', ['-p1', '--no-backup-if-mismatch'], {
       encoding: 'utf-8',
       timeout: 10_000,
       cwd: safeWorkingDir,
+      input: patchText,
     });
 
     const patched: string[] = [];
@@ -92,19 +85,14 @@ export function applyPatch(patchText: string, workingDir: string): PatchResult {
     }
     return { files: patched, errors: [] };
   } catch (err: any) {
-    const text = (err?.stdout ? err.stdout + '\n' : '') + (err?.message || 'Patch apply failed');
+    const text = [
+      err?.stdout,
+      err?.stderr,
+      err?.message || 'Patch apply failed',
+    ].filter(Boolean).join('\n');
     const lines = text.split('\n').filter((l: string) => l.trim());
     return { files: [], errors: lines.slice(0, 10) };
-  } finally {
-    try { unlinkSync(patchFile); } catch { /* ignore */ }
   }
-}
-
-function joinSafe(a: string, b: string): string {
-  // Local helper so this file does not need to import `join` from 'path'
-  // (which it would otherwise do purely for this one call).
-  if (a.endsWith('/') || a.endsWith('\\')) return a + b;
-  return a + '/' + b;
 }
 
 function normalizePatchPath(rawPath: string): string {

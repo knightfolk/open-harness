@@ -57,6 +57,7 @@ export function PanelWrapper({ panelId, onClose, onSwap, children }: Props) {
     <div
       ref={frameRef}
       className={`panel-frame panel-frame--${panelId} ${dragOver ? 'panel-drop-target' : ''}`}
+      data-panel-id={panelId}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

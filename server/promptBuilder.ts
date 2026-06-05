@@ -6,6 +6,7 @@
  * Data source: docs/MODEL_PROMPTING_GUIDE.md (May 2026 research)
  */
 import { getModelConfig, isReasoningModel, type ModelPromptConfig } from './modelProfiles';
+import { UNTRUSTED_CONTEXT_RULES, wrapUntrustedBlock } from './untrustedContent';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
 function buildSystemPrompt(config: ModelPromptConfig, options: BuildPromptOptions): string {
   const role = options.role || config.defaultRole || 'coder';
   const rolePrompt = ROLE_PROMPTS[role] || ROLE_PROMPTS['coder'];
-  const personality = options.personality;
+  const personality = normalizePersonality(options.personality);
 
   switch (config.systemPromptStyle) {
     case 'xml-tagged':
@@ -136,6 +137,13 @@ function buildSystemPrompt(config: ModelPromptConfig, options: BuildPromptOption
     default:
       return buildStructuredPrompt(config, rolePrompt, personality, options);
   }
+}
+
+function normalizePersonality(personality?: string): string | undefined {
+  if (!personality) return undefined;
+  return personality
+    .replace(/Explain your reasoning step by step\./gi, 'Provide a concise rationale.')
+    .replace(/Include context, alternatives considered, and tradeoffs\./gi, 'Include relevant context, alternatives considered, and tradeoffs when useful.');
 }
 
 function buildXMLPrompt(
@@ -155,7 +163,7 @@ function buildXMLPrompt(
     parts.push('<context>');
     parts.push(`The user has a project open at: ${options.workingDir}`);
     parts.push('Reference files by their full paths. Use proper file paths in code blocks.');
-    if (options.projectProfileSummary) parts.push(options.projectProfileSummary);
+    if (options.projectProfileSummary) parts.push(wrapUntrustedBlock('project context', options.projectProfileSummary));
     parts.push('</context>');
   }
 
@@ -165,8 +173,9 @@ function buildXMLPrompt(
   parts.push('2. After using tools, provide a clear final answer');
   parts.push('3. Use markdown formatting in responses');
   parts.push('4. Respond in English');
+  parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('5. Follow the most recent instructions precisely');
+    parts.push('6. Follow the most recent trusted user instructions precisely');
   }
   parts.push('</rules>');
 
@@ -200,7 +209,7 @@ function buildStructuredPrompt(
     parts.push(`## Context`);
     parts.push(`The user has a project open at: ${options.workingDir}`);
     parts.push('Reference files by their full paths. Use proper file paths in code blocks.');
-    if (options.projectProfileSummary) parts.push(options.projectProfileSummary);
+    if (options.projectProfileSummary) parts.push(wrapUntrustedBlock('project context', options.projectProfileSummary));
   }
 
   parts.push('');
@@ -209,8 +218,9 @@ function buildStructuredPrompt(
   parts.push('2. After using tools, provide a clear final answer with findings');
   parts.push('3. Use markdown formatting in responses');
   parts.push('4. Respond in English');
+  parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('5. Follow the most recent instructions precisely');
+    parts.push('6. Follow the most recent trusted user instructions precisely');
   }
 
   if (options.taskDescription) {
@@ -238,10 +248,10 @@ function buildConcisePrompt(
 
   if (options.workingDir) {
     parts.push(`Project: ${options.workingDir}`);
-    if (options.projectProfileSummary) parts.push(options.projectProfileSummary);
+    if (options.projectProfileSummary) parts.push(wrapUntrustedBlock('project context', options.projectProfileSummary));
   }
 
-  parts.push('Rules: Use tools when needed. Give clear answers. Markdown format. English only.');
+  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES}`);
 
   if (options.taskDescription) {
     parts.push(`Task: ${options.taskDescription}`);
@@ -261,10 +271,10 @@ function buildMinimalPrompt(
 ): string {
   const base = personality || rolePrompt;
   if (options.workingDir) {
-    const profile = options.projectProfileSummary ? ` ${options.projectProfileSummary}` : '';
-    return `${base} Project: ${options.workingDir}.${profile} Be concise.`;
+    const profile = options.projectProfileSummary ? ` ${wrapUntrustedBlock('project context', options.projectProfileSummary)}` : '';
+    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} Be concise.`;
   }
-  return base;
+  return `${base} ${UNTRUSTED_CONTEXT_RULES}`;
 }
 
 // ── Tool adaptation ────────────────────────────────────

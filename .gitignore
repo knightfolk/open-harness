@@ -32,3 +32,8 @@ OpenHarnessApp/Sources/OpenHarnessApp/Resources/dist/
 
 # Temporary backup files
 *.bak
+
+# Generated benchmark fixtures
+test-fixtures/flappy-bird-eval/
+test-fixtures/prompt-injection-eval/
+.openharness-bench/

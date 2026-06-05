@@ -42,7 +42,7 @@ import {
 } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { v4 as uuid } from 'uuid';
 import { getStatus, getFileDiff } from './git';
 
@@ -97,7 +97,7 @@ function writeProjectMeta(root: string, meta: ProjectMeta) {
 
 function runGit(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args.join(' ')}`, {
+    return execFileSync('git', args, {
       cwd,
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
@@ -110,7 +110,7 @@ function runGit(args: string[], cwd: string): string {
 
 function getGitRoot(dir: string): string | null {
   try {
-    return execSync('git rev-parse --show-toplevel', {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: dir,
       encoding: 'utf-8',
       timeout: 5000,
@@ -338,7 +338,7 @@ export function applyCheckpointDiff(dir: string, id: string): RestoreCheckpointR
     try {
       const full = join(root, file.path);
       ensureDir(dirname(full));
-      execSync('git apply --whitespace=nowarn -', {
+      execFileSync('git', ['apply', '--whitespace=nowarn', '-'], {
         cwd: root,
         input: file.content,
         encoding: 'utf-8',

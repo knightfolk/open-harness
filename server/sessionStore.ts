@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { redactSecrets } from './sectionRedaction';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -30,6 +31,17 @@ export interface PersistedSession {
   version?: number;
 }
 
+function redactPersistedValue<T>(value: T): T {
+  if (typeof value === 'string') return redactSecrets(value).redacted as T;
+  if (Array.isArray(value)) return value.map((item) => redactPersistedValue(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactPersistedValue(item)]),
+    ) as T;
+  }
+  return value;
+}
+
 // ── Storage paths ──────────────────────────────────────
 
 const SESSIONS_DIR = join(homedir(), '.openharness', 'sessions');
@@ -46,7 +58,7 @@ function sessionPath(id: string): string {
 
 export function saveSession(session: PersistedSession): void {
   ensureDir();
-  writeFileSync(sessionPath(session.id), JSON.stringify(session, null, 2), 'utf-8');
+  writeFileSync(sessionPath(session.id), JSON.stringify(redactPersistedValue(session), null, 2), 'utf-8');
 }
 
 // ── Load ───────────────────────────────────────────────

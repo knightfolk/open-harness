@@ -4,17 +4,19 @@ import {
   Sparkles, Globe, Search, FileText,
   Command, Layout, Grid, Layers, Loader,
   ChevronDown, ChevronRight, CheckCircle2, Circle, Bot, AlertCircle, FolderOpen,
+  Trash2,
 } from 'lucide-react';
-import type { SidebarTab, Session, Skill, Plugin, MemoryEntry, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
+import type { SidebarTab, Skill, Plugin, MemoryEntry, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
+import type { SessionInfo } from '../utils/api';
 import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
 
 interface Props {
   isOpen: boolean;
-  sessions: Session[];
+  sessions: SessionInfo[];
   activeSessionId?: string;
   activeSubAgents: SubAgent[];
   onSelectSession: (id: string) => void;
-  onNewSession: () => void;
+  onNewSession: (workingDir?: string | null) => void;
   activeModel: string;
   providers: ProviderConfig[];
   roleAssignments: CodingRoleAssignment[];
@@ -36,6 +38,9 @@ interface Props {
   onPersonalityChange: (text: string) => void;
   onOpenFolder?: () => void;
   onFocusAgent?: (agentId: string) => void;
+  width?: number;
+  onDeleteSession?: (id: string) => void;
+  onDeleteProject?: (workingDir: string | null) => void;
 }
 
 const tabConfig = [
@@ -62,13 +67,13 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onOpenSettings, onSelectSession, onNewSession, onOpenFolder, onFocusAgent }: Props) {
+export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onOpenSettings, onSelectSession, onNewSession, onOpenFolder, onFocusAgent, width, onDeleteSession, onDeleteProject }: Props) {
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
 
   if (!isOpen) return null;
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={width ? { width, minWidth: width } : undefined}>
       <div className="sidebar-tabs">
         {tabConfig.map(({ key, icon: Icon, label }) => (
           <button
@@ -92,6 +97,8 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
             onNewSession={onNewSession}
             onOpenFolder={onOpenFolder}
             onFocusAgent={onFocusAgent}
+            onDeleteSession={onDeleteSession}
+            onDeleteProject={onDeleteProject}
           />
         )}
         {activeTab === 'skills' && <SkillsTab skills={mockSkills} plugins={mockPlugins} />}
@@ -122,18 +129,21 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
 /*  Chat Tab — sessions with nested sub-agents                        */
 /* ------------------------------------------------------------------ */
 
-function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder, onFocusAgent }: {
-  sessions: Session[];
+function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder, onFocusAgent, onDeleteSession, onDeleteProject }: {
+  sessions: SessionInfo[];
   activeSessionId?: string;
   activeSubAgents: SubAgent[];
   onSelectSession: (id: string) => void;
-  onNewSession: () => void;
+  onNewSession: (workingDir?: string | null) => void;
   onOpenFolder?: () => void;
   onFocusAgent?: (agentId: string) => void;
+  onDeleteSession?: (id: string) => void;
+  onDeleteProject?: (workingDir: string | null) => void;
 }) {
+  const projectGroups = groupSessionsByProject(sessions);
   return (
     <>
-      <button className="new-session-btn" onClick={onNewSession}>
+      <button className="new-session-btn" onClick={() => onNewSession()}>
         <Plus size={15} />
         New Session
       </button>
@@ -143,48 +153,116 @@ function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, 
           Open Folder
         </button>
       )}
-      {sessions.map((session) => {
-        const isActive = session.id === activeSessionId;
-        const isRunning = isActive && activeSubAgents.length > 0;
-        return (
-          <div key={session.id}>
-            {/* Main session row */}
-            <div
-              className={`session-item ${isActive ? 'active' : ''} ${isActive && activeSubAgents.length > 0 ? 'has-agents' : ''}`}
-              onClick={() => onSelectSession(session.id)}
-            >
-              <div className="session-item-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {isActive && isRunning && (
-                  <div className="session-running-dot" />
-                )}
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {session.title}
-                </span>
-              </div>
-              <div className="session-item-preview">
-                {session.messages.length > 0
-                  ? session.messages[session.messages.length - 1].content.slice(0, 60) + '...'
-                  : 'Empty session'}
-              </div>
-              <div className="session-item-time">
-                <Clock size={10} style={{ marginRight: 4, verticalAlign: -1 }} />
-                {formatRelativeTime(session.updatedAt)}
-              </div>
+      {projectGroups.map((group) => (
+        <div className="project-group" key={group.key}>
+          <div className="project-group-header">
+            <div className="project-group-title">
+              <FolderOpen size={13} />
+              <span>{group.name}</span>
             </div>
-
-            {/* Sub-agents nested under the active session */}
-            {isActive && activeSubAgents.length > 0 && (
-              <div className="sub-agent-tree">
-                {activeSubAgents.map((agent) => (
-                  <SubAgentRow key={agent.id} agent={agent} onFocus={onFocusAgent ? () => onFocusAgent(agent.id) : undefined} />
-                ))}
-              </div>
-            )}
+            <div className="project-group-actions">
+              <button
+                className="sidebar-icon-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNewSession(group.workingDir);
+                }}
+                title={`New chat in ${group.name}`}
+                aria-label={`New chat in ${group.name}`}
+              >
+                <Plus size={12} />
+              </button>
+              <span>{group.sessions.length}</span>
+              {onDeleteProject && (
+                <button
+                  className="sidebar-icon-button danger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete all chats for ${group.name}?`)) onDeleteProject(group.workingDir);
+                  }}
+                  title={`Delete ${group.name}`}
+                  aria-label={`Delete ${group.name}`}
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
           </div>
-        );
-      })}
+          {group.sessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+            const isRunning = isActive && activeSubAgents.length > 0;
+            return (
+              <div key={session.id}>
+                <div
+                  className={`session-item ${isActive ? 'active' : ''} ${isActive && activeSubAgents.length > 0 ? 'has-agents' : ''}`}
+                  onClick={() => onSelectSession(session.id)}
+                >
+                  <div className="session-item-topline">
+                    <div className="session-item-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {isActive && isRunning && <div className="session-running-dot" />}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {session.title}
+                      </span>
+                    </div>
+                    {onDeleteSession && (
+                      <button
+                        className="sidebar-icon-button danger session-delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete chat "${session.title}"?`)) onDeleteSession(session.id);
+                        }}
+                        title="Delete chat"
+                        aria-label="Delete chat"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="session-item-preview">
+                    {session.preview || 'Empty session'}
+                  </div>
+                  <div className="session-item-time">
+                    <Clock size={10} style={{ marginRight: 4, verticalAlign: -1 }} />
+                    {formatRelativeTime(new Date(session.updatedAt))}
+                  </div>
+                </div>
+
+                {isActive && activeSubAgents.length > 0 && (
+                  <div className="sub-agent-tree">
+                    {activeSubAgents.map((agent) => (
+                      <SubAgentRow key={agent.id} agent={agent} onFocus={onFocusAgent ? () => onFocusAgent(agent.id) : undefined} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </>
   );
+}
+
+function groupSessionsByProject(sessions: SessionInfo[]) {
+  const groups = new Map<string, { key: string; name: string; workingDir: string | null; sessions: SessionInfo[] }>();
+  for (const session of sessions) {
+    const workingDir = session.workingDir || null;
+    const key = workingDir || '__no_project__';
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        name: workingDir ? basename(workingDir) : 'No Project',
+        workingDir,
+        sessions: [],
+      });
+    }
+    groups.get(key)!.sessions.push(session);
+  }
+  return Array.from(groups.values());
+}
+
+function basename(path: string) {
+  return path.split('/').filter(Boolean).pop() || path;
 }
 
 /* ------------------------------------------------------------------ */

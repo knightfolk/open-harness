@@ -2,7 +2,6 @@ import { Suspense, lazy } from 'react';
 import type { PanelId } from '../../types/layout';
 
 const SubAgentTracker = lazy(() => import('../SubAgentTracker').then((m) => ({ default: m.SubAgentTracker })));
-const PlanTracker = lazy(() => import('../PlanTracker').then((m) => ({ default: m.PlanTracker })));
 const ChatPanel = lazy(() => import('../ChatPanel').then((m) => ({ default: m.ChatPanel })));
 const DiffViewer = lazy(() => import('../DiffViewer').then((m) => ({ default: m.DiffViewer })));
 const BrowserPanel = lazy(() => import('../BrowserPanel').then((m) => ({ default: m.BrowserPanel })));
@@ -20,6 +19,7 @@ interface Props {
     plan: any;
     fileChanges: any[];
     terminalCommands: any[];
+    focusedSubAgentId?: string | null;
     messages: any[];
     isTyping: boolean;
     onSendMessage: (msg: string) => void;
@@ -35,7 +35,12 @@ interface Props {
     onExplainChange?: (filePath: string) => void;
     onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
     onCompareModel?: () => void;
+    onReviewChanges?: () => void;
+    onFocusAgents?: () => void;
+    trustMode?: string;
     models?: Array<{ id: string; name: string }>;
+    pinnedTools?: PanelId[];
+    onOpenPinnedTool?: (id: PanelId) => void;
   };
 }
 
@@ -61,9 +66,9 @@ export function PanelContent({ panelId, context }: Props) {
   );
   switch (panelId) {
     case 'chat':
-      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} />);
+      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} pinnedTools={context.pinnedTools || []} onOpenPinnedTool={context.onOpenPinnedTool || (() => {})} />);
     case 'side-chat':
-      return wrapped(<SideChatPanel />);
+      return wrapped(<SideChatPanel activeModel={context.activeModel} models={context.models || []} />);
     case 'diffs':
       return wrapped(<DiffViewer workingDir={context.workingDir} onReviewDiff={context.onReviewDiff} onProposePatch={context.onProposePatch} onExplainChange={context.onExplainChange} />);
     case 'browser':
@@ -71,9 +76,7 @@ export function PanelContent({ panelId, context }: Props) {
     case 'terminal':
       return wrapped(<TerminalPanel workingDir={context.workingDir} onSendToChat={context.onSendToChat} />);
     case 'sub-agents':
-      return wrapped(<SubAgentTracker agents={context.subAgents} />);
-    case 'plan':
-      return wrapped(context.plan ? <PlanTracker plan={context.plan} /> : <EmptyState text="No active plan" />);
+      return wrapped(<SubAgentTracker agents={context.subAgents} focusedAgentId={context.focusedSubAgentId ?? null} />);
     case 'files':
       return wrapped(<FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />);
     case 'model-lab':

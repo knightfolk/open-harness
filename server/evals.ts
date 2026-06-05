@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 
 import { join } from 'path';
 import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
+import { redactSecrets } from './sectionRedaction';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -89,15 +90,64 @@ export interface EvalSummary {
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
 }
 
+export interface EvalRecommendation {
+  role: string;
+  modelId: string;
+  reason: string;
+  reportId: string;
+  reportName: string;
+  generatedAt: string;
+}
+
 // ── Storage ────────────────────────────────────────────
 
-const EVALS_DIR = join(homedir(), '.openharness', 'evals');
-const SUITES_DIR = join(EVALS_DIR, 'suites');
-const REPORTS_DIR = join(EVALS_DIR, 'reports');
+const PRIMARY_EVALS_DIR = join(homedir(), '.openharness', 'evals');
+const PRIMARY_SUITES_DIR = join(PRIMARY_EVALS_DIR, 'suites');
+const PRIMARY_REPORTS_DIR = join(PRIMARY_EVALS_DIR, 'reports');
+
+function dedupe(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function getEvalDataHomeCandidates(): string[] {
+  const homes = new Set<string>();
+  homes.add(homedir());
+
+  if (process.platform === 'darwin') {
+    homes.add(join(homedir(), 'Library', 'Application Support', 'Parall', 'Codex Stock'));
+  }
+
+  if (process.env.OPENHARNESS_HOME_DIR) {
+    homes.add(process.env.OPENHARNESS_HOME_DIR.trim());
+  }
+
+  return dedupe(Array.from(homes));
+}
+
+function getEvalDirCandidates(...parts: string[]): string[] {
+  return dedupe(
+    getEvalDataHomeCandidates().map((home) =>
+      join(home, '.openharness', ...parts),
+    ),
+  );
+}
+
+const REPORTS_DIRS = getEvalDirCandidates('evals', 'reports');
+
+function redactPersistedValue<T>(value: T): T {
+  if (typeof value === 'string') return redactSecrets(value).redacted as T;
+  if (Array.isArray(value)) return value.map((item) => redactPersistedValue(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactPersistedValue(item)]),
+    ) as T;
+  }
+  return value;
+}
 
 function ensureDirs() {
-  mkdirSync(SUITES_DIR, { recursive: true });
-  mkdirSync(REPORTS_DIR, { recursive: true });
+  mkdirSync(PRIMARY_SUITES_DIR, { recursive: true });
+  mkdirSync(PRIMARY_REPORTS_DIR, { recursive: true });
 }
 
 ensureDirs();
@@ -256,34 +306,120 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
 // ── Report Persistence ─────────────────────────────────
 
 export function saveReport(report: EvalReport): void {
-  const path = join(REPORTS_DIR, `${report.id}.json`);
-  writeFileSync(path, JSON.stringify(report, null, 2), 'utf-8');
+  const path = join(PRIMARY_REPORTS_DIR, `${report.id}.json`);
+  writeFileSync(path, JSON.stringify(redactPersistedValue(report), null, 2), 'utf-8');
 }
 
 export function loadReport(id: string): EvalReport | null {
-  const path = join(REPORTS_DIR, `${id}.json`);
-  if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, 'utf-8'));
+  for (const dir of REPORTS_DIRS) {
+    const path = join(dir, `${id}.json`);
+    if (!existsSync(path)) continue;
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  }
+  return null;
 }
 
 export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number }> {
-  if (!existsSync(REPORTS_DIR)) return [];
-  const files = readdirSync(REPORTS_DIR).filter(f => f.endsWith('.json'));
-  return files.map(f => {
-    try {
-      const report: EvalReport = JSON.parse(readFileSync(join(REPORTS_DIR, f), 'utf-8'));
-      return {
-        id: report.id,
-        name: report.name,
-        status: report.status,
-        createdAt: report.createdAt,
-        completedAt: report.completedAt,
-        total: report.total,
-      };
-    } catch {
-      return null;
+  const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number }>();
+
+  for (const dir of REPORTS_DIRS) {
+    if (!existsSync(dir)) continue;
+    const files = readdirSync(dir).filter(f => f.endsWith('.json'));
+    for (const f of files) {
+      try {
+        const report: EvalReport = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
+        reportMap.set(report.id, {
+          id: report.id,
+          name: report.name,
+          status: report.status,
+          createdAt: report.createdAt,
+          completedAt: report.completedAt,
+          total: report.total,
+        });
+      } catch {
+        // ignore malformed report files
+      }
     }
-  }).filter(Boolean) as Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number }>;
+  }
+
+  const reports = Array.from(reportMap.values());
+  reports.sort((a, b) => {
+    const aDate = new Date(a.completedAt || a.createdAt).getTime();
+    const bDate = new Date(b.completedAt || b.createdAt).getTime();
+    return bDate - aDate;
+  });
+  return reports;
+}
+
+function readReportsFromDir(path: string): EvalReport[] {
+  if (!existsSync(path)) return [];
+  const files = readdirSync(path).filter((f) => f.endsWith('.json'));
+  const parsed: EvalReport[] = [];
+  for (const file of files) {
+    try {
+      parsed.push(JSON.parse(readFileSync(join(path, file), 'utf-8')) as EvalReport);
+    } catch {
+      // ignore malformed report files
+    }
+  }
+  return parsed;
+}
+
+function reportTimestamp(report: EvalReport): number {
+  return new Date(report.completedAt || report.createdAt).getTime();
+}
+
+function getPersistedReports(): EvalReport[] {
+  if (!REPORTS_DIRS.some((dir) => existsSync(dir))) return [];
+
+  const byId = new Map<string, EvalReport>();
+  for (const dir of REPORTS_DIRS) {
+    for (const report of readReportsFromDir(dir)) {
+      const current = byId.get(report.id);
+      if (!current || reportTimestamp(report) > reportTimestamp(current)) {
+        byId.set(report.id, report);
+      }
+    }
+  }
+  return Array.from(byId.values());
+}
+
+function getAllReports(): EvalReport[] {
+  const byId = new Map<string, EvalReport>();
+  for (const report of activeRuns.values()) {
+    byId.set(report.id, report);
+  }
+  for (const report of getPersistedReports()) {
+    if (!byId.has(report.id)) byId.set(report.id, report);
+  }
+  return Array.from(byId.values());
+}
+
+function getLatestCompletedEvalReport(): EvalReport | null {
+  const completed = getAllReports()
+    .filter((r) => r.status === 'complete' && r.summary);
+  if (completed.length === 0) return null;
+
+  completed.sort((a, b) => {
+    const aDate = new Date(a.completedAt || a.createdAt).getTime();
+    const bDate = new Date(b.completedAt || b.createdAt).getTime();
+    return bDate - aDate;
+  });
+  return completed[0];
+}
+
+export function getLatestEvalRecommendations(): EvalRecommendation[] {
+  const latest = getLatestCompletedEvalReport();
+  if (!latest?.summary?.recommendations || latest.summary.recommendations.length === 0) return [];
+
+  return latest.summary.recommendations.map((rec) => ({
+    role: rec.role,
+    modelId: rec.modelId,
+    reason: rec.reason,
+    reportId: latest.id,
+    reportName: latest.name,
+    generatedAt: latest.completedAt || latest.createdAt,
+  }));
 }
 
 // ── Summary Generation ─────────────────────────────────

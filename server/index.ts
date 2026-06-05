@@ -1,15 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
-import { readFileSync, readdirSync, statSync, existsSync, lstatSync } from 'fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync } from 'fs';
 import { join, basename, extname } from 'path';
-import { homedir } from 'os';
-import { execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef } from './config';
 import type { StoredMCPServer, StoredProvider } from './config';
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
 import { checkDockerReadiness } from './dockerReadiness';
+import { dockerDesktopEnv } from './dockerDesktopEnv';
 import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAllCuratedServers } from './curatedMcp';
 import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost } from './modelProfiles';
 import { buildContextWindow } from './contextManager';
@@ -47,11 +47,45 @@ import { captureDeepBrowser } from './browserCapture';
 import { analyzeDomStructure, checkResourceHealth } from './browserCaptureEnhancements';
 import { estimateSections, redactSecrets } from "./sectionRedaction";
 import { parseToolCallMarkup, MarkupScrubber, type MarkupParseResult } from './toolCallMarkup';
+import { wrapUntrustedBlock } from './untrustedContent';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
   const result = parseToolCallMarkup(text, knownToolNames);
   return result.matchedAny ? result.remainder : text;
+}
+
+function sanitizeFilePart(value: string): string {
+  return value.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'model';
+}
+
+function redactOutputText(text: string): string {
+  return redactSecrets(text).redacted;
+}
+
+function redactToolResult(value: any): any {
+  if (typeof value === 'string') return redactOutputText(value);
+  if (Array.isArray(value)) return value.map((item) => redactToolResult(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactToolResult(item)]));
+  }
+  return value;
+}
+
+function wrapToolResultForModel(toolName: string, content: string): string {
+  return wrapUntrustedBlock(`tool:${toolName}`, content);
+}
+
+const DOCKER_MCP_ARGS = ['mcp', 'gateway', 'run', '--transport', 'stdio', '--profile', 'ai_coding'];
+
+async function startDockerMcpGateway() {
+  const child = spawn('docker', DOCKER_MCP_ARGS, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: dockerDesktopEnv(),
+  });
+  child.on('error', (err: Error) => console.log('[mcp-gw] Failed:', err.message));
+  child.on('exit', (code: number | null) => console.log('[mcp-gw] exited with code', code));
+  return mcpManager.startStdioClient('docker-mcp', 'Docker MCP', child, 'docker', DOCKER_MCP_ARGS);
 }
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import {
@@ -78,18 +112,23 @@ import * as checkpoints from './checkpoints';
 import * as worktrees from './worktrees';
 import * as protectedPaths from './protectedPaths';
 import * as processLedger from './processLedger';
-import { filterToolsForTrustMode, checkToolActionPolicy, isPathAllowed, type TrustMode } from './toolPolicy';
+import { filterToolsForTrustMode, checkCommandPolicy, checkToolActionPolicy, isPathAllowed, isPathWithin, isReadPathAllowed, type TrustMode } from './toolPolicy';
 import * as sessionStore from './sessionStore';
 import * as projectMemory from './projectMemory';
 import { getAdapterInfo, discoverLocalProviders, streamWithAdapter } from './providers/registry';
 import type { ProviderChatRequest, ProviderMessage } from './providers/types';
 
 const app = express();
+const UI_PORT = process.env.OPENHARNESS_VITE_PORT || process.env.VITE_PORT || '5173';
+const UI_ORIGIN = process.env.OPENHARNESS_UI_URL || `http://localhost:${UI_PORT}`;
+const MODEL_REQUEST_TIMEOUT_MS = 90_000;
 const allowedOrigins = new Set([
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3001',
   'http://127.0.0.1:3001',
+  'http://host.docker.internal:5173',
+  'http://host.docker.internal:3001',
 ]);
 app.use(cors({
   origin(origin, callback) {
@@ -98,6 +137,22 @@ app.use(cors({
   },
 }));
 app.use(express.json({ limit: '50mb' }));
+
+app.get('/', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(
+    [
+      '<!doctype html>',
+      '<html>',
+      '<head><title>OpenHarness</title></head>',
+      '<body style="font: 14px/1.4 system-ui, -apple-system, sans-serif; padding: 16px; color: #e6edf3; background: #0d0f11;">',
+      '<h1 style="margin: 0 0 8px; font-size: 18px;">OpenHarness API is running</h1>',
+      `<p>Frontend is served from ${UI_ORIGIN}. Open <a href="${UI_ORIGIN}" style="color:#6ca6e6;">${UI_ORIGIN}</a> to use the app.</p>`,
+      '</body>',
+      '</html>',
+    ].join('\n'),
+  );
+});
 
 // ── Types ──────────────────────────────────────────────
 interface SessionRow {
@@ -308,17 +363,17 @@ function runShellCommand(command: string, cwd: string, timeoutMs = 30000): Promi
     };
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      resolve({ output: output + '\n[command timed out]', exitCode: 124 });
+      resolve({ output: redactOutputText(output + '\n[command timed out]'), exitCode: 124 });
     }, timeoutMs);
     child.stdout.on('data', append);
     child.stderr.on('data', append);
     child.on('error', (err) => {
       clearTimeout(timer);
-      resolve({ output: err.message, exitCode: 1 });
+      resolve({ output: redactOutputText(err.message), exitCode: 1 });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ output, exitCode: code ?? 0 });
+      resolve({ output: redactOutputText(output), exitCode: code ?? 0 });
     });
   });
 }
@@ -326,6 +381,30 @@ function runShellCommand(command: string, cwd: string, timeoutMs = 30000): Promi
 // ── In-memory store ────────────────────────────────────
 const sessions: Map<string, SessionRow> = new Map();
 
+function knownWorkspaceRoots(): string[] {
+  const roots = new Set<string>([process.cwd()]);
+  for (const session of sessions.values()) {
+    if (session.workingDir) roots.add(session.workingDir);
+  }
+  return Array.from(roots);
+}
+
+function isKnownWorkspacePath(candidate: string | undefined): boolean {
+  if (!candidate) return false;
+  return knownWorkspaceRoots().some((root) => isPathWithin(candidate, root));
+}
+
+function trustedWorkspaceFromRequest(req: express.Request): string {
+  const body = (req.body || {}) as any;
+  const sessionId = (req.params.id || body.sessionId || req.query.sessionId) as string | undefined;
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (session?.workingDir) return session.workingDir;
+
+  const requested = (body.workingDir || body.cwd || req.query.workingDir || req.query.cwd) as string | undefined;
+  if (isKnownWorkspacePath(requested)) return requested!;
+
+  return process.cwd();
+}
 
 // Load persisted sessions from disk on startup
 const persisted = sessionStore.loadAllSessions();
@@ -715,15 +794,36 @@ app.delete('/api/mcp-servers/:id', (req, res) => {
 // ── MCP runtime endpoints ─────────────────────────────
 
 app.get('/api/mcp/status', (_req, res) => {
-  res.json(mcpManager.getStatus());
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const status = mcpManager.getStatus().map((server: any) => {
+    const tools = Array.isArray(server.tools) ? server.tools : [];
+    const policy = filterToolsForTrustMode(tools, trustMode);
+    const allowed = new Set(policy.filteredTools || []);
+    return {
+      ...server,
+      usableToolCount: allowed.size,
+      blockedToolCount: Math.max(0, tools.length - allowed.size),
+      tools: tools.map((tool: any) => ({
+        ...tool,
+        allowed: allowed.has(tool.name),
+      })),
+    };
+  });
+  res.json(status);
 });
 
 app.post('/api/mcp/:serverId/tools/:toolName', async (req, res) => {
   const { serverId, toolName } = req.params;
   const args = req.body || {};
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const workingDir = trustedWorkspaceFromRequest(req);
+  const toolPolicy = checkToolActionPolicy(toolName, args, trustMode, workingDir);
+  if (!toolPolicy.allowed) {
+    return res.status(403).json({ error: toolPolicy.reason || 'Tool call not allowed' });
+  }
   try {
     const result = await mcpManager.callTool(serverId, toolName, args);
-    res.json({ result });
+    res.json({ result: redactToolResult(result) });
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
@@ -731,12 +831,12 @@ app.post('/api/mcp/:serverId/tools/:toolName', async (req, res) => {
 
 app.post('/api/mcp/:serverId/start', async (req, res) => {
   const { serverId } = req.params;
-  const server = serverId === 'docker-mcp'
-    ? { id: 'docker-mcp', name: 'Docker MCP', endpoint: 'stdio://docker mcp gateway run --transport stdio --profile ai_coding' }
-    : appConfig.mcpServers.find((s) => s.id === serverId);
-  if (!server) return res.status(404).json({ error: 'Server not found' });
+  const server = appConfig.mcpServers.find((s) => s.id === serverId);
+  if (serverId !== 'docker-mcp' && !server) return res.status(404).json({ error: 'Server not found' });
   try {
-    const client = await mcpManager.startServer(server.id, server.name, server.endpoint);
+    const client = serverId === 'docker-mcp'
+      ? await startDockerMcpGateway()
+      : await mcpManager.startServer(server!.id, server!.name, server!.endpoint);
     res.json({
       id: client.id,
       name: client.name,
@@ -758,11 +858,11 @@ app.post('/api/mcp/:serverId/restart', async (req, res) => {
   const { serverId } = req.params;
   try {
     await mcpManager.stopServer(serverId).catch(() => {});
-    const server = serverId === 'docker-mcp'
-      ? { id: 'docker-mcp', name: 'Docker MCP', endpoint: 'stdio://docker mcp gateway run --transport stdio --profile ai_coding' }
-      : appConfig.mcpServers.find((s) => s.id === serverId);
-    if (!server) return res.status(404).json({ error: 'Server not found' });
-    const client = await mcpManager.startServer(server.id, server.name, server.endpoint);
+    const server = appConfig.mcpServers.find((s) => s.id === serverId);
+    if (serverId !== 'docker-mcp' && !server) return res.status(404).json({ error: 'Server not found' });
+    const client = serverId === 'docker-mcp'
+      ? await startDockerMcpGateway()
+      : await mcpManager.startServer(server!.id, server!.name, server!.endpoint);
     res.json({
       id: client.id,
       name: client.name,
@@ -877,6 +977,9 @@ app.get('/api/models', (_req, res) => {
 app.get('/api/fs/list', (req, res) => {
   const dir = req.query.path as string;
   if (!dir || !existsSync(dir)) return res.status(400).json({ error: 'Invalid path' });
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const readPolicy = isReadPathAllowed(dir, trustMode, trustedWorkspaceFromRequest(req));
+  if (!readPolicy.allowed) return res.status(403).json({ error: readPolicy.reason || 'Path refused' });
 
   try {
     const stat = statSync(dir);
@@ -914,6 +1017,9 @@ app.get('/api/fs/list', (req, res) => {
 app.get('/api/fs/read', (req, res) => {
   const filePath = req.query.path as string;
   if (!filePath || !existsSync(filePath)) return res.status(400).json({ error: 'Invalid path' });
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const readPolicy = isReadPathAllowed(filePath, trustMode, trustedWorkspaceFromRequest(req));
+  if (!readPolicy.allowed) return res.status(403).json({ error: readPolicy.reason || 'Path refused' });
 
   try {
     const stat = statSync(filePath);
@@ -940,15 +1046,15 @@ app.post('/api/terminal/exec', async (req, res) => {
   const { command, cwd } = req.body as { command: string; cwd?: string };
   if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
   const cmdTrustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
-  const cmdPolicy = checkToolActionPolicy('exec_command', { command, cwd }, cmdTrustMode, cwd);
+  const workingDir = isKnownWorkspacePath(cwd) ? cwd! : process.cwd();
+  const cmdPolicy = checkToolActionPolicy('exec_command', { command, cwd: workingDir }, cmdTrustMode, workingDir);
   if (!cmdPolicy.allowed) return res.status(403).json({ error: cmdPolicy.reason || 'Command not allowed' });
 
-  const workingDir = cwd || homedir();
   const start = Date.now();
 
   const result = await runShellCommand(command, workingDir);
   res.json({
-    command,
+    command: redactOutputText(command),
     output: result.output,
     exitCode: result.exitCode,
     duration: Date.now() - start,
@@ -960,7 +1066,14 @@ app.post('/api/terminal/exec', async (req, res) => {
 
 app.post('/api/terminal/sessions', (req, res) => {
   const { cwd } = req.body as { cwd?: string };
-  const session = createTermSession(cwd || process.cwd());
+  if (cwd && !isKnownWorkspacePath(cwd)) {
+    return res.status(403).json({ error: 'Terminal sessions must be created inside a trusted workspace' });
+  }
+  const workingDir = cwd || process.cwd();
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const readPolicy = isReadPathAllowed(workingDir, trustMode, workingDir);
+  if (!readPolicy.allowed) return res.status(403).json({ error: readPolicy.reason || 'Workspace not allowed' });
+  const session = createTermSession(workingDir);
   res.status(201).json(session);
 });
 
@@ -972,11 +1085,15 @@ app.get('/api/terminal/sessions/:sessionId/history', (req, res) => {
 app.post('/api/terminal/sessions/:sessionId/run', (req, res) => {
   const { command, cwd } = req.body as { command?: string; cwd?: string };
   if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const workingDir = isKnownWorkspacePath(cwd) ? cwd! : process.cwd();
+  const cmdPolicy = checkToolActionPolicy('exec_command', { command, cwd: workingDir }, trustMode, workingDir);
+  if (!cmdPolicy.allowed) return res.status(403).json({ error: cmdPolicy.reason || 'Command not allowed' });
 
   const entry = runTermCommand({
     sessionId: req.params.sessionId,
     command,
-    cwd,
+    cwd: workingDir,
     timeout: 120_000,
   });
   res.status(201).json(entry);
@@ -998,8 +1115,10 @@ app.get('/api/terminal/commands/:commandId', (req, res) => {
 app.get('/api/git/status', (req, res) => {
   const dir = req.query.dir as string;
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    res.json(git.getStatus(dir));
+    res.json(git.getStatus(workspace.dir));
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
@@ -1008,11 +1127,17 @@ app.get('/api/git/status', (req, res) => {
 app.get('/api/git/diff', (req, res) => {
   const dir = req.query.dir as string;
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  if (req.query.path) {
+    const pathCheck = validateRepoRelativePaths([req.query.path as string], workspace.dir);
+    if (!pathCheck.ok) return res.status(pathCheck.status).json({ error: pathCheck.error });
+  }
   try {
     const opts: { cached?: boolean; path?: string } = {};
     if (req.query.cached) opts.cached = true;
     if (req.query.path) opts.path = req.query.path as string;
-    res.json(git.getDiff(dir, opts));
+    res.json(git.getDiff(workspace.dir, opts));
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
@@ -1022,8 +1147,12 @@ app.get('/api/git/file-diff', (req, res) => {
   const dir = req.query.dir as string;
   const path = req.query.path as string;
   if (!dir || !path) return res.status(400).json({ error: 'dir and path are required' });
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const pathCheck = validateRepoRelativePaths([path], workspace.dir);
+  if (!pathCheck.ok) return res.status(pathCheck.status).json({ error: pathCheck.error });
   try {
-    res.json(git.getFileDiff(dir, path));
+    res.json(git.getFileDiff(workspace.dir, path));
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
@@ -1032,8 +1161,12 @@ app.get('/api/git/file-diff', (req, res) => {
 app.post('/api/git/stage', (req, res) => {
   const { dir, paths } = req.body as { dir: string; paths: string[] };
   if (!dir || !paths?.length) return res.status(400).json({ error: 'dir and paths are required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const pathCheck = validateRepoRelativePaths(paths, workspace.dir);
+  if (!pathCheck.ok) return res.status(pathCheck.status).json({ error: pathCheck.error });
   try {
-    git.stageFiles(dir, paths);
+    git.stageFiles(workspace.dir, paths);
     res.json({ ok: true });
   } catch (err: any) {
     res.status(502).json({ error: err.message });
@@ -1043,8 +1176,12 @@ app.post('/api/git/stage', (req, res) => {
 app.post('/api/git/unstage', (req, res) => {
   const { dir, paths } = req.body as { dir: string; paths: string[] };
   if (!dir || !paths?.length) return res.status(400).json({ error: 'dir and paths are required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const pathCheck = validateRepoRelativePaths(paths, workspace.dir);
+  if (!pathCheck.ok) return res.status(pathCheck.status).json({ error: pathCheck.error });
   try {
-    git.unstageFiles(dir, paths);
+    git.unstageFiles(workspace.dir, paths);
     res.json({ ok: true });
   } catch (err: any) {
     res.status(502).json({ error: err.message });
@@ -1054,8 +1191,10 @@ app.post('/api/git/unstage', (req, res) => {
 app.post('/api/git/commit', (req, res) => {
   const { dir, message } = req.body as { dir: string; message: string };
   if (!dir || !message?.trim()) return res.status(400).json({ error: 'dir and message are required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    const result = git.commit(dir, message);
+    const result = git.commit(workspace.dir, message);
     res.json(result);
   } catch (err: any) {
     res.status(502).json({ error: err.message });
@@ -1065,9 +1204,11 @@ app.post('/api/git/commit', (req, res) => {
 app.get('/api/git/log', (req, res) => {
   const dir = req.query.dir as string;
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
     const count = req.query.count ? parseInt(req.query.count as string, 10) : 20;
-    res.json(git.getLog(dir, count));
+    res.json(git.getLog(workspace.dir, count));
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
@@ -1158,6 +1299,131 @@ function scopeCheckOrThrow(workingDir: string): void {
     err.statusCode = 400;
     throw err;
   }
+}
+
+function ensureKnownWorkspace(dir: string): { ok: true; dir: string } | { ok: false; status: number; error: string } {
+  if (!dir?.trim()) return { ok: false, status: 400, error: 'dir is required' };
+  if (!isKnownWorkspacePath(dir)) {
+    return { ok: false, status: 403, error: 'Directory is outside trusted workspaces' };
+  }
+  return { ok: true, dir };
+}
+
+function ensureWorkspaceReadAllowed(dir: string): { ok: true; dir: string } | { ok: false; status: number; error: string } {
+  const workspace = ensureKnownWorkspace(dir);
+  if (!workspace.ok) return workspace;
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const readPolicy = isReadPathAllowed(workspace.dir, trustMode, workspace.dir);
+  if (!readPolicy.allowed) {
+    return { ok: false, status: 403, error: readPolicy.reason || 'Workspace read not allowed' };
+  }
+  return workspace;
+}
+
+function ensureLocalMutationAllowed(): { ok: true } | { ok: false; status: number; error: string } {
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  if (trustMode === 'read-only' || trustMode === 'chat-only') {
+    return { ok: false, status: 403, error: `Write operations not allowed in ${trustMode} mode` };
+  }
+  return { ok: true };
+}
+
+function ensureWorkspaceMutationAllowed(dir: string): { ok: true; dir: string } | { ok: false; status: number; error: string } {
+  const workspace = ensureKnownWorkspace(dir);
+  if (!workspace.ok) return workspace;
+  const mutation = ensureLocalMutationAllowed();
+  if (!mutation.ok) return mutation;
+  return workspace;
+}
+
+const TASK_TRUST_MODES = new Set(['read-only', 'ask-before-write', 'workspace-write']);
+
+function validateHarnessTaskInput(
+  input: Partial<harnessTasks.HarnessTask>,
+  fallbackWorkingDir?: string,
+): { ok: true; task: any } | { ok: false; status: number; error: string } {
+  const workingDir = typeof input.workingDir === 'string' && input.workingDir.trim()
+    ? input.workingDir
+    : fallbackWorkingDir || process.cwd();
+  const workspace = ensureKnownWorkspace(workingDir);
+  if (!workspace.ok) return workspace;
+
+  const trustMode = input.trustMode || 'workspace-write';
+  if (!TASK_TRUST_MODES.has(trustMode)) {
+    return { ok: false, status: 400, error: 'Invalid task trustMode' };
+  }
+
+  const setupCommands = Array.isArray(input.setupCommands) ? input.setupCommands : [];
+  const verificationCommands = Array.isArray(input.verificationCommands) ? input.verificationCommands : [];
+  for (const command of [...setupCommands, ...verificationCommands]) {
+    if (typeof command !== 'string' || !command.trim()) {
+      return { ok: false, status: 400, error: 'Task commands must be non-empty strings' };
+    }
+    const policy = checkCommandPolicy(command, (appConfig.trustMode || 'workspace-write') as TrustMode);
+    if (!policy.allowed) {
+      return { ok: false, status: 403, error: `Task command refused: ${policy.reason || 'Command not allowed'}` };
+    }
+  }
+
+  return {
+    ok: true,
+    task: {
+      ...input,
+      workingDir: workspace.dir,
+      trustMode,
+      setupCommands,
+      verificationCommands,
+    },
+  };
+}
+
+function validateBenchTaskExecution(
+  task: harnessTasks.HarnessTask,
+  fallbackWorkingDir: string,
+): { ok: true; dir: string } | { ok: false; status: number; error: string } {
+  const workspace = ensureKnownWorkspace(task.workingDir || fallbackWorkingDir);
+  if (!workspace.ok) return workspace;
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  for (const command of [...(task.setupCommands || []), ...(task.verificationCommands || [])]) {
+    const policy = checkCommandPolicy(command, trustMode);
+    if (!policy.allowed) {
+      return { ok: false, status: 403, error: `Task command refused: ${policy.reason || 'Command not allowed'}` };
+    }
+  }
+  return { ok: true, dir: workspace.dir };
+}
+
+function validateRepoRelativePaths(paths: string[], workspace: string): { ok: true } | { ok: false; status: number; error: string } {
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p.trim()) {
+      return { ok: false, status: 400, error: 'Invalid path' };
+    }
+    if (p.startsWith('-') || p.includes('\0') || p.includes('\n') || p.includes('\r')) {
+      return { ok: false, status: 400, error: `Unsafe path: ${p}` };
+    }
+    if (!isPathWithin(join(workspace, p), workspace)) {
+      return { ok: false, status: 403, error: `Path is outside workspace: ${p}` };
+    }
+  }
+  return { ok: true };
+}
+
+function validateRepoQueryPath(value: unknown): { ok: true; dir: string } | { ok: false; status: number; error: string } {
+  const targetPath = typeof value === 'string' && value.trim() ? value : process.cwd();
+  if (!existsSync(targetPath)) return { ok: false, status: 404, error: 'path not found' };
+  return ensureWorkspaceReadAllowed(targetPath);
+}
+
+function validateRepoFiles(files: string[], workspace: string): { ok: true } | { ok: false; status: number; error: string } {
+  for (const file of files) {
+    if (typeof file !== 'string' || !file.trim()) {
+      return { ok: false, status: 400, error: 'Invalid file path' };
+    }
+    if (!isPathWithin(file, workspace)) {
+      return { ok: false, status: 403, error: `File ${file} is outside trusted workspace` };
+    }
+  }
+  return { ok: true };
 }
 
 const DEV_PREVIEW_PORTS = [5173, 3000, 4173, 8787, 8080, 4321];
@@ -1426,6 +1692,7 @@ app.post('/api/patch-proposals/:id/apply', async (req, res) => {
           exitCode: 1,
           stdout: '',
           stderr: err?.message || 'Validation runner crashed',
+          findings: [err?.message || 'Validation runner crashed'],
           durationMs: 0,
           passed: false,
         }];
@@ -1478,9 +1745,10 @@ app.post('/api/patch-proposals/:id/apply', async (req, res) => {
 app.post('/api/dialog/open-folder', (_req, res) => {
   // Use osascript on macOS to show a folder picker
   try {
-    const result = execSync(
-      `osascript -e 'POSIX path of (choose folder with prompt "Open Folder")'`,
-      { encoding: 'utf-8' }
+    const result = execFileSync(
+      'osascript',
+      ['-e', 'POSIX path of (choose folder with prompt "Open Folder")'],
+      { encoding: 'utf-8' },
     ).trim();
     res.json({ path: result });
   } catch {
@@ -1507,9 +1775,10 @@ function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunSte
 app.get('/api/project/profile', (req, res) => {
   const targetPath = req.query.path as string;
   if (!targetPath) return res.status(400).json({ error: 'path is required' });
-  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  const workspace = validateRepoQueryPath(targetPath);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    res.json(getProjectProfile(targetPath));
+    res.json(getProjectProfile(workspace.dir));
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to build project profile' });
   }
@@ -1524,12 +1793,12 @@ function parsePack(value: unknown): ContextPackName | null {
 }
 
 app.get('/api/repo/map', (req, res) => {
-  const targetPath = (req.query.path as string) || process.cwd();
-  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  const workspace = validateRepoQueryPath(req.query.path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const budgetRaw = Number(req.query.tokenBudget);
   const tokenBudget = Number.isFinite(budgetRaw) && budgetRaw > 0 ? Math.min(Math.floor(budgetRaw), 20000) : 4500;
   try {
-    const map = getRepoMap(targetPath);
+    const map = getRepoMap(workspace.dir);
     res.json(summarizeRepoMap(map, tokenBudget));
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to build repo map' });
@@ -1537,12 +1806,12 @@ app.get('/api/repo/map', (req, res) => {
 });
 
 app.get('/api/repo/symbol', (req, res) => {
-  const targetPath = (req.query.path as string) || process.cwd();
+  const workspace = validateRepoQueryPath(req.query.path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const name = (req.query.name as string || '').trim();
   if (!name) return res.status(400).json({ error: 'name is required' });
-  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
   try {
-    const map = getRepoMap(targetPath);
+    const map = getRepoMap(workspace.dir);
     const matches = findSymbolDefinition(map, name).slice(0, 50);
     res.json({ query: name, matchCount: matches.length, matches });
   } catch (err: any) {
@@ -1551,12 +1820,14 @@ app.get('/api/repo/symbol', (req, res) => {
 });
 
 app.get('/api/repo/deps', (req, res) => {
-  const targetPath = (req.query.path as string) || process.cwd();
+  const workspace = validateRepoQueryPath(req.query.path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const file = (req.query.file as string || '').trim();
   if (!file) return res.status(400).json({ error: 'file is required' });
-  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  const filesCheck = validateRepoFiles([file], workspace.dir);
+  if (!filesCheck.ok) return res.status(filesCheck.status).json({ error: filesCheck.error });
   try {
-    const map = getRepoMap(targetPath);
+    const map = getRepoMap(workspace.dir);
     res.json({
       file,
       imports: getDirectDependencies(map, file),
@@ -1568,13 +1839,15 @@ app.get('/api/repo/deps', (req, res) => {
 });
 
 app.get('/api/repo/impact', (req, res) => {
-  const targetPath = (req.query.path as string) || process.cwd();
+  const workspace = validateRepoQueryPath(req.query.path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const raw = (req.query.files as string || '').trim();
   if (!raw) return res.status(400).json({ error: 'files is required (comma-separated)' });
   const files = raw.split(',').map((s) => s.trim()).filter(Boolean);
-  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
+  const filesCheck = validateRepoFiles(files, workspace.dir);
+  if (!filesCheck.ok) return res.status(filesCheck.status).json({ error: filesCheck.error });
   try {
-    const map = getRepoMap(targetPath);
+    const map = getRepoMap(workspace.dir);
     res.json({ files, ...summarizeChangeImpact(map, files) });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to compute impact' });
@@ -1587,14 +1860,14 @@ app.get('/api/repo/context-pack/suggest', (req, res) => {
 });
 
 app.get('/api/repo/context-pack', (req, res) => {
-  const targetPath = (req.query.path as string) || process.cwd();
+  const workspace = validateRepoQueryPath(req.query.path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const pack = parsePack(req.query.pack) || suggestContextPack((req.query.userMessage as string) || '').pack;
   const userMessage = (req.query.userMessage as string) || '';
   const budgetRaw = Number(req.query.budgetTokens);
   const budgetTokens = Number.isFinite(budgetRaw) && budgetRaw > 0 ? Math.min(Math.floor(budgetRaw), 20000) : 2500;
-  if (!existsSync(targetPath)) return res.status(404).json({ error: 'path not found' });
   try {
-    const map = getRepoMap(targetPath);
+    const map = getRepoMap(workspace.dir);
     const cp = buildContextPack(map, pack, userMessage, budgetTokens);
     res.json(cp);
   } catch (err: any) {
@@ -1608,8 +1881,9 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
-  const { content } = req.body as { content: string };
+  const { content, modelId } = req.body as { content: string; modelId?: string };
   if (!content?.trim()) return res.status(400).json({ error: 'Content is required' });
+  const requestedModelOverride = typeof modelId === 'string' && modelId.trim() ? modelId.trim() : undefined;
 
   const userMsg: MessageRow = {
     id: uuid(),
@@ -1634,18 +1908,18 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   writeSSE(res, 'user_message', userMsg);
   writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
 
-  const requestedModel = getActiveModel();
-  const resolved = resolveActiveProvider();
+  const requestedModel = requestedModelOverride || getActiveModel();
+  const resolved = requestedModelOverride ? resolveProviderForModel(requestedModelOverride) : resolveActiveProvider();
   const run = createHarnessRun({
     sessionId: session.id,
     userMessageId: userMsg.id,
     requestedModel,
     providerId: resolved?.providerId || 'local',
   });
-  writeSSE(res, 'run_start', run);
 
   const route = await routeWithAutoRouter(content, appConfig);
   run.role = route.role;
+  writeSSE(res, 'run_start', run);
   const rd = route.routerData;
   if (rd && rd.source === 'auto') {
     emitRunStep(res, run, {
@@ -1658,23 +1932,22 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       classifierModel: rd.classifierModel ?? null,
     });
 
-  // Record routing decision for cross-session learning
-  if (rd && rd.source === 'auto') {
     recordRoutingDecision({
       timestamp: new Date().toISOString(),
       sessionId: session.id,
       taskHash: String(Math.abs(content.split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0)).toString(36)),
       selectedModel: route.suggestedModels[0] || requestedModel,
       score: rd.score ?? 0,
-      candidateScores: {},
+      candidateScores: rd.candidateScores || {},
       wasFallback: rd.fallback ?? false,
       wasCached: rd.cached ?? false,
       classifierModel: rd.classifierModel ?? null,
       surface: 'orchestrator',
       complexity: route.complexity,
+      taskType: route.mode,
+      role: route.role,
       userTurns: session.messages.length,
     });
-  }
   }
 
   // Non-direct modes run multi-agent orchestration instead of single-stream model
@@ -1683,7 +1956,9 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
 
     try {
-      const orchResult = await runOrchestratorPipeline(route, content, appConfig, session.workingDir || undefined);
+      const orchResult = await runOrchestratorPipeline(route, content, appConfig, session.workingDir || undefined, {
+        onStep: (step) => emitRunStep(res, run, step),
+      });
 
       // Emit per-phase run steps
       for (const phase of orchResult.phases) {
@@ -1712,7 +1987,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   } else if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session, run);
   } else {
-    await streamModelWithFallback(resolved, session, res, assistantId, run, route);
+    await streamModelWithFallback(resolved, session, res, assistantId, run, route, requestedModelOverride);
   }
 
   completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
@@ -1803,9 +2078,15 @@ async function invokeMCPTool(
   toolName: string,
   args: Record<string, any>,
   toolServerMap: Record<string, string>,
+  workingDir?: string,
 ): Promise<any> {
   const serverId = toolServerMap[toolName];
   if (!serverId) throw new Error('No server for tool: ' + toolName);
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const toolPolicy = checkToolActionPolicy(toolName, args, trustMode, workingDir || process.cwd());
+  if (!toolPolicy.allowed) {
+    throw new Error(toolPolicy.reason || 'Tool call not allowed by trust mode');
+  }
 
   // ── Built-in tools (handled locally) ────────────────
   if (serverId === '__builtin__') {
@@ -1837,15 +2118,17 @@ async function invokeMCPTool(
           const stat = statSync(filePath);
           if (stat.isDirectory()) return { error: 'Path is a directory' };
           if (stat.size > 1024 * 1024) return { error: 'File too large (max 1MB)' };
-          return { path: filePath, content: readFileSync(filePath, 'utf-8'), size: stat.size };
+          return { path: filePath, content: redactOutputText(readFileSync(filePath, 'utf-8')), size: stat.size };
         } catch (err: any) { return { error: err.message }; }
       }
       case 'exec_command': {
         const command = args.command as string;
-        const cwd = (args.cwd as string) || homedir();
+        const requestedCwd = args.cwd as string | undefined;
+        const baseCwd = workingDir || process.cwd();
+        const cwd = requestedCwd && isPathWithin(requestedCwd, baseCwd) ? requestedCwd : baseCwd;
         if (!command?.trim()) return { error: 'No command' };
         const result = await runShellCommand(command, cwd);
-        return { output: result.output, exitCode: result.exitCode, cwd };
+        return { output: redactOutputText(result.output), exitCode: result.exitCode, cwd };
       }
       default:
         return { error: 'Unknown built-in tool: ' + toolName };
@@ -1853,7 +2136,7 @@ async function invokeMCPTool(
   }
 
   // ── MCP tools (handled by MCP manager) ──────────────
-  return mcpManager.callTool(serverId, toolName, args);
+  return redactToolResult(await mcpManager.callTool(serverId, toolName, args));
 }
 
 async function parseStreamForContentAndTools(
@@ -2077,8 +2360,9 @@ async function streamWithNativeAdapter(
       // branch uses, so behavior stays consistent across providers.
       for (const tc of roundToolCalls) {
         const tcId = tc.id || uuid();
-        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: tc.arguments }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments });
+        const displayArgs = redactOutputText(tc.arguments);
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: displayArgs }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs });
 
         const startTime = Date.now();
         let output: string;
@@ -2087,28 +2371,28 @@ async function streamWithNativeAdapter(
 
         if (isRedundantToolCall(toolTracker, tc.name, parsedArgs)) {
           const skipMsg = `[Skipped: ${tc.name} already called with same path]`;
-          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 }) + '\n\n');
-          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: skipMsg, durationMs: 0 });
+          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: skipMsg, durationMs: 0 });
           // `name` is what Gemini's functionResponse needs to match the call.
-          roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: skipMsg });
-          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 });
+          roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: wrapToolResultForModel(tc.name, skipMsg) });
+          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 });
           continue;
         }
 
         try {
-          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap);
+          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined);
           output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } catch (err: any) {
-          output = 'Error: ' + err.message;
+          output = redactOutputText('Error: ' + err.message);
         }
         const duration = Date.now() - startTime;
 
-        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 500), duration }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: output.slice(0, 500), durationMs: duration });
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 500), duration }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: output.slice(0, 500), durationMs: duration });
 
-        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 2000), duration });
+        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 2000), duration });
         // `name` is what Gemini's functionResponse needs to match the call.
-        roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: output });
+        roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: wrapToolResultForModel(tc.name, output) });
       }
     }
 
@@ -2133,8 +2417,11 @@ async function streamWithNativeAdapter(
     session.updatedAt = new Date().toISOString();
     sessionStore.saveSession(session);
   } catch (err: any) {
-    if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
-    res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
+    const message = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+      ? `Model request timed out after ${Math.round(MODEL_REQUEST_TIMEOUT_MS / 1000)}s`
+      : err?.message || 'Model request failed';
+    if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message }); }
+    res.write('event: error\ndata: ' + JSON.stringify({ error: message }) + '\n\n');
   }
 }
 
@@ -2344,6 +2631,7 @@ async function streamModel(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -2392,8 +2680,9 @@ async function streamModel(
       // Invoke each tool call via MCP
       for (const tc of toolCalls) {
         const tcId = tc.id || uuid();
-        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: tc.arguments }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments });
+        const displayArgs = redactOutputText(tc.arguments);
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: displayArgs }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs });
 
         const startTime = Date.now();
         let output: string;
@@ -2403,28 +2692,28 @@ async function streamModel(
         // Skip redundant tool calls (already listed/read this path)
         if (isRedundantToolCall(toolTracker, tc.name, parsedArgs)) {
           const skipMsg = `[Skipped: ${tc.name} already called with same path]`;
-          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 }) + '\n\n');
-          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: skipMsg, durationMs: 0 });
-          apiMessages.push({ role: 'tool', tool_call_id: tcId, content: skipMsg });
-          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: skipMsg, duration: 0 });
+          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: skipMsg, durationMs: 0 });
+          apiMessages.push({ role: 'tool', tool_call_id: tcId, content: wrapToolResultForModel(tc.name, skipMsg) });
+          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 });
           continue;
         }
 
         try {
-          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap);
+          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined);
           output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } catch (err: any) {
-          output = 'Error: ' + err.message;
+          output = redactOutputText('Error: ' + err.message);
         }
         const duration = Date.now() - startTime;
 
-        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 500), duration }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: tc.arguments, outputPreview: output.slice(0, 500), durationMs: duration });
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 500), duration }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: output.slice(0, 500), durationMs: duration });
 
-        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: tc.arguments, output: output.slice(0, 2000), duration });
+        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 2000), duration });
 
         // Add tool result to conversation for next round
-        apiMessages.push({ role: 'tool', tool_call_id: tcId, content: output });
+        apiMessages.push({ role: 'tool', tool_call_id: tcId, content: wrapToolResultForModel(tc.name, output) });
       }
     }
 
@@ -2448,6 +2737,7 @@ async function streamModel(
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
           body: JSON.stringify(forcedBody),
+          signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
         });
         if (forcedResponse.ok) {
           const forcedToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
@@ -2542,7 +2832,9 @@ app.post('/api/test/run', async (req, res) => {
 
   const tid = testId || 'test-' + Date.now();
   const targetModel = modelId || appConfig.activeModel;
-  const targetDir = workingDir || process.cwd();
+  const workspace = ensureWorkspaceReadAllowed(workingDir || process.cwd());
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const targetDir = workspace.dir;
 
   // Create a temporary session for the test
   const testSession: SessionRow = {
@@ -2616,7 +2908,7 @@ app.post('/api/test/run', async (req, res) => {
     runStatus.status = 'complete';
   }
 
-  const response = chunks.join('');
+  const response = redactOutputText(chunks.join(''));
   res.json({
     testId: tid,
     model: targetModel,
@@ -2665,7 +2957,9 @@ app.post('/api/test/batch', async (req, res) => {
   }
 
   const tid = runId || 'batch-' + Date.now();
-  const targetDir = workingDir || process.cwd();
+  const workspace = ensureWorkspaceReadAllowed(workingDir || process.cwd());
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const targetDir = workspace.dir;
   const total = prompts.length * modelIds.length;
 
   activeTestRuns.set(tid, { total, completed: 0, status: 'running', results: [] });
@@ -2736,7 +3030,7 @@ app.post('/api/test/batch', async (req, res) => {
         disposeEphemeralSession(testSession.id);
       }
 
-      const response = chunks.join('');
+      const response = redactOutputText(chunks.join(''));
       runStatus.results.push({
         model: modelId,
         prompt: p.id,
@@ -2780,21 +3074,27 @@ app.get('/api/providers/local-discovery', async (_req, res) => {
 app.get('/api/project/memory', (req, res) => {
   const path = req.query.path as string;
   if (!path) return res.status(400).json({ error: 'path is required' });
-  const memory = projectMemory.loadProjectMemory(path);
+  const workspace = ensureKnownWorkspace(path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const memory = projectMemory.loadProjectMemory(workspace.dir);
   res.json(memory);
 });
 
 app.put('/api/project/memory', (req, res) => {
   const { path, content } = req.body as { path: string; content: string };
   if (!path || content == null) return res.status(400).json({ error: 'path and content are required' });
-  projectMemory.saveMemory(path, content);
+  const workspace = ensureWorkspaceMutationAllowed(path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  projectMemory.saveMemory(workspace.dir, content);
   res.json({ ok: true });
 });
 
 app.post('/api/project/memory/append', (req, res) => {
   const { path, content } = req.body as { path: string; content: string };
   if (!path || !content) return res.status(400).json({ error: 'path and content are required' });
-  projectMemory.appendToMemory(path, content);
+  const workspace = ensureWorkspaceMutationAllowed(path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  projectMemory.appendToMemory(workspace.dir, content);
   res.json({ ok: true });
 });
 
@@ -2867,7 +3167,7 @@ app.post('/api/chat/compare', async (req, res) => {
     return res.status(502).json({ error: err.message });
   }
 
-  const response = chunks.join('');
+  const response = redactOutputText(chunks.join(''));
   res.json({
     model: targetModel,
     providerId: resolved.providerId,
@@ -2892,12 +3192,18 @@ app.get('/api/tasks/:id', (req, res) => {
 });
 
 app.post('/api/tasks', (req, res) => {
-  const task = harnessTasks.createTask(req.body);
+  const validated = validateHarnessTaskInput(req.body);
+  if (!validated.ok) return res.status(validated.status).json({ error: validated.error });
+  const task = harnessTasks.createTask(validated.task);
   res.status(201).json(task);
 });
 
 app.put('/api/tasks/:id', (req, res) => {
-  const task = harnessTasks.updateTask(req.params.id, req.body);
+  const existing = harnessTasks.getTask(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Task not found' });
+  const validated = validateHarnessTaskInput({ ...existing, ...req.body }, existing.workingDir);
+  if (!validated.ok) return res.status(validated.status).json({ error: validated.error });
+  const task = harnessTasks.updateTask(req.params.id, validated.task);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   res.json(task);
 });
@@ -2909,7 +3215,9 @@ app.delete('/api/tasks/:id', (req, res) => {
 
 app.post('/api/tasks/seed', (req, res) => {
   const { workingDir } = req.body as { workingDir?: string };
-  harnessTasks.seedFixtures(workingDir || process.cwd());
+  const workspace = ensureKnownWorkspace(workingDir || process.cwd());
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  harnessTasks.seedFixtures(workspace.dir);
   res.json({ ok: true, count: harnessTasks.listTasks().length });
 });
 
@@ -2943,7 +3251,14 @@ app.get('/api/task-suites/:id/export', (req, res) => {
 
 app.post('/api/task-suites/import', (req, res) => {
   try {
-    const suite = harnessTasks.importSuite(req.body);
+    const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
+    const validatedTasks = [];
+    for (const task of tasks) {
+      const validated = validateHarnessTaskInput(task);
+      if (!validated.ok) return res.status(validated.status).json({ error: validated.error });
+      validatedTasks.push(validated.task);
+    }
+    const suite = harnessTasks.importSuite({ ...req.body, tasks: validatedTasks });
     res.status(201).json(suite);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -2994,6 +3309,17 @@ app.post('/api/bench/run', async (req, res) => {
   const tasks = taskIds.map(id => harnessTasks.getTask(id)).filter(Boolean) as harnessTasks.HarnessTask[];
   if (tasks.length === 0) return res.status(400).json({ error: 'No valid tasks found' });
 
+  const targetWorkspace = ensureKnownWorkspace(workingDir || process.cwd());
+  if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+  const taskDirs = new Map<string, string>();
+  for (const task of tasks) {
+    const validated = validateBenchTaskExecution(task, targetWorkspace.dir);
+    if (!validated.ok) {
+      return res.status(validated.status).json({ error: `${task.name}: ${validated.error}` });
+    }
+    taskDirs.set(task.id, validated.dir);
+  }
+
   const run = benchRuns.createBenchRun({
     name: name || `Bench ${new Date().toLocaleDateString()}`,
     suiteId,
@@ -3004,7 +3330,7 @@ app.post('/api/bench/run', async (req, res) => {
   res.status(201).json({ id: run.id, status: 'running', total: run.total });
 
   // Run in background
-  const targetDir = workingDir || process.cwd();
+  const targetDir = targetWorkspace.dir;
 
   for (const modelId of modelIds) {
     const resolved = resolveProviderForModel(modelId);
@@ -3037,7 +3363,7 @@ app.post('/api/bench/run', async (req, res) => {
     }
 
     for (const task of tasks) {
-      const taskDir = task.workingDir || targetDir;
+      const taskDir = taskDirs.get(task.id) || targetDir;
       const startMs = Date.now();
       const startedAt = new Date().toISOString();
 
@@ -3122,12 +3448,20 @@ app.post('/api/bench/run', async (req, res) => {
         continue;
       }
 
-      const response = chunks.join('');
+      const response = redactOutputText(chunks.join(''));
+      const benchArtifactsDir = join(taskDir, '.openharness-bench');
+      mkdirSync(benchArtifactsDir, { recursive: true });
+      const responsePath = join(benchArtifactsDir, `${run.id}-${task.id}-${sanitizeFilePart(modelId)}-response.txt`);
+      writeFileSync(responsePath, response, 'utf-8');
 
       // Run verification commands
       let validationResults: benchRuns.ValidationCommandResult[] = [];
       if (task.verificationCommands.length > 0) {
-        validationResults = await benchRuns.runValidation(task.verificationCommands, taskDir);
+        validationResults = await benchRuns.runValidation(task.verificationCommands, taskDir, {
+          OPENHARNESS_BENCH_RESPONSE: responsePath,
+          OPENHARNESS_BENCH_MODEL: modelId,
+          OPENHARNESS_BENCH_TASK: task.name,
+        });
       }
 
       const wallMs = Date.now() - startMs;
@@ -3190,6 +3524,10 @@ app.get('/api/evals/reports/:id', (req, res) => {
   res.json(report);
 });
 
+app.get('/api/evals/recommendations', (_req, res) => {
+  res.json(evals.getLatestEvalRecommendations());
+});
+
 app.post('/api/evals/run', async (req, res) => {
   const { name, promptIds, modelIds, workingDir } = req.body as {
     name?: string;
@@ -3202,6 +3540,9 @@ app.post('/api/evals/run', async (req, res) => {
     return res.status(400).json({ error: 'promptIds and modelIds are required' });
   }
 
+  const targetWorkspace = ensureKnownWorkspace(workingDir || process.cwd());
+  if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+
   const report = evals.createReport(
     name || `Eval ${new Date().toLocaleDateString()}`,
     promptIds,
@@ -3212,7 +3553,7 @@ app.post('/api/evals/run', async (req, res) => {
   res.status(201).json({ id: report.id, status: 'running', total: report.total });
 
   // Run in background
-  const targetDir = workingDir || process.cwd();
+  const targetDir = targetWorkspace.dir;
   const prompts = promptIds.map(id => evals.getPromptById(id)).filter(Boolean) as Array<import('./evals').PromptCase>;
 
   for (const modelId of modelIds) {
@@ -3286,7 +3627,7 @@ app.post('/api/evals/run', async (req, res) => {
         disposeEphemeralSession(testSession.id);
       }
 
-      const response = chunks.join('');
+      const response = redactOutputText(chunks.join(''));
       const wallMs = Date.now() - startMs;
       const scores = evals.scoreResult({ response, toolCalls, wallMs, workingDir: targetDir });
 
@@ -3321,8 +3662,10 @@ app.post('/api/evals/run', async (req, res) => {
 app.post('/api/checkpoints', (req, res) => {
   const { dir, label } = req.body as { dir: string; label?: string };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    const cp = checkpoints.createCheckpoint(dir, { label });
+    const cp = checkpoints.createCheckpoint(workspace.dir, { label });
     res.status(201).json(cp);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -3332,8 +3675,10 @@ app.post('/api/checkpoints', (req, res) => {
 app.get('/api/checkpoints', (req, res) => {
   const dir = (req.query.dir as string) || '';
   if (!dir) return res.json([]);
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    res.json(checkpoints.listCheckpoints(dir));
+    res.json(checkpoints.listCheckpoints(workspace.dir));
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -3342,7 +3687,9 @@ app.get('/api/checkpoints', (req, res) => {
 app.get('/api/checkpoints/:id', (req, res) => {
   const dir = (req.query.dir as string) || '';
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const cp = checkpoints.getCheckpoint(dir, req.params.id);
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const cp = checkpoints.getCheckpoint(workspace.dir, req.params.id);
   if (!cp) return res.status(404).json({ error: 'Checkpoint not found' });
   res.json(cp);
 });
@@ -3350,7 +3697,9 @@ app.get('/api/checkpoints/:id', (req, res) => {
 app.delete('/api/checkpoints/:id', (req, res) => {
   const dir = (req.query.dir as string) || '';
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  if (!checkpoints.deleteCheckpoint(dir, req.params.id)) {
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  if (!checkpoints.deleteCheckpoint(workspace.dir, req.params.id)) {
     return res.status(404).json({ error: 'Checkpoint not found' });
   }
   res.status(204).end();
@@ -3359,9 +3708,11 @@ app.delete('/api/checkpoints/:id', (req, res) => {
 app.post('/api/checkpoints/:id/restore', (req, res) => {
   const { dir, mode } = req.body as { dir: string; mode?: 'reset' | 'apply' };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const op = mode === 'apply' ? checkpoints.applyCheckpointDiff : checkpoints.restoreCheckpoint;
   try {
-    res.json(op(dir, req.params.id));
+    res.json(op(workspace.dir, req.params.id));
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -3378,8 +3729,10 @@ app.post('/api/worktrees', (req, res) => {
     dir: string; label?: string; baseBranch?: string; reuseBranch?: boolean;
   };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    const wt = worktrees.createWorktree(dir, { label, baseBranch, reuseBranch });
+    const wt = worktrees.createWorktree(workspace.dir, { label, baseBranch, reuseBranch });
     res.status(201).json(wt);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -3389,8 +3742,10 @@ app.post('/api/worktrees', (req, res) => {
 app.get('/api/worktrees', (req, res) => {
   const dir = (req.query.dir as string) || '';
   if (!dir) return res.json([]);
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    res.json(worktrees.listWorktrees(dir));
+    res.json(worktrees.listWorktrees(workspace.dir));
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -3399,7 +3754,9 @@ app.get('/api/worktrees', (req, res) => {
 app.get('/api/worktrees/:id', (req, res) => {
   const dir = (req.query.dir as string) || '';
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const wt = worktrees.getWorktreeStatus(dir, req.params.id);
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const wt = worktrees.getWorktreeStatus(workspace.dir, req.params.id);
   if (!wt) return res.status(404).json({ error: 'Worktree not found' });
   res.json(wt);
 });
@@ -3407,14 +3764,18 @@ app.get('/api/worktrees/:id', (req, res) => {
 app.get('/api/worktrees/:id/diff', (req, res) => {
   const dir = (req.query.dir as string) || '';
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  res.json(worktrees.diffWorktreeVsBase(dir, req.params.id));
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  res.json(worktrees.diffWorktreeVsBase(workspace.dir, req.params.id));
 });
 
 app.delete('/api/worktrees/:id', (req, res) => {
   const dir = (req.query.dir as string) || '';
   const force = req.query.force === '1' || req.query.force === 'true';
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  if (!worktrees.removeWorktree(dir, req.params.id, { force })) {
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  if (!worktrees.removeWorktree(workspace.dir, req.params.id, { force })) {
     return res.status(404).json({ error: 'Worktree not found' });
   }
   res.status(204).end();
@@ -3425,8 +3786,10 @@ app.post('/api/worktrees/:id/promote', (req, res) => {
     dir: string; targetBranch?: string; force?: boolean;
   };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    res.json(worktrees.promoteWorktree(dir, req.params.id, { targetBranch, force }));
+    res.json(worktrees.promoteWorktree(workspace.dir, req.params.id, { targetBranch, force }));
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -3435,8 +3798,10 @@ app.post('/api/worktrees/:id/promote', (req, res) => {
 app.post('/api/worktrees/auto-clean', (req, res) => {
   const { dir } = req.body as { dir: string };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    res.json(worktrees.autoCleanEmptyWorktrees(dir));
+    res.json(worktrees.autoCleanEmptyWorktrees(workspace.dir));
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -3467,7 +3832,14 @@ app.post('/api/secrets/scan-files', (req, res) => {
   if (!root || !Array.isArray(paths)) {
     return res.status(400).json({ error: 'root and paths[] are required' });
   }
-  res.json(protectedPaths.scanFilesForSecrets(root, paths, { maxBytes, ignore }));
+  const workspace = ensureWorkspaceReadAllowed(root);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p.trim() || !isPathWithin(p, workspace.dir)) {
+      return res.status(403).json({ error: `Path ${p} is outside trusted workspace` });
+    }
+  }
+  res.json(protectedPaths.scanFilesForSecrets(workspace.dir, paths, { maxBytes, ignore }));
 });
 
 app.post('/api/export/redact', (req, res) => {
@@ -3500,22 +3872,30 @@ app.get('/api/processes/:pid/log', (req, res) => {
 
 app.delete('/api/processes/:pid/log', (req, res) => {
   const pid = parseInt(req.params.pid, 10);
+  const mutation = ensureLocalMutationAllowed();
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   if (!processLedger.clearLog(pid)) return res.status(404).json({ error: 'Process not found' });
   res.status(204).end();
 });
 
 app.delete('/api/processes/:pid', (req, res) => {
   const pid = parseInt(req.params.pid, 10);
+  const mutation = ensureLocalMutationAllowed();
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   if (!processLedger.killProcess(pid)) return res.status(404).json({ error: 'Process not found' });
   res.status(204).end();
 });
 
 app.post('/api/processes/kill-all', (req, res) => {
   const { kinds } = (req.body || {}) as { kinds?: processLedger.ProcessKind[] };
+  const mutation = ensureLocalMutationAllowed();
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   res.json(processLedger.killAll({ kinds }));
 });
 
 app.post('/api/processes/prune', (_req, res) => {
+  const mutation = ensureLocalMutationAllowed();
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   res.json({ removed: processLedger.pruneExited() });
 });
 
@@ -3523,8 +3903,10 @@ app.post('/api/processes/prune', (_req, res) => {
 
 app.get('/api/safety/summary', (req, res) => {
   const dir = (req.query.dir as string) || process.cwd();
-  const cps = checkpoints.listCheckpoints(dir);
-  const wts = worktrees.listWorktrees(dir).map(w => worktrees.refreshWorktreeState(w));
+  const workspace = ensureWorkspaceReadAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const cps = checkpoints.listCheckpoints(workspace.dir);
+  const wts = worktrees.listWorktrees(workspace.dir).map(w => worktrees.refreshWorktreeState(w));
   const procs = processLedger.listProcesses();
   res.json({
     checkpoints: { count: cps.length, latest: cps[0] || null },
@@ -3831,15 +4213,19 @@ app.post('/api/prompt/estimate', (req, res) => {
 app.post('/api/project/memory/archive', (req, res) => {
   const path = (req.body as { path?: string })?.path;
   if (!path) return res.status(400).json({ error: 'path is required' });
+  const workspace = ensureWorkspaceMutationAllowed(path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const archived = projectMemory.saveMemory(path, projectMemory.loadMemory(path));
-  res.json({ ok: true, archived, archivedAt: stamp });
+  projectMemory.saveMemory(workspace.dir, projectMemory.loadMemory(workspace.dir));
+  res.json({ ok: true, archived: true, archivedAt: stamp });
 });
 
 app.get('/api/project/memory/export', (req, res) => {
   const path = req.query.path as string;
   if (!path) return res.status(400).json({ error: 'path is required' });
-  const memory = projectMemory.loadMemory(path);
+  const workspace = ensureKnownWorkspace(path);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const memory = projectMemory.loadMemory(workspace.dir);
   res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="openharness-memory-${path.replace(/[^a-zA-Z0-9._-]/g, '_')}.md"`);
   res.send(memory || '# (empty)');
@@ -3864,12 +4250,14 @@ app.post('/api/agents/background', (req, res) => {
   if (!body.profileId || !body.prompt) {
     return res.status(400).json({ error: 'profileId and prompt are required' });
   }
+  const workspace = body.workingDir ? ensureWorkspaceReadAllowed(body.workingDir) : { ok: true as const, dir: process.cwd() };
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
     const handle = agentRuntime.startBackgroundAgent(appConfig, {
       profileId: body.profileId as agentProfiles.AgentProfileId,
       prompt: body.prompt,
       modelId: body.modelId,
-      workingDir: body.workingDir,
+      workingDir: workspace.dir,
     });
     res.json({ id: handle.id, startedAt: new Date().toISOString() });
   } catch (err: any) {
@@ -3909,9 +4297,10 @@ async function streamModelWithFallback(
   assistantId: string,
   run: HarnessRun | undefined,
   routeOverride: RouteDecision | undefined,
+  overrideModelId?: string,
 ): Promise<void> {
   // Collect all providers that can serve the effective model
-  const effectiveModel = run?.effectiveModel || getActiveModel();
+  const effectiveModel = overrideModelId || run?.effectiveModel || getActiveModel();
   const providers: Array<{ chatURL: string; apiKey: string; providerId: string }> = [];
   const seen = new Set<string>();
 
@@ -3951,7 +4340,7 @@ async function streamModelWithFallback(
       res.write("\n");
     }
     try {
-      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, undefined, run, routeOverride);
+      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, overrideModelId, run, routeOverride);
       // If here, streaming succeeded
       return;
     } catch (err: any) {
@@ -4013,13 +4402,10 @@ app.listen(PORT, () => {
 
   // Auto-start Docker MCP gateway via stdio (keeps process alive as child)
   try {
-    execSync('which docker', { encoding: 'utf-8' });
-    const mcpGateway = spawn('docker', [
-      'mcp', 'gateway', 'run',
-      '--transport', 'stdio',
-      '--profile', 'ai_coding',
-    ], {
+    execFileSync('sh', ['-c', 'command -v docker'], { encoding: 'utf-8' });
+    const mcpGateway = spawn('docker', DOCKER_MCP_ARGS, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: dockerDesktopEnv(),
     });
     mcpGateway.on('error', (err: Error) => console.log('[mcp-gw] Failed:', err.message));
     mcpGateway.on('exit', (code: number | null) => console.log('[mcp-gw] exited with code', code));
@@ -4033,6 +4419,7 @@ app.listen(PORT, () => {
       let multilineJson: { label: string; depth: number; lines: number; started: boolean } | null = null;
       const isBanner = (line: string) =>
         /Using credential helper:/i.test(line) ||
+        /^Reading profile configuration/i.test(line) ||
         /^Watching for configuration updates/i.test(line) ||
         /^Connecting to OAuth notification stream/i.test(line) ||
         /^Starting OAuth (notification monitor|provider loops)/i.test(line) ||
@@ -4042,11 +4429,17 @@ app.listen(PORT, () => {
         /^Running mcp\//i.test(line) ||
         /^Configuration read in/i.test(line) ||
         /^> \w[\w-]*: \(\d+ tools\)$/i.test(line) ||
+        /^\w[\w-]*: \(\d+ tools\)$/i.test(line) ||
         /^> \d+ tools? listed in/i.test(line) ||
+        /^\d+ tools? listed in/i.test(line) ||
         /^Adding internal tools/i.test(line) ||
         /^> mcp-[a-z-]+: tool for/i.test(line) ||
+        /^mcp-[a-z-]+: tool for/i.test(line) ||
+        /^mcp-[a-z-]+: prompt for/i.test(line) ||
         /^> code-mode: write code/i.test(line) ||
+        /^code-mode: write code/i.test(line) ||
         /^> mcp-exec: execute tools/i.test(line) ||
+        /^mcp-exec: execute tools/i.test(line) ||
         /^> mcp-config-set: tool for setting/i.test(line) ||
         /^> mcp-create-profile: tool for creating/i.test(line) ||
         /^> mcp-activate-profile: tool for activating/i.test(line) ||
@@ -4055,6 +4448,7 @@ app.listen(PORT, () => {
         /^Loading \d+ catalog/i.test(line) ||
         /^Processing catalog/i.test(line) ||
         /^Using images:/i.test(line) ||
+        /^mcp\/[\w.-]+@sha256:/i.test(line) ||
         /^Initialized in /i.test(line) ||
         /^Client initialized openharness/i.test(line) ||
         /^Current working directory:/i.test(line) ||
@@ -4125,7 +4519,7 @@ app.listen(PORT, () => {
     // Connect via stdio using the MCP client after the gateway initializes
     setTimeout(async () => {
       try {
-        await mcpManager.startStdioClient('docker-mcp', 'Docker MCP', mcpGateway, 'docker', ['mcp', 'gateway', 'run', '--transport', 'stdio', '--profile', 'ai_coding']);
+        await mcpManager.startStdioClient('docker-mcp', 'Docker MCP', mcpGateway, 'docker', DOCKER_MCP_ARGS);
         const c = mcpManager.getClient('docker-mcp');
         console.log('✓ Docker MCP connected — tools:', c?.getTools?.()?.length || 0);
       } catch (err: any) {

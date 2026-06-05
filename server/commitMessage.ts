@@ -12,7 +12,7 @@
 // verification command passes. The user can override the gate with
 // `force: true` on the commit endpoint, which is surfaced in the UI.
 import { existsSync, writeFileSync, unlinkSync } from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { join, relative } from 'path';
 import type { PatchProposal } from './patchProposals';
 import { listComments } from './reviewComments';
@@ -200,7 +200,7 @@ export function createBranch(workingDir: string, name: string): { ok: boolean; b
     if (!/^[a-zA-Z0-9._/-]+$/.test(name)) {
       return { ok: false, error: 'Branch name contains invalid characters' };
     }
-    execSync(`git checkout -b ${name}`, { cwd: workingDir, encoding: 'utf-8', timeout: 10000 });
+    execFileSync('git', ['checkout', '-b', name], { cwd: workingDir, encoding: 'utf-8', timeout: 10000 });
     return { ok: true, branch: name };
   } catch (err: any) {
     return { ok: false, error: err?.message?.split('\n')?.[0] || 'git checkout -b failed' };
@@ -213,16 +213,16 @@ export function createBranch(workingDir: string, name: string): { ok: boolean; b
  */
 export function gitCommit(workingDir: string, message: string, files: string[]): { ok: boolean; hash?: string; error?: string } {
   try {
-    const addTargets = files.length > 0 ? files.join(' ') : '.';
-    execSync(`git add -- ${addTargets}`, { cwd: workingDir, encoding: 'utf-8', timeout: 10000 });
+    const addTargets = files.length > 0 ? files : ['.'];
+    execFileSync('git', ['add', '--', ...addTargets], { cwd: workingDir, encoding: 'utf-8', timeout: 10000 });
     const tmpFile = join(workingDir, '.git', 'OPENHARNESS_COMMIT_EDITMSG');
     if (!existsSync(join(workingDir, '.git'))) {
       return { ok: false, error: 'Working directory is not a git repository' };
     }
     writeFileSync(tmpFile, message, 'utf-8');
-    execSync(`git commit -F "${tmpFile}"`, { cwd: workingDir, encoding: 'utf-8', timeout: 15000 });
+    execFileSync('git', ['commit', '-F', tmpFile], { cwd: workingDir, encoding: 'utf-8', timeout: 15000 });
     try { unlinkSync(tmpFile); } catch { /* ignore */ }
-    const hash = execSync('git rev-parse HEAD', { cwd: workingDir, encoding: 'utf-8' }).trim();
+    const hash = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workingDir, encoding: 'utf-8' }).trim();
     return { ok: true, hash };
   } catch (err: any) {
     return { ok: false, error: err?.message?.split('\n')?.[0] || 'git commit failed' };
@@ -232,7 +232,7 @@ export function gitCommit(workingDir: string, message: string, files: string[]):
 /** Cheap working-tree lookup of HEAD SHA. */
 export function getHeadSha(workingDir: string): string | null {
   try {
-    return execSync('git rev-parse HEAD', { cwd: workingDir, encoding: 'utf-8' }).trim();
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workingDir, encoding: 'utf-8' }).trim();
   } catch {
     return null;
   }

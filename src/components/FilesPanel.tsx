@@ -65,16 +65,17 @@ export function FilesPanel({ workingDir, projectProfile }: Props) {
   }, [workingDir]);
 
   const loadDir = useCallback(async (dirPath: string) => {
+    if (!workingDir) return;
     setLoading(true);
     try {
-      const result = await api.listDirectory(dirPath);
+      const result = await api.listDirectory(dirPath, workingDir);
       setEntries(result.entries);
     } catch (err) {
       console.error('Failed to load directory:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [workingDir]);
 
 
 
@@ -96,13 +97,13 @@ export function FilesPanel({ workingDir, projectProfile }: Props) {
   const handleFileClick = useCallback(async (filePath: string) => {
     setSelectedFile(filePath);
     try {
-      const result = await api.readFile(filePath);
+      const result = await api.readFile(filePath, workingDir);
       setFileContent(result.content);
     } catch (err) {
       console.error('Failed to read file:', err);
       setFileContent('Error loading file');
     }
-  }, []);
+  }, [workingDir]);
 
   if (!workingDir) {
     return (

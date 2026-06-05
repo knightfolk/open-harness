@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, statSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -55,9 +55,10 @@ export async function capturePreview(url: string): Promise<BrowserPreviewResult>
 
   try {
     // Try to fetch the page to check it's alive
-    const curlResult = execSync(
-      `curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${fullUrl}"`,
-      { encoding: 'utf-8', timeout: 10000 }
+    const curlResult = execFileSync(
+      'curl',
+      ['-s', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '5', fullUrl],
+      { encoding: 'utf-8', timeout: 10000 },
     ).trim();
 
     if (curlResult !== '200') {
@@ -67,7 +68,7 @@ export async function capturePreview(url: string): Promise<BrowserPreviewResult>
 
     // Get page title via curl + grep
     try {
-      const html = execSync(`curl -s --max-time 5 "${fullUrl}"`, {
+      const html = execFileSync('curl', ['-s', '--max-time', '5', fullUrl], {
         encoding: 'utf-8',
         maxBuffer: 5 * 1024 * 1024,
         timeout: 10000,
@@ -82,31 +83,38 @@ export async function capturePreview(url: string): Promise<BrowserPreviewResult>
     // or fall back to a descriptive result
     try {
       // Check if there's a browser window with this URL open
-      const windowCheck = execSync(
-        `osascript -e 'tell application "System Events" to get name of every window of process "Safari" whose name contains "localhost"' 2>/dev/null || echo ""`,
-        { encoding: 'utf-8', timeout: 5000 }
+      const windowCheck = execFileSync(
+        'osascript',
+        ['-e', 'tell application "System Events" to get name of every window of process "Safari" whose name contains "localhost"'],
+        { encoding: 'utf-8', timeout: 5000 },
       ).trim();
 
       if (windowCheck && windowCheck !== '') {
         // Take a screenshot of the Safari window
-        execSync(`screencapture -l $(osascript -e 'tell application "Safari" to get id of window 1') "${screenshotPath}" 2>/dev/null || true`, {
-          timeout: 10000,
-        });
+        const windowId = execFileSync(
+          'osascript',
+          ['-e', 'tell application "Safari" to get id of window 1'],
+          { encoding: 'utf-8', timeout: 5000 },
+        ).trim();
+        if (windowId) {
+          execFileSync('screencapture', ['-l', windowId, screenshotPath], { timeout: 10000 });
+        }
       }
     } catch { /* no Safari window */ }
 
     // Try using webshot via a Python one-liner if available (many macOS systems have it)
     if (!existsSync(screenshotPath) || statSync(screenshotPath).size === 0) {
       try {
-        execSync(
-          `python3 -c "
+        execFileSync(
+          'python3',
+          ['-c', `
 import urllib.request
 try:
-    r = urllib.request.urlopen('${fullUrl}', timeout=5)
+    r = urllib.request.urlopen(${JSON.stringify(fullUrl)}, timeout=5)
     print('STATUS:' + str(r.status))
 except Exception as e:
     print('ERROR:' + str(e))
-" 2>/dev/null`,
+`],
           { encoding: 'utf-8', timeout: 10000 }
         );
       } catch { /* python not available or failed */ }
@@ -135,9 +143,10 @@ export function checkServerHealth(url: string): { reachable: boolean; statusCode
   const fullUrl = url.startsWith('http') ? url : `http://${url}`;
   const start = Date.now();
   try {
-    const code = execSync(
-      `curl -s -o /dev/null -w "%{http_code}" --max-time 3 "${fullUrl}"`,
-      { encoding: 'utf-8', timeout: 8000 }
+    const code = execFileSync(
+      'curl',
+      ['-s', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '3', fullUrl],
+      { encoding: 'utf-8', timeout: 8000 },
     ).trim();
     return { reachable: code === '200', statusCode: parseInt(code, 10), latencyMs: Date.now() - start };
   } catch {

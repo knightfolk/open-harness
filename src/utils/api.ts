@@ -1,6 +1,26 @@
 import type { BrowserPreviewResult, PatchValidationResult } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+function defaultApiBase(): string {
+  if (typeof window === 'undefined' || !window.location.hostname) return 'http://localhost:3001';
+  const { protocol, hostname } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+    return 'http://localhost:3001';
+  }
+  return `${protocol}//${hostname}:3001`;
+}
+
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_URL;
+  if (!configured || typeof window === 'undefined') return configured || defaultApiBase();
+  const hostname = window.location.hostname;
+  const isLocalPage = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  if (!isLocalPage && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(configured)) {
+    return defaultApiBase();
+  }
+  return configured;
+}
+
+export const API_BASE = resolveApiBase();
 
 // ── Types ──────────────────────────────────────────────
 
@@ -86,6 +106,7 @@ export interface StreamCallbacks {
   onUserMessage: (msg: MessageInfo) => void;
   onAssistantStart: (id: string) => void;
   onText: (id: string, text: string) => void;
+  onAssistantMessage?: (msg: MessageInfo) => void;
   onToolCall: (toolCall: ToolCallInfo) => void;
   onRunStart?: (run: HarnessRun) => void;
   onRunStep?: (runId: string, step: HarnessRunStep) => void;
@@ -101,7 +122,7 @@ export interface AutoRouterState {
   classifierModel: string | null;
   threshold: number;
   candidateCount: number;
-  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean }>;
+  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; contextWindowTokens: number }>;
   cacheSize: number;
 }
 
@@ -232,6 +253,16 @@ export interface ProviderModelInfo {
   enabled: boolean;
 }
 
+export interface LocalProviderDiscovery {
+  id: string;
+  name: string;
+  type: string;
+  baseURL: string;
+  reachable: boolean;
+  latencyMs: number;
+  modelsCount?: number;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -247,6 +278,14 @@ export async function getProviders(): Promise<ProviderInfo[]> {
     const res = await fetch(`${API_BASE}/api/providers`);
     if (res.ok) return res.json();
   } catch { /* not available yet */ }
+  return [];
+}
+
+export async function discoverLocalProviders(): Promise<LocalProviderDiscovery[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/providers/local-discovery`);
+    if (res.ok) return res.json();
+  } catch { /* local discovery is optional */ }
   return [];
 }
 
@@ -344,6 +383,7 @@ export interface MCPToolStatus {
   name: string;
   description: string;
   inputSchema: any;
+  allowed?: boolean;
 }
 
 export interface MCPServerStatus {
@@ -351,6 +391,8 @@ export interface MCPServerStatus {
   name: string;
   running: boolean;
   toolCount: number;
+  usableToolCount?: number;
+  blockedToolCount?: number;
   resourceCount: number;
   tools?: MCPToolStatus[];
   error?: string;
@@ -366,7 +408,7 @@ export async function getMCPStatus(): Promise<MCPServerStatus[]> {
 
 export async function startMCPServer(serverId: string): Promise<any> {
   const res = await fetch(`${API_BASE}/api/mcp/${serverId}/start`, { method: 'POST' });
-  if (!res.ok) throw new Error(`Failed to start MCP server: ${res.status}`);
+  if (!res.ok) throw new Error(await responseErrorMessage(res, 'Failed to start MCP server'));
   return res.json();
 }
 
@@ -449,8 +491,16 @@ export async function installCuratedMcpServer(id: string): Promise<MCPServerInfo
 
 export async function restartMCPServer(serverId: string): Promise<any> {
   const res = await fetch(`${API_BASE}/api/mcp/${serverId}/restart`, { method: 'POST' });
-  if (!res.ok) throw new Error(`Failed to restart MCP server: ${res.status}`);
+  if (!res.ok) throw new Error(await responseErrorMessage(res, 'Failed to restart MCP server'));
   return res.json();
+}
+
+async function responseErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json();
+    if (body?.error) return `${fallback}: ${body.error}`;
+  } catch { /* ignore */ }
+  return `${fallback}: ${res.status}`;
 }
 
 // ── Multi-provider batch save (Milestone 18 onboarding) ──
@@ -614,11 +664,11 @@ export async function deleteSession(id: string): Promise<void> {
 
 // ── Send Message (streaming) ───────────────────────────
 
-export async function sendMessage(sessionId: string, content: string, callbacks: StreamCallbacks): Promise<void> {
+export async function sendMessage(sessionId: string, content: string, callbacks: StreamCallbacks, options: { modelId?: string } = {}): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, modelId: options.modelId }),
   });
 
   if (!res.ok) {
@@ -658,6 +708,8 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
           case 'user_message': callbacks.onUserMessage(parsed as MessageInfo); break;
           case 'assistant_start': callbacks.onAssistantStart(parsed.id); break;
           case 'text': callbacks.onText(parsed.id, parsed.text); break;
+          case 'orchestration_text': callbacks.onText('', parsed.text); break;
+          case 'assistant_message': callbacks.onAssistantMessage?.(parsed as MessageInfo); break;
           case 'tool_call': callbacks.onToolCall(parsed as ToolCallInfo); break;
           case 'run_start': callbacks.onRunStart?.(parsed as HarnessRun); break;
           case 'run_step': callbacks.onRunStep?.(parsed.runId, parsed.step as HarnessRunStep); break;
@@ -710,15 +762,19 @@ export interface FileInfo {
   content: string;
 }
 
-export async function listDirectory(dirPath: string): Promise<DirectoryInfo> {
-  const res = await fetch(`${API_BASE}/api/fs/list?path=${encodeURIComponent(dirPath)}`);
-  if (!res.ok) throw new Error(`Failed to list directory: ${res.status}`);
+export async function listDirectory(dirPath: string, workingDir?: string | null): Promise<DirectoryInfo> {
+  const params = new URLSearchParams({ path: dirPath });
+  if (workingDir) params.set('workingDir', workingDir);
+  const res = await fetch(`${API_BASE}/api/fs/list?${params.toString()}`);
+  if (!res.ok) throw new Error(await responseErrorMessage(res, 'Failed to list directory'));
   return res.json();
 }
 
-export async function readFile(filePath: string): Promise<FileInfo> {
-  const res = await fetch(`${API_BASE}/api/fs/read?path=${encodeURIComponent(filePath)}`);
-  if (!res.ok) throw new Error(`Failed to read file: ${res.status}`);
+export async function readFile(filePath: string, workingDir?: string | null): Promise<FileInfo> {
+  const params = new URLSearchParams({ path: filePath });
+  if (workingDir) params.set('workingDir', workingDir);
+  const res = await fetch(`${API_BASE}/api/fs/read?${params.toString()}`);
+  if (!res.ok) throw new Error(await responseErrorMessage(res, 'Failed to read file'));
   return res.json();
 }
 
@@ -1214,6 +1270,15 @@ export interface EvalSummary {
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
 }
 
+export interface EvalRecommendation {
+  role: string;
+  modelId: string;
+  reason: string;
+  reportId: string;
+  reportName: string;
+  generatedAt: string;
+}
+
 export interface EvalReport {
   id: string;
   configId: string;
@@ -1266,6 +1331,12 @@ export async function runEval(params: {
     body: JSON.stringify(params),
   });
   if (!res.ok) throw new Error(`Eval run failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getEvalRecommendations(): Promise<EvalRecommendation[]> {
+  const res = await fetch(`${API_BASE}/api/evals/recommendations`);
+  if (!res.ok) return [];
   return res.json();
 }
 
@@ -1417,6 +1488,7 @@ export interface ValidationCommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  findings: string[];
   durationMs: number;
   passed: boolean;
 }
@@ -1785,14 +1857,22 @@ export interface RouterLearningSummary {
   models: Record<string, { total: number; success: number; rate: number }>;
   successRate: number;
   outdated: boolean;
+  byTaskType: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  byRole: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  byComplexity: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
 }
 
 export interface RoutingEvent {
   id: string;
   timestamp: string;
   sessionId: string;
+  taskType: string;
+  role: string;
+  complexity: string;
   selectedModel: string;
   score: number;
+  candidateScores?: Record<string, number>;
   wasFallback: boolean;
   wasCached: boolean;
   outcome: 'success' | 'failure' | 'ambiguous' | null;
@@ -1800,7 +1880,16 @@ export interface RoutingEvent {
 
 export async function getRouterLearning(): Promise<RouterLearningSummary> {
   const res = await fetch(`${API_BASE}/api/router/learning`);
-  if (!res.ok) return { totalEvents: 0, models: {}, successRate: 0, outdated: true };
+  if (!res.ok) return {
+    totalEvents: 0,
+    models: {},
+    successRate: 0,
+    outdated: true,
+    byTaskType: {},
+    byRole: {},
+    byComplexity: {},
+    bestByTaskType: [],
+  };
   return res.json();
 }
 
@@ -1992,19 +2081,15 @@ export async function commitProposal(
   return parsed;
 }
 
-// ============================================================================
-// Project Memory stubs (server endpoints TBD)
-// ============================================================================
-
 export async function archiveProjectMemory(workingDir: string): Promise<{ ok: boolean; archivedAt?: string; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/project-memory/archive`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workingDir }),
+  const res = await fetch(`${API_BASE}/api/project/memory/archive`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: workingDir }),
   });
-  return safeJson<{ ok: boolean; archivedAt?: string; error?: string }>(res, { ok: false, error: 'Not yet implemented on the server' });
+  return safeJson<{ ok: boolean; archivedAt?: string; error?: string }>(res, { ok: false, error: `Archive failed (${res.status})` });
 }
 
 export async function exportProjectMemory(workingDir: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/project-memory/export?workingDir=${encodeURIComponent(workingDir)}`);
+  const res = await fetch(`${API_BASE}/api/project/memory/export?path=${encodeURIComponent(workingDir)}`);
   if (!res.ok) return '';
   return res.text();
 }

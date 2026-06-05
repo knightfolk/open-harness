@@ -10,7 +10,7 @@ import {
 } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { v4 as uuid } from 'uuid';
 
 export interface Worktree {
@@ -82,7 +82,7 @@ function writeProjectMeta(root: string, meta: ProjectMeta) {
 
 function runGit(args: string[], cwd: string, opts: { input?: string } = {}): string {
   try {
-    return execSync(`git ${args.join(' ')}`, {
+    return execFileSync('git', args, {
       cwd,
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
@@ -96,7 +96,7 @@ function runGit(args: string[], cwd: string, opts: { input?: string } = {}): str
 
 function getGitRoot(dir: string): string | null {
   try {
-    return execSync('git rev-parse --show-toplevel', {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: dir,
       encoding: 'utf-8',
       timeout: 5000,

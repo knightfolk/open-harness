@@ -12,6 +12,10 @@
 import { listAgentProfiles, getAgentProfile, type AgentProfile, type AgentProfileId } from './agentProfiles';
 import { type StoredConfig } from "./config";
 import { v4 as uuid } from 'uuid';
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'fs';
+import { extname, isAbsolute, join, resolve } from 'path';
+import { parseToolCallMarkup } from './toolCallMarkup';
+import type { HarnessRunStep } from './runTrace';
 
 export interface BackgroundAgentRequest {
   profileId: AgentProfileId;
@@ -19,6 +23,7 @@ export interface BackgroundAgentRequest {
   modelId?: string;
   workingDir?: string;
   signal?: AbortSignal;
+  onStep?: (step: HarnessRunStep) => void;
 }
 
 export interface BackgroundAgentArtifact {
@@ -42,6 +47,9 @@ export interface BackgroundAgentHandle {
 }
 
 const ACTIVE: Map<string, BackgroundAgentHandle> = new Map();
+const AGENT_REQUEST_TIMEOUT_MS = 90_000;
+const AGENT_TOOL_NAMES = ['list_directory', 'read_file'];
+const MAX_AGENT_TOOL_ROUNDS = 6;
 
 export function listActiveBackgroundAgents(): Array<{ id: string; profileId: AgentProfileId; startedAt: string }> {
   return Array.from(ACTIVE.values()).map((h) => ({
@@ -149,7 +157,18 @@ export function startBackgroundAgent(
   }
 
   const startedAt = new Date().toISOString();
-  const systemPrompt = buildProfileSystemPrompt(profile, req.workingDir);
+  let systemPrompt = buildProfileSystemPrompt(profile, req.workingDir);
+  if (profile.readOnly) {
+    systemPrompt += [
+      '',
+      'Available read-only tools:',
+      '<list_directory><path>/absolute/or/relative/path</path></list_directory>',
+      '<read_file><path>/absolute/or/relative/path</path></read_file>',
+      'When you need repository evidence, emit exactly one of those XML tool calls and no surrounding prose.',
+      'After tool results are provided, either request one more read-only tool or produce the final answer.',
+      'Do not use brace notes, pseudocode actions, or prose placeholders as tool calls.',
+    ].join('\n');
+  }
 
   const promise = (async (): Promise<BackgroundAgentArtifact> => {
     const notes: string[] = [];
@@ -272,34 +291,62 @@ export async function runAgentPhase(
   };
 
   try {
-    const { apiKey } = provider;
-    const url = buildChatURL(provider);
-    const body = {
-      model: modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: req.prompt },
-      ],
-      stream: false,
-      temperature: profile.temperature,
-    };
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: req.prompt },
+    ];
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Provider returned ${res.status}: ${text.slice(0, 200)}`);
+    for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round++) {
+      req.onStep?.({ type: 'model_request', round: round + 1, model: modelId });
+      const text = await callAgentModel(provider, modelId, messages, profile.temperature, controller.signal);
+      if (text) req.onStep?.({ type: 'model_text', chars: text.length });
+      const parsed = parseToolCallMarkup(text, AGENT_TOOL_NAMES);
+      const calls = parsed.calls.filter((call) => AGENT_TOOL_NAMES.includes(call.name));
+
+      if (calls.length === 0) {
+        artifact.response = stripAgentToolMarkup(text);
+        break;
+      }
+
+      messages.push({ role: 'assistant', content: text });
+      const toolResults = calls.map((call) => {
+        const toolId = `agent-${uuid()}`;
+        req.onStep?.({ type: 'tool_call', id: toolId, name: call.name, input: call.arguments });
+        const start = Date.now();
+        const output = runReadOnlyAgentTool(call.name, call.arguments, req.workingDir);
+        req.onStep?.({
+          type: 'tool_call',
+          id: toolId,
+          name: call.name,
+          input: call.arguments,
+          outputPreview: output.slice(0, 500),
+          durationMs: Date.now() - start,
+        });
+        notes.push(`tool=${call.name}`);
+        return [
+          `### ${call.name}`,
+          `Input: ${JSON.stringify(call.arguments)}`,
+          `Output:`,
+          output,
+        ].join('\n');
+      }).join('\n\n');
+
+      messages.push({
+        role: 'user',
+        content: [
+          `Tool results:`,
+          toolResults,
+          ``,
+          round === MAX_AGENT_TOOL_ROUNDS - 1
+            ? `Now produce the final answer from the gathered evidence. Do not request more tools.`
+            : `Use these results to continue. If you need more context, request one read-only tool call. Otherwise produce the final answer.`,
+        ].join('\n'),
+      });
+
+      if (round === MAX_AGENT_TOOL_ROUNDS - 1) {
+        artifact.response = stripAgentToolMarkup(text);
+      }
     }
-    const data = await res.json() as any;
-    const choice = data.choices?.[0];
-    const text = choice?.message?.content || data.content?.[0]?.text || '';
-    artifact.response = typeof text === 'string' ? text : JSON.stringify(text);
   } catch (err: any) {
     if (controller.signal.aborted) {
       artifact.status = 'cancelled';
@@ -313,6 +360,78 @@ export async function runAgentPhase(
   }
 
   return artifact;
+}
+
+async function callAgentModel(
+  provider: { baseURL: string; apiKey: string; providerType: string },
+  modelId: string,
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  temperature: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const url = buildChatURL(provider);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
+  const timeoutSignal = AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS);
+  const combinedSignal = signal.aborted ? signal : AbortSignal.any([signal, timeoutSignal]);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId,
+      messages,
+      stream: false,
+      temperature,
+    }),
+    signal: combinedSignal,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Provider returned ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const data = await res.json() as any;
+  const choice = data.choices?.[0];
+  const text = choice?.message?.content || data.content?.[0]?.text || '';
+  return typeof text === 'string' ? text : JSON.stringify(text);
+}
+
+function stripAgentToolMarkup(text: string): string {
+  const parsed = parseToolCallMarkup(text, AGENT_TOOL_NAMES);
+  return (parsed.matchedAny ? parsed.remainder : text).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
+function runReadOnlyAgentTool(name: string, args: Record<string, unknown>, workingDir?: string): string {
+  const base = workingDir || process.cwd();
+  const rawPath = typeof args.path === 'string' ? args.path : '.';
+  const target = isAbsolute(rawPath) ? rawPath : resolve(base, rawPath);
+  if (!target.startsWith(base)) return 'Error: path is outside the working directory.';
+  if (!existsSync(target)) return `Error: path does not exist: ${target}`;
+
+  if (name === 'list_directory') {
+    const stat = statSync(target);
+    if (!stat.isDirectory()) return `Error: not a directory: ${target}`;
+    const entries = readdirSync(target)
+      .filter((entry) => !entry.startsWith('.'))
+      .slice(0, 80)
+      .map((entry) => {
+        const full = join(target, entry);
+        const s = lstatSync(full);
+        return `${s.isDirectory() ? 'dir ' : 'file'} ${entry}`;
+      });
+    return [`Path: ${target}`, ...entries].join('\n');
+  }
+
+  if (name === 'read_file') {
+    const stat = statSync(target);
+    if (stat.isDirectory()) return runReadOnlyAgentTool('list_directory', { path: target }, workingDir);
+    if (stat.size > 256 * 1024) return `Error: file too large for agent read (${stat.size} bytes): ${target}`;
+    const content = readFileSync(target, 'utf8');
+    const lines = content.split('\n').slice(0, 220).map((line, index) => `${index + 1}: ${line}`);
+    return [`Path: ${target}`, `Extension: ${extname(target) || '(none)'}`, ...lines].join('\n');
+  }
+
+  return `Error: unknown read-only tool: ${name}`;
 }
 
 

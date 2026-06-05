@@ -97,7 +97,7 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
         ) : (
           <WifiOff size={12} style={{ color: 'var(--accent-error)' }} />
         )}
-        {connected ? 'Connected' : 'Offline'}
+        {connected ? 'Provider connected' : 'No model provider'}
       </div>
 
       <div className="status-bar-separator" />
