@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Wifi, WifiOff, ChevronUp, Cpu, Zap, Brain, DollarSign,
-  Check, Search, Shield,
+  Check, Search, Shield, Settings,
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
 
@@ -23,6 +23,8 @@ interface Props {
   enabledToolCount?: number;
   onModelChange: (modelId: string) => void;
   onTrustModeChange?: (mode: string) => void;
+  runningModel?: string | null;
+  onOpenSettings?: () => void;
 }
 
 const AUTO_MODEL_ID = 'Auto';
@@ -51,7 +53,7 @@ const TRUST_COLORS: Record<string, string> = {
 
 const ALL_TRUST_MODES = ['chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local'];
 
-export function StatusBar({ activeModel, providerName, connected, messageCount, workingDir, models, trustMode, enabledToolCount, onModelChange, onTrustModeChange }: Props) {
+export function StatusBar({ activeModel, providerName, connected, messageCount, workingDir, models, trustMode, enabledToolCount, onModelChange, onTrustModeChange, runningModel, onOpenSettings }: Props) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [trustPickerOpen, setTrustPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,6 +96,7 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
 
   const currentModel = models.find(m => m.id === activeModel);
   const isAuto = activeModel === AUTO_MODEL_ID;
+  const autoModelLabel = runningModel ? `Auto · ${runningModel}` : 'Auto';
   const trustColor = TRUST_COLORS[trustMode] || '#6b7280';
   const trustLabel = TRUST_LABELS[trustMode] || trustMode;
 
@@ -161,11 +164,26 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
 
       <div className="status-bar-separator" />
 
+      {onOpenSettings && (
+        <>
+          <button
+            className="status-bar-item status-bar-settings-btn"
+            type="button"
+            onClick={onOpenSettings}
+            title="Open settings"
+            aria-label="Open settings"
+          >
+            <Settings size={12} />
+          </button>
+          <div className="status-bar-separator" />
+        </>
+      )}
+
       {/* Model switcher */}
       <div ref={pickerRef} style={{ position: 'relative' }}>
         <button
           ref={modelBtnRef}
-          className="status-bar-item status-bar-model-btn"
+          className={`status-bar-item status-bar-model-btn ${isAuto ? 'status-bar-model-btn-auto' : ''}`}
           onClick={() => {
             const nextOpen = !modelPickerOpen;
             setModelPickerOpen(nextOpen);
@@ -178,8 +196,8 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
             }
           }}
         >
-          <Cpu size={12} />
-          <span className="status-bar-model-name">{activeModel}</span>
+          {isAuto ? <span className="status-bar-auto-dot" aria-hidden="true" /> : <Cpu size={12} />}
+          <span className="status-bar-model-name">{isAuto ? autoModelLabel : activeModel}</span>
           {currentModel && (
             <span className="status-bar-model-ctx">{formatContext(currentModel.contextWindow)}</span>
           )}
@@ -231,7 +249,7 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
       {/* Provider */}
       <div className="status-bar-item">
         <Zap size={12} />
-        {isAuto ? 'Auto' : providerName || 'No provider'}
+        {providerName || (isAuto ? 'Router' : 'No provider')}
       </div>
 
       {/* Working dir */}

@@ -933,6 +933,7 @@ function App() {
 
   const msgCount = messages.length;
   const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'OpenHarness';
+  const runningModel = subAgents.find((a) => a.status === 'running')?.model || null;
   const focusSubAgentInPanel = (agentId: string | null) => {
     if (agentId) setFocusedSubAgentId(agentId);
     addPanel('sub-agents');
@@ -1070,6 +1071,8 @@ function App() {
           enabledToolCount={enabledToolCount}
           trustMode={trustMode}
           onTrustModeChange={handleTrustModeChange}
+          runningModel={runningModel}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       </main>
 

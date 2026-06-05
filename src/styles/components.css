@@ -415,7 +415,7 @@
 .floating-super-panel {
   position: absolute;
   top: 16px;
-  right: 18px;
+  right: 46px;
   z-index: 8;
   min-width: 260px;
   max-width: 520px;
@@ -454,10 +454,10 @@
 .floating-super-reveal {
   position: absolute;
   top: 96px;
-  right: 0;
+  right: 14px;
   z-index: 9;
-  width: 28px;
-  min-height: 156px;
+  width: 30px;
+  min-height: 116px;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -504,11 +504,11 @@
 }
 
 .floating-tool-tabs.with-super-open {
-  right: calc(var(--floating-super-width, 330px) + 28px);
+  right: 14px;
 }
 
 .floating-tool-tab {
-  width: 28px;
+  width: 30px;
   min-height: 116px;
   display: inline-flex;
   flex-direction: column;
@@ -3249,7 +3249,7 @@ button:focus-visible {
 .chat-panel-root.has-floating-super .input-area {
   width: min(860px, calc(100% - var(--floating-super-width, 330px) - 96px));
   margin-left: auto;
-  margin-right: calc(var(--floating-super-width, 330px) + 48px);
+  margin-right: calc(var(--floating-super-width, 330px) + 76px);
 }
 
 .chat-panel-root.has-hidden-super .input-area {
@@ -4116,8 +4116,8 @@ button:focus-visible {
 .status-bar {
   display: flex;
   align-items: center;
-  height: 24px;
-  padding: 0 10px;
+  height: 18px;
+  padding: 0 8px;
   background: var(--bg-primary);
   border-top: 1px solid var(--border-subtle);
   font-size: 10px;
@@ -4138,7 +4138,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 4px;
+  padding: 0 3px;
   height: 100%;
   white-space: nowrap;
 }
@@ -4151,7 +4151,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 1px 6px;
+  padding: 0 7px;
   background: transparent;
   border: none;
   border-radius: 4px;
@@ -4159,7 +4159,7 @@ button:focus-visible {
   color: var(--text-tertiary);
   font-size: 10px;
   transition: all var(--transition-fast);
-  height: 18px;
+  height: 16px;
 }
 
 .status-bar-model-btn:hover {
@@ -4167,8 +4167,41 @@ button:focus-visible {
   color: var(--text-primary);
 }
 
+.status-bar-settings-btn {
+  height: 16px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 10px;
+  transition: all var(--transition-fast);
+}
+
+.status-bar-settings-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.status-bar-model-btn-auto {
+  gap: 5px;
+  color: var(--text-secondary);
+}
+
+.status-bar-auto-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-success) 16%, transparent), 0 0 10px color-mix(in srgb, var(--accent-success) 55%, transparent);
+  flex-shrink: 0;
+}
+
 .status-bar-model-name {
   font-weight: 500;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-bar-model-ctx {
