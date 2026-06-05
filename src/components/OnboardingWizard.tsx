@@ -274,13 +274,13 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
           <h1 className="onboarding-title">Welcome to OpenHarness</h1>
           <p className="onboarding-subtitle">
-            Your open AI coding harness. Connect any model, pick an agent style, and start building.
+            Your local-first AI workbench. Connect supported providers, pick an agent style, and start building.
           </p>
 
           <div className="onboarding-features">
             <div className="onboarding-feature">
               <Zap size={16} style={{ color: 'var(--accent-primary)' }} />
-              <span>Works with <strong>any AI model</strong> — OpenAI, Anthropic, Google, local, free</span>
+              <span>Works with major providers and local runtimes: <strong>OpenAI-compatible, Anthropic, Google, Ollama, LM Studio</strong></span>
             </div>
             <div className="onboarding-feature">
               <Brain size={16} style={{ color: 'var(--accent-primary)' }} />

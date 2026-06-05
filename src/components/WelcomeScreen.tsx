@@ -15,7 +15,8 @@ export function WelcomeScreen({ onSuggestionClick }: Props) {
       </div>
       <h1 className="welcome-title">OpenHarness</h1>
       <p className="welcome-subtitle">
-        A polished, modern agent interface. Ask anything — write code, debug issues, explore repos, manage agents, and more.
+        A local-first AI workbench for coding, routing, and evaluation.
+        Ask anything — write code, debug issues, inspect repos, and coordinate agents.
       </p>
       <div className="welcome-suggestions">
         {welcomeSuggestions.map((s, i) => {

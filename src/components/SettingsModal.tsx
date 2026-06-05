@@ -48,7 +48,7 @@ const CATEGORIES: SettingsCategory[] = [
   { id: 'personality', label: 'Personality', icon: MessageCircle },
   { id: 'onboarding', label: 'Onboarding', icon: ArrowRight },
   { id: 'theme', label: 'Theme', icon: ThemeIcon },
-  { id: 'routing', label: 'Routing Learn', icon: Brain },
+  { id: 'routing', label: 'Routing Learning', icon: Brain },
   { id: 'auto-router', label: 'Auto-Router', icon: SlidersHorizontal },
   { id: 'chat', label: 'Chat Settings', icon: Settings },
   { id: 'about', label: 'About', icon: CheckCircle2 },
@@ -337,7 +337,9 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
   return (
     <>
       <PaneTitle>Model Library</PaneTitle>
-      <PaneDesc>Dense model cards for the top tracked models, with live access badges for your configured providers.</PaneDesc>
+      <PaneDesc>
+        Compare tracked model cards with strengths, weaknesses, context, cost, and live availability across your configured providers.
+      </PaneDesc>
 
       <div className="model-library-toolbar">
         <label className="model-library-search">
@@ -1972,12 +1974,12 @@ function AboutPane({ configPath }: { configPath?: string }) {
   return (
     <>
       <PaneTitle>About OpenHarness</PaneTitle>
-      <PaneDesc>A universal AI provider harness for desktop.</PaneDesc>
+      <PaneDesc>A local-first AI workbench for routing, evaluating, and coordinating coding agents.</PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>OpenHarness</div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 12 }}>Version 1.0.0</div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          An Electron + React + Express desktop app that provides a universal interface for AI providers with MCP tool integration, role-based model routing, and a tiling panel layout.
+          An Electron + React + Express workbench for local-first agent workflows with MCP tool integration, model routing, and multi-panel operations.
         </div>
         <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
           <div style={{ marginBottom: 4, fontWeight: 600 }}>Active config file</div>
