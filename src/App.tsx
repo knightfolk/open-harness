@@ -1,21 +1,25 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, Plan, HarnessRunStep, ProjectProfile } from './types';
 import type { PanelId } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
-import { SettingsModal } from './components/SettingsModal';
-import { OnboardingWizard } from './components/OnboardingWizard';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
 import { EnvironmentRail } from './components/EnvironmentRail';
-import { ReviewChangesFlyout } from './components/ReviewChangesFlyout';
-import { AgentFocusPanel } from './components/AgentFocusPanel';
-import { RunningAgentsStrip } from './components/RunningAgentsStrip';
 import { PanelRightOpen } from 'lucide-react';
 import * as api from './utils/api';
 import './styles/global.css';
 import './styles/components.css';
+
+// Heavy overlays and the on-demand focus/strip components are loaded
+// lazily. They contribute a large share of the initial bundle but are
+// only shown after explicit user action or while a run is in flight.
+const SettingsModal = lazy(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
+const OnboardingWizard = lazy(() => import('./components/OnboardingWizard').then((m) => ({ default: m.OnboardingWizard })));
+const ReviewChangesFlyout = lazy(() => import('./components/ReviewChangesFlyout').then((m) => ({ default: m.ReviewChangesFlyout })));
+const AgentFocusPanel = lazy(() => import('./components/AgentFocusPanel').then((m) => ({ default: m.AgentFocusPanel })));
+const RunningAgentsStrip = lazy(() => import('./components/RunningAgentsStrip').then((m) => ({ default: m.RunningAgentsStrip })));
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const RIGHT_SIDE_PANELS = new Set<PanelId>(['side-chat', 'diffs', 'browser', 'sub-agents', 'files', 'model-lab', 'safety', 'patches']);
@@ -927,12 +931,14 @@ function App() {
             <>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, position: 'relative' }}>
               {focusedSubAgentId != null ? (
-                <AgentFocusPanel
-                  agents={subAgents}
-                  focusedId={focusedSubAgentId}
-                  onFocus={(id) => setFocusedSubAgentId(id)}
-                  onExit={() => setFocusedSubAgentId(null)}
-                />
+                <Suspense fallback={null}>
+                  <AgentFocusPanel
+                    agents={subAgents}
+                    focusedId={focusedSubAgentId}
+                    onFocus={(id) => setFocusedSubAgentId(id)}
+                    onExit={() => setFocusedSubAgentId(null)}
+                  />
+                </Suspense>
               ) : (
                 <>
                   <LayoutEngine
@@ -962,13 +968,15 @@ function App() {
                   />
                   {subAgents.length > 0 && (
                     <div className="running-agents-strip-host">
-                      <RunningAgentsStrip
-                        agents={subAgents}
-                        onFocus={() => {
-                          const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
-                          setFocusedSubAgentId(next);
-                        }}
-                      />
+                      <Suspense fallback={null}>
+                        <RunningAgentsStrip
+                          agents={subAgents}
+                          onFocus={() => {
+                            const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
+                            setFocusedSubAgentId(next);
+                          }}
+                        />
+                      </Suspense>
                     </div>
                   )}
                 </>
@@ -1039,6 +1047,7 @@ function App() {
 
       {/* Onboarding Wizard */}
       {showOnboarding && (
+        <Suspense fallback={null}>
         <OnboardingWizard
           onComplete={async (result) => {
             // Refresh providers/models after onboarding completes.
@@ -1073,10 +1082,12 @@ function App() {
           }}
           onSkip={() => setShowOnboarding(false)}
         />
+        </Suspense>
       )}
 
       {/* Review Changes Flyout */}
       {reviewFlyoutOpen && (
+        <Suspense fallback={null}>
         <ReviewChangesFlyout
           workingDir={workingDir}
           _sessionId={activeSessionId}
@@ -1085,8 +1096,10 @@ function App() {
           onProposePatch={handleProposePatch}
           onExplainChange={handleExplainChange}
         />
+        </Suspense>
       )}
 
+      <Suspense fallback={null}>
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -1111,6 +1124,7 @@ function App() {
         onRestartOnboarding={() => { setSettingsOpen(false); setShowOnboarding(true); }}
         onMcpStatusRefresh={refreshMcpStatus}
       />
+      </Suspense>
     </div>
   );
 }

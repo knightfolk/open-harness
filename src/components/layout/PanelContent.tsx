@@ -1,15 +1,17 @@
+import { Suspense, lazy } from 'react';
 import type { PanelId } from '../../types/layout';
-import { SubAgentTracker } from '../SubAgentTracker';
-import { PlanTracker } from '../PlanTracker';
-import { ChatPanel } from '../ChatPanel';
-import { DiffViewer } from '../DiffViewer';
-import { BrowserPanel } from '../BrowserPanel';
-import { TerminalPanel } from '../TerminalPanel';
-import { FilesPanel } from '../FilesPanel';
-import { SideChatPanel } from '../SideChatPanel';
-import { ModelLabPanel } from '../ModelLabPanel';
-import { SafetyPanel } from '../SafetyPanel';
-import { PatchReviewPanel } from '../PatchReviewPanel';
+
+const SubAgentTracker = lazy(() => import('../SubAgentTracker').then((m) => ({ default: m.SubAgentTracker })));
+const PlanTracker = lazy(() => import('../PlanTracker').then((m) => ({ default: m.PlanTracker })));
+const ChatPanel = lazy(() => import('../ChatPanel').then((m) => ({ default: m.ChatPanel })));
+const DiffViewer = lazy(() => import('../DiffViewer').then((m) => ({ default: m.DiffViewer })));
+const BrowserPanel = lazy(() => import('../BrowserPanel').then((m) => ({ default: m.BrowserPanel })));
+const TerminalPanel = lazy(() => import('../TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
+const FilesPanel = lazy(() => import('../FilesPanel').then((m) => ({ default: m.FilesPanel })));
+const SideChatPanel = lazy(() => import('../SideChatPanel').then((m) => ({ default: m.SideChatPanel })));
+const ModelLabPanel = lazy(() => import('../ModelLabPanel').then((m) => ({ default: m.ModelLabPanel })));
+const SafetyPanel = lazy(() => import('../SafetyPanel').then((m) => ({ default: m.SafetyPanel })));
+const PatchReviewPanel = lazy(() => import('../PatchReviewPanel').then((m) => ({ default: m.PatchReviewPanel })));
 
 interface Props {
   panelId: PanelId;
@@ -37,30 +39,49 @@ interface Props {
   };
 }
 
+function PanelFallback() {
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 16,
+      color: 'var(--text-tertiary)',
+      fontSize: 12,
+    }}>
+      Loading panel...
+    </div>
+  );
+}
+
 export function PanelContent({ panelId, context }: Props) {
+  const wrapped = (node: React.ReactNode) => (
+    <Suspense fallback={<PanelFallback />}>{node}</Suspense>
+  );
   switch (panelId) {
     case 'chat':
-      return <ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} />;
+      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} />);
     case 'side-chat':
-      return <SideChatPanel />;
+      return wrapped(<SideChatPanel />);
     case 'diffs':
-      return <DiffViewer workingDir={context.workingDir} onReviewDiff={context.onReviewDiff} onProposePatch={context.onProposePatch} onExplainChange={context.onExplainChange} />;
+      return wrapped(<DiffViewer workingDir={context.workingDir} onReviewDiff={context.onReviewDiff} onProposePatch={context.onProposePatch} onExplainChange={context.onExplainChange} />);
     case 'browser':
-      return <BrowserPanel workingDir={context.workingDir} onAskAboutScreenshot={context.onAskAboutScreenshot} />;
+      return wrapped(<BrowserPanel workingDir={context.workingDir} onAskAboutScreenshot={context.onAskAboutScreenshot} />);
     case 'terminal':
-      return <TerminalPanel workingDir={context.workingDir} onSendToChat={context.onSendToChat} />;
+      return wrapped(<TerminalPanel workingDir={context.workingDir} onSendToChat={context.onSendToChat} />);
     case 'sub-agents':
-      return <SubAgentTracker agents={context.subAgents} />;
+      return wrapped(<SubAgentTracker agents={context.subAgents} />);
     case 'plan':
-      return context.plan ? <PlanTracker plan={context.plan} /> : <EmptyState text="No active plan" />;
+      return wrapped(context.plan ? <PlanTracker plan={context.plan} /> : <EmptyState text="No active plan" />);
     case 'files':
-      return <FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />;
+      return wrapped(<FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />);
     case 'model-lab':
-      return <ModelLabPanel workingDir={context.workingDir} models={context.models || []} />;
+      return wrapped(<ModelLabPanel workingDir={context.workingDir} models={context.models || []} />);
     case 'safety':
-      return <SafetyPanel workingDir={context.workingDir} />;
+      return wrapped(<SafetyPanel workingDir={context.workingDir} />);
     case 'patches':
-      return <PatchReviewPanel workingDir={context.workingDir} sessionId={context.sessionId ?? null} pendingProposalId={context.pendingPatchProposalId ?? null} onClearPendingProposal={context.clearPendingPatchProposalId ?? (() => {})} />;
+      return wrapped(<PatchReviewPanel workingDir={context.workingDir} sessionId={context.sessionId ?? null} pendingProposalId={context.pendingPatchProposalId ?? null} onClearPendingProposal={context.clearPendingPatchProposalId ?? (() => {})} />);
     default:
       return <EmptyState text="Unknown panel" />;
   }

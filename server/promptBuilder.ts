@@ -33,6 +33,10 @@ export interface PromptBuildResult {
     stop?: string[];
   };
   useNativeToolCalls: boolean;
+  // When the model cannot emit native tool calls, this describes the
+  // tool set in plain text and includes markup-format instructions
+  // so the parser can recover the call from the streamed text.
+  toolsDescription?: string;
   thinkingEnabled: boolean;
   streamFieldsToCapture: string[];
 }
@@ -67,26 +71,38 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
   // 2. Adapt tools
   const { adaptedTools, useNative } = adaptTools(config, options.tools);
 
-  // 3. Generation config
+  // 3. For non-native models, surface the available tools as a
+  //    text description and teach the markup format the parser
+  //    understands. This is what lets MiniMax/Qwen-style providers
+  //    call built-in tools like list_directory and read_file even
+  //    when they do not honor OpenAI `tool_calls` SSE deltas.
+  const toolsDescription = (!useNative && options.tools && options.tools.length > 0)
+    ? toolsAsText(options.tools)
+    : undefined;
+  const systemPromptWithTools = toolsDescription
+    ? `${systemPrompt}\n\n${toolsDescription}\n\nWhen the user asks you to use a tool, emit exactly one tool call in this format and nothing else:\n\n\`\`\`\n<tool_call>\n{"name": "<tool_name>", "arguments": { <json-args> }}\n</tool_call>\n\`\`\`\nAfter the tool result arrives, summarize the answer in plain text.`
+    : systemPrompt;
+
+  // 4. Generation config
   const temperature = options.role === 'title' ? 0.6
     : config.defaultCodingTemperature;
   const stopSeqs = config.stopSequences.length > 0 ? config.stopSequences : undefined;
 
-  // 4. Stream fields
+  // 5. Stream fields
   const streamFields = ['content'];
   if (isThinking && config.reasoningSupport === 'native-thinking') {
     streamFields.push('reasoning_content');
   }
 
   return {
-    systemPrompt,
+    systemPrompt: systemPromptWithTools,
     systemInstruction: {
       target: config.family === 'anthropic'
         ? 'anthropic-system'
         : config.family === 'gemini'
           ? 'gemini-systemInstruction'
           : 'system-message',
-      content: systemPrompt,
+      content: systemPromptWithTools,
     },
     adaptedTools,
     generationConfig: {
@@ -95,6 +111,7 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
       stop: stopSeqs,
     },
     useNativeToolCalls: useNative,
+    toolsDescription,
     thinkingEnabled: isThinking && config.reasoningSupport === 'native-thinking',
     streamFieldsToCapture: streamFields,
   };

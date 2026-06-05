@@ -46,6 +46,13 @@ import * as agentRuntime from './agentRuntime';
 import { captureDeepBrowser } from './browserCapture';
 import { analyzeDomStructure, checkResourceHealth } from './browserCaptureEnhancements';
 import { estimateSections, redactSecrets } from "./sectionRedaction";
+import { parseToolCallMarkup, MarkupScrubber, type MarkupParseResult } from './toolCallMarkup';
+
+function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
+  if (!text) return text;
+  const result = parseToolCallMarkup(text, knownToolNames);
+  return result.matchedAny ? result.remainder : text;
+}
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import {
   createProposal,
@@ -1854,13 +1861,25 @@ async function parseStreamForContentAndTools(
   res: express.Response,
   assistantId: string,
   streamText: boolean = true,
+  knownToolNames: string[] = [],
 ): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; arguments: string }> }> {
   const reader = (response as any).body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+  // Markup-recovered calls. Some OpenAI-compatible providers (notably
+  // MiniMax) emit tool invocations as plain text using <toolName>...</toolName>
+  // markup instead of native tool_calls SSE deltas. We capture those
+  // here and merge them with any native calls so the downstream MCP
+  // loop executes both kinds through one path.
+  const markupCalls: Array<{ id: string; name: string; arguments: string }> = [];
   const cleaner = new StreamCleaner();
+  // Stream-time scrubber: drops known tool markup from text deltas
+  // before they reach the user, so the markup never visibly leaks.
+  const knownToolNameSet = new Set(knownToolNames);
+  const scrubber = new MarkupScrubber();
+  let nextMarkupId = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1884,7 +1903,12 @@ async function parseStreamForContentAndTools(
         if (delta.content) {
           content += delta.content;
           if (streamText) {
-            const filtered = cleaner.feed(delta.content);
+            // Scrub any tool-call markup from the chunk before it
+            // reaches the cleaner. The recovered calls are still
+            // captured from `content` at end-of-stream; this path
+            // only ensures the user never sees the markup.
+            const scrubbed = scrubber.feed(delta.content, knownToolNameSet);
+            const filtered = cleaner.feed(scrubbed);
             if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
           }
         }
@@ -1908,12 +1932,41 @@ async function parseStreamForContentAndTools(
 
   // Flush any remaining tag-stripped content
   if (streamText) {
+    const tail = scrubber.flush();
+    if (tail) {
+      const filtered = cleaner.feed(tail);
+      if (filtered) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: filtered }) + '\n\n');
+    }
     const remaining = cleaner.flush();
     if (remaining) res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: remaining }) + '\n\n');
   }
 
-  const toolCalls = Array.from(toolCallMap.values()).filter((tc) => tc.name);
-  return { content, toolCalls };
+  // Scan the accumulated content for inline tool markup. This runs
+  // AFTER the tag-stripped flush so the markup never reaches the
+  // client; we only recover structured tool calls from it.
+  if (knownToolNames.length > 0) {
+    const result: MarkupParseResult = parseToolCallMarkup(content, knownToolNames);
+    for (const call of result.calls) {
+      nextMarkupId += 1;
+      markupCalls.push({
+        id: `markup-${nextMarkupId}`,
+        name: call.name,
+        arguments: JSON.stringify(call.arguments),
+      });
+    }
+  }
+
+  const nativeCalls = Array.from(toolCallMap.values()).filter((tc) => tc.name);
+  // Native calls take priority because they are always structured.
+  // Markup calls only fill in when no native call of the same name
+  // was emitted during this round, so we don't double-execute.
+  const nativeNames = new Set(nativeCalls.map((c) => c.name));
+  const merged = [...nativeCalls];
+  for (const mc of markupCalls) {
+    if (nativeNames.has(mc.name)) continue;
+    merged.push(mc);
+  }
+  return { content, toolCalls: merged };
 }
 
 // ── Universal model streaming (with MCP tool-calling loop) ─
@@ -2304,12 +2357,14 @@ async function streamModel(
       // Tool rounds: suppress text output (it's narration, not the answer)
       // Final round: stream text normally for real-time answer display
       const isLastRound = round === MAX_TOOL_ROUNDS - 1;
-      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound);
+      const knownToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
+      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound, knownToolNames);
       if (run && content.length > 0) emitRunStep(res, run, { type: 'model_text', chars: content.length });
 
       // No tool calls → model gave a direct answer (or final round completed)
       if (toolCalls.length === 0) {
-        finalContent = filterMonologue(stripThinkingTags(content));
+        const contentForDisplay = stripToolCallMarkup(content, knownToolNames);
+        finalContent = filterMonologue(stripThinkingTags(contentForDisplay));
         // If this was a suppressed round, the text wasn't streamed — emit it now
         if (!isLastRound && finalContent.trim()) {
           const cleaned = finalContent;
@@ -2326,7 +2381,7 @@ async function streamModel(
       // Add the assistant message with tool calls to the conversation context
       apiMessages.push({
         role: 'assistant',
-        content: content || null,
+        content: content ? stripToolCallMarkup(content, knownToolNames) : null,
         tool_calls: toolCalls.map((tc) => ({
           id: tc.id,
           type: 'function',
@@ -2395,7 +2450,8 @@ async function streamModel(
           body: JSON.stringify(forcedBody),
         });
         if (forcedResponse.ok) {
-          const forcedResult = await parseStreamForContentAndTools(forcedResponse, res, assistantId, true);
+          const forcedToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
+          const forcedResult = await parseStreamForContentAndTools(forcedResponse, res, assistantId, true, forcedToolNames);
           if (forcedResult.content.trim()) {
             finalContent = filterMonologue(stripThinkingTags(forcedResult.content));
           }
