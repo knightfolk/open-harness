@@ -4,7 +4,7 @@ import { v4 as uuid } from 'uuid';
 import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync } from 'fs';
 import { join, basename, extname } from 'path';
 import { execFileSync, spawn } from 'child_process';
-import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef } from './config';
+import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef, getConfigPath } from './config';
 import type { StoredMCPServer, StoredProvider } from './config';
 import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager } from './mcp';
@@ -349,6 +349,25 @@ function getActiveModel(): string {
   return appConfig.activeModel || 'MiniMax-M3';
 }
 
+function normalizeModelOverride(modelId?: string): string | undefined {
+  if (!modelId || typeof modelId !== 'string') return undefined;
+  const trimmed = modelId.trim();
+  if (!trimmed) return undefined;
+  return trimmed.toLowerCase() === 'auto' ? undefined : trimmed;
+}
+
+function resolveSelectedModel(route: RouteDecision, requestedModelOverride?: string): string {
+  const normalizedOverride = normalizeModelOverride(requestedModelOverride);
+  if (normalizedOverride) return normalizedOverride;
+
+  const autoModel = route.routerData?.source === 'auto' && !route.routerData?.fallback
+    ? route.suggestedModels?.[0]
+    : undefined;
+  const roleModel = appConfig.roleAssignments?.[route.role];
+
+  return autoModel || roleModel || getActiveModel();
+}
+
 function getPersonality(): string {
   return appConfig.personality || '';
 }
@@ -494,6 +513,7 @@ app.delete('/api/sessions/:id', (req, res) => {
 app.get('/api/config', (_req, res) => {
   const safeConfig = {
     ...appConfig,
+    configPath: getConfigPath(),
     providers: appConfig.providers.map((p) => ({
       ...p,
       apiKey: p.apiKey ? '••••' + p.apiKey.slice(-4) : '', // mask the key
@@ -641,11 +661,12 @@ app.post('/api/providers/batch', (req, res) => {
     const id = raw.id || String(raw.name).toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const existing = appConfig.providers.find((p) => p.id === id);
     const incomingModels = Array.isArray(raw.models) ? raw.models : undefined;
+    const incomingApiKey = typeof raw.apiKey === 'string' ? raw.apiKey.trim() : '';
     const provider: StoredProvider = {
       id,
       name: raw.name,
       type: raw.type as StoredProvider['type'],
-      apiKey: raw.apiKey || existing?.apiKey || '',
+      apiKey: incomingApiKey || existing?.apiKey || '',
       baseURL: raw.baseURL,
       models: incomingModels && incomingModels.length > 0 ? incomingModels : (existing?.models || []),
     };
@@ -661,11 +682,12 @@ app.post('/api/providers', (req, res) => {
   if (!name || !type || !baseURL) {
     return res.status(400).json({ error: 'name, type, and baseURL are required' });
   }
+  const normalizedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
   const provider: StoredProvider = {
     id: id || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     name,
     type: type as StoredProvider['type'],
-    apiKey: apiKey || '',
+    apiKey: normalizedApiKey,
     baseURL,
     models: models || [],
   };
@@ -683,7 +705,9 @@ app.put('/api/providers/:id', (req, res) => {
   if (updates.name !== undefined) existing.name = updates.name;
   if (updates.type !== undefined) existing.type = updates.type;
   if (updates.baseURL !== undefined) existing.baseURL = updates.baseURL;
-  if (updates.apiKey && !updates.apiKey.startsWith('••••')) existing.apiKey = updates.apiKey;
+  if (typeof updates.apiKey === 'string' && !updates.apiKey.startsWith('••••')) {
+    existing.apiKey = updates.apiKey.trim();
+  }
   if (updates.models !== undefined) existing.models = updates.models;
 
   appConfig = upsertProvider(appConfig, existing);
@@ -705,7 +729,9 @@ app.post('/api/providers/:id/test', async (req, res) => {
 
   // If a new apiKey/baseURL is provided in the test request, use it
   const testProvider = { ...provider };
-  if (req.body?.apiKey && !req.body.apiKey.startsWith('••••')) testProvider.apiKey = req.body.apiKey;
+  if (typeof req.body?.apiKey === 'string' && !req.body.apiKey.startsWith('••••')) {
+    testProvider.apiKey = req.body.apiKey.trim();
+  }
   if (req.body?.baseURL) testProvider.baseURL = req.body.baseURL;
 
   const result = await testProviderConnection(testProvider);
@@ -720,7 +746,9 @@ app.post('/api/providers/:id/models', async (req, res) => {
 
   // Allow passing temp credentials for the fetch
   const fetchProvider = { ...provider };
-  if (req.body?.apiKey && !req.body.apiKey.startsWith('••••')) fetchProvider.apiKey = req.body.apiKey;
+  if (typeof req.body?.apiKey === 'string' && !req.body.apiKey.startsWith('••••')) {
+    fetchProvider.apiKey = req.body.apiKey.trim();
+  }
   if (req.body?.baseURL) fetchProvider.baseURL = req.body.baseURL;
 
   try {
@@ -1883,7 +1911,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
 
   const { content, modelId } = req.body as { content: string; modelId?: string };
   if (!content?.trim()) return res.status(400).json({ error: 'Content is required' });
-  const requestedModelOverride = typeof modelId === 'string' && modelId.trim() ? modelId.trim() : undefined;
+  const requestedModelOverride = normalizeModelOverride(modelId);
 
   const userMsg: MessageRow = {
     id: uuid(),
@@ -1909,15 +1937,16 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
 
   const requestedModel = requestedModelOverride || getActiveModel();
-  const resolved = requestedModelOverride ? resolveProviderForModel(requestedModelOverride) : resolveActiveProvider();
+  const route = await routeWithAutoRouter(content, appConfig);
+  const effectiveModel = resolveSelectedModel(route, requestedModelOverride);
+  const resolved = resolveProviderForModel(effectiveModel);
   const run = createHarnessRun({
     sessionId: session.id,
     userMessageId: userMsg.id,
     requestedModel,
     providerId: resolved?.providerId || 'local',
   });
-
-  const route = await routeWithAutoRouter(content, appConfig);
+  run.effectiveModel = effectiveModel;
   run.role = route.role;
   writeSSE(res, 'run_start', run);
   const rd = route.routerData;
@@ -1950,8 +1979,17 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     });
   }
 
-  // Non-direct modes run multi-agent orchestration instead of single-stream model
-  if (route.mode !== 'direct' && resolved) {
+  // Non-direct modes run multi-agent orchestration instead of single-stream model.
+  // Keep this path active even if model resolution is unclear because
+  // routing and orchestration still provide deterministic behavior.
+  if (route.mode !== 'direct') {
+    if (run) emitRunStep(res, run, {
+      type: 'route',
+      role: route.role,
+      model: effectiveModel,
+      reason: `${route.mode} mode · ${route.reason}`,
+    });
+
     // Emit orchestration step headers
     for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
 
@@ -1987,7 +2025,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   } else if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session, run);
   } else {
-    await streamModelWithFallback(resolved, session, res, assistantId, run, route, requestedModelOverride);
+    await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel);
   }
 
   completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
@@ -2628,6 +2666,7 @@ async function streamModel(
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + apiKey,
+          'x-api-key': apiKey,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
@@ -2735,7 +2774,11 @@ async function streamModel(
         };
         const forcedResponse = await fetch(chatURL, {
           method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+          headers: {
+            'Authorization': 'Bearer ' + apiKey,
+            'x-api-key': apiKey,
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify(forcedBody),
           signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
         });
@@ -4291,7 +4334,7 @@ app.get('/api/agents/background/:id/result', async (_req, res) => {
  * If all providers fail, the final error from the last attempt is preserved.
  */
 async function streamModelWithFallback(
-  primaryResolved: { chatURL: string; apiKey: string; providerId: string; provider?: any },
+  primaryResolved: { chatURL: string; apiKey: string; providerId: string; provider?: any } | null | undefined,
   session: SessionRow,
   res: express.Response,
   assistantId: string,
@@ -4393,12 +4436,13 @@ app.listen(PORT, () => {
   const _resolved = resolveActiveProvider();
   console.log(`Model: ${_activeModel} (family: ${_family}, style: ${_cfg.systemPromptStyle}, tool quality: ${_cfg.toolCallQuality})`);
   console.log(`Providers: ${appConfig.providers.length} configured`);
+  console.log(`Config path: ${getConfigPath()}`);
   if (_resolved) {
     console.log(`✓ Active provider: ${_resolved.providerId} (${_resolved.chatURL})`);
   } else {
     console.log(`⚠  No provider found for model ${_activeModel} — using local fallback`);
   }
-  console.log(`✓ Config loaded from ~/.openharness/config.json`);
+  console.log(`✓ Config loaded from ${getConfigPath()}`);
 
   // Auto-start Docker MCP gateway via stdio (keeps process alive as child)
   try {

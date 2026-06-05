@@ -125,10 +125,12 @@ export async function routeWithAutoRouter(
   config: StoredConfig,
 ): Promise<RouteDecision> {
   // First run the heuristic router for role/mode classification
-  const route = routeRequest(content, config.activeModel || '', config.roleAssignments || {});
+  const activeModel = config.activeModel || '';
+  const route = routeRequest(content, activeModel, config.roleAssignments || {});
+  const shouldUseAutoRouter = activeModel.trim().toLowerCase() === 'auto';
 
   // If auto-router is enabled, use it for model selection
-  if (isAutoRouterEnabled()) {
+  if (isAutoRouterEnabled() && shouldUseAutoRouter) {
     // TODO(P1): Pass real hasImages, turns, and toolCount from session state.
     // Currently hardcoded because routeWithAutoRouter doesn't have access to the session.
     // The classifier still works, but accuracy improves with real signal values.

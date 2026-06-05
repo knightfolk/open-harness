@@ -154,6 +154,7 @@ export interface ContextConfig {
 
 export interface AppConfig {
   version: number;
+  configPath?: string;
   providers: ProviderInfo[];
   mcpServers: MCPServerInfo[];
   personality: string;

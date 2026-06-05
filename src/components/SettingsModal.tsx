@@ -74,6 +74,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  configPath?: string;
   activeModel: string;
   providers: ProviderConfig[];
   roleAssignments: CodingRoleAssignment[];
@@ -82,8 +83,9 @@ interface Props {
   mcpServers: MCPServerItem[];
   mcpStatus: any[];
   onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string }) => Promise<any>;
-  onTestProvider: (providerId: string) => Promise<any>;
-  onFetchModels: (providerId: string) => Promise<any>;
+  onTestProvider: (providerId: string, tempKey?: string) => Promise<any>;
+  onFetchModels: (providerId: string, tempKey?: string) => Promise<any>;
+  onUpdateProvider: (providerId: string, updates: { apiKey?: string; baseURL?: string; type?: string; models?: any[] }) => Promise<void>;
   onRemoveProvider: (providerId: string) => void;
   onAddMCPServer: (server: { name: string; endpoint: string; authType: string; authToken: string }) => Promise<any>;
   onRemoveMCPServer: (serverId: string) => void;
@@ -121,7 +123,8 @@ const roleIconMap: Record<string, typeof Bot> = {
 // ── Main component ─────────────────────────────────────
 export function SettingsModal({
   isOpen, onClose, activeModel, providers, roleAssignments, activeTheme,
-  personalityText, mcpServers, mcpStatus, onAddProvider, onTestProvider,
+  configPath, personalityText, mcpServers, mcpStatus, onAddProvider, onTestProvider,
+  onUpdateProvider,
   onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer,
   onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme,
   onPersonalityChange,
@@ -187,8 +190,15 @@ export function SettingsModal({
           <div className="settings-content">
             {contentKey === 'model' && <ActiveModelPane activeModel={activeModel} enabledModels={enabledModels} onSelectModel={onSelectModel} />}
             {contentKey === 'providers/manage' && (
-              <ProvidersPane providers={providers} onTest={onTestProvider} onFetch={onFetchModels}
-                onRemove={onRemoveProvider} onToggleModel={onToggleProviderModel} activeModel={activeModel} />
+              <ProvidersPane
+                providers={providers}
+                onTest={onTestProvider}
+                onFetch={onFetchModels}
+                onUpdateProvider={onUpdateProvider}
+                onRemove={onRemoveProvider}
+                onToggleModel={onToggleProviderModel}
+                activeModel={activeModel}
+              />
             )}
             {contentKey === 'providers/add' && (
               <AddProviderPane onAdd={onAddProvider} existingIds={providers.map((p) => p.id)}
@@ -205,7 +215,7 @@ export function SettingsModal({
             {contentKey === 'routing' && <RoutingLearningPane onApplyRoleRecommendation={onAssignRoleModel} />}
             {contentKey === 'auto-router' && <AutoRouterPane />}
             {contentKey === 'chat' && <ChatSettingsPane />}
-            {contentKey === 'about' && <AboutPane />}
+            {contentKey === 'about' && <AboutPane configPath={configPath} />}
           </div>
         </div>
       </div>
@@ -226,16 +236,20 @@ function PaneDesc({ children }: { children: React.ReactNode }) { return <div cla
 
 function ActiveModelPane({ activeModel, enabledModels, onSelectModel }: any) {
   const current = enabledModels.find((m: any) => m.id === activeModel);
+  const effectiveCurrent = current || (activeModel === 'Auto'
+    ? { id: 'Auto', name: 'Auto', providerName: 'Router' }
+    : null);
   return (
     <>
       <PaneTitle>Active Chat Model</PaneTitle>
-      <PaneDesc>The model used for all chat conversations. Only enabled models from configured providers appear here.</PaneDesc>
+      <PaneDesc>The model used for all chat conversations. Select Auto to let routing pick a candidate per request.</PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
         <div style={{ marginBottom: 8 }}>
-          <div className="settings-item-label">{current?.name || activeModel}</div>
-          <div className="settings-item-desc">{current ? `${current.providerName} • enabled for chat` : 'No enabled model found'}</div>
+          <div className="settings-item-label">{effectiveCurrent?.name || activeModel}</div>
+          <div className="settings-item-desc">{activeModel === 'Auto' ? 'Router mode • per-request auto-selection' : (current ? `${current.providerName} • enabled for chat` : 'No enabled model found')}</div>
         </div>
         <select className="settings-select settings-select-wide" value={activeModel} onChange={(e) => onSelectModel(e.target.value)}>
+          <option value="Auto">Auto</option>
           {enabledModels.map((model: any) => (
             <option key={`${model.providerId}:${model.id}`} value={model.id}>{model.providerName} — {model.name}</option>
           ))}
@@ -249,13 +263,23 @@ function ActiveModelPane({ activeModel, enabledModels, onSelectModel }: any) {
 /*  MANAGE PROVIDERS — collapsible cards, scales to 10+               */
 /* ================================================================== */
 
-function ProvidersPane({ providers, onTest, onFetch, onRemove, onToggleModel, activeModel }: any) {
+function ProvidersPane({
+  providers,
+  onTest,
+  onFetch,
+  onUpdateProvider,
+  onRemove,
+  onToggleModel,
+  activeModel,
+}: any) {
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, any>>({});
   const [fetchingModels, setFetchingModels] = useState<string | null>(null);
   const [fetchResults, setFetchResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [providerKeyDraft, setProviderKeyDraft] = useState<Record<string, string>>({});
+  const [updatingProviderKey, setUpdatingProviderKey] = useState<string | null>(null);
   const [healthByProvider, setHealthByProvider] = useState<Record<string, { summary: api.ProviderHealthSummary; history: api.ProviderHealthRecord[] }>>({});
   const [probingHealth, setProbingHealth] = useState<string | null>(null);
 
@@ -341,6 +365,58 @@ function ProvidersPane({ providers, onTest, onFetch, onRemove, onToggleModel, ac
                 <div className="prov-card-body">
                   {/* Quick actions */}
                   <div className="prov-card-actions">
+                    {provider.type !== 'local' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                            API key
+                            <span style={{ color: provider.configured ? 'var(--text-secondary)' : 'var(--warning)' }}>
+                              {provider.configured ? ' (stored)' : ' (not configured)'}
+                            </span>
+                          </span>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <input
+                              type="password"
+                              value={providerKeyDraft[provider.id] || ''}
+                              onChange={(e) => setProviderKeyDraft((prev) => ({ ...prev, [provider.id]: e.target.value }))}
+                              placeholder={provider.configured ? 'Update key (optional)' : 'Add API key'}
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontSize: 11,
+                                borderRadius: 4,
+                                border: '1px solid var(--border-primary)',
+                                background: 'var(--bg-tertiary)',
+                                color: 'var(--text-primary)',
+                                padding: '4px 6px',
+                              }}
+                            />
+                            <button
+                              className="settings-mini-button"
+                              disabled={updatingProviderKey === provider.id}
+                              onClick={async () => {
+                                const apiKey = (providerKeyDraft[provider.id] || '').trim();
+                                if (!apiKey) return;
+                                setUpdatingProviderKey(provider.id);
+                                try {
+                                  await onUpdateProvider(provider.id, { apiKey });
+                                  const result = await onTest(provider.id, apiKey);
+                                  setTestResults((p) => ({ ...p, [provider.id]: result }));
+                                  setProviderKeyDraft((prev) => ({ ...prev, [provider.id]: '' }));
+                                } catch (err: any) {
+                                  setTestResults((p) => ({ ...p, [provider.id]: { ok: false, error: err?.message || 'Failed to save or validate key' } }));
+                                } finally {
+                                  setUpdatingProviderKey(null);
+                                }
+                              }}
+                            >
+                              {updatingProviderKey === provider.id ? <Loader size={11} className="spin" /> : <KeyRound size={11} />}
+                              {updatingProviderKey === provider.id ? 'Saving' : 'Save'}
+                            </button>
+                          </div>
+                        </label>
+                      </div>
+                    )}
                     {(healthByProvider[provider.id]?.summary || tr) && (
                       <ProviderHealthBadge
                         summary={healthByProvider[provider.id]?.summary}
@@ -349,14 +425,26 @@ function ProvidersPane({ providers, onTest, onFetch, onRemove, onToggleModel, ac
                         probing={probingHealth === provider.id}
                       />
                     )}
-                    <button className="settings-mini-button" onClick={() => { setTestingProvider(provider.id); onTest(provider.id).then((r: any) => setTestResults((p) => ({ ...p, [provider.id]: r }))).catch((e: any) => setTestResults((p) => ({ ...p, [provider.id]: { ok: false, error: e.message } }))).finally(() => setTestingProvider(null)); }} disabled={testingProvider === provider.id}>
+                    <button
+                      className="settings-mini-button"
+                      onClick={() => {
+                        const tempKey = (providerKeyDraft[provider.id] || '').trim() || undefined;
+                        setTestingProvider(provider.id);
+                        onTest(provider.id, tempKey)
+                          .then((r: any) => setTestResults((p) => ({ ...p, [provider.id]: r })))
+                          .catch((e: any) => setTestResults((p) => ({ ...p, [provider.id]: { ok: false, error: e.message } })))
+                          .finally(() => setTestingProvider(null));
+                      }}
+                      disabled={testingProvider === provider.id}
+                    >
                       {testingProvider === provider.id ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
                       {testingProvider === provider.id ? 'Testing...' : 'Test'}
                     </button>
                     <button className="settings-mini-button" onClick={async () => {
+                      const tempKey = (providerKeyDraft[provider.id] || '').trim() || undefined;
                       setFetchingModels(provider.id);
                       try {
-                        const result = await onFetch(provider.id);
+                        const result = await onFetch(provider.id, tempKey);
                         const count = Array.isArray(result) ? result.length : (result?.length || 0);
                         setFetchResults((prev) => ({ ...prev, [provider.id]: { ok: true, msg: 'Found ' + count + ' model' + (count === 1 ? '' : 's') } }));
                       } catch (err: any) {
@@ -1706,7 +1794,9 @@ function ChatSettingsPane() {
 /* ================================================================== */
         <ContextBudgetControls />
 
-function AboutPane() {
+function AboutPane({ configPath }: { configPath?: string }) {
+  const displayConfigPath = configPath || '(not reported by server)';
+
   return (
     <>
       <PaneTitle>About OpenHarness</PaneTitle>
@@ -1716,6 +1806,24 @@ function AboutPane() {
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 12 }}>Version 1.0.0</div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
           An Electron + React + Express desktop app that provides a universal interface for AI providers with MCP tool integration, role-based model routing, and a tiling panel layout.
+        </div>
+        <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          <div style={{ marginBottom: 4, fontWeight: 600 }}>Active config file</div>
+          <div style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border-primary)', borderRadius: 6, wordBreak: 'break-all' }}>
+            {displayConfigPath}
+          </div>
+          <button
+            className="settings-mini-button"
+            onClick={() => {
+              if (!configPath) return;
+              navigator.clipboard?.writeText(configPath).catch(() => {});
+            }}
+            style={{ marginTop: 6 }}
+            title="Copy active config path"
+            disabled={!configPath}
+          >
+            Copy config path
+          </button>
         </div>
         <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-tertiary)' }}>
           <div>• 8 built-in themes (4 dark + 4 light)</div>

@@ -22,6 +22,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     };
     if (options.apiKey) {
       headers['Authorization'] = `Bearer ${options.apiKey}`;
+      headers['x-api-key'] = options.apiKey;
     }
 
     const body: any = {

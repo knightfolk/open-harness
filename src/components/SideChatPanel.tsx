@@ -52,15 +52,16 @@ export function SideChatPanel({ activeModel, models }: Props) {
     () => models.length > 0 ? models : [{ id: activeModel, name: activeModel }],
     [activeModel, models],
   );
-  const effectiveModel = modelOptions.some((m) => m.id === selectedModel) ? selectedModel : activeModel;
+  const fallbackModel = modelOptions.length > 0 ? modelOptions[0].id : activeModel;
+  const effectiveModel = modelOptions.some((m) => m.id === selectedModel) ? selectedModel : fallbackModel;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
-    if (!modelOptions.some((m) => m.id === selectedModel)) setSelectedModel(activeModel);
-  }, [activeModel, modelOptions, selectedModel]);
+    if (!modelOptions.some((m) => m.id === selectedModel)) setSelectedModel(fallbackModel);
+  }, [modelOptions, selectedModel, fallbackModel]);
 
   const ensureSession = async (): Promise<string | null> => {
     if (sessionId) return sessionId;

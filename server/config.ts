@@ -106,6 +106,10 @@ const LEGACY_CONFIG_DIR = join(homedir(), '.open-harness');
 const CONFIG_DIR = join(homedir(), '.openharness');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
+export function getConfigPath(): string {
+  return CONFIG_PATH;
+}
+
 const DEFAULT_CONFIG: StoredConfig = {
   version: 1,
   providers: [
@@ -164,10 +168,14 @@ export function loadConfig(): StoredConfig {
     const raw = readFileSync(CONFIG_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as StoredConfig;
     // Merge with defaults for forward-compat
+    const normalizedProviders = (parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
+      ...provider,
+      apiKey: typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '',
+    }));
     return {
       ...cloneDefaultConfig(),
       ...parsed,
-      providers: parsed.providers || cloneDefaultConfig().providers,
+      providers: normalizedProviders,
       mcpServers: parsed.mcpServers || [],
       trustMode: parsed.trustMode || DEFAULT_CONFIG.trustMode,
       roleAssignments: {

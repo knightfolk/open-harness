@@ -359,6 +359,7 @@ async function callOpenAICompatibleClassifier(
   };
   if (provider.apiKey) {
     headers['Authorization'] = `Bearer ${provider.apiKey}`;
+    headers['x-api-key'] = provider.apiKey;
   }
 
   const res = await fetch(url, {

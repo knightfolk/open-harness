@@ -199,7 +199,10 @@ export function startBackgroundAgent(
         temperature: profile.temperature,
       };
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+        headers['x-api-key'] = apiKey;
+      }
 
       const res = await fetch(url, {
         method: 'POST',
@@ -371,7 +374,10 @@ async function callAgentModel(
 ): Promise<string> {
   const url = buildChatURL(provider);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
+  if (provider.apiKey) {
+    headers['Authorization'] = `Bearer ${provider.apiKey}`;
+    headers['x-api-key'] = provider.apiKey;
+  }
   const timeoutSignal = AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS);
   const combinedSignal = signal.aborted ? signal : AbortSignal.any([signal, timeoutSignal]);
 

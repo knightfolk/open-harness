@@ -118,6 +118,7 @@ function App() {
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
   const [contextWarning, setContextWarning] = useState<string | null>(null);
   const [trustMode, setTrustMode] = useState('workspace-write');
+  const [configPath, setConfigPath] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
@@ -234,6 +235,7 @@ function App() {
       try {
         const config = await api.getConfig();
         if (config) {
+          setConfigPath(config.configPath || '');
           setActiveModel(config.activeModel || 'MiniMax-M2.7');
           setActiveTheme(config.activeTheme || 'midnight');
           setPersonalityText(config.personality || '');
@@ -311,6 +313,19 @@ function App() {
     });
   }, []);
 
+  const handleUpdateProvider = useCallback(async (providerId: string, updates: { apiKey?: string; baseURL?: string; type?: string; models?: any[] }) => {
+    await api.updateProvider(providerId, updates as any);
+    const fresh = await api.getProviders();
+    setProviders(fresh.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      type: p.type || 'openai-compatible',
+      endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
+      configured: !!p.hasKey || p.type === 'local',
+      models: p.models || [],
+    })));
+  }, []);
+
   const handleAssignRoleModel = useCallback((roleId: string, modelId: string) => {
     setRoleAssignments((prev) => {
       const next = prev.map((r) => (r.id === roleId ? { ...r, modelId } : r));
@@ -348,12 +363,12 @@ function App() {
     return result;
   }, []);
 
-  const handleTestProvider = useCallback(async (providerId: string) => {
-    return await api.testProviderConnection(providerId);
+  const handleTestProvider = useCallback(async (providerId: string, tempKey?: string) => {
+    return await api.testProviderConnection(providerId, tempKey);
   }, []);
 
-  const handleFetchModels = useCallback(async (providerId: string) => {
-    const models = await api.fetchProviderModels(providerId);
+  const handleFetchModels = useCallback(async (providerId: string, tempKey?: string) => {
+    const models = await api.fetchProviderModels(providerId, tempKey);
     // Update the provider's model list by saving to server then refreshing
     const fresh = await api.getProviders();
     setProviders(fresh.map((p: any) => ({
@@ -1041,7 +1056,9 @@ function App() {
         {/* Enhanced Status Bar */}
         <StatusBar
           activeModel={activeModel}
-          providerName={providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
+          providerName={activeModel.toLowerCase() === 'auto'
+            ? 'Router'
+            : providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
           connected={providers.some(p => p.configured)}
           messageCount={msgCount}
           workingDir={workingDir}
@@ -1131,6 +1148,7 @@ function App() {
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        configPath={configPath}
         activeModel={activeModel}
         providers={providers}
         roleAssignments={roleAssignments}
@@ -1141,6 +1159,7 @@ function App() {
         onAddProvider={handleAddProvider}
         onTestProvider={handleTestProvider}
         onFetchModels={handleFetchModels}
+        onUpdateProvider={handleUpdateProvider}
         onRemoveProvider={handleRemoveProvider}
         onAddMCPServer={handleAddMCPServer}
         onRemoveMCPServer={handleRemoveMCPServer}

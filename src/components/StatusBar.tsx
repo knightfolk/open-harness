@@ -25,6 +25,9 @@ interface Props {
   onTrustModeChange?: (mode: string) => void;
 }
 
+const AUTO_MODEL_ID = 'Auto';
+const AUTO_MODEL_LABEL = 'Auto';
+
 function formatContext(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`;
   return `${Math.round(tokens / 1024)}K`;
@@ -76,15 +79,21 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     m.providerName.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const hasSearch = searchQuery.trim().length > 0;
+  const pickerModels = [
+    { id: AUTO_MODEL_ID, name: AUTO_MODEL_LABEL, providerName: 'Router', contextWindow: 0 },
+    ...filtered,
+  ];
 
   const grouped = new Map<string, ModelOption[]>();
-  for (const m of filtered) {
+  for (const m of pickerModels) {
     const list = grouped.get(m.providerName) || [];
     list.push(m);
     grouped.set(m.providerName, list);
   }
 
   const currentModel = models.find(m => m.id === activeModel);
+  const isAuto = activeModel === AUTO_MODEL_ID;
   const trustColor = TRUST_COLORS[trustMode] || '#6b7280';
   const trustLabel = TRUST_LABELS[trustMode] || trustMode;
 
@@ -203,13 +212,13 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
                       onClick={() => { onModelChange(m.id); setModelPickerOpen(false); setSearchQuery(''); }}
                     >
                       <span className="model-picker-item-name">{m.name}</span>
-                      <span className="model-picker-item-ctx">{formatContext(m.contextWindow)}</span>
+                      {!!m.contextWindow && <span className="model-picker-item-ctx">{formatContext(m.contextWindow)}</span>}
                       {m.id === activeModel && <Check size={14} className="model-picker-item-check" />}
                     </button>
                   ))}
                 </div>
               ))}
-              {filtered.length === 0 && (
+              {hasSearch && filtered.length === 0 && (
                 <div className="model-picker-empty">No models found</div>
               )}
             </div>
@@ -222,7 +231,7 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
       {/* Provider */}
       <div className="status-bar-item">
         <Zap size={12} />
-        {providerName || 'No provider'}
+        {isAuto ? 'Auto' : providerName || 'No provider'}
       </div>
 
       {/* Working dir */}

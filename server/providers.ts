@@ -21,9 +21,10 @@ export async function testProviderConnection(provider: StoredProvider): Promise<
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    if (provider.apiKey) {
-      headers['Authorization'] = `Bearer ${provider.apiKey}`;
-    }
+  if (provider.apiKey) {
+    headers['Authorization'] = `Bearer ${provider.apiKey}`;
+    headers['x-api-key'] = provider.apiKey;
+  }
 
     const response = await fetch(url, {
       method: 'GET',
@@ -73,9 +74,10 @@ export async function fetchProviderModels(provider: StoredProvider): Promise<Fet
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    if (provider.apiKey) {
-      headers['Authorization'] = `Bearer ${provider.apiKey}`;
-    }
+  if (provider.apiKey) {
+    headers['Authorization'] = `Bearer ${provider.apiKey}`;
+    headers['x-api-key'] = provider.apiKey;
+  }
 
     const response = await fetch(url, {
       method: 'GET',
