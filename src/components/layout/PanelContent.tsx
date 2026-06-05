@@ -41,6 +41,8 @@ interface Props {
     models?: Array<{ id: string; name: string }>;
     pinnedTools?: PanelId[];
     onOpenPinnedTool?: (id: PanelId) => void;
+    environmentOpen?: boolean;
+    onEnvironmentOpenChange?: (open: boolean) => void;
   };
 }
 
@@ -66,7 +68,7 @@ export function PanelContent({ panelId, context }: Props) {
   );
   switch (panelId) {
     case 'chat':
-      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} />);
+      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} environmentOpen={context.environmentOpen ?? true} onEnvironmentOpenChange={context.onEnvironmentOpenChange || (() => {})} />);
     case 'side-chat':
       return wrapped(<SideChatPanel activeModel={context.activeModel} models={context.models || []} />);
     case 'diffs':

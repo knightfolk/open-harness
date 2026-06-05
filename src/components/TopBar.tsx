@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, RotateCcw, FolderOpen,
   ChevronDown, Check, Wrench, PanelRightOpen, PanelRightClose, Terminal,
-  Heart,
+  Heart, Activity,
 } from 'lucide-react';
 import type { PanelId } from '../types/layout';
 import { ALL_PANELS } from '../types/layout';
@@ -22,6 +22,8 @@ interface Props {
   rightRailPinned?: boolean;
   bottomBarOpen: boolean;
   onToggleBottomBar: () => void;
+  environmentOpen: boolean;
+  onToggleEnvironment: () => void;
   pinnedTools: PanelId[];
   onTogglePinnedTool: (id: PanelId) => void;
 }
@@ -30,6 +32,7 @@ export function TopBar({
   sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout,
   sessionTitle, workingDir, onOpenFolder,
   rightRailOpen, onToggleRightRail, rightRailPinned = false, bottomBarOpen, onToggleBottomBar,
+  environmentOpen, onToggleEnvironment,
   pinnedTools, onTogglePinnedTool,
 }: Props) {
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
@@ -109,7 +112,7 @@ export function TopBar({
       </div>
 
       <div className="top-bar-actions">
-        <button className="top-bar-action" onClick={onOpenFolder} title="Open folder">
+        <button className="top-bar-action" onClick={onOpenFolder} title="Open Files panel" aria-label="Open Files panel">
           <FolderOpen size={16} />
         </button>
 
@@ -120,6 +123,15 @@ export function TopBar({
           aria-label={bottomBarOpen ? 'Hide bottom bar' : 'Show bottom bar'}
         >
           <Terminal size={16} />
+        </button>
+
+        <button
+          className={'top-bar-action' + (environmentOpen ? ' active' : '')}
+          onClick={onToggleEnvironment}
+          title={environmentOpen ? 'Hide Environment' : 'Show Environment'}
+          aria-label={environmentOpen ? 'Hide Environment' : 'Show Environment'}
+        >
+          <Activity size={16} />
         </button>
 
         <button

@@ -35,6 +35,8 @@ interface Props {
   models?: Array<{ id: string; name: string }>;
   pinnedTools?: PanelId[];
   onOpenPinnedTool?: (id: PanelId) => void;
+  environmentOpen?: boolean;
+  onEnvironmentOpenChange?: (open: boolean) => void;
 }
 
 export function LayoutEngine({
@@ -67,6 +69,8 @@ export function LayoutEngine({
   models,
   pinnedTools,
   onOpenPinnedTool,
+  environmentOpen,
+  onEnvironmentOpenChange,
 }: Props) {
   return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{
     subAgents, plan, fileChanges, terminalCommands, focusedSubAgentId, messages, isTyping,
@@ -81,6 +85,8 @@ export function LayoutEngine({
     models,
     pinnedTools,
     onOpenPinnedTool,
+    environmentOpen,
+    onEnvironmentOpenChange,
   }} />;
 }
 

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Send, Paperclip, Image, AtSign, Command, Activity } from 'lucide-react';
+import { Send, Paperclip, Image, AtSign, Command } from 'lucide-react';
 import type { Message, SubAgent } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { shortModelName } from '../utils/modelDisplay';
@@ -21,10 +21,11 @@ interface Props {
   subAgents: SubAgent[];
   onReviewChanges: () => void;
   onFocusAgents: () => void;
+  environmentOpen: boolean;
+  onEnvironmentOpenChange: (open: boolean) => void;
 }
 
 const SUPER_WIDTH_KEY = 'openharness.chat-super.width.v1';
-const SUPER_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
 
 function loadSuperWidth() {
   try {
@@ -36,20 +37,12 @@ function loadSuperWidth() {
   }
 }
 
-function loadSuperHidden() {
-  try {
-    return localStorage.getItem(SUPER_HIDDEN_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents }: Props) {
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, environmentOpen, onEnvironmentOpenChange }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const [superWidth, setSuperWidth] = useState(loadSuperWidth);
-  const [superHidden, setSuperHidden] = useState(loadSuperHidden);
+  const superHidden = !environmentOpen;
   const userScrolledUpRef = useRef(false);
   const previousMessageCountRef = useRef(0);
   const previousLastContentLengthRef = useRef(0);
@@ -99,14 +92,8 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
   }, [onCompareModel]);
 
   const hideSuperPanel = useCallback(() => {
-    setSuperHidden(true);
-    try { localStorage.setItem(SUPER_HIDDEN_KEY, 'true'); } catch { /* ignore */ }
-  }, []);
-
-  const showSuperPanel = useCallback(() => {
-    setSuperHidden(false);
-    try { localStorage.setItem(SUPER_HIDDEN_KEY, 'false'); } catch { /* ignore */ }
-  }, []);
+    onEnvironmentOpenChange(false);
+  }, [onEnvironmentOpenChange]);
 
   const startResizeSuper = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -131,21 +118,11 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
     if (!isTyping) return;
     const width = rootRef.current?.clientWidth || window.innerWidth;
     if (width < 940) return;
-    setSuperHidden(false);
-    try { localStorage.setItem(SUPER_HIDDEN_KEY, 'false'); } catch { /* ignore */ }
-  }, [isTyping]);
+    onEnvironmentOpenChange(true);
+  }, [isTyping, onEnvironmentOpenChange]);
 
   return (
     <div ref={rootRef} className={`chat-panel-root ${superHidden ? 'has-hidden-super' : 'has-floating-super'}`} style={{ '--floating-super-width': `${superWidth}px` } as CSSProperties}>
-      <button
-        className={`chat-env-toggle ${!superHidden ? 'active' : ''}`}
-        type="button"
-        onClick={superHidden ? showSuperPanel : hideSuperPanel}
-        aria-label={superHidden ? 'Show Environment' : 'Hide Environment'}
-        title={superHidden ? 'Show Environment' : 'Hide Environment'}
-      >
-        <Activity size={15} />
-      </button>
       <div className="messages" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && !isTyping && (
           <SmartWelcome workingDir={workingDir || null} projectProfile={projectProfile || null} onSuggestionClick={onSendMessage} />

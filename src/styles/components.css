@@ -451,35 +451,6 @@
   padding-right: calc(var(--floating-super-width, 330px) + 64px);
 }
 
-.chat-env-toggle {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  z-index: 10;
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-accent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-elevated) 92%, #fff 3%);
-  color: var(--text-secondary);
-  cursor: pointer;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
-  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
-}
-
-.chat-env-toggle:hover,
-.chat-env-toggle.active {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-}
-
-.chat-env-toggle:active {
-  transform: translateY(1px);
-}
-
 .is-resizing-panel,
 .is-resizing-panel * {
   cursor: col-resize !important;

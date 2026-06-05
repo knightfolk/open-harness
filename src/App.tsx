@@ -20,6 +20,7 @@ const ReviewChangesFlyout = lazy(() => import('./components/ReviewChangesFlyout'
 const uid = () => Math.random().toString(36).slice(2, 10);
 const SIDEBAR_WIDTH_KEY = 'openharness.sidebar.width.v1';
 const PINNED_TOOLS_KEY = 'openharness.pinned-tools.v1';
+const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
 
 function loadSidebarWidth() {
   try {
@@ -37,6 +38,14 @@ function loadPinnedTools(): PanelId[] {
     return Array.isArray(parsed) ? parsed.filter((id): id is PanelId => typeof id === 'string') : [];
   } catch {
     return [];
+  }
+}
+
+function loadEnvironmentOpen() {
+  try {
+    return localStorage.getItem(ENVIRONMENT_HIDDEN_KEY) !== 'true';
+  } catch {
+    return true;
   }
 }
 
@@ -89,6 +98,7 @@ function App() {
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [pinnedTools, setPinnedTools] = useState<PanelId[]>(loadPinnedTools);
+  const [environmentOpen, setEnvironmentOpen] = useState(loadEnvironmentOpen);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [workingDir, setWorkingDir] = useState<string | null>(null);
@@ -944,6 +954,10 @@ function App() {
       return next;
     });
   }, []);
+  const setChatEnvironmentOpen = useCallback((open: boolean) => {
+    setEnvironmentOpen(open);
+    try { localStorage.setItem(ENVIRONMENT_HIDDEN_KEY, open ? 'false' : 'true'); } catch { /* ignore */ }
+  }, []);
 
   return (
     <div className="app-layout">
@@ -990,12 +1004,14 @@ function App() {
           onResetLayout={resetLayout}
           sessionTitle={sessionTitle}
           workingDir={workingDir}
-          onOpenFolder={handleOpenFolder}
+          onOpenFolder={() => addPanel('files')}
           rightRailOpen={visiblePanels.has('side-chat')}
           onToggleRightRail={handleToggleRightRail}
           rightRailPinned={false}
           bottomBarOpen={bottomBarOpen}
           onToggleBottomBar={handleToggleBottomBar}
+          environmentOpen={environmentOpen}
+          onToggleEnvironment={() => setChatEnvironmentOpen(!environmentOpen)}
           pinnedTools={pinnedTools}
           onTogglePinnedTool={togglePinnedTool}
         />
@@ -1046,6 +1062,8 @@ function App() {
                     models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
                     pinnedTools={pinnedTools}
                     onOpenPinnedTool={addPanel}
+                    environmentOpen={environmentOpen}
+                    onEnvironmentOpenChange={setChatEnvironmentOpen}
                   />
               </>
             </div>
