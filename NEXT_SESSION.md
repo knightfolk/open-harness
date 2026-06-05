@@ -31,7 +31,7 @@ After auditing the source code against the 6 Critical Gaps from PLAN.md and addi
 ### ✅ Fully Addressed (4 of 6)
 1. **Orchestrator spawns agents** — Execute/investigate/compare modes use `agentRuntime.ts` with sub-agents
 2. **Auto-router (classifier-based)** — `server/autoRouter.ts` scores candidates on capability
-3. **Role buckets + Planning Room** — Different models per role, and planning requests now run multiple planner participants when configured
+3. **Agent Roles + Planning Room** — Different models per role, and planning requests now run multiple planner participants when configured
 6. **"Start with answer" rule gated** — `isReasoningModel()` check at line 2203 of `server/index.ts`
 
 ### ✅ New Source of Truth
@@ -74,7 +74,7 @@ After auditing the source code against the 6 Critical Gaps from PLAN.md and addi
 2. **Wire recommendations into auto-router candidates** — update candidate cards based on eval results per role
 3. **Track per-task-type routing success/failure** — use `routerLearning.ts` outcome recording with task type metadata
 4. **Surface "best model for X tasks"** in a Settings dashboard panel
-5. **Auto-adjust role assignments** from eval data — if eval says Qwen3 Coder is best for code, update the "coder" role bucket
+5. **Auto-adjust role assignments** from eval data — if eval says Qwen3 Coder is best for code, update the "coder" agent role
 
 ### P2: Rate Limiting / Token Budget Enforcement
 **Files to touch:** `server/providerHealth.ts`, `server/config.ts`

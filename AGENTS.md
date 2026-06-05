@@ -76,9 +76,9 @@ Source: `docs/MODEL_PROMPTING_GUIDE.md` (May 2026 research, update quarterly).
 
 ---
 
-## Role Bucket Configuration
+## Agent Role Configuration
 
-Role assignments map agent roles to specific models in config. The server reads `appConfig.roleAssignments` and passes the correct role/bucket model to `buildPromptForModel()`.
+Agent role assignments map each agent role to a specific model in config. The server reads `appConfig.roleAssignments` and passes the correct role model to `buildPromptForModel()`.
 
 ### Recommended Defaults (from docs/MODEL_LANDSCAPE.md)
 
@@ -125,7 +125,7 @@ Both are in `server/index.ts`. They add complexity and can fight reasoning model
 The eval system (`server/evals.ts`) scores model outputs on structural, runtime, and style signals. Eval reports include model recommendations per role.
 
 When acting on eval results:
-- `EvalSummary.recommendations` can inform role bucket defaults and auto-router candidate ordering
+- `EvalSummary.recommendations` can inform agent role defaults and auto-router candidate ordering
 - Weighted score breakdowns let you compare models head-to-head
 - The Model Lab UI (`ModelLabPanel.tsx`) runs prompt suites across model matrices
 - Routing feedback (which model does best for which task type) comes from comparing eval results across role categories
@@ -145,4 +145,3 @@ npm run build
 ```
 
 If server/runtime code changes, follow Core Rule 1: kill existing processes, relaunch, verify reachability.
-

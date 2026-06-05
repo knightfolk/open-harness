@@ -38,7 +38,7 @@ const CATEGORIES: SettingsCategory[] = [
     { id: 'manage', label: 'Manage Providers' },
     { id: 'add', label: 'Add Provider' },
   ]},
-  { id: 'roles', label: 'Role Buckets', icon: SlidersHorizontal },
+  { id: 'roles', label: 'Agent Roles', icon: SlidersHorizontal },
   { id: 'mcp', label: 'MCP Servers', icon: Server, subcategories: [
     { id: 'docker', label: 'Docker MCP' },
     { id: 'curated', label: 'Curated Tools' },
@@ -218,7 +218,7 @@ export function SettingsModal({
               <AddProviderPane onAdd={onAddProvider} existingIds={providers.map((p) => p.id)}
                 onDone={() => { setSelectedCat('providers'); setSelectedSub('manage'); }} />
             )}
-            {contentKey === 'roles' && <RoleBucketsPane roleAssignments={roleAssignments} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} />}
+            {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} />}
             {contentKey === 'mcp/docker' && <DockerMCPPane mcpServers={mcpServers} mcpStatus={mcpStatus} onRefresh={onMcpStatusRefresh} />}
             {contentKey === 'mcp/curated' && <CuratedMCPPane />}
             {contentKey === 'mcp/custom' && <CustomMCPServersPane mcpServers={mcpServers} onRemove={onRemoveMCPServer} />}
@@ -365,7 +365,7 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
           title="Show only models that match fetched provider models"
         >
           {accessOnly ? <Check size={11} /> : <Bot size={11} />}
-          Access
+          My Models
         </button>
       </div>
 
@@ -918,10 +918,10 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
 }
 
 
-function RoleBucketsPane({ roleAssignments, enabledModels, onAssignRoleModel }: any) {
+function AgentRolesPane({ roleAssignments, enabledModels, onAssignRoleModel }: any) {
   return (
     <>
-      <PaneTitle>Coding Role Buckets</PaneTitle>
+      <PaneTitle>Agent Roles</PaneTitle>
       <PaneDesc>Assign models to specialized coding roles. Models marked ✓ are recommended based on capabilities.</PaneDesc>
       <div className="role-bucket-list" style={{ marginTop: 16 }}>
         {roleAssignments.map((role: CodingRoleAssignment) => {
@@ -2001,7 +2001,7 @@ function AboutPane({ configPath }: { configPath?: string }) {
           <div>• 8 built-in themes (4 dark + 4 light)</div>
           <div>• OpenAI-compatible provider support</div>
           <div>• Docker MCP integration with 34+ tools</div>
-          <div>• 7 coding role buckets with model recommendations</div>
+          <div>• 7 agent roles with model recommendations</div>
         </div>
       </div>
     </>

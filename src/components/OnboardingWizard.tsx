@@ -73,8 +73,8 @@ const TRUST_OPTIONS: { id: 'chat-only' | 'read-only' | 'ask-before-write' | 'wor
   { id: 'workspace-write', label: 'Workspace write', icon: ShieldCheck, desc: 'AI can edit files inside the project. Most productive, less safe.' },
 ];
 
-// ── Role buckets ───────────────────────────────────────
-const ROLE_BUCKETS = [
+// ── Agent roles ───────────────────────────────────────
+const AGENT_ROLES = [
   { id: 'coder', label: 'Coder', desc: 'Primary coding agent' },
   { id: 'reasoner', label: 'Reasoner', desc: 'Complex reasoning / planning' },
   { id: 'summarizer', label: 'Summarizer', desc: 'Text summarization' },
@@ -219,7 +219,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
       // Build default role assignments (all -> active model; user can override later)
       const roleAssignments: Record<string, string> = {};
       if (activeModel) {
-        for (const role of ROLE_BUCKETS) roleAssignments[role.id] = activeModel;
+        for (const role of AGENT_ROLES) roleAssignments[role.id] = activeModel;
       }
 
       // Persist personality + trust + active model + role assignments

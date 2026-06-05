@@ -1142,7 +1142,7 @@ function App() {
                 if (result?.activeModel) setActiveModel(result.activeModel);
                 else setActiveModel(models[0].id);
               }
-              // Adopt personality, trust mode, and role buckets from onboarding.
+              // Adopt personality, trust mode, and agent roles from onboarding.
                 if (result?.personality) setPersonalityText(result.personality);
               if (result?.trustMode) setTrustMode(result.trustMode as any);
               if (result?.roleAssignments) setRoleAssignments(roleMapToAssignments(result.roleAssignments));

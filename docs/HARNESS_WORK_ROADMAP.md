@@ -521,7 +521,7 @@ Turn the existing test-results and prompt-test harness into a first-class produc
 ### P2 — Routing feedback loop
 
 - [x] Compare eval results by role
-- [x] Suggest role bucket assignments
+- [x] Suggest agent role assignments
 - [x] Show best model per task class
 - [ ] Export model recommendation report
 
@@ -530,7 +530,7 @@ Turn the existing test-results and prompt-test harness into a first-class produc
 - [x] User can run model comparisons from UI.
 - [x] Eval output is saved and viewable.
 - [x] Reports include model quality, speed, and tool-use signals.
-- [x] Eval results can inform role bucket settings.
+- [x] Eval results can inform agent role settings.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
 
@@ -1175,7 +1175,7 @@ Make first launch feel like a guided setup assistant instead of a settings scave
 ## Current Code State
 
 - `src/components/OnboardingWizard.tsx` exists and now configures multiple selected providers in one pass.
-- `src/components/SettingsModal.tsx` already has provider presets, role buckets, and personality presets that onboarding can reuse.
+- `src/components/SettingsModal.tsx` already has provider presets, agent roles, and personality presets that onboarding can reuse.
 - `server/config.ts` persists providers, `activeModel`, `roleAssignments`, `personality`, theme, trust mode, and MCP server settings.
 - `src/App.tsx` shows onboarding only when no provider has a key, but the final folder path from onboarding is not currently opened as a session.
 
@@ -1195,14 +1195,14 @@ Make first launch feel like a guided setup assistant instead of a settings scave
 - [x] Ask the user how the default agent should behave: business-only, concise, chatty, helpful/teacher, creative, or custom.
 - [x] Write the selected personality into `config.personality`.
 - [ ] Ask whether OpenHarness should optimize for low cost, best quality, local/private, or balanced defaults.
-- [~] Assign role buckets from enabled models: planner, coder, reviewer, reasoner, summarizer, worker.
+- [~] Assign agent roles from enabled models: planner, coder, reviewer, reasoner, summarizer, worker.
 - [ ] Let users override role assignments before finishing.
 
 ### P1 — First project and trust setup
 
 - [x] Make the onboarding folder picker actually create/open a session with that working directory.
 - [x] Ask for an initial trust mode in plain language: chat only, read only, ask before writing, workspace write.
-- [~] Show a final review page: providers, active model, role buckets, personality, trust mode, MCP status, project folder.
+- [~] Show a final review page: providers, active model, agent roles, personality, trust mode, MCP status, project folder.
 - [~] Add “restart onboarding” and “rerun setup check” from Settings.
 
 ### P2 — Friendly recovery and migration
@@ -1216,7 +1216,7 @@ Make first launch feel like a guided setup assistant instead of a settings scave
 - [x] A new user can configure multiple providers in one pass.
 - [x] A local-only user can choose Ollama/LM Studio without entering a key.
 - [x] The selected default agent personality is used by chat immediately.
-- [~] Role buckets are filled with enabled models and can be changed before finish.
+- [~] Agent roles are filled with enabled models and can be changed before finish.
 - [x] Finishing onboarding opens the selected folder/session.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
@@ -1314,7 +1314,7 @@ Files:
 Definition of done:
 
 - [x] Onboarding asks which providers the user already has and saves multiple providers in one pass.
-- [~] Onboarding sets personality, trust mode, active model, and role buckets from enabled models.
+- [~] Onboarding sets personality, trust mode, active model, and agent roles from enabled models.
 - [x] Onboarding can enable local Ollama/LM Studio without API keys.
 - [x] Docker readiness is shown in onboarding and Settings.
 - [~] Docker MCP start/stop/restart and tool catalog UX work from Settings.
@@ -1324,7 +1324,7 @@ Definition of done:
 Remaining Assignment 0 polish:
 
 - [ ] Add low-cost / best-quality / local-private / balanced default selection.
-- [ ] Let users override role buckets before finishing onboarding.
+- [ ] Let users override agent roles before finishing onboarding.
 - [ ] Add partial-setup resume and clearer provider failure recovery copy.
 - [ ] Add MCP server smoke tests, gateway-death recovery, PID/log tails, and profile creation/validation depth.
 

@@ -8,7 +8,7 @@ OpenHarness keeps the UI-facing model database in `src/data/modelCatalog.ts`.
 Update that file whenever you add or change any of the following:
 
 - provider presets in Settings or onboarding
-- default active models or role bucket recommendations
+- default active models or agent role recommendations
 - auto-router candidate cards, relative cost weights, or image/tool support
 - model-specific prompting, context-window, or pricing assumptions
 - new help/docs surfaces that describe models, providers, or routing behavior
@@ -62,7 +62,7 @@ Current external refresh anchors:
 | GPT-5.4 | OpenAI | 1M+ | Planner | Premium | Flagship, best overall reasoning |
 | DeepSeek R2 | DeepSeek | 128K | Planner, Code Reviewer | Cheap | Chain-of-thought reasoning specialist |
 
-## Role Bucket Recommendations
+## Agent Role Recommendations
 
 ### Planner (architecture, research, task breakdown)
 **Top picks:** o3, Claude Opus 4, Gemini 2.5 Pro, GLM-5.1, DeepSeek R2
