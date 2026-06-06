@@ -882,8 +882,8 @@
 .input-area {
   padding: 8px 0 12px;
   box-sizing: border-box;
-  width: min(calc(var(--chat-content-max) - var(--chat-message-indent)), calc(100% - var(--chat-content-left) - var(--chat-message-indent) - var(--chat-content-right)));
-  margin-left: calc(var(--chat-content-left) + var(--chat-message-indent));
+  width: min(var(--chat-content-max), calc(100% - 10px - var(--chat-content-right)));
+  margin-left: 10px;
   margin-right: auto;
   flex-shrink: 0;
   flex-grow: 0;
@@ -4412,6 +4412,10 @@ button:focus-visible {
   justify-content: center;
   padding: 48px 24px;
   height: 100%;
+  box-sizing: border-box;
+  width: min(var(--chat-content-max), calc(100% - var(--chat-content-left) - var(--chat-content-right)));
+  margin-left: var(--chat-content-left);
+  margin-right: auto;
   animation: fadeIn 0.3s ease;
 }
 
