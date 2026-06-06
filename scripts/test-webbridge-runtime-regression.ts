@@ -43,6 +43,13 @@ function runChecks(): CheckResult[] {
     /message\.frameInfo\.isMainFrame/.test(bridgeSource),
   );
 
+  add(
+    'runtime probe is opt-in by environment variable or launch argument',
+    /enum WebBridgeRuntimeProbe[\s\S]*OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE[\s\S]*--webbridge-runtime-probe/.test(bridgeSource) &&
+      /guard WebBridgeRuntimeProbe\.isEnabled else \{ return \}/.test(bridgeSource) &&
+      /guard WebBridgeRuntimeProbe\.isEnabled else \{ return \}/.test(contentSource),
+  );
+
   sectionContains(
     bridgeSource,
     /guard[\s\S]*message\.name == "nativeBridge"[\s\S]*message\.frameInfo\.isMainFrame[\s\S]*WebBridge\.isTrustedBridgeOrigin\(messageURL\)/,

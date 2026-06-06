@@ -25,6 +25,7 @@ This script validates the local WebBridge contract by checking the Swift source 
 
 - origin gate behavior in `WebBridge.isTrustedBridgeOrigin`
 - main-frame bridge gate in `userContentController(_:didReceive:)`
+- runtime probe opt-in gating via `OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE=1` or `--webbridge-runtime-probe`
 - trusted action registration/dispatch for `createSession`, `listDirectory`, `readFile`
 - path allowlist checks for `createSession` (`workingDir` normalization + workspace registration)
 - path allowlist checks for `listDirectory`/`readFile`
@@ -32,17 +33,25 @@ This script validates the local WebBridge contract by checking the Swift source 
 
 The script exits non-zero if any of these invariants drift, so it can be used as a release gate.
 
+## No-launch validation
+
+For normal development passes, do not launch, rebuild, re-sign, or replace `/Applications/OpenHarness.app`.
+Use the automated source check above, plus optional source inspection, to confirm the bridge contract without touching the installed app identity.
+
 ## Manual runtime confirmation (one operator-in-the-loop pass)
 
-After running the script above, perform one manual OpenHarness.app pass on the release artifact:
+After running the script above, perform one manual OpenHarness.app pass on the release artifact only when runtime proof is explicitly approved:
 
-1. Start a clean OpenHarness.app build from that release and open it.
-2. Confirm dev-mode baseline navigation still lands on `http://localhost:5173` when expected.
-3. Open a trusted localhost page and verify:
+1. Use the stable installed app artifact. Do not rebuild, re-sign, replace, or regenerate temporary `/tmp/*.app` bundles for this check.
+2. Launch once with either `OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE=1` or `--webbridge-runtime-probe`.
+3. Tail `/tmp/webbridge-runtime-probe-trace.log` or `~/Library/Logs/OpenHarness/webbridge-runtime-probe-trace.log`.
+4. Stop after the first complete probe result set. Do not relaunch repeatedly if macOS requests authorization.
+5. Confirm dev-mode baseline navigation still lands on `http://localhost:5173` when expected.
+6. Open a trusted localhost page and verify:
    - `createSession` with a valid temp workspace registers session root.
    - `listDirectory`/`readFile` return data for a file under that session root.
-4. Open any non-trusted local HTML file (for example, `/tmp/webbridge-neg-test.html`).
-5. From the trusted app page attempt `window.location.href` navigation to that file URL:
+7. Open any non-trusted local HTML file (for example, `/tmp/webbridge-neg-test.html`).
+8. From the trusted app page attempt `window.location.href` navigation to that file URL:
    - app window should not switch into the untrusted renderer context
    - bridge callbacks from that untrusted page should fail with `Bridge access denied` (or no callback if origin isn't `nativeBridge`-eligible).
 
