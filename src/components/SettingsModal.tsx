@@ -269,7 +269,7 @@ export function SettingsModal({
             {contentKey === 'onboarding' && <OnboardingPane onRestartOnboarding={onRestartOnboarding} />}
             {contentKey === 'personality' && <PersonalityPane personalityText={personalityText} onChange={onPersonalityChange} />}
             {contentKey === 'theme' && <ThemePane activeTheme={activeTheme} onSelectTheme={onSelectTheme} />}
-            {contentKey === 'routing' && <RoutingLearningPane onApplyRoleRecommendation={onAssignRoleModel} />}
+            {contentKey === 'routing' && <RoutingLearningPane enabledModels={enabledModels} onApplyRoleRecommendation={onAssignRoleModel} />}
             {contentKey === 'auto-router' && <AutoRouterPane />}
             {contentKey === 'chat' && <ChatSettingsPane />}
             {contentKey === 'about' && <AboutPane configPath={configPath} />}
