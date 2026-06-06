@@ -47,6 +47,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   const [summary, setSummary] = useState<api.RouterLearningSummary | null>(null);
   const [events, setEvents] = useState<api.RoutingEvent[]>([]);
   const [recommendations, setRecommendations] = useState<api.EvalRecommendation[]>([]);
+  const [thresholdSuggestion, setThresholdSuggestion] = useState<{ suggestedThreshold: number; reason: string; dataPoints: number } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -61,14 +62,17 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   }, [enabledModels]);
 
   const loadData = useCallback(async () => {
-    const [s, e, r] = await Promise.all([
+    const [s, e, r, routerState] = await Promise.all([
       api.getRouterLearning(),
       api.getRouterLearningEvents(undefined, 25),
       api.getEvalRecommendations(),
+      api.getRouterState(),
     ]);
+    const t = await api.suggestRouterThreshold(routerState.threshold);
     setSummary(s);
     setEvents(e);
     setRecommendations(r);
+    setThresholdSuggestion(t);
   }, []);
 
   useEffect(() => {
@@ -137,6 +141,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   const byTaskType = summary?.byTaskType || {};
   const byRole = summary?.byRole || {};
   const byComplexity = summary?.byComplexity || {};
+  const latestEvent = events[0] || null;
+  const latestScores = sortedCandidateScores(latestEvent?.candidateScores, 3);
+  const fallbackEvents = events.filter((event) => event.wasFallback);
+  const ratedFallbackEvents = fallbackEvents.filter((event) => event.outcome !== null);
+  const bestLearningSignal = summary?.bestByTaskType[0] || null;
 
   return (
     <div className="routing-learning-pane">
@@ -194,6 +203,54 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           <strong>{totalEvents < 20 ? 'Learning' : 'Stable'}</strong>
           <small>{totalEvents < 20 ? 'Mark more recent events before trusting winners' : 'Enough samples for trend checks'}</small>
         </div>
+      </section>
+
+      <section className="routing-section">
+        <div className="routing-section-header">
+          <div>
+            <h3>Route Debug Loop</h3>
+            <p>Candidate scores explain one route, marked outcomes shape learning summaries, and eval recommendations stay manual until applied.</p>
+          </div>
+        </div>
+        <div className="routing-debug-grid">
+          <div className="routing-debug-card">
+            <span>Latest candidate scores</span>
+            <strong>{latestEvent ? latestEvent.selectedModel : 'No route yet'}</strong>
+            {latestScores.length > 0 ? (
+              <div className="routing-score-chips">
+                {latestScores.map(([model, score]) => (
+                  <span key={model} title={`${model}: ${score.toFixed(2)}`}>{model} {score.toFixed(2)}</span>
+                ))}
+              </div>
+            ) : (
+              <small>{candidateScoresUnavailableLabel({ fallback: latestEvent?.wasFallback })}</small>
+            )}
+          </div>
+          <div className="routing-debug-card">
+            <span>Fallback outcomes</span>
+            <strong>{fallbackEvents.length} recent</strong>
+            <small>{ratedFallbackEvents.length} marked as {routingOutcomeLabel('success')}, {routingOutcomeLabel('failure')}, or {routingOutcomeLabel('ambiguous')}</small>
+          </div>
+          <div className="routing-debug-card">
+            <span>Learning influence</span>
+            <strong>{bestLearningSignal ? bestLearningSignal.model : 'No winner yet'}</strong>
+            <small>
+              {bestLearningSignal
+                ? `${bestLearningSignal.taskType} · ${pct(bestLearningSignal.rate)} from ${bestLearningSignal.total} reviewed`
+                : thresholdSuggestion?.reason || 'Mark outcomes before trusting summaries'}
+            </small>
+          </div>
+          <div className="routing-debug-card">
+            <span>Eval recommendations</span>
+            <strong>{accessibleRecommendations.length} available</strong>
+            <small>{unavailableRecommendations.length} unavailable · Apply updates roles only; Auto-Router candidates stay separate.</small>
+          </div>
+        </div>
+        {thresholdSuggestion && (
+          <div className="routing-debug-note">
+            Threshold signal: {thresholdSuggestion.reason}. This is advisory and does not change routing until a config action applies it.
+          </div>
+        )}
       </section>
 
       <section className="routing-section">

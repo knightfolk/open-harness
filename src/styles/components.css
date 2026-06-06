@@ -3066,6 +3066,7 @@ button:focus-visible {
 
 .routing-explain,
 .routing-metrics,
+.routing-debug-grid,
 .routing-breakdown-grid,
 .routing-mini-grid {
   display: grid;
@@ -3079,6 +3080,7 @@ button:focus-visible {
 
 .routing-explain-item,
 .routing-metric-card,
+.routing-debug-card,
 .routing-section,
 .routing-breakdown-card,
 .routing-mini-card {
@@ -3119,13 +3121,21 @@ button:focus-visible {
   margin-top: 10px;
 }
 
+.routing-debug-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
 .routing-metric-card,
+.routing-debug-card,
 .routing-section {
   padding: 12px;
 }
 
 .routing-metric-card span,
-.routing-metric-card small {
+.routing-metric-card small,
+.routing-debug-card span,
+.routing-debug-card small {
   display: block;
   color: var(--text-tertiary);
   font-size: 11px;
@@ -3136,6 +3146,23 @@ button:focus-visible {
   margin: 4px 0;
   font-size: 22px;
   color: var(--text-primary);
+}
+
+.routing-debug-card strong {
+  display: block;
+  margin: 4px 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routing-debug-note {
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .routing-metric-card.low strong {

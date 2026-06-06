@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test:auto-router-trace-ui": "tsx scripts/test-auto-router-trace-ui.ts",
+    "test:router-learning-debug-loop": "tsx scripts/test-router-learning-debug-loop.ts",
     "test:router-learning-outcomes": "tsx scripts/test-router-learning-outcome-persistence.ts",
     "test:routing-adherence": "tsx scripts/test-routing-adherence.ts",
     "test:hardening": "tsx scripts/test-tool-policy.ts && tsx scripts/test-auto-router-context.ts && tsx scripts/test-redaction.ts && tsx scripts/test-session-redaction.ts && tsx scripts/test-artifact-redaction.ts && tsx scripts/test-process-ledger-redaction.ts && tsx scripts/test-mcp-redaction.ts && tsx scripts/test-prompt-injection-boundaries.ts && tsx scripts/test-command-safety.ts",
