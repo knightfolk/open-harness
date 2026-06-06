@@ -227,14 +227,10 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
 
   return (
     <>
-      <button className="new-session-btn" onClick={() => onNewSession()}>
-        <Plus size={15} />
-        New Session
-      </button>
       {onOpenFolder && (
-        <button className="new-session-btn" onClick={onOpenFolder} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-primary)', color: 'var(--text-secondary)' }}>
+        <button className="new-session-btn" onClick={onOpenFolder}>
           <FolderOpen size={15} />
-          Open Folder
+          New Project
         </button>
       )}
       {projectGroups.map((group) => {
