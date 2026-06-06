@@ -256,10 +256,10 @@ export function SideChatPanel({ activeModel, models }: Props) {
             rows={1}
             disabled={isTyping}
             style={{
-              flex: 1, resize: 'none', background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)',
+              flex: 1, minWidth: 0, resize: 'none', overflow: 'hidden', background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)',
               borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '6px 8px',
               fontSize: 12, fontFamily: 'Inter, sans-serif', outline: 'none', lineHeight: 1.4,
-              minHeight: 32, maxHeight: 80,
+              height: 32, minHeight: 32,
             }}
           />
           <button onClick={handleSend} disabled={!input.trim() || isTyping} style={{
