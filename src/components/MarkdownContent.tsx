@@ -65,9 +65,34 @@ function simpleMarkdown(text: string): string {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');
   html = html.replace(/`([^`]+?)`/g, '<code>$1</code>');
-  html = html.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  html = html.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, (_match, label, href) => {
+    return `<a href="${sanitizeMarkdownLink(href || '')}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
 
   return '<p>' + html + '</p>';
+}
+
+function sanitizeMarkdownLink(raw: string): string {
+  const href = (raw || '').trim();
+  if (!href) return '#';
+  if (href.startsWith('#') || href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) {
+    return escapeHtmlAttribute(href);
+  }
+  const lower = href.toLowerCase();
+  if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:')) {
+    return escapeHtmlAttribute(href);
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+    return '#';
+  }
+  return escapeHtmlAttribute(href);
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 export function MarkdownContent({ content }: { content: string }) {

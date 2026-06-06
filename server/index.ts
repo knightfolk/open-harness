@@ -2,12 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
 import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync } from 'fs';
-import { join, basename, extname } from 'path';
+import { join, basename, extname, resolve, parse as parsePath } from 'path';
 import { execFileSync, spawn } from 'child_process';
+import { timingSafeEqual } from 'crypto';
+import { isIP } from 'net';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef, getConfigPath } from './config';
 import type { StoredMCPServer, StoredProvider } from './config';
 import { testProviderConnection, fetchProviderModels } from './providers';
-import { mcpManager } from './mcp';
+import { mcpManager, parseStdioEndpoint } from './mcp';
 import { checkDockerReadiness } from './dockerReadiness';
 import { dockerDesktopEnv } from './dockerDesktopEnv';
 import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAllCuratedServers } from './curatedMcp';
@@ -50,6 +52,7 @@ import { parseToolCallMarkup, MarkupScrubber, type MarkupParseResult } from './t
 import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
+import type { PersistedSession } from './sessionStore';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -124,6 +127,13 @@ const app = express();
 const UI_PORT = process.env.OPENHARNESS_VITE_PORT || process.env.VITE_PORT || '5173';
 const UI_ORIGIN = process.env.OPENHARNESS_UI_URL || `http://localhost:${UI_PORT}`;
 const MODEL_REQUEST_TIMEOUT_MS = 90_000;
+const SERVER_LISTEN_HOST = process.env.OPENHARNESS_LISTEN_HOST || process.env.OPENHARNESS_BIND_HOST || '127.0.0.1';
+const LOCAL_CONTROL_TOKEN = (
+  process.env.OPENHARNESS_LOCAL_TOKEN
+  || process.env.OPENHARNESS_LOCAL_CONTROL_TOKEN
+  || process.env.OPENHARNESS_CONTROL_TOKEN
+  || ''
+).trim();
 const allowedOrigins = new Set([
   'http://localhost:5173',
   'http://127.0.0.1:5173',
@@ -476,32 +486,175 @@ function knownWorkspaceRoots(): string[] {
   return Array.from(roots);
 }
 
+function normalizeAddressForControlCheck(address: string | undefined): string {
+  if (!address) return '';
+  const unwrapped = address.replace(/^\[|]$/g, '');
+  if (unwrapped.startsWith('::ffff:')) return unwrapped.slice(7);
+  return unwrapped;
+}
+
+function isLoopbackAddress(address: string): boolean {
+  const normalized = normalizeAddressForControlCheck(address).toLowerCase();
+  if (!normalized) return false;
+  if (!isIP(normalized)) {
+    return normalized === 'localhost';
+  }
+  if (normalized === '::1' || normalized === '127.0.0.1') return true;
+  if (normalized.startsWith('127.')) return true;
+  return false;
+}
+
+function getLocalControlToken(req: express.Request): string {
+  const bearer = req.get('authorization');
+  if (bearer && /^bearer\s+/i.test(bearer)) {
+    return bearer.replace(/^bearer\s+/i, '').trim();
+  }
+  return (
+    req.get('x-openharness-local-token')
+    || req.get('x-openharness-token')
+    || req.get('x-local-token')
+    || ''
+  ).trim();
+}
+
+function ensureLocalControl(req: express.Request): { ok: true } | { ok: false; status: number; error: string } {
+  if (req.ip && isLoopbackAddress(req.ip)) return { ok: true };
+  if (!LOCAL_CONTROL_TOKEN) return { ok: false, status: 403, error: 'Mutation/execution endpoints require loopback access or OPENHARNESS_LOCAL_TOKEN' };
+  const providedToken = getLocalControlToken(req);
+  if (!providedToken) return { ok: false, status: 403, error: 'Mutation/execution endpoints require loopback access or OPENHARNESS_LOCAL_TOKEN' };
+
+  const expected = Buffer.from(LOCAL_CONTROL_TOKEN, 'utf8');
+  const actual = Buffer.from(providedToken, 'utf8');
+  if (expected.length !== actual.length) return { ok: false, status: 403, error: 'Invalid local control token' };
+
+  try {
+    if (!timingSafeEqual(expected, actual)) {
+      return { ok: false, status: 403, error: 'Invalid local control token' };
+    }
+  } catch {
+    return { ok: false, status: 403, error: 'Invalid local control token' };
+  }
+  return { ok: true };
+}
+
+function resolveWorkspaceCandidate(raw: string): string {
+  return resolve(raw).replace(/[\\/]+$/g, '');
+}
+
+function isRestrictedWorkspaceRoot(candidate: string): boolean {
+  const normalized = resolveWorkspaceCandidate(candidate);
+  const root = parsePath(normalized).root;
+  if (normalized === root.replace(/[\\/]+$/g, '')) return true;
+  if (parsePath(normalized).root === normalized) return true;
+  if (!normalized.startsWith('/')) return false;
+
+  const trimmed = normalized.slice(1).replace(/[\\/]+$/g, '');
+  const segments = trimmed.split(/[\\/]/).filter(Boolean);
+  if (segments.length === 1) {
+    const top = segments[0].toLowerCase();
+    return ['home', 'users', 'system', 'library', 'applications', 'private', 'usr', 'etc', 'var', 'opt', 'tmp', 'bin', 'sbin'].includes(top);
+  }
+  return false;
+}
+
+function validateSessionWorkingDir(raw: string): { ok: true; dir: string } | { ok: false; status: number; error: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, status: 400, error: 'workingDir is required' };
+  if (trimmed.includes('\0')) return { ok: false, status: 400, error: 'Invalid workingDir value' };
+
+  const dir = resolveWorkspaceCandidate(trimmed);
+  try {
+    if (!existsSync(dir)) return { ok: false, status: 404, error: 'workingDir does not exist' };
+    const stats = statSync(dir);
+    if (!stats.isDirectory()) return { ok: false, status: 400, error: 'workingDir must be a directory' };
+  } catch {
+    return { ok: false, status: 400, error: 'Invalid workingDir path' };
+  }
+  if (isRestrictedWorkspaceRoot(dir)) return { ok: false, status: 400, error: 'workingDir points to a restricted system path' };
+
+  return { ok: true, dir };
+}
+
+function normalizePersistedWorkingDir(raw: string | null): string | null {
+  if (!raw) return null;
+  const validation = validateSessionWorkingDir(raw);
+  return validation.ok ? validation.dir : null;
+}
+
+function validateMcpEndpoint(endpoint: unknown): { ok: true } | { ok: false; status: number; error: string } {
+  if (typeof endpoint !== 'string') return { ok: false, status: 400, error: 'endpoint must be a string' };
+  const trimmed = endpoint.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (!trimmed) {
+    return { ok: false, status: 400, error: 'endpoint is required' };
+  }
+
+  if (lower.startsWith('stdio://')) {
+    if (!parseStdioEndpoint(trimmed)) {
+      return { ok: false, status: 400, error: 'Invalid stdio endpoint format. Expected stdio://command arg1 arg2' };
+    }
+    return { ok: true };
+  }
+
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    return { ok: false, status: 400, error: 'Unsupported endpoint scheme. Use http(s) URL or stdio:// command' };
+  }
+
+  const lowerTrimmed = trimmed.toLowerCase();
+  if (!lowerTrimmed.startsWith('http://') && !lowerTrimmed.startsWith('https://')) {
+    return { ok: false, status: 400, error: 'Unsupported endpoint scheme. Use http(s) URL or stdio:// command' };
+  }
+
+  try {
+    new URL(trimmed);
+  } catch {
+    return { ok: false, status: 400, error: 'Invalid MCP endpoint URL' };
+  }
+
+  return { ok: true };
+}
+
 function isKnownWorkspacePath(candidate: string | undefined): boolean {
   if (!candidate) return false;
-  return knownWorkspaceRoots().some((root) => isPathWithin(candidate, root));
+  const normalized = resolveWorkspaceCandidate(candidate);
+  return knownWorkspaceRoots().some((root) => isPathWithin(normalized, root));
 }
 
 function trustedWorkspaceFromRequest(req: express.Request): string {
   const body = (req.body || {}) as any;
   const sessionId = (req.params.id || body.sessionId || req.query.sessionId) as string | undefined;
   const session = sessionId ? sessions.get(sessionId) : undefined;
-  if (session?.workingDir) return session.workingDir;
+  const normalized = session?.workingDir ? normalizePersistedWorkingDir(session.workingDir) : null;
+  if (normalized) return normalized;
 
   const requested = (body.workingDir || body.cwd || req.query.workingDir || req.query.cwd) as string | undefined;
-  if (isKnownWorkspacePath(requested)) return requested!;
+  if (requested && isKnownWorkspacePath(requested)) return resolveWorkspaceCandidate(requested);
 
   return process.cwd();
 }
 
 // Load persisted sessions from disk on startup
 const persisted = sessionStore.loadAllSessions();
+const validSessions: PersistedSession[] = [];
 for (const s of persisted) {
-  sessions.set(s.id, {
-    ...s,
-    messages: s.messages || [],
-  });
+  const migrated = { ...s, messages: s.messages || [] };
+  const migratedWorkingDir = normalizePersistedWorkingDir(s.workingDir);
+  if (!migratedWorkingDir && s.workingDir) {
+    console.warn(`Removing invalid persisted session workingDir for ${s.id}: ${s.workingDir}`);
+    migrated.workingDir = null;
+  } else if (migratedWorkingDir) {
+    migrated.workingDir = migratedWorkingDir;
+  }
+  validSessions.push(migrated);
+  sessions.set(migrated.id, migrated as SessionRow);
+  if (migrated.workingDir !== s.workingDir) {
+    sessionStore.saveSession(migrated);
+  }
 }
-if (persisted.length > 0) console.log(`✓ Loaded ${persisted.length} persisted session(s)`);
+if (persisted.length > 0) {
+  console.log(`✓ Loaded ${validSessions.length}/${persisted.length} persisted session(s)`);
+}
 
 function disposeEphemeralSession(sessionId: string) {
   sessions.delete(sessionId);
@@ -525,6 +678,8 @@ app.get('/api/mcp/watchdog', (_req, res) => {
 });
 
 app.post('/api/mcp/watchdog/restart', async (_req, res) => {
+  const mutation = ensureLocalMutationWithControl(_req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   try {
     mcpManager.stopWatchdog();
     mcpManager.startWatchdog(30_000);
@@ -556,7 +711,15 @@ app.get('/api/sessions/:id', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { title, workingDir } = req.body as { title?: string; workingDir?: string };
+  const { title } = req.body as { title?: string; workingDir?: string };
+  let { workingDir } = req.body as { title?: string; workingDir?: string };
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+  if (workingDir) {
+    const validation = validateSessionWorkingDir(workingDir);
+    if (!validation.ok) return res.status(validation.status).json({ error: validation.error });
+    workingDir = validation.dir;
+  }
   const session: SessionRow = {
     id: uuid(),
     title: title || 'New Session',
@@ -571,6 +734,8 @@ app.post('/api/sessions', (req, res) => {
 });
 
 app.delete('/api/sessions/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   sessions.delete(req.params.id);
   sessionStore.deleteSession(req.params.id);
   res.status(204).end();
@@ -882,9 +1047,15 @@ app.get('/api/mcp-servers', (_req, res) => {
 });
 
 app.post('/api/mcp-servers', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { name, endpoint, authType, authToken, enabled } = req.body as any;
   if (!name || !endpoint) {
     return res.status(400).json({ error: 'name and endpoint are required' });
+  }
+  const endpointValidation = validateMcpEndpoint(endpoint);
+  if (!endpointValidation.ok) {
+    return res.status(endpointValidation.status).json({ error: endpointValidation.error });
   }
   const server: StoredMCPServer = {
     id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -900,6 +1071,8 @@ app.post('/api/mcp-servers', (req, res) => {
 });
 
 app.delete('/api/mcp-servers/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   appConfig = removeMCPServer(appConfig, req.params.id);
   saveConfig(appConfig);
   // Also stop the process if running
@@ -929,6 +1102,8 @@ app.get('/api/mcp/status', (_req, res) => {
 });
 
 app.post('/api/mcp/:serverId/tools/:toolName', async (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { serverId, toolName } = req.params;
   const args = req.body || {};
   const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
@@ -946,9 +1121,17 @@ app.post('/api/mcp/:serverId/tools/:toolName', async (req, res) => {
 });
 
 app.post('/api/mcp/:serverId/start', async (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { serverId } = req.params;
   const server = appConfig.mcpServers.find((s) => s.id === serverId);
   if (serverId !== 'docker-mcp' && !server) return res.status(404).json({ error: 'Server not found' });
+  if (serverId !== 'docker-mcp') {
+    const endpointValidation = validateMcpEndpoint(server!.endpoint);
+    if (!endpointValidation.ok) {
+      return res.status(endpointValidation.status).json({ error: endpointValidation.error });
+    }
+  }
   try {
     const client = serverId === 'docker-mcp'
       ? await startDockerMcpGateway()
@@ -965,17 +1148,27 @@ app.post('/api/mcp/:serverId/start', async (req, res) => {
 });
 
 app.post('/api/mcp/:serverId/stop', async (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   await mcpManager.stopServer(req.params.serverId);
   res.json({ ok: true });
 });
 
 // Restart an MCP server (stop then start)
 app.post('/api/mcp/:serverId/restart', async (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { serverId } = req.params;
   try {
     await mcpManager.stopServer(serverId).catch(() => {});
     const server = appConfig.mcpServers.find((s) => s.id === serverId);
     if (serverId !== 'docker-mcp' && !server) return res.status(404).json({ error: 'Server not found' });
+    if (serverId !== 'docker-mcp') {
+      const endpointValidation = validateMcpEndpoint(server!.endpoint);
+      if (!endpointValidation.ok) {
+        return res.status(endpointValidation.status).json({ error: endpointValidation.error });
+      }
+    }
     const client = serverId === 'docker-mcp'
       ? await startDockerMcpGateway()
       : await mcpManager.startServer(server!.id, server!.name, server!.endpoint);
@@ -1016,6 +1209,8 @@ app.get('/api/mcp/curated', (_req, res) => {
 
 // Install a curated MCP server in one click
 app.post('/api/mcp/curated/install', async (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { id } = req.body || {};
   if (!id) return res.status(400).json({ error: 'id is required' });
   const entry = findCuratedServer(id);
@@ -1027,6 +1222,10 @@ app.post('/api/mcp/curated/install', async (req, res) => {
 
   if (entry.transport === 'stdio' && entry.command) {
     const endpoint = `stdio://${[entry.command, ...(entry.args || [])].join(' ')}`;
+    const endpointValidation = validateMcpEndpoint(endpoint);
+    if (!endpointValidation.ok) {
+      return res.status(endpointValidation.status).json({ error: endpointValidation.error });
+    }
     const server: StoredMCPServer = {
       id: entry.id,
       name: entry.name,
@@ -1159,6 +1358,8 @@ app.get('/api/fs/read', (req, res) => {
 // ── Terminal Route ─────────────────────────────────────
 
 app.post('/api/terminal/exec', async (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { command, cwd } = req.body as { command: string; cwd?: string };
   if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
   const cmdTrustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
@@ -1181,6 +1382,8 @@ app.post('/api/terminal/exec', async (req, res) => {
 // ── Terminal Session Routes ────────────────────────────
 
 app.post('/api/terminal/sessions', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { cwd } = req.body as { cwd?: string };
   if (cwd && !isKnownWorkspacePath(cwd)) {
     return res.status(403).json({ error: 'Terminal sessions must be created inside a trusted workspace' });
@@ -1199,6 +1402,8 @@ app.get('/api/terminal/sessions/:sessionId/history', (req, res) => {
 });
 
 app.post('/api/terminal/sessions/:sessionId/run', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { command, cwd } = req.body as { command?: string; cwd?: string };
   if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
   const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
@@ -1216,6 +1421,8 @@ app.post('/api/terminal/sessions/:sessionId/run', (req, res) => {
 });
 
 app.post('/api/terminal/commands/:commandId/cancel', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const cancelled = cancelTermCommand(req.params.commandId);
   res.json({ cancelled });
 });
@@ -1442,6 +1649,12 @@ function ensureLocalMutationAllowed(): { ok: true } | { ok: false; status: numbe
     return { ok: false, status: 403, error: `Write operations not allowed in ${trustMode} mode` };
   }
   return { ok: true };
+}
+
+function ensureLocalMutationWithControl(req: express.Request): { ok: true } | { ok: false; status: number; error: string } {
+  const mutation = ensureLocalMutationAllowed();
+  if (!mutation.ok) return mutation;
+  return ensureLocalControl(req);
 }
 
 function ensureWorkspaceMutationAllowed(dir: string): { ok: true; dir: string } | { ok: false; status: number; error: string } {
@@ -4203,7 +4416,7 @@ app.get('/api/processes/:pid/log', (req, res) => {
 
 app.delete('/api/processes/:pid/log', (req, res) => {
   const pid = parseInt(req.params.pid, 10);
-  const mutation = ensureLocalMutationAllowed();
+  const mutation = ensureLocalMutationWithControl(req);
   if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   if (!processLedger.clearLog(pid)) return res.status(404).json({ error: 'Process not found' });
   res.status(204).end();
@@ -4211,7 +4424,7 @@ app.delete('/api/processes/:pid/log', (req, res) => {
 
 app.delete('/api/processes/:pid', (req, res) => {
   const pid = parseInt(req.params.pid, 10);
-  const mutation = ensureLocalMutationAllowed();
+  const mutation = ensureLocalMutationWithControl(req);
   if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   if (!processLedger.killProcess(pid)) return res.status(404).json({ error: 'Process not found' });
   res.status(204).end();
@@ -4219,13 +4432,13 @@ app.delete('/api/processes/:pid', (req, res) => {
 
 app.post('/api/processes/kill-all', (req, res) => {
   const { kinds } = (req.body || {}) as { kinds?: processLedger.ProcessKind[] };
-  const mutation = ensureLocalMutationAllowed();
+  const mutation = ensureLocalMutationWithControl(req);
   if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   res.json(processLedger.killAll({ kinds }));
 });
 
 app.post('/api/processes/prune', (_req, res) => {
-  const mutation = ensureLocalMutationAllowed();
+  const mutation = ensureLocalMutationWithControl(_req);
   if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   res.json({ removed: processLedger.pruneExited() });
 });
@@ -4706,9 +4919,9 @@ app.post('/api/cost/estimate', (req, res) => {
 
 process.on('SIGPIPE', () => { console.log('[signal] SIGPIPE received — ignoring'); });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`OpenHarness server running on http://localhost:${PORT}`);
+const PORT = Number(process.env.PORT) || 3001;
+app.listen(PORT, SERVER_LISTEN_HOST, () => {
+  console.log(`OpenHarness server running on http://${SERVER_LISTEN_HOST}:${PORT}`);
 
   // Register this server process in the ledger so the UI can see/kill it.
   processLedger.registerExternal({

@@ -20,6 +20,7 @@ import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
 import { getAdapter } from './providers/registry';
 import type { ProviderMessage } from './providers/types';
+import { isPathWithin } from './toolPolicy';
 
 export interface BackgroundAgentRequest {
   profileId: AgentProfileId;
@@ -653,7 +654,7 @@ function runReadOnlyAgentTool(name: string, args: Record<string, unknown>, worki
   const base = workingDir || process.cwd();
   const rawPath = typeof args.path === 'string' ? args.path : '.';
   const target = isAbsolute(rawPath) ? rawPath : resolve(base, rawPath);
-  if (!target.startsWith(base)) return 'Error: path is outside the working directory.';
+  if (!isPathWithin(target, base)) return 'Error: path is outside the working directory.';
   if (!existsSync(target)) return `Error: path does not exist: ${target}`;
 
   if (name === 'list_directory') {

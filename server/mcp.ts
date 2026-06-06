@@ -38,6 +38,95 @@ interface MCPMessage {
   error?: { code: number; message: string; data?: any };
 }
 
+interface ParsedStdioCommand {
+  command: string;
+  args: string[];
+  raw: string;
+}
+
+function splitCommandTokens(raw: string): string[] {
+  const tokens: string[] = [];
+  const input = raw.trim();
+  let token = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  const pushToken = () => {
+    if (token.length === 0) return;
+    tokens.push(token);
+    token = '';
+  };
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (escaped) {
+      if (ch === '\n') {
+        token += '\n';
+      } else {
+        token += ch;
+      }
+      escaped = false;
+      continue;
+    }
+    if (quote) {
+      if (ch === '\\' && quote === '"') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+        continue;
+      }
+      token += ch;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '\'' || ch === '"') {
+      quote = ch as "'" | '"';
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      pushToken();
+      continue;
+    }
+    token += ch;
+  }
+
+  if (escaped) token += '\\';
+  if (quote) {
+    throw new Error('Unclosed quote in MCP command');
+  }
+  pushToken();
+  return tokens;
+}
+
+export function parseStdioEndpoint(endpoint: string): ParsedStdioCommand | null {
+  const trimmed = String(endpoint || '').trim();
+  if (!trimmed.toLowerCase().startsWith('stdio://')) return null;
+  const commandLine = trimmed.replace(/^stdio:\/\//i, '');
+  try {
+    const tokens = splitCommandTokens(commandLine);
+    if (tokens.length === 0) return null;
+    return { command: tokens[0], args: tokens.slice(1), raw: commandLine };
+  } catch {
+    return null;
+  }
+}
+
+function parseCommandForSpawn(endpoint: string): ParsedStdioCommand {
+  const parsed = parseStdioEndpoint(endpoint);
+  if (!parsed) {
+    throw new Error(`Invalid MCP stdio command: ${redactMcpText(endpoint)}`);
+  }
+  if (!parsed.command) {
+    throw new Error('MCP stdio command is empty');
+  }
+  return parsed;
+}
+
 export function redactMcpText(value: string): string {
   return redactSecrets(value).redacted;
 }
@@ -121,10 +210,9 @@ class MCPClient {
     return new Promise((resolve, reject) => {
       try {
         // Parse command — handle both stdio:// and direct commands
-        const cmd = this.command.replace(/^stdio:\/\//, '');
-        const fullCmd = cmd.includes(' ') ? cmd.split(' ') : [cmd];
-        const command = fullCmd[0];
-        const args = [...fullCmd.slice(1), ...this.args];
+        const parsed = parseCommandForSpawn(this.command);
+        const args = [...parsed.args, ...this.args];
+        const command = parsed.command;
 
         this.process = spawn(command, args, {
           stdio: ['pipe', 'pipe', 'pipe'],

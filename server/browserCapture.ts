@@ -52,6 +52,7 @@ export interface DeepBrowserArtifact {
 }
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024; // 2MB cap to keep the artifact bounded
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 
 function extractTagAttributes(html: string, tag: string): Array<Record<string, string>> {
@@ -124,6 +125,22 @@ function extractTitle(html: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
+function isLoopbackUrl(rawUrl: string): boolean {
+  let normalized = rawUrl.trim();
+  if (!normalized) return false;
+  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return false;
+  }
+  if (parsed.username || parsed.password) return false;
+  return LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase());
+}
+
 /**
  * Pull a deep artifact for the given local URL. Returns null when the URL
  * is not local or unreachable. The function never throws — errors are
@@ -131,7 +148,7 @@ function extractTitle(html: string): string | undefined {
  */
 export async function captureDeepBrowser(url: string): Promise<DeepBrowserArtifact | null> {
   const fullUrl = url.startsWith('http') ? url : `http://${url}`;
-  if (!/^(https?:\/\/)?(localhost|127\.0\.0\.1|::1)(:\d+)?/i.test(fullUrl)) {
+  if (!isLoopbackUrl(fullUrl)) {
     return null;
   }
   const start = Date.now();

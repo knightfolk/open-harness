@@ -20,9 +20,27 @@ export interface ConsoleError {
 }
 
 const CACHE_DIR = join(homedir(), '.openharness', 'browser-cache');
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 function ensureCacheDir() {
   if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+}
+
+function isLoopbackUrl(rawUrl: string): boolean {
+  let normalized = rawUrl.trim();
+  if (!normalized) return false;
+  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return false;
+  }
+  if (parsed.username || parsed.password) return false;
+  const host = parsed.hostname.toLowerCase();
+  return LOOPBACK_HOSTS.has(host);
 }
 
 /**
@@ -42,10 +60,8 @@ export async function capturePreview(url: string): Promise<BrowserPreviewResult>
     errors: [],
   };
 
-  // Validate URL is localhost/127.0.0.1
-  const isLocalUrl = /^(https?:\/\/)?(localhost|127\.0\.0\.1|::1)(:\d+)?/i.test(url);
-
-  if (!isLocalUrl) {
+  // Validate URL is strict loopback host (localhost, 127.0.0.1, or ::1)
+  if (!isLoopbackUrl(url)) {
     result.errors.push({ type: 'warning', message: 'Only localhost URLs are supported for security' });
     return result;
   }
