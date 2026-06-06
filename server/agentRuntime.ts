@@ -407,6 +407,7 @@ export async function runAgentPhase(
       { role: 'system', content: systemPrompt },
       { role: 'user', content: req.prompt },
     ];
+    let exhaustedToolRounds = false;
 
     for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round++) {
       req.onStep?.({ type: 'model_request', round: round + 1, model: modelId });
@@ -457,8 +458,32 @@ export async function runAgentPhase(
       });
 
       if (round === MAX_AGENT_TOOL_ROUNDS - 1) {
-        artifact.response = stripAgentToolMarkup(text, knownToolNames);
+        exhaustedToolRounds = true;
       }
+    }
+
+    if (exhaustedToolRounds && !artifact.response.trim()) {
+      req.onStep?.({ type: 'model_request', round: MAX_AGENT_TOOL_ROUNDS + 1, model: modelId });
+      const finalText = await callAgentModel(provider, modelId, [
+        ...messages,
+        {
+          role: 'user',
+          content: [
+            `You have reached the read-only tool limit.`,
+            `Do not request more tools.`,
+            `Produce the final answer now from the evidence already gathered.`,
+          ].join('\n'),
+        },
+      ], profile.temperature, controller.signal);
+      if (finalText) req.onStep?.({ type: 'model_text', chars: finalText.length });
+      artifact.response = stripAgentToolMarkup(finalText, knownToolNames);
+    }
+
+    if (artifact.status === 'complete' && !artifact.response.trim()) {
+      artifact.status = 'error';
+      artifact.error = exhaustedToolRounds
+        ? 'Agent exhausted tool rounds without producing a final answer'
+        : 'Agent completed without producing a final answer';
     }
   } catch (err: any) {
     if (controller.signal.aborted) {
