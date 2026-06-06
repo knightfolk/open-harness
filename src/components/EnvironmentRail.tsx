@@ -29,8 +29,8 @@ const TRUST_ICONS: Record<string, React.ReactNode> = {
 const TRUST_COLORS: Record<string, string> = {
   'chat-only': '#6b7280',
   'read-only': '#3b82f6',
-  'ask-before-write': '#f59e0b',
-  'workspace-write': '#22c55e',
+  'ask-before-write': '#22c55e',
+  'workspace-write': '#f59e0b',
   'full-local': '#ef4444',
 };
 

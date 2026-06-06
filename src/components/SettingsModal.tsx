@@ -12,7 +12,7 @@ import {
 import type { ProviderConfig, CodingRoleAssignment, MCPServerItem, Skill, Plugin, MemoryEntry } from '../types';
 import type { ThinkingEffort } from '../types';
 import * as api from '../utils/api';
-import { modelCapabilityFlags, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
+import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
 import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
 import {
   findModelCatalogCard,
@@ -311,35 +311,22 @@ function PaneTitle({ children }: { children: React.ReactNode }) { return <div cl
 function PaneDesc({ children }: { children: React.ReactNode }) { return <div className="settings-pane-desc">{children}</div>; }
 
 function ModelAbilityIcons({ modelId, providerId }: { modelId: string; providerId?: string }) {
-  const flags = modelCapabilityFlags(modelId, providerId);
-  const abilities = [
-    { id: 'thinking', label: 'Thinking', active: flags.thinking, icon: Brain },
-    { id: 'vision', label: 'Vision', active: flags.vision, icon: Eye },
-    { id: 'tools', label: 'Tools', active: flags.tools, icon: Wrench },
-    { id: 'context', label: 'Long context', active: flags.longContext, icon: Layers },
-  ];
+  const abilities = modelAbilityStates(modelId, providerId);
+  const isAuto = modelId.trim().toLowerCase() === 'auto';
   return (
-    <div style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }} aria-label="Model abilities">
-      {abilities.map(({ id, label, active, icon: Icon }) => (
+    <div className="model-ability-icons" aria-label="Model abilities">
+      {abilities.map(({ id, active, title }) => {
+        const Icon = id === 'thinking' ? Brain : id === 'vision' ? Eye : id === 'tools' ? Wrench : Layers;
+        return (
         <span
           key={id}
-          title={active ? label : `${label} not detected`}
-          style={{
-            width: 24,
-            height: 24,
-            borderRadius: 4,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid var(--border-primary)',
-            color: active ? 'var(--accent-primary)' : 'var(--text-tertiary)',
-            background: active ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-secondary)',
-            opacity: active ? 1 : 0.45,
-          }}
+          className={`model-ability-icon ${active ? 'active' : 'disabled'} ${isAuto ? 'auto' : ''}`}
+          title={title}
         >
           <Icon size={13} />
         </span>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -451,6 +438,9 @@ function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, onSelectM
     ? { id: 'Auto', name: 'Auto', providerName: 'Router' }
     : null);
   const supportsThinking = modelSupportsThinking(activeModel, current?.providerId);
+  const thinkingTitle = activeModel === 'Auto'
+    ? 'Thinking biases Auto toward cheaper or deeper routing.'
+    : 'Thinking effort for this reasoning-capable model.';
   return (
     <>
       <PaneTitle>Active Chat Model</PaneTitle>
@@ -460,7 +450,7 @@ function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, onSelectM
           <div className="settings-item-label">{effectiveCurrent?.name || activeModel}</div>
           <div className="settings-item-desc">{activeModel === 'Auto' ? 'Router mode • per-request auto-selection' : (current ? `${current.providerName} • enabled for chat` : 'No enabled model found')}</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="settings-model-controls">
           <select className="settings-select settings-select-wide" value={activeModel} onChange={(e) => onSelectModel(e.target.value)}>
             <option value="Auto">Auto</option>
             {enabledModels.map((model: any) => (
@@ -468,11 +458,14 @@ function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, onSelectM
             ))}
           </select>
           {supportsThinking && (
-            <select className="settings-select" value={thinkingEffort} onChange={(e) => onThinkingEffortChange(e.target.value as ThinkingEffort)} title="Thinking effort">
-              {THINKING_EFFORTS.map((effort) => (
-                <option key={effort.id} value={effort.id}>{effort.label}</option>
-              ))}
-            </select>
+            <label className="settings-thinking-control" title={thinkingTitle}>
+              <span><Brain size={12} /> Thinking</span>
+              <select className="settings-select" value={thinkingEffort} onChange={(e) => onThinkingEffortChange(e.target.value as ThinkingEffort)} aria-label="Thinking effort">
+                {THINKING_EFFORTS.map((effort) => (
+                  <option key={effort.id} value={effort.id}>{effort.label}</option>
+                ))}
+              </select>
+            </label>
           )}
           <ModelAbilityIcons modelId={activeModel} providerId={current?.providerId} />
         </div>
@@ -1275,13 +1268,16 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
           const Icon = roleIconMap[role.id] || Bot;
           const selectedModel = enabledModels.find((model: any) => model.id === role.modelId);
           const supportsThinking = modelSupportsThinking(role.modelId, selectedModel?.providerId);
+          const thinkingTitle = role.modelId === 'Auto'
+            ? `${role.name} uses Thinking to bias Auto routing depth and cost.`
+            : `${role.name} thinking effort for this reasoning-capable model.`;
           return (
             <div key={role.id} className="role-bucket-card">
               <div className="role-bucket-icon"><Icon size={15} /></div>
               <div className="role-bucket-body">
                 <div className="role-bucket-name">{role.name}</div>
                 <div className="role-bucket-desc">{role.description}</div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="settings-model-controls">
                   <select className="settings-select settings-select-wide" value={role.modelId} onChange={(e) => onAssignRoleModel(role.id, e.target.value)}>
                     <option value="Auto">Auto</option>
                     {enabledModels.map((model: any) => {
@@ -1294,11 +1290,14 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
                     })}
                   </select>
                   {supportsThinking && (
-                    <select className="settings-select" value={roleThinking?.[role.id] || 'medium'} onChange={(e) => onAssignRoleThinking(role.id, e.target.value as ThinkingEffort)} title={`${role.name} thinking effort`}>
-                      {THINKING_EFFORTS.map((effort) => (
-                        <option key={effort.id} value={effort.id}>{effort.label}</option>
-                      ))}
-                    </select>
+                    <label className="settings-thinking-control" title={thinkingTitle}>
+                      <span><Brain size={12} /> Thinking</span>
+                      <select className="settings-select" value={roleThinking?.[role.id] || 'medium'} onChange={(e) => onAssignRoleThinking(role.id, e.target.value as ThinkingEffort)} aria-label={`${role.name} thinking effort`}>
+                        {THINKING_EFFORTS.map((effort) => (
+                          <option key={effort.id} value={effort.id}>{effort.label}</option>
+                        ))}
+                      </select>
+                    </label>
                   )}
                   <ModelAbilityIcons modelId={role.modelId} providerId={selectedModel?.providerId} />
                 </div>

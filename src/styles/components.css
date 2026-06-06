@@ -1921,6 +1921,59 @@
   border-color: var(--accent-primary);
 }
 
+.settings-model-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-thinking-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.settings-thinking-control > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-tertiary);
+}
+
+.model-ability-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.model-ability-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-primary);
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  opacity: 0.45;
+}
+
+.model-ability-icon.active {
+  color: var(--accent-primary);
+  background: rgba(99, 102, 241, 0.12);
+  opacity: 1;
+}
+
+.model-ability-icon.auto {
+  color: var(--accent-success);
+  background: color-mix(in srgb, var(--accent-success) 13%, transparent);
+}
+
 /* ========== Diff View ========== */
 .diff-line {
   font-family: 'JetBrains Mono', monospace;
@@ -5271,6 +5324,47 @@ button:focus-visible {
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.status-bar-path-button {
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.status-bar-path-button:hover,
+.status-bar-path-button:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.status-model-ability {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  opacity: 0.45;
+}
+
+.status-model-ability.active {
+  color: var(--accent-primary);
+  opacity: 1;
+}
+
+.status-model-ability.auto {
+  color: var(--accent-success);
+}
+
+.status-terminal-popover {
+  width: min(620px, calc(100vw - 28px));
+  height: min(420px, calc(100vh - 120px));
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
 }
 
 /* Model Picker Dropdown */

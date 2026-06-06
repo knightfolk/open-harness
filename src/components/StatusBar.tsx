@@ -1,14 +1,16 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Wifi, WifiOff, ChevronUp, Cpu, Brain, DollarSign,
-  Check, Search, Shield, Settings, Star, Eye, Wrench, Layers,
+  Check, Search, Shield, Settings, Star, Eye, Wrench, Layers, Terminal,
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 import { providerPlanLabel } from '../data/providerPlans';
-import { modelCapabilityFlags, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
+import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
 import type { ThinkingEffort } from '../types';
+
+const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 
 interface ModelOption {
   id: string;
@@ -62,8 +64,8 @@ const TRUST_LABELS: Record<string, string> = {
 const TRUST_COLORS: Record<string, string> = {
   'chat-only': '#6b7280',
   'read-only': '#3b82f6',
-  'ask-before-write': '#f59e0b',
-  'workspace-write': '#22c55e',
+  'ask-before-write': '#22c55e',
+  'workspace-write': '#f59e0b',
   'full-local': '#ef4444',
 };
 
@@ -93,24 +95,30 @@ export function StatusBar({
 }: Props) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [trustPickerOpen, setTrustPickerOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [pickerPos, setPickerPos] = useState<{ left: number; bottom: number } | null>(null);
   const [trustPickerPos, setTrustPickerPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [terminalPos, setTerminalPos] = useState<{ left: number; bottom: number } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerPanelRef = useRef<HTMLDivElement>(null);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const trustRef = useRef<HTMLDivElement>(null);
   const trustBtnRef = useRef<HTMLButtonElement>(null);
   const trustPanelRef = useRef<HTMLDivElement>(null);
+  const terminalBtnRef = useRef<HTMLButtonElement>(null);
+  const terminalPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!modelPickerOpen && !trustPickerOpen) return;
+    if (!modelPickerOpen && !trustPickerOpen && !terminalOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
       const clickedModelButton = modelBtnRef.current?.contains(target);
       const clickedModelPicker = pickerPanelRef.current?.contains(target);
       const clickedTrustButton = trustBtnRef.current?.contains(target);
       const clickedTrustPicker = trustPanelRef.current?.contains(target);
+      const clickedTerminalButton = terminalBtnRef.current?.contains(target);
+      const clickedTerminalPanel = terminalPanelRef.current?.contains(target);
       if (modelPickerOpen && !clickedModelButton && !clickedModelPicker) {
         setModelPickerOpen(false);
         setSearchQuery('');
@@ -118,10 +126,13 @@ export function StatusBar({
       if (trustPickerOpen && !clickedTrustButton && !clickedTrustPicker) {
         setTrustPickerOpen(false);
       }
+      if (terminalOpen && !clickedTerminalButton && !clickedTerminalPanel) {
+        setTerminalOpen(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [modelPickerOpen, trustPickerOpen]);
+  }, [modelPickerOpen, trustPickerOpen, terminalOpen]);
 
   const filtered = models.filter(m =>
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -162,7 +173,7 @@ export function StatusBar({
   const servingProvider = currentModel?.providerName || providerName;
   const currentProviderId = currentModel?.providerId || activeProviderId;
   const supportsThinking = modelSupportsThinking(activeModel, currentProviderId);
-  const capabilityFlags = modelCapabilityFlags(activeModel, currentProviderId);
+  const abilities = modelAbilityStates(activeModel, currentProviderId);
   const connectionLabel = connected
     ? isAuto
       ? `Router ready · ${providerCount || 0} provider${providerCount === 1 ? '' : 's'}`
@@ -199,6 +210,7 @@ export function StatusBar({
             const nextOpen = !trustPickerOpen;
             setTrustPickerOpen(nextOpen);
             setModelPickerOpen(false);
+            setTerminalOpen(false);
             setSearchQuery('');
             if (nextOpen && trustBtnRef.current) {
               // Match the model picker: anchor above the status button in a
@@ -278,6 +290,7 @@ export function StatusBar({
             const nextOpen = !modelPickerOpen;
             setModelPickerOpen(nextOpen);
             setTrustPickerOpen(false);
+            setTerminalOpen(false);
             if (nextOpen && modelBtnRef.current) {
               // Anchor the floating picker above the button so it escapes
               // any overflow-hidden ancestor in the chat panel column.
@@ -417,34 +430,59 @@ export function StatusBar({
 
       {/* Model abilities */}
       <div className="status-bar-item" title="Model abilities" aria-label="Model abilities">
-        {[
-          { id: 'thinking', label: 'Thinking', active: capabilityFlags.thinking, icon: Brain },
-          { id: 'vision', label: 'Vision', active: capabilityFlags.vision, icon: Eye },
-          { id: 'tools', label: 'Tools', active: capabilityFlags.tools, icon: Wrench },
-          { id: 'context', label: 'Long context', active: capabilityFlags.longContext, icon: Layers },
-        ].map(({ id, label, active, icon: Icon }) => (
+        {abilities.map(({ id, active, title }) => {
+          const Icon = id === 'thinking' ? Brain : id === 'vision' ? Eye : id === 'tools' ? Wrench : Layers;
+          return (
           <span
             key={id}
-            title={active ? label : `${label} not detected`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              color: active ? 'var(--accent-primary)' : 'var(--text-tertiary)',
-              opacity: active ? 1 : 0.45,
-            }}
+            className={`status-model-ability ${active ? 'active' : 'disabled'} ${isAuto ? 'auto' : ''}`}
+            title={title}
           >
             <Icon size={12} />
           </span>
-        ))}
+          );
+        })}
       </div>
 
       {/* Working dir */}
       {workingDir && (
         <>
           <div className="status-bar-separator" />
-          <div className="status-bar-item status-bar-path">
+          <button
+            ref={terminalBtnRef}
+            type="button"
+            className="status-bar-item status-bar-path status-bar-path-button"
+            title={`Open terminal in ${workingDir}`}
+            aria-label={`Open terminal in ${workingDir}`}
+            onClick={() => {
+              const nextOpen = !terminalOpen;
+              setTerminalOpen(nextOpen);
+              setModelPickerOpen(false);
+              setTrustPickerOpen(false);
+              setSearchQuery('');
+              if (nextOpen && terminalBtnRef.current) {
+                const rect = terminalBtnRef.current.getBoundingClientRect();
+                const width = Math.min(620, Math.max(420, window.innerWidth - 28));
+                const left = Math.min(rect.left, window.innerWidth - width - 14);
+                setTerminalPos({ left: Math.max(14, left), bottom: window.innerHeight - rect.top + 6 });
+              }
+            }}
+          >
+            <Terminal size={12} />
             {workingDir.split('/').pop()}
-          </div>
+          </button>
+          {terminalOpen && terminalPos && createPortal(
+            <div
+              ref={terminalPanelRef}
+              className="status-terminal-popover"
+              style={{ position: 'fixed', left: terminalPos.left, bottom: terminalPos.bottom, zIndex: 20001 }}
+            >
+              <Suspense fallback={<div className="status-terminal-loading">Opening terminal...</div>}>
+                <TerminalPanel workingDir={workingDir} />
+              </Suspense>
+            </div>,
+            document.body,
+          )}
         </>
       )}
 
