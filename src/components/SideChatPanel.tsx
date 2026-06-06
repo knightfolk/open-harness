@@ -32,6 +32,62 @@ interface SideToolCall {
 
 const SIDE_CHAT_MODEL_KEY = 'openharness.side-chat.model.v1';
 
+const TOOL_ACTIVITY_COPY: Record<string, { running: string; complete: string; error: string }> = {
+  web_fetch: {
+    running: 'Opening a tiny window to the web...',
+    complete: 'Brought back fresh web context.',
+    error: 'The web trail went cold.',
+  },
+  browser_navigate: {
+    running: 'Walking the browser to the right page...',
+    complete: 'Browser landed on the page.',
+    error: 'The browser missed the turn.',
+  },
+  browser_snapshot: {
+    running: 'Taking a quick look around the page...',
+    complete: 'Page scan is in hand.',
+    error: 'Could not get a clean page scan.',
+  },
+  browser_click: {
+    running: 'Pressing the right button...',
+    complete: 'Click landed.',
+    error: 'That click did not take.',
+  },
+  browser_type: {
+    running: 'Typing carefully...',
+    complete: 'Text is in place.',
+    error: 'Typing stumbled.',
+  },
+  read_file: {
+    running: 'Reading the relevant file...',
+    complete: 'File context loaded.',
+    error: 'Could not read that file.',
+  },
+  list_directory: {
+    running: 'Peeking inside the folder...',
+    complete: 'Folder map loaded.',
+    error: 'Could not list that folder.',
+  },
+  exec_command: {
+    running: 'Running a quick command...',
+    complete: 'Command came back.',
+    error: 'Command hit a snag.',
+  },
+};
+
+function toolActivityText(toolCalls?: SideToolCall[]) {
+  if (!toolCalls?.length) return null;
+  const latestRunning = [...toolCalls].reverse().find((tool) => tool.status === 'running');
+  const latest = latestRunning || toolCalls[toolCalls.length - 1];
+  const copy = TOOL_ACTIVITY_COPY[latest.name];
+  if (copy) return copy[latest.status];
+
+  const readableName = latest.name.replace(/^browser_/, '').replace(/_/g, ' ');
+  if (latest.status === 'running') return `Working with ${readableName}...`;
+  if (latest.status === 'complete') return `Finished ${readableName}.`;
+  return `${readableName} hit a snag.`;
+}
+
 function loadSideChatModel(activeModel: string) {
   try {
     return localStorage.getItem(SIDE_CHAT_MODEL_KEY) || activeModel;
@@ -110,7 +166,17 @@ export function SideChatPanel({ activeModel, models }: Props) {
         onToolCall: (tc) => {
           setMessages((prev) => prev.map((m) =>
             m.id === assistantId
-              ? { ...m, toolCalls: [...(m.toolCalls || []), { id: tc.id, name: tc.name, status: tc.status, input: tc.input, output: tc.output, duration: tc.duration }] }
+              ? {
+                  ...m,
+                  toolCalls: (() => {
+                    const nextTool = { id: tc.id, name: tc.name, status: tc.status, input: tc.input, output: tc.output, duration: tc.duration };
+                    const existing = m.toolCalls || [];
+                    const index = existing.findIndex((tool) => tool.id === tc.id);
+                    return index >= 0
+                      ? existing.map((tool, i) => (i === index ? { ...tool, ...nextTool } : tool))
+                      : [...existing, nextTool];
+                  })(),
+                }
               : m
           ));
         },
@@ -200,32 +266,31 @@ export function SideChatPanel({ activeModel, models }: Props) {
             <span style={{ fontSize: 10 }}>Ask questions without losing main chat context</span>
           </div>
         )}
-        {messages.map((msg) => (
-          <div key={msg.id} style={{
-            marginBottom: 8,
-            display: 'flex',
-            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-          }}>
-            <div style={{
-              maxWidth: '85%',
-              padding: '6px 10px',
-              borderRadius: msg.role === 'user' ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
-              background: msg.role === 'user' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-              color: msg.role === 'user' ? 'white' : 'var(--text-primary)',
-              fontSize: 12,
-              lineHeight: 1.5,
-              border: msg.role === 'assistant' ? '1px solid var(--border-primary)' : 'none',
+        {messages.map((msg) => {
+          const activityText = toolActivityText(msg.toolCalls);
+          return (
+            <div key={msg.id} style={{
+              marginBottom: 8,
+              display: 'flex',
+              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
             }}>
-              {/* Tool calls */}
-              {msg.toolCalls?.map((tc) => (
-                <div key={tc.id} style={{
-                  fontSize: 10, padding: '3px 6px', marginBottom: 4,
-                  borderRadius: 4, background: 'var(--bg-secondary)',
-                  color: 'var(--text-tertiary)', borderLeft: '2px solid var(--accent-primary)',
-                }}>
-                  {tc.name} {tc.status === 'running' ? '⋯' : tc.status === 'complete' ? '✓' : '✗'}
-                </div>
-              ))}
+              <div style={{
+                maxWidth: '85%',
+                padding: '6px 10px',
+                borderRadius: msg.role === 'user' ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
+                background: msg.role === 'user' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                color: msg.role === 'user' ? 'white' : 'var(--text-primary)',
+                fontSize: 12,
+                lineHeight: 1.5,
+                border: msg.role === 'assistant' ? '1px solid var(--border-primary)' : 'none',
+              }}>
+                {/* Tool activity */}
+                {activityText && (
+                  <div className={`side-chat-tool-activity ${msg.toolCalls?.some((tc) => tc.status === 'running') ? 'running' : ''}`}>
+                    <span className="side-chat-tool-activity-dot" />
+                    <span>{activityText}</span>
+                  </div>
+                )}
               {/* Content */}
               {msg.content && (
                 <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -241,7 +306,8 @@ export function SideChatPanel({ activeModel, models }: Props) {
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 
