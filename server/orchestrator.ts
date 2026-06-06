@@ -31,6 +31,7 @@ export interface OrchestrationPhase {
 
 export interface OrchestrationCallbacks {
   onStep?: (step: HarnessRunStep) => void;
+  signal?: AbortSignal;
 }
 
 // ── Public API ─────────────────────────────────────────
@@ -50,13 +51,13 @@ export async function runOrchestratorPipeline(
 ): Promise<OrchestrationResult> {
   switch (route.mode) {
     case 'plan':
-      return runPlanningRoomPipeline(route, userMessage, config, workingDir);
+      return runPlanningRoomPipeline(route, userMessage, config, workingDir, callbacks);
     case 'execute':
-      return runExecutePipeline(route, userMessage, config, workingDir);
+      return runExecutePipeline(route, userMessage, config, workingDir, callbacks);
     case 'investigate':
       return runInvestigatePipeline(route, userMessage, config, workingDir, callbacks);
     case 'compare':
-      return runComparePipeline(route, userMessage, config, workingDir);
+      return runComparePipeline(route, userMessage, config, workingDir, callbacks);
     default:
       return {
         finalText: userMessage,
@@ -73,6 +74,7 @@ async function runPlanningRoomPipeline(
   userMessage: string,
   config: StoredConfig,
   workingDir?: string,
+  callbacks: OrchestrationCallbacks = {},
 ): Promise<OrchestrationResult> {
   const phases: OrchestrationPhase[] = [];
   const targetModels = buildPlanningRoomModelSet(route, config);
@@ -121,6 +123,8 @@ async function runPlanningRoomPipeline(
         prompt: independentPrompt,
         modelId,
         workingDir,
+        signal: callbacks.signal,
+        onStep: callbacks.onStep,
       });
       phases.push({
         label: `planning-room:plan:${modelId}`,
@@ -182,6 +186,8 @@ async function runPlanningRoomPipeline(
           prompt: peerPrompt,
           modelId: plan.modelId,
           workingDir,
+          signal: callbacks.signal,
+          onStep: callbacks.onStep,
         });
         phases.push({
           label: `planning-room:cross-check:${plan.modelId}`,
@@ -244,6 +250,8 @@ async function runPlanningRoomPipeline(
       prompt: synthesisPrompt,
       modelId: synthesisModel,
       workingDir,
+      signal: callbacks.signal,
+      onStep: callbacks.onStep,
     });
     phases.push({
       label: 'planning-room:synthesis',
@@ -304,6 +312,7 @@ async function runExecutePipeline(
   userMessage: string,
   config: StoredConfig,
   workingDir?: string,
+  callbacks: OrchestrationCallbacks = {},
 ): Promise<OrchestrationResult> {
   const phases: OrchestrationPhase[] = [];
 
@@ -329,6 +338,8 @@ async function runExecutePipeline(
       prompt: plannerPrompt,
       modelId: plannerModel,
       workingDir,
+      signal: callbacks.signal,
+      onStep: callbacks.onStep,
     });
     phases.push({
       label: 'planner',
@@ -376,6 +387,8 @@ async function runExecutePipeline(
       prompt: implPrompt,
       modelId: implModelId,
       workingDir,
+      signal: callbacks.signal,
+      onStep: callbacks.onStep,
     });
     phases.push({
       label: 'implementer',
@@ -423,6 +436,8 @@ async function runExecutePipeline(
       prompt: reviewPrompt,
       modelId: reviewModelId,
       workingDir,
+      signal: callbacks.signal,
+      onStep: callbacks.onStep,
     });
     phases.push({
       label: 'reviewer',
@@ -518,6 +533,7 @@ async function runInvestigatePipeline(
       prompt: explorePrompt,
       modelId: exploreModel,
       workingDir,
+      signal: callbacks.signal,
       onStep: callbacks.onStep,
     });
     phases.push({
@@ -557,6 +573,7 @@ async function runComparePipeline(
   userMessage: string,
   config: StoredConfig,
   workingDir?: string,
+  callbacks: OrchestrationCallbacks = {},
 ): Promise<OrchestrationResult> {
   const phases: OrchestrationPhase[] = [];
 
@@ -590,6 +607,8 @@ async function runComparePipeline(
         prompt: judgePrompt,
         modelId,
         workingDir,
+        signal: callbacks.signal,
+        onStep: callbacks.onStep,
       });
       responses.push({ model: modelId, text: art.response || '(empty response)', ok: art.status === 'complete' });
       phases.push({
@@ -636,6 +655,8 @@ async function runComparePipeline(
       prompt: judgePrompt,
       modelId: config.activeModel || '',
       workingDir,
+      signal: callbacks.signal,
+      onStep: callbacks.onStep,
     });
     phases.push({
       label: 'judge',

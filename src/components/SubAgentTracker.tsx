@@ -38,6 +38,7 @@ function stepIcon(step: HarnessRunStep) {
   switch (step.type) {
     case 'orchestration': return Route;
     case 'route': return Route;
+    case 'auto_router': return Gauge;
     case 'prompt_built': return FileText;
     case 'model_request': return Zap;
     case 'tool_call': return Terminal;
@@ -53,6 +54,7 @@ function stepTitle(step: HarnessRunStep): string {
   switch (step.type) {
     case 'orchestration': return `Orchestration · ${step.label}`;
     case 'route': return `Route: ${step.role} → ${step.model}`;
+    case 'auto_router': return `Auto-router · ${step.modelId} (${step.score.toFixed(2)})`;
     case 'prompt_built': return `Prompt built · ${step.toolCount} tool${step.toolCount === 1 ? '' : 's'}`;
     case 'model_request': return `Model request · round ${step.round}`;
     case 'tool_call': return step.durationMs == null ? `Tool started · ${step.name}` : `Tool finished · ${step.name}`;
@@ -68,6 +70,7 @@ function stepDetail(step: HarnessRunStep): string | null {
   switch (step.type) {
     case 'orchestration': return step.detail || step.mode;
     case 'route': return step.reason || null;
+    case 'auto_router': return `${step.cached ? 'Cached decision' : 'Fresh decision'}${step.fallback ? ' · fallback' : ''}${step.classifierModel ? ` · classifier: ${step.classifierModel}` : ''}\n${step.reason}`;
     case 'prompt_built': return step.promptPreview;
     case 'model_request': return step.model;
     case 'tool_call': {

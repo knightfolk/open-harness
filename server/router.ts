@@ -51,14 +51,21 @@ function detectComplexitySignals(text: string, lower: string, fileRefs: string[]
   };
 }
 
+function stripNegatedActionPhrases(lower: string) {
+  return lower
+    .replace(/\b(?:without|do not|don't|dont|no need to|no need for|not asking you to)\s+(?:\w+\s+){0,4}(?:implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)(?:\s+\w+){0,4}/g, ' ')
+    .replace(/\b(?:no|without)\s+(?:code|coding|edits?|changes?|patch(?:es)?)\b/g, ' ');
+}
+
 export function routeRequest(content: string, activeModel: string, roleAssignments: Record<string, string> = {}): RouteDecision {
   const lower = content.toLowerCase();
+  const intentLower = stripNegatedActionPhrases(lower);
   const fileRefs = detectFileReferences(lower);
   const complexitySignals = detectComplexitySignals(content, lower, fileRefs);
-  const asksCompare = /\b(compare|versus|vs\.?|which model|model a|model b|judge|evaluate outputs?)\b/.test(lower);
-  const asksExecute = /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(lower);
-  const asksPlan = /\b(plan|planning mode|roadmap|design|architect|architecture|strategy|proposal|approach)\b/.test(lower);
-  const asksReview = /\b(review|audit|inspect|investigate|analy[sz]e|explain|summar|overview|find bugs|security|vuln|performance)\b/.test(lower);
+  const asksCompare = /\b(compare|versus|vs\.?|which model|model a|model b|judge|evaluate outputs?)\b/.test(intentLower);
+  const asksExecute = /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower);
+  const asksPlan = /\b(plan|planning mode|roadmap|design|architect|architecture|strategy|proposal|approach)\b/.test(intentLower);
+  const asksReview = /\b(review|audit|inspect|investigate|analy[sz]e|explain|summar|overview|find bugs|security|vuln|performance)\b/.test(intentLower);
   const asksProjectOverview = /\b(overview|summar|explain|describe)\b[\s\S]{0,80}\b(project|codebase|repo|repository|architecture|components)\b/.test(lower)
     || /\b(project|codebase|repo|repository)\b[\s\S]{0,80}\b(overview|summar|explain|describe|architecture|components)\b/.test(lower);
   const asksValidation = /\b(test|lint|build|typecheck|validate|verify|smoke)\b/.test(lower);

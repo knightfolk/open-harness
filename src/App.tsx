@@ -65,6 +65,7 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'orchestration': return `${step.label}: ${step.detail || step.mode}`;
     case 'route': return `Routed to ${step.role} using ${step.model}${step.reason ? ` (${step.reason})` : ''}`;
     case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
+    case 'auto_router': return `Auto-router picked ${step.modelId} (${step.score.toFixed(2)})${step.cached ? ' from cache' : ''}`;
     case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
     case 'model_text': return `Received ${step.chars} characters from model`;

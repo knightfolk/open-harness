@@ -1932,6 +1932,12 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
+  const requestController = new AbortController();
+  let streamFinished = false;
+  res.on('close', () => {
+    if (!streamFinished && !res.writableEnded) requestController.abort();
+  });
+
   const assistantId = uuid();
   writeSSE(res, 'user_message', userMsg);
   writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
@@ -1996,6 +2002,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     try {
       const orchResult = await runOrchestratorPipeline(route, content, appConfig, session.workingDir || undefined, {
         onStep: (step) => emitRunStep(res, run, step),
+        signal: requestController.signal,
       });
 
       // Emit per-phase run steps
@@ -2031,6 +2038,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
   writeSSE(res, 'run_complete', run);
   writeSSE(res, 'done', {});
+  streamFinished = true;
   res.end();
 });
 
@@ -2506,7 +2514,9 @@ async function streamModel(
   if (run) {
     run.role = classifiedRole;
     run.effectiveModel = effectiveModel;
-    for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
+    if (route.mode !== 'direct') {
+      for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
+    }
     emitRunStep(res, run, { type: 'route', role: classifiedRole, model: effectiveModel, reason: `${route.mode} mode · ${route.reason}` });
   }
   const effectiveResolved = resolveProviderForModel(effectiveModel);
