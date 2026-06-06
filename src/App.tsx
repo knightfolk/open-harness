@@ -1108,12 +1108,23 @@ function App() {
           providerName={activeModel.toLowerCase() === 'auto'
             ? 'Router'
             : providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
+          activeProviderId={providers.find(p => p.models?.some(m => m.id === activeModel))?.id}
+          activeProviderAccessMode={providers.find(p => p.models?.some(m => m.id === activeModel))?.accessMode}
+          activeProviderPlanId={providers.find(p => p.models?.some(m => m.id === activeModel))?.planId}
           connected={providers.some(p => p.configured)}
           messageCount={msgCount}
           workingDir={workingDir}
           models={Array.from(modelContextWindows.entries()).map(([id, ctx]) => {
             const prov = providers.find(p => p.models?.some(m => m.id === id));
-            return { id, name: id, providerName: prov?.name || 'Unknown', contextWindow: ctx };
+            return {
+              id,
+              name: id,
+              providerName: prov?.name || 'Unknown',
+              providerId: prov?.id,
+              accessMode: prov?.accessMode,
+              planId: prov?.planId,
+              contextWindow: ctx,
+            };
           })}
           onModelChange={handleSelectModel}
           enabledToolCount={enabledToolCount}

@@ -6,11 +6,15 @@ import {
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
+import { providerPlanLabel } from '../data/providerPlans';
 
 interface ModelOption {
   id: string;
   name: string;
   providerName: string;
+  providerId?: string;
+  accessMode?: 'api-key' | 'subscription';
+  planId?: string;
   contextWindow: number;
 }
 
@@ -21,6 +25,9 @@ interface Props {
   messageCount: number;
   workingDir: string | null;
   models: ModelOption[];
+  activeProviderId?: string;
+  activeProviderAccessMode?: 'api-key' | 'subscription';
+  activeProviderPlanId?: string;
   trustMode: string;
   enabledToolCount?: number;
   configuredProviderCount?: number;
@@ -56,7 +63,24 @@ const TRUST_COLORS: Record<string, string> = {
 
 const ALL_TRUST_MODES = ['chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local'];
 
-export function StatusBar({ activeModel, providerName, connected, messageCount, workingDir, models, trustMode, enabledToolCount, configuredProviderCount, onModelChange, onTrustModeChange, runningModel, onOpenSettings }: Props) {
+export function StatusBar({
+  activeModel,
+  providerName,
+  connected,
+  messageCount,
+  workingDir,
+  models,
+  activeProviderId,
+  activeProviderAccessMode,
+  activeProviderPlanId,
+  trustMode,
+  enabledToolCount,
+  configuredProviderCount,
+  onModelChange,
+  onTrustModeChange,
+  runningModel,
+  onOpenSettings,
+}: Props) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [trustPickerOpen, setTrustPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -299,7 +323,41 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
 
       {/* Cost estimate */}
       {(() => {
-        // Rough estimate: ~500 input tokens + ~200 output tokens per message
+        const activeProvider = models.find((m) => m.id === activeModel) || (
+          activeModel.toLowerCase() === 'auto'
+            ? undefined
+            : models.find((m) => m.providerName === servingProvider)
+        );
+        const accessMode = activeProvider?.accessMode || 'api-key';
+        if (isAuto) {
+          const activeProviderLabel = activeProviderAccessMode
+            ? providerPlanLabel(activeProviderId, activeProviderPlanId, activeProvider?.providerName || providerName)
+            : null;
+          if (activeProviderAccessMode === 'subscription' || accessMode === 'subscription') {
+            return (
+              <div className="status-bar-item" title={`Billing mode: subscription${activeProviderLabel ? ` (${activeProviderLabel})` : ''}`}>
+                <DollarSign size={12} />
+                Subscription{activeProviderLabel ? ` · ${activeProviderLabel}` : ''}
+              </div>
+            );
+          }
+        }
+
+        if (accessMode === 'subscription') {
+          const planLabel = providerPlanLabel(
+            activeProvider?.providerId || activeProviderId,
+            activeProvider?.planId || activeProviderPlanId,
+            activeProvider?.providerName || providerName,
+          );
+          return (
+            <div className="status-bar-item" title={`Billing mode: subscription${planLabel ? ` (${planLabel})` : ''}`}>
+              <DollarSign size={12} />
+              Subscription · {planLabel}
+            </div>
+          );
+        }
+
+        // Rough estimate: ~300 input tokens + ~150 output tokens per message
         const est = estimateModelCost(activeModel, messageCount * 300, messageCount * 150);
         if (!est || est.total < 0.001) return null;
         const label = est.total < 0.01 ? '< $0.01' : `~$${est.total.toFixed(2)}`;
