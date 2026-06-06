@@ -22,6 +22,7 @@ import {
   MODEL_CATEGORY_META,
   modelBestCategory,
   modelCatalogTooltip,
+  normalizeModelCatalogKey,
   TOP_MODEL_CATALOG,
 } from '../data/modelCatalog';
 
@@ -74,7 +75,7 @@ interface ProviderPreset {
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'openai', name: 'OpenAI', type: 'openai-compatible', baseURL: 'https://api.openai.com/v1', description: 'GPT-4.1, o3, o4-mini, GPT-5', color: '#10a37f', featured: true },
-  { id: 'minimax', name: 'MiniMax', type: 'openai-compatible', baseURL: 'https://api.minimax.io/v1', description: 'MiniMax M2.7', color: '#6366f1', featured: true },
+  { id: 'minimax', name: 'MiniMax', type: 'openai-compatible', baseURL: 'https://api.minimax.io/v1', description: 'MiniMax M3, M2.7', color: '#6366f1', featured: true },
   { id: 'deepseek', name: 'DeepSeek', type: 'openai-compatible', baseURL: 'https://api.deepseek.com/v1', description: 'DeepSeek V4, V4 Flash, R2', color: '#4a9eff', featured: true },
   { id: 'xai', name: 'xAI', type: 'openai-compatible', baseURL: 'https://api.x.ai/v1', description: 'Grok 3, Grok 3 Mini', color: '#1d9bf0', featured: true },
   { id: 'mistral', name: 'Mistral', type: 'openai-compatible', baseURL: 'https://api.mistral.ai/v1', description: 'Mistral Large, Codestral', color: '#f54e42', featured: true },
@@ -122,12 +123,12 @@ interface Props {
 
 // ── Model recommendation map ──
 const MODEL_RECOMMENDATIONS: Record<string, string[]> = {
-  planner: ['o3', 'glm-5.1', 'deepseek-r2', 'deepseek-v4', 'llama-4-scout', 'kimi-k2.5', 'gpt-5.4', 'MiniMax-M2.7'],
-  coder: ['deepseek-v4', 'gpt-4.1', 'llama-4-maverick', 'MiniMax-M2.7', 'qwen-3-235b', 'glm-5', 'kimi-k2.6', 'grok-3', 'codestral', 'gpt-5.3-codex'],
+  planner: ['o3', 'glm-5.1', 'deepseek-r2', 'deepseek-v4', 'llama-4-scout', 'kimi-k2.5', 'gpt-5.4', 'MiniMax-M3'],
+  coder: ['deepseek-v4', 'gpt-4.1', 'llama-4-maverick', 'MiniMax-M3', 'qwen-3-235b', 'glm-5', 'kimi-k2.6', 'grok-3', 'codestral', 'gpt-5.3-codex'],
   reviewer: ['o3', 'mistral-large', 'o4-mini', 'deepseek-r2', 'qwen-3-235b', 'mimo-v2.5-pro'],
-  reasoner: ['o3', 'deepseek-r2', 'qwen-3-235b', 'grok-3', 'MiniMax-M2.7'],
-  summarizer: ['gpt-4.1-mini', 'deepseek-v4-flash', 'qwen-3-32b', 'mistral-small', 'MiniMax-M2.7'],
-  worker: ['gpt-4.1-nano', 'glm-4.7', 'deepseek-v4-flash', 'qwen-3-32b', 'MiniMax-M2.7'],
+  reasoner: ['o3', 'deepseek-r2', 'qwen-3-235b', 'grok-3', 'MiniMax-M3'],
+  summarizer: ['gpt-4.1-mini', 'deepseek-v4-flash', 'qwen-3-32b', 'mistral-small', 'MiniMax-M3'],
+  worker: ['gpt-4.1-nano', 'glm-4.7', 'deepseek-v4-flash', 'qwen-3-32b', 'MiniMax-M3'],
 };
 
 function isModelRecommended(roleId: string, modelId: string): boolean {
@@ -411,6 +412,7 @@ function modelMatchesCatalogId(modelId: string, providerId: string, catalogId: s
 }
 
 function getCatalogAccess(cardId: string, providers: ProviderConfig[]) {
+  const card = TOP_MODEL_CATALOG.find((candidate) => candidate.id === cardId);
   const matches = providers.flatMap((provider) =>
     provider.models
       .filter((model) => modelMatchesCatalogId(model.id, provider.id, cardId))
@@ -422,13 +424,31 @@ function getCatalogAccess(cardId: string, providers: ProviderConfig[]) {
         modelName: model.name,
       }))
   );
+  const providerAccess = card
+    ? providers
+      .filter((provider) => {
+        if (!provider.configured) return false;
+        const providerKeys = [provider.id, provider.name].map((value) => normalizeModelCatalogKey(value || ''));
+        const cardProviderKeys = [card.provider, ...card.providerHints].map((value) => normalizeModelCatalogKey(value || ''));
+        return providerKeys.some((providerKey) =>
+          cardProviderKeys.some((cardProviderKey) => providerKey.includes(cardProviderKey) || cardProviderKey.includes(providerKey))
+        );
+      })
+      .map((provider) => ({
+        providerName: provider.name,
+        providerId: provider.id,
+        configured: provider.configured,
+      }))
+    : [];
   const enabled = matches.filter((match) => match.configured && match.enabled);
   const configured = matches.filter((match) => match.configured);
+  const available = configured.length > 0 || providerAccess.length > 0;
   return {
     matches,
     enabled,
-    label: enabled.length > 0 ? 'Enabled' : configured.length > 0 ? 'Available' : matches.length > 0 ? 'Fetched' : 'Catalog',
-    providerLabel: (enabled[0] || configured[0] || matches[0])?.providerName || '',
+    providerAccess,
+    label: enabled.length > 0 ? 'Enabled' : available ? 'Available' : matches.length > 0 ? 'Fetched' : 'Catalog',
+    providerLabel: (enabled[0] || configured[0] || matches[0] || providerAccess[0])?.providerName || '',
   };
 }
 
@@ -459,7 +479,7 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
     ].join(' ').toLowerCase();
     const queryMatch = !query.trim() || haystack.includes(query.trim().toLowerCase());
     const categoryMatch = categoryFilter === 'all' || category === categoryFilter;
-    const accessMatch = !accessOnly || access.enabled.length > 0 || access.matches.length > 0;
+    const accessMatch = !accessOnly || access.enabled.length > 0 || access.matches.length > 0 || access.providerAccess.length > 0;
     return queryMatch && categoryMatch && accessMatch;
   });
 
@@ -491,9 +511,9 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
           ))}
         </select>
         <button
-          className={`settings-mini-button ${accessOnly ? 'active' : ''}`}
+          className={`settings-mini-button model-library-access-button ${accessOnly ? 'active' : ''}`}
           onClick={() => setAccessOnly((prev) => !prev)}
-          title="Show only models that match fetched provider models"
+          title="Show models available through configured providers or fetched model rows"
         >
           {accessOnly ? <Check size={11} /> : <Bot size={11} />}
           My Models

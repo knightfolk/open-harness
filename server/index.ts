@@ -2589,7 +2589,7 @@ async function streamModel(
   const classifiedRole = route.role;
   // Check if the user configured a different model for this role
   const roleModelOverride = appConfig.roleAssignments?.[classifiedRole];
-  // Priority: overrideModelId > route.suggestedModels[0] (auto-router, active non-fallback) > role bucket > activeModel
+  // Priority: overrideModelId > route.suggestedModels[0] (auto-router, active non-fallback) > Agent Roles > activeModel
   const autoRouterModel = route.routerData?.source === 'auto' && !route.routerData?.fallback
     ? route.suggestedModels?.[0]
     : undefined;
@@ -2613,7 +2613,7 @@ async function streamModel(
     providerId = effectiveResolved.providerId;
   }
   if (effectiveModel !== activeModel) {
-    console.log(`[role-router] ${classifiedRole} → using ${effectiveModel} (override from role bucket)`);
+    console.log(`[role-router] ${classifiedRole} → using ${effectiveModel} (override from Agent Roles)`);
   }
   const apiModelId = splitModelRef(effectiveModel).bareModelId;
 

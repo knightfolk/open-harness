@@ -208,7 +208,7 @@ export function getAvailableCandidates(): AutoRouterCandidate[] {
 /**
  * Make a routing decision for the given task signal.
  * Returns null if the router is not configured/enabled, in which case
- * the caller should fall back to the heuristic router + role buckets.
+ * the caller should fall back to the heuristic router + Agent Roles.
  */
 export async function routeTask(
   signal: AutoRouterSignal,

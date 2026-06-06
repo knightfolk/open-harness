@@ -81,12 +81,12 @@ function basename(p: string) {
 }
 
 const DEFAULT_ROLE_ASSIGNMENTS: CodingRoleAssignment[] = [
-  { id: 'planner', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'MiniMax-M2.7' },
-  { id: 'coder', name: 'Code Implementer', description: 'Writing code, fixes, debugging, and refactoring', modelId: 'MiniMax-M2.7' },
-  { id: 'reviewer', name: 'Code Reviewer', description: 'Reviewing PRs, finding correctness and security issues', modelId: 'MiniMax-M2.7' },
-  { id: 'reasoner', name: 'Reasoner', description: 'Complex analysis, comparisons, and tradeoffs', modelId: 'MiniMax-M2.7' },
-  { id: 'summarizer', name: 'Summarizer', description: 'Condensing files, threads, and long outputs', modelId: 'MiniMax-M2.7' },
-  { id: 'worker', name: 'Tool Runner', description: 'Fast shell, file, and utility tasks', modelId: 'MiniMax-M2.7' },
+  { id: 'planner', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'MiniMax-M3' },
+  { id: 'coder', name: 'Code Implementer', description: 'Writing code, fixes, debugging, and refactoring', modelId: 'MiniMax-M3' },
+  { id: 'reviewer', name: 'Code Reviewer', description: 'Reviewing PRs, finding correctness and security issues', modelId: 'MiniMax-M3' },
+  { id: 'reasoner', name: 'Reasoner', description: 'Complex analysis, comparisons, and tradeoffs', modelId: 'MiniMax-M3' },
+  { id: 'summarizer', name: 'Summarizer', description: 'Condensing files, threads, and long outputs', modelId: 'MiniMax-M3' },
+  { id: 'worker', name: 'Tool Runner', description: 'Fast shell, file, and utility tasks', modelId: 'MiniMax-M3' },
 ];
 
 function legacyRoleModel(assignments: Record<string, string>, roleId: string): string | undefined {
@@ -121,7 +121,7 @@ function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeModel, setActiveModel] = useState('MiniMax-M2.7');
+  const [activeModel, setActiveModel] = useState('MiniMax-M3');
   const [providers, setProviders] = useState<ProviderConfig[]>([
     {
       id: 'minimax',
@@ -130,6 +130,7 @@ function App() {
       endpointLabel: 'api.minimax.io/v1',
       configured: true,
       models: [
+        { id: 'MiniMax-M3', name: 'MiniMax M3', enabled: true },
         { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', enabled: true },
       ],
     },
@@ -262,7 +263,7 @@ function App() {
         const config = await api.getConfig();
         if (config) {
           setConfigPath(config.configPath || '');
-          setActiveModel(config.activeModel || 'MiniMax-M2.7');
+          setActiveModel(config.activeModel || 'MiniMax-M3');
           setActiveTheme(config.activeTheme || 'midnight');
           setPersonalityText(config.personality || '');
           document.documentElement.setAttribute('data-theme', config.activeTheme || 'midnight');

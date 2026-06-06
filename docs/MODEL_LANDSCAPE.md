@@ -39,8 +39,8 @@ Current external refresh anchors:
 | Claude Opus 4 | Anthropic | 200K | Planner, Code Reviewer | Premium | Deepest analysis, best for complex refactors |
 | Gemini 2.5 Pro | Google | 1M | Planner, Design Specialist | Premium | Massive context, great at large codebase analysis |
 | Gemini 2.5 Flash | Google | 1M | Tool Runner, Bug Fixer | Mid | Fast with huge context window |
-| MiniMax-M3 | MiniMax | 1M | Code Implementer, Planner | Mid | Frontier multimodal — SOTA coding & agent; image/video input, thinking blocks, Anthropic-compatible API |
-| MiniMax-M2.7 | MiniMax | 1M | Code Implementer | Mid | Strong code generation, cost-effective |
+| MiniMax-M3 | MiniMax | 1M | Code Implementer, Planner | Low | Frontier multimodal coding and agent model; image/video input, thinking blocks, Anthropic-compatible API |
+| MiniMax-M2.7 | MiniMax | 204K | Code Implementer | Mid | Older coding fallback; M3 is the preferred MiniMax default |
 | DeepSeek V4 | DeepSeek | 128K | Code Implementer, Planner | Cheap | Top-tier open-weight, exceptional code quality |
 | DeepSeek V4 Flash | DeepSeek | 128K | Tool Runner, Bug Fixer | Cheap | Fast variant, great for iteration |
 | DeepSeek V3 | DeepSeek | 128K | Bug Fixer | Free | Solid older model, still competitive |
@@ -123,7 +123,7 @@ Current external refresh anchors:
 ## Notes
 - **OpenAI-compatible** means the provider uses the `/v1/chat/completions` endpoint format
 - Only Anthropic and Google need custom adapters — 80%+ of providers work with the same code
-- MiniMax-M3 additionally supports Anthropic-compatible API via  (recommended for M3)
+- MiniMax-M3 additionally supports Anthropic-compatible API via `/anthropic/v1/messages` (recommended for M3)
 - Context window sizes are approximate and may vary by tier
 - "Local" models require Ollama, LM Studio, or similar runtime
 - Prices shift frequently — check provider websites for current rates

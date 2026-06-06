@@ -2584,6 +2584,14 @@ button:focus-visible {
   background: var(--accent-primary);
   color: white;
 }
+.settings-mini-button.model-library-access-button.active {
+  background: var(--accent-success);
+  color: white;
+}
+.settings-mini-button.model-library-access-button.active:hover {
+  background: #20b66b;
+  color: white;
+}
 
 .settings-card {
   background: var(--bg-tertiary);
