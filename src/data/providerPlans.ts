@@ -82,6 +82,16 @@ export const PROVIDER_PLAN_CATALOG: ProviderPlanCatalogEntry[] = [
     ],
   },
   {
+    providerId: 'opencode-go',
+    label: 'OpenCode Go',
+    sourceLabel: 'OpenCode Go subscription endpoint',
+    sourceUrl: 'https://opencode.ai/',
+    plans: [
+      { id: 'go-subscription', label: 'Go subscription', accessMode: 'subscription', description: 'OpenCode Go subscription access; treat routed models as quota-backed rather than per-token API spend.' },
+      { id: 'go-api-key', label: 'API key / compatible endpoint', accessMode: 'api-key', description: 'Use when the OpenCode-compatible endpoint should be costed like a metered API key.' },
+    ],
+  },
+  {
     providerId: 'mistral',
     label: 'Mistral',
     sourceLabel: 'Mistral pricing',

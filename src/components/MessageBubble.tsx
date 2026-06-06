@@ -131,7 +131,7 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
   );
 
   return (
-    <div className="message-wrapper">
+    <div className={`message-wrapper ${message.role}`}>
       <div className="message">
         <div className={`message-avatar ${message.role}`}>
           {avatarIcons[message.role]}

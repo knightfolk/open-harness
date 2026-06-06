@@ -1004,7 +1004,7 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
   }, [selectedPreset]);
 
   const handlePresetSave = async () => {
-    if (!apiKey.trim() && selectedPreset?.type !== 'local') { setError('API key is required'); return; }
+    if (!apiKey.trim() && selectedPreset?.type !== 'local' && presetAccessMode !== 'subscription') { setError('API key is required'); return; }
     if (!presetURL.trim()) { setError('Endpoint is required'); return; }
     setSaving(true); setError('');
     try {
@@ -1069,7 +1069,7 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
               <label>Provider name<input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder={selectedPreset.name} /></label>
               <label>API key
                 <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={selectedPreset.type === 'local' ? 'No key needed for local providers' : 'Paste your API key'}
+                  placeholder={selectedPreset.type === 'local' ? 'No key needed for local providers' : presetAccessMode === 'subscription' ? 'Optional for subscription access' : 'Paste your API key'}
                   disabled={selectedPreset.type === 'local'} />
               </label>
               <label>Endpoint<input value={presetURL} onChange={(e) => setPresetURL(e.target.value)} placeholder={selectedPreset.baseURL} /></label>

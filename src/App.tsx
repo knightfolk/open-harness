@@ -83,6 +83,10 @@ function basename(p: string) {
   return p.split('/').filter(Boolean).pop() || p;
 }
 
+function providerIsConfigured(provider: any): boolean {
+  return !!provider.hasKey || provider.type === 'local' || provider.accessMode === 'subscription';
+}
+
 const DEFAULT_ROLE_ASSIGNMENTS: CodingRoleAssignment[] = [
   { id: 'planner', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'Auto' },
   { id: 'coder', name: 'Code Implementer', description: 'Writing code, fixes, debugging, and refactoring', modelId: 'Auto' },
@@ -266,7 +270,7 @@ function App() {
               name: p.name,
               type: p.type || 'openai-compatible',
               endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
-              configured: !!p.hasKey || p.type === 'local',
+              configured: providerIsConfigured(p),
               accessMode: p.accessMode,
               planId: p.planId,
               models: p.models || [],
@@ -293,7 +297,7 @@ function App() {
 
         // Show onboarding if no providers have keys
         const hasKey = (config?.providers || []).some((p: any) =>
-          p.hasKey || p.type === 'local' || (p.apiKey && p.apiKey.startsWith('••••'))
+          providerIsConfigured(p) || (p.apiKey && p.apiKey.startsWith('••••'))
         );
         if (!hasKey) setShowOnboarding(true);
       } catch { /* use defaults */ }
@@ -343,7 +347,7 @@ function App() {
       name: p.name,
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
-      configured: !!p.hasKey || p.type === 'local',
+      configured: providerIsConfigured(p),
       accessMode: p.accessMode,
       planId: p.planId,
       models: p.models || [],
@@ -391,7 +395,7 @@ function App() {
       name: p.name,
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
-      configured: !!p.hasKey || p.type === 'local',
+      configured: providerIsConfigured(p),
       accessMode: p.accessMode,
       planId: p.planId,
       models: p.models || [],
@@ -412,7 +416,7 @@ function App() {
       name: p.name,
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
-      configured: !!p.hasKey || p.type === 'local',
+      configured: providerIsConfigured(p),
       accessMode: p.accessMode,
       planId: p.planId,
       models: p.models || [],
@@ -428,7 +432,7 @@ function App() {
         name: p.name,
         type: p.type || 'openai-compatible',
         endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
-        configured: !!p.hasKey || p.type === 'local',
+        configured: providerIsConfigured(p),
         accessMode: p.accessMode,
         planId: p.planId,
         models: p.models || [],
@@ -1169,7 +1173,7 @@ function App() {
                 name: p.name,
                 type: p.type || 'openai-compatible',
                 endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
-                configured: !!p.hasKey || p.type === 'local',
+                configured: providerIsConfigured(p),
                 accessMode: p.accessMode,
                 planId: p.planId,
                 models: p.models || [],
