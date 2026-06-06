@@ -24,16 +24,10 @@ export function normalizeThinkingEffort(value: unknown): ThinkingEffort {
 export function modelSupportsThinking(modelId: string, providerId = ''): boolean {
   if (modelId.trim().toLowerCase() === 'auto') return true;
   const card = findModelCatalogCard(modelId, providerId);
-  const text = [
-    providerId,
-    modelId,
-    card?.id,
-    card?.displayName,
-    card?.family,
-    ...(card?.aliases || []),
-  ].filter(Boolean).join(' ').toLowerCase();
+  if (card) return card.supportsThinking;
+  const text = [providerId, modelId].filter(Boolean).join(' ').toLowerCase();
   return /\b(o[134]|o4|o3|o1)\b/.test(text)
-    || /\b(r1|r2)\b|reasoning|thinking|qwen.*think|grok-4|glm-5/.test(text);
+    || /\b(r1|r2)\b|thinking|qwen.*think|grok-4|deepseek-reasoner/.test(text);
 }
 
 export function modelCapabilityFlags(modelId: string, providerId = '') {

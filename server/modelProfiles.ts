@@ -390,30 +390,42 @@ export function getModelConfig(modelId: string): ModelPromptConfig {
   const family = detectModelFamily(modelId);
   const base = MODEL_FAMILY_CONFIGS[family] || MODEL_FAMILY_CONFIGS['unknown'];
   const lower = modelId.toLowerCase();
+  const reasoningSupport = nativeThinkingModelId(lower)
+    ? 'native-thinking'
+    : base.reasoningSupport === 'none'
+      ? 'none'
+      : 'prompt-based-cot';
   if (family === 'minimax' && /m2[.-]?7/.test(lower)) {
-    return { ...base, contextWindowTokens: 204800, recommendedMaxTokens: 16000 };
+    return { ...base, reasoningSupport, contextWindowTokens: 204800, recommendedMaxTokens: 16000 };
   }
   if (family === 'gemini' && /gemini-1\.5-pro/.test(lower)) {
-    return { ...base, contextWindowTokens: 2000000, recommendedMaxTokens: 32768 };
+    return { ...base, reasoningSupport, contextWindowTokens: 2000000, recommendedMaxTokens: 32768 };
   }
   if (family === 'gemini' && /gemini-1\.5-flash/.test(lower)) {
-    return { ...base, contextWindowTokens: 1000000, recommendedMaxTokens: 32768 };
+    return { ...base, reasoningSupport, contextWindowTokens: 1000000, recommendedMaxTokens: 32768 };
   }
   if (family === 'anthropic' && /claude-3[-.]5|claude-3-7|claude-sonnet-4|claude-opus-4/.test(lower)) {
-    return { ...base, contextWindowTokens: 200000, recommendedMaxTokens: 16384 };
+    return { ...base, reasoningSupport, contextWindowTokens: 200000, recommendedMaxTokens: 16384 };
   }
-  return base;
+  return { ...base, reasoningSupport };
 }
 
 /** Check if a model is a reasoning/thinking model. */
 export function isReasoningModel(modelId: string): boolean {
   if (!modelId) return false;
-  const lower = modelId.toLowerCase();
+  return nativeThinkingModelId(modelId.toLowerCase());
+}
+
+function nativeThinkingModelId(lower: string): boolean {
   return (
-    /\br1\b/.test(lower) ||
+    /\b(o[134]|o4|o3|o1)\b/.test(lower) ||
+    /\bdeepseek[-_/ ]?(r1|r2|reasoner)\b/.test(lower) ||
+    /\b(r1|r2)\b/.test(lower) ||
     /\bthinking\b/.test(lower) ||
-    /\breasoning\b/.test(lower) ||
-    lower.includes('grok-4')
+    /\bqwen.*think/.test(lower) ||
+    /\bqwen3[._-]?\d*[-_/ ]?max\b/.test(lower) ||
+    /\bgrok[-_/ ]?4\b/.test(lower) ||
+    /\bminimax[-_/ ]?m3\b|\bminimax\/minimax[-_/ ]?m3\b/.test(lower)
   );
 }
 
