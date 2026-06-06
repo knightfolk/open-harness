@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openharness.local/schemas/model-prompt-plugin.schema.json",
+  "title": "OpenHarness Model Prompt Plugin",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "name", "version", "description", "author", "license", "provenance", "targets", "renderers", "sections", "safety"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "url": { "type": "string", "format": "uri" },
+        "email": { "type": "string" }
+      }
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "trust"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["local", "generated", "community", "imported-opencode", "imported-other"]
+        },
+        "trust": {
+          "type": "string",
+          "enum": ["trusted", "review-required", "blocked"]
+        },
+        "homepage": { "type": "string", "format": "uri" },
+        "repository": { "type": "string", "format": "uri" },
+        "commit": { "type": "string", "maxLength": 80 },
+        "signature": { "type": "string", "maxLength": 500 },
+        "importedFrom": { "type": "string", "maxLength": 240 }
+      }
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "modelIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "modelFamilies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["anthropic", "deepseek", "gemini", "grok", "llama", "mistral", "openai", "qwen", "minimax", "gemma", "phi", "unknown"]
+          },
+          "uniqueItems": true
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["coder", "planner", "reviewer", "summarizer", "worker", "reasoner", "title", "router"]
+          },
+          "uniqueItems": true
+        },
+        "routeModes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["direct", "plan", "investigate", "execute", "compare"]
+          },
+          "uniqueItems": true
+        },
+        "taskTags": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "uniqueItems": true
+        },
+        "minContextTokens": { "type": "integer", "minimum": 0 },
+        "maxContextTokens": { "type": "integer", "minimum": 1 },
+        "requiresImages": { "type": "boolean" },
+        "requiresTools": { "type": "boolean" }
+      }
+    },
+    "renderers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "format"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "format": {
+            "type": "string",
+            "enum": ["markdown", "structured", "xml", "json-contract", "minimal"]
+          },
+          "targetModelIds": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "targetModelFamilies": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          },
+          "template": { "type": "string", "minLength": 1 },
+          "sectionOrder": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "placement", "content"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "placement": {
+            "type": "string",
+            "enum": ["prepend-system", "append-system", "replace-role", "append-task", "tool-instructions", "output-contract"]
+          },
+          "priority": { "type": "integer", "minimum": 0, "maximum": 1000, "default": 100 },
+          "conditions": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "roles": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+              "routeModes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+              "taskTags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+              "trustModes": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["read-only", "chat-only", "ask-before-write", "workspace-write"] },
+                "uniqueItems": true
+              }
+            }
+          },
+          "content": { "type": "string", "minLength": 1 },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "description"],
+              "properties": {
+                "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+                "description": { "type": "string", "minLength": 1 },
+                "required": { "type": "boolean", "default": false },
+                "default": { "type": ["string", "number", "boolean", "null"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "packs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "pluginIds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "description": { "type": "string", "maxLength": 500 },
+          "pluginIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "taskTags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "evals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "prompt", "rubric", "minimumScore"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "prompt": { "type": "string", "minLength": 1 },
+          "baseline": { "type": "string" },
+          "minimumScore": { "type": "number", "minimum": 0, "maximum": 10 },
+          "rubric": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "points", "description"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+                "points": { "type": "number", "minimum": 0 },
+                "description": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permissions", "untrustedContextPolicy", "canOverrideProjectInstructions"],
+      "properties": {
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "read": { "$ref": "#/$defs/permission" },
+            "edit": { "$ref": "#/$defs/permission" },
+            "bash": { "$ref": "#/$defs/permission" },
+            "web": { "$ref": "#/$defs/permission" },
+            "mcp": { "$ref": "#/$defs/permission" },
+            "skill": { "$ref": "#/$defs/permission" }
+          }
+        },
+        "untrustedContextPolicy": {
+          "type": "string",
+          "enum": ["preserve-existing", "harden", "block"]
+        },
+        "canOverrideProjectInstructions": {
+          "type": "boolean",
+          "const": false
+        },
+        "blockedPatterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recordAdherence": { "type": "boolean", "default": true },
+        "recordLatency": { "type": "boolean", "default": true },
+        "recordCost": { "type": "boolean", "default": true },
+        "recordGrounding": { "type": "boolean", "default": true },
+        "recordTimeoutPhase": { "type": "boolean", "default": true }
+      }
+    }
+  },
+  "$defs": {
+    "permission": {
+      "oneOf": [
+        { "type": "string", "enum": ["allow", "ask", "deny"] },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["allow", "ask", "deny"]
+          }
+        }
+      ]
+    }
+  }
+}

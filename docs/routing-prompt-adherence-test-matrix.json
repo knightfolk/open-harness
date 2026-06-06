@@ -1,0 +1,148 @@
+{
+  "schemaVersion": "0.1.0",
+  "suiteId": "routing-prompt-adherence",
+  "name": "Routing Prompt Adherence Baseline",
+  "createdAt": "2026-06-06",
+  "observedRouterState": {
+    "enabled": true,
+    "classifierModel": "minimax:MiniMax-M2.5-highspeed",
+    "threshold": 0.7,
+    "candidateCount": 14,
+    "routerHealthOk": true,
+    "routerHealthLatencyMs": 4481,
+    "note": "Captured from local server endpoints during research; candidate list may drift with user config."
+  },
+  "dimensions": [
+    "routeAccuracy",
+    "promptAdherence",
+    "robustness",
+    "grounding",
+    "latency",
+    "costAwareness",
+    "baselineDelta"
+  ],
+  "cases": [
+    {
+      "id": "one-word-review",
+      "prompt": "review",
+      "observedHeuristicRoute": {
+        "mode": "investigate",
+        "role": "reviewer",
+        "complexity": "medium",
+        "needsTools": true,
+        "needsValidation": false
+      },
+      "expectedBehavior": "Ask one concise scope question or run a small bounded review; do not launch a deep multi-agent review by default.",
+      "fridayBaseline": "Clarify whether the user wants a repo review, diff review, or current screen review before spending deep-review budget.",
+      "failureSignals": [
+        "full investigation without scope",
+        "timeout",
+        "claims about files without reading them",
+        "writes files"
+      ]
+    },
+    {
+      "id": "review-project",
+      "prompt": "Review this project. What is it? What does it do? What are its strengths and weaknesses?",
+      "observedHeuristicRoute": {
+        "mode": "investigate",
+        "role": "reviewer",
+        "complexity": "medium",
+        "needsTools": true,
+        "needsValidation": false
+      },
+      "expectedBehavior": "Read instructions and key files, then provide a grounded structured review with strengths, weaknesses, and next actions.",
+      "fridayBaseline": "Read AGENTS.md, handoff docs, package.json, router/prompt/eval files, and major UI entry points before summarizing.",
+      "failureSignals": [
+        "no file reads",
+        "hallucinated architecture",
+        "missing weaknesses",
+        "timeout without phase attribution"
+      ]
+    },
+    {
+      "id": "review-current-diff",
+      "prompt": "Please review the current diff for correctness and bugs.",
+      "observedHeuristicRoute": {
+        "mode": "investigate",
+        "role": "reviewer",
+        "complexity": "medium",
+        "needsTools": true,
+        "needsValidation": false
+      },
+      "expectedBehavior": "Inspect git status and git diff, then report findings first with file and line references.",
+      "fridayBaseline": "Run git status, inspect diff hunks, prioritize bugs/regressions/missing tests, and avoid summarizing before findings.",
+      "failureSignals": [
+        "does not inspect git diff",
+        "generic review advice",
+        "edits files",
+        "no severity ordering"
+      ]
+    },
+    {
+      "id": "deep-review-compare",
+      "prompt": "Do a deep review of this repo and compare model adherence.",
+      "observedHeuristicRoute": {
+        "mode": "compare",
+        "role": "reviewer",
+        "complexity": "deep",
+        "needsTools": true,
+        "needsValidation": false
+      },
+      "expectedBehavior": "Run a compare/eval-style flow across selected models and compare outputs against the same rubric and Friday baseline.",
+      "fridayBaseline": "Define rubric, run bounded equivalent prompts, inspect outputs for adherence/grounding/robustness, then synthesize differences.",
+      "failureSignals": [
+        "single model only",
+        "no shared rubric",
+        "no baseline comparison",
+        "no raw decision data"
+      ]
+    },
+    {
+      "id": "debug-empty-response",
+      "prompt": "When I send a message, sometimes I get an empty response. Help me debug this.",
+      "observedHeuristicRoute": {
+        "mode": "investigate",
+        "role": "reviewer",
+        "complexity": "medium",
+        "needsTools": true,
+        "needsValidation": false
+      },
+      "expectedBehavior": "Trace the chat streaming path, provider response parsing, tag stripping, monologue buffer, and SSE close handling.",
+      "fridayBaseline": "Inspect server/index.ts provider streaming, provider adapters, router path, logs, and persisted run traces before proposing fixes.",
+      "failureSignals": [
+        "generic provider advice",
+        "ignores SSE close handling",
+        "no reproduction path",
+        "no phase-specific hypothesis"
+      ]
+    },
+    {
+      "id": "prompt-plugin-implementation-request",
+      "prompt": "Wire in OpenCode skills and prompt plugins.",
+      "observedHeuristicRoute": {
+        "mode": "execute",
+        "role": "planner",
+        "complexity": "medium",
+        "needsTools": true,
+        "needsValidation": true
+      },
+      "expectedBehavior": "Produce a phased design first, because full implementation spans registry, schema validation, prompt builder, evals, UI, and importers.",
+      "fridayBaseline": "Research existing OpenHarness surfaces and OpenCode formats, create a schema and next-phase plan, then commit the docs.",
+      "failureSignals": [
+        "large speculative implementation",
+        "no schema",
+        "no eval plan",
+        "no safety/provenance model"
+      ]
+    }
+  ],
+  "recommendedScoring": {
+    "routeAccuracy": 2,
+    "promptAdherence": 2,
+    "robustness": 2,
+    "grounding": 2,
+    "latency": 1,
+    "baselineDelta": 1
+  }
+}
