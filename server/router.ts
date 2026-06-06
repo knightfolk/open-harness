@@ -155,12 +155,16 @@ export async function routeWithAutoRouter(
     );
     const routerStart = Date.now();
     try {
+      const roleThinking = config.roleThinking?.[route.role] || config.thinkingEffort || 'medium';
       const decision = await routeTask(signal, config, {
-        forceCostStrategy: route.complexity === 'simple'
-          ? 'cheapest'
-          : route.complexity === 'deep' && route.mode !== 'investigate'
-            ? 'strongest'
-            : undefined,
+        forceCostStrategy: roleThinking === 'medium'
+          ? route.complexity === 'simple'
+            ? 'cheapest'
+            : route.complexity === 'deep' && route.mode !== 'investigate'
+              ? 'strongest'
+              : undefined
+          : undefined,
+        thinkingEffort: roleThinking,
       });
     if (decision) {
       const isFallback = decision.fallback || decision.score === 0;

@@ -118,6 +118,8 @@ export interface CodingRoleAssignment {
   modelId: string;
 }
 
+export type ThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
 export interface SubAgent {
   id: string;
   name: string;

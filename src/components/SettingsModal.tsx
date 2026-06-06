@@ -7,10 +7,12 @@ import {
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
   Check, ChevronDown, ChevronRight, CheckCircle2, Bot, Container,
   ArrowRight, BookOpen, Search, Sparkles, Zap, FileText, Globe, Layout, Command,
-  Grid, Layers,
+  Grid, Layers, Eye, Wrench,
 } from 'lucide-react';
 import type { ProviderConfig, CodingRoleAssignment, MCPServerItem, Skill, Plugin, MemoryEntry } from '../types';
+import type { ThinkingEffort } from '../types';
 import * as api from '../utils/api';
+import { modelCapabilityFlags, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
 import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
 import {
   findModelCatalogCard,
@@ -112,8 +114,10 @@ interface Props {
   onClose: () => void;
   configPath?: string;
   activeModel: string;
+  thinkingEffort: ThinkingEffort;
   providers: ProviderConfig[];
   roleAssignments: CodingRoleAssignment[];
+  roleThinking: Record<string, ThinkingEffort>;
   activeTheme: string;
   personalityText: string;
   mcpServers: MCPServerItem[];
@@ -126,8 +130,10 @@ interface Props {
   onAddMCPServer: (server: { name: string; endpoint: string; authType: string; authToken: string }) => Promise<any>;
   onRemoveMCPServer: (serverId: string) => void;
   onSelectModel: (modelId: string) => void;
+  onThinkingEffortChange: (effort: ThinkingEffort) => void;
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
+  onAssignRoleThinking: (roleId: string, effort: ThinkingEffort) => void;
   onSelectTheme: (themeId: string) => void;
   onThemePluginManifestsChange: (themeManifests: string[]) => void;
   onRemoveTheme: (themeId: string) => void;
@@ -180,11 +186,11 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
 
 // ── Main component ─────────────────────────────────────
 export function SettingsModal({
-  isOpen, onClose, activeModel, providers, roleAssignments, activeTheme,
+  isOpen, onClose, activeModel, thinkingEffort, providers, roleAssignments, roleThinking, activeTheme,
   configPath, personalityText, mcpServers, mcpStatus, onAddProvider, onTestProvider,
   onUpdateProvider,
   onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer,
-  onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme,
+  onSelectModel, onThinkingEffortChange, onToggleProviderModel, onAssignRoleModel, onAssignRoleThinking, onSelectTheme,
   onThemePluginManifestsChange, onRemoveTheme,
   onPersonalityChange,
   onRestartOnboarding,
@@ -251,7 +257,7 @@ export function SettingsModal({
             })}
           </nav>
           <div className="settings-content">
-            {contentKey === 'model' && <ActiveModelPane activeModel={activeModel} enabledModels={enabledModels} onSelectModel={onSelectModel} />}
+            {contentKey === 'model' && <ActiveModelPane activeModel={activeModel} thinkingEffort={thinkingEffort} enabledModels={enabledModels} onSelectModel={onSelectModel} onThinkingEffortChange={onThinkingEffortChange} />}
             {contentKey === 'model-library' && <ModelLibraryPane providers={providers} />}
             {contentKey === 'providers/manage' && (
               <ProvidersPane
@@ -268,7 +274,7 @@ export function SettingsModal({
               <AddProviderPane onAdd={onAddProvider} existingIds={providers.map((p) => p.id)}
                 onDone={() => { setSelectedCat('providers'); setSelectedSub('manage'); }} />
             )}
-            {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} />}
+            {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} roleThinking={roleThinking} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} onAssignRoleThinking={onAssignRoleThinking} />}
             {contentKey === 'assistant/clicky' && <ClickySettingsPane enabled={clickyEnabled} onChange={onClickyEnabledChange} />}
             {contentKey === 'assistant/skills' && <AssistantSkillsPane skills={mockSkills} plugins={mockPlugins} />}
             {contentKey === 'assistant/memory' && <AssistantMemoryPane entries={mockMemoryEntries} />}
@@ -303,6 +309,40 @@ export function SettingsModal({
 
 function PaneTitle({ children }: { children: React.ReactNode }) { return <div className="settings-pane-title">{children}</div>; }
 function PaneDesc({ children }: { children: React.ReactNode }) { return <div className="settings-pane-desc">{children}</div>; }
+
+function ModelAbilityIcons({ modelId, providerId }: { modelId: string; providerId?: string }) {
+  const flags = modelCapabilityFlags(modelId, providerId);
+  const abilities = [
+    { id: 'thinking', label: 'Thinking', active: flags.thinking, icon: Brain },
+    { id: 'vision', label: 'Vision', active: flags.vision, icon: Eye },
+    { id: 'tools', label: 'Tools', active: flags.tools, icon: Wrench },
+    { id: 'context', label: 'Long context', active: flags.longContext, icon: Layers },
+  ];
+  return (
+    <div style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }} aria-label="Model abilities">
+      {abilities.map(({ id, label, active, icon: Icon }) => (
+        <span
+          key={id}
+          title={active ? label : `${label} not detected`}
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 4,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '1px solid var(--border-primary)',
+            color: active ? 'var(--accent-primary)' : 'var(--text-tertiary)',
+            background: active ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-secondary)',
+            opacity: active ? 1 : 0.45,
+          }}
+        >
+          <Icon size={13} />
+        </span>
+      ))}
+    </div>
+  );
+}
 
 /* ================================================================== */
 /*  ASSISTANT                                                          */
@@ -405,11 +445,12 @@ function AssistantMemoryPane({ entries }: { entries: MemoryEntry[] }) {
 /*  ACTIVE MODEL                                                       */
 /* ================================================================== */
 
-function ActiveModelPane({ activeModel, enabledModels, onSelectModel }: any) {
+function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, onSelectModel, onThinkingEffortChange }: any) {
   const current = enabledModels.find((m: any) => m.id === activeModel);
   const effectiveCurrent = current || (activeModel === 'Auto'
     ? { id: 'Auto', name: 'Auto', providerName: 'Router' }
     : null);
+  const supportsThinking = modelSupportsThinking(activeModel, current?.providerId);
   return (
     <>
       <PaneTitle>Active Chat Model</PaneTitle>
@@ -419,12 +460,22 @@ function ActiveModelPane({ activeModel, enabledModels, onSelectModel }: any) {
           <div className="settings-item-label">{effectiveCurrent?.name || activeModel}</div>
           <div className="settings-item-desc">{activeModel === 'Auto' ? 'Router mode • per-request auto-selection' : (current ? `${current.providerName} • enabled for chat` : 'No enabled model found')}</div>
         </div>
-        <select className="settings-select settings-select-wide" value={activeModel} onChange={(e) => onSelectModel(e.target.value)}>
-          <option value="Auto">Auto</option>
-          {enabledModels.map((model: any) => (
-            <option key={`${model.providerId}:${model.id}`} value={model.id} title={modelCatalogTooltip(model.id, model.providerId)}>{model.providerName} — {model.name}</option>
-          ))}
-        </select>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select className="settings-select settings-select-wide" value={activeModel} onChange={(e) => onSelectModel(e.target.value)}>
+            <option value="Auto">Auto</option>
+            {enabledModels.map((model: any) => (
+              <option key={`${model.providerId}:${model.id}`} value={model.id} title={modelCatalogTooltip(model.id, model.providerId)}>{model.providerName} — {model.name}</option>
+            ))}
+          </select>
+          {supportsThinking && (
+            <select className="settings-select" value={thinkingEffort} onChange={(e) => onThinkingEffortChange(e.target.value as ThinkingEffort)} title="Thinking effort">
+              {THINKING_EFFORTS.map((effort) => (
+                <option key={effort.id} value={effort.id}>{effort.label}</option>
+              ))}
+            </select>
+          )}
+          <ModelAbilityIcons modelId={activeModel} providerId={current?.providerId} />
+        </div>
       </div>
     </>
   );
@@ -1214,30 +1265,43 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
 }
 
 
-function AgentRolesPane({ roleAssignments, enabledModels, onAssignRoleModel }: any) {
+function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssignRoleModel, onAssignRoleThinking }: any) {
   return (
     <>
       <PaneTitle>Agent Roles</PaneTitle>
-      <PaneDesc>Assign models to specialized coding roles. Models marked ✓ are recommended based on capabilities.</PaneDesc>
+      <PaneDesc>Assign models and thinking effort to specialized coding roles. Models marked ✓ are recommended based on capabilities.</PaneDesc>
       <div className="role-bucket-list" style={{ marginTop: 16 }}>
         {roleAssignments.map((role: CodingRoleAssignment) => {
           const Icon = roleIconMap[role.id] || Bot;
+          const selectedModel = enabledModels.find((model: any) => model.id === role.modelId);
+          const supportsThinking = modelSupportsThinking(role.modelId, selectedModel?.providerId);
           return (
             <div key={role.id} className="role-bucket-card">
               <div className="role-bucket-icon"><Icon size={15} /></div>
               <div className="role-bucket-body">
                 <div className="role-bucket-name">{role.name}</div>
                 <div className="role-bucket-desc">{role.description}</div>
-                <select className="settings-select settings-select-wide" value={role.modelId} onChange={(e) => onAssignRoleModel(role.id, e.target.value)}>
-                  {enabledModels.map((model: any) => {
-                    const rec = isModelRecommended(role.id, model.id);
-                    return (
-                      <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>
-                        {rec ? '✓ ' : ''}{model.providerName} — {model.name}{rec ? ' (Recommended)' : ''}
-                      </option>
-                    );
-                  })}
-                </select>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select className="settings-select settings-select-wide" value={role.modelId} onChange={(e) => onAssignRoleModel(role.id, e.target.value)}>
+                    <option value="Auto">Auto</option>
+                    {enabledModels.map((model: any) => {
+                      const rec = isModelRecommended(role.id, model.id);
+                      return (
+                        <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>
+                          {rec ? '✓ ' : ''}{model.providerName} — {model.name}{rec ? ' (Recommended)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {supportsThinking && (
+                    <select className="settings-select" value={roleThinking?.[role.id] || 'medium'} onChange={(e) => onAssignRoleThinking(role.id, e.target.value as ThinkingEffort)} title={`${role.name} thinking effort`}>
+                      {THINKING_EFFORTS.map((effort) => (
+                        <option key={effort.id} value={effort.id}>{effort.label}</option>
+                      ))}
+                    </select>
+                  )}
+                  <ModelAbilityIcons modelId={role.modelId} providerId={selectedModel?.providerId} />
+                </div>
                 {findModelCatalogCard(role.modelId) && (
                   <div className="role-bucket-model-note" title={modelCatalogTooltip(role.modelId)}>
                     {findModelCatalogCard(role.modelId)?.compactDescription}

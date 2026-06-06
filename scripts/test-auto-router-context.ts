@@ -15,6 +15,7 @@ const config: StoredConfig = {
       models: [
         { id: 'phi-4', name: 'Phi 4', enabled: true },
         { id: 'MiniMax-M3', name: 'MiniMax M3', enabled: true },
+        { id: 'claude-opus-4.8', name: 'Claude Opus 4.8', enabled: true },
       ],
     },
   ],
@@ -42,6 +43,12 @@ const config: StoredConfig = {
         cost: 0.5,
         supportsImages: true,
         card: 'Large-context 1M-token model. Use when the task or conversation cannot fit smaller models.',
+      },
+      {
+        modelId: 'local:claude-opus-4.8',
+        cost: 1.2,
+        supportsImages: true,
+        card: 'Premium frontier-style model for hard reasoning, architecture, and code review.',
       },
     ],
   },
@@ -74,6 +81,18 @@ const largeDecision = await routeTask({
 assert.equal(largeDecision?.modelId, 'local:MiniMax-M3', 'large tasks should skip candidates whose context window cannot fit the input');
 assert.equal(largeDecision?.scores['local:phi-4'], 0, 'context-incompatible candidates should be scored as unusable');
 assert.match(largeDecision?.reason || '', /Skipped 1 candidate/i, 'router reason should explain context-limit filtering');
+
+const xHighDecision = await routeTask({
+  task: 'Carefully review a risky architecture change.',
+  surface: 'orchestrator',
+  hasImages: false,
+  turns: 3,
+  toolCount: 10,
+  estimatedInputTokens: 12_000,
+}, config, { thinkingEffort: 'xhigh' });
+
+assert.equal(xHighDecision?.modelId, 'local:claude-opus-4.8', 'xHigh thinking should prefer premium-weight candidates when available');
+assert.match(xHighDecision?.reason || '', /xHigh thinking/i, 'router reason should identify the xHigh strategy');
 
 assert.equal(getModelConfig('MiniMax-M2.7').contextWindowTokens, 204_800, 'MiniMax M2.7 should not inherit M3 1M context');
 assert.equal(getModelConfig('MiniMax-M3').contextWindowTokens, 1_000_000, 'MiniMax M3 should keep 1M context');

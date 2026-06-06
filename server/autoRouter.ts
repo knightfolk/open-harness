@@ -87,6 +87,8 @@ export interface AutoRouterDecision {
 export interface AutoRouterDecisionOptions {
   /** Force a deterministic cost-aware fallback mode, bypassing classification. */
   forceCostStrategy?: 'cheapest' | 'strongest';
+  /** User-visible thinking effort hint used to bias Auto routing. */
+  thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 // ── State ──────────────────────────────────────────────
@@ -235,8 +237,9 @@ export async function routeTask(
     };
   }
 
-  if (options.forceCostStrategy) {
-    return pickByCost(candidates, options.forceCostStrategy, signal.hasImages, signal.estimatedInputTokens, autoRouterConfig);
+  const tierStrategy = options.forceCostStrategy || costStrategyForThinkingEffort(options.thinkingEffort);
+  if (tierStrategy) {
+    return pickByCost(candidates, tierStrategy, signal.hasImages, signal.estimatedInputTokens, autoRouterConfig);
   }
 
   // Check cache
@@ -658,7 +661,7 @@ function pickCandidate(
 
 function pickByCost(
   candidates: AutoRouterCandidate[],
-  strategy: 'cheapest' | 'strongest',
+  strategy: 'cheapest' | 'strongest' | 'premium',
   hasImages: boolean,
   estimatedInputTokens: number,
   config: AutoRouterConfig,
@@ -673,20 +676,27 @@ function pickByCost(
     return fallbackDecision(candidates, config, `No viable candidates for image/context strategy ${strategy}`);
   }
 
-  const ordered = [...usableCandidates].sort((a, b) => {
-    return strategy === 'cheapest'
-      ? a.cost - b.cost
-      : b.cost - a.cost;
-  });
+  const preferredCandidates = strategy === 'premium'
+    ? usableCandidates.filter((candidate) => candidate.cost >= 0.8)
+    : usableCandidates;
+  const effectiveCandidates = preferredCandidates.length > 0 ? preferredCandidates : usableCandidates;
+  const ordered = [...effectiveCandidates].sort((a, b) => (
+    strategy === 'cheapest' ? a.cost - b.cost : b.cost - a.cost
+  ));
 
   const selected = ordered[0];
   const skippedForContext = imageSafeCandidates.length - contextSafeCandidates.length;
   const contextReason = skippedForContext > 0
     ? ` Skipped ${skippedForContext} candidate(s) that could not fit ~${estimatedInputTokens} input tokens.`
     : '';
+  const premiumFallback = strategy === 'premium' && preferredCandidates.length === 0
+    ? ' No premium-weight candidate was available; used strongest viable candidate.'
+    : '';
   const reason = (strategy === 'cheapest'
-    ? 'Simple task bypassed classifier; using cheapest viable candidate.'
-    : 'Complex task escalated; using strongest viable candidate.') + contextReason;
+    ? 'Low thinking selected; using cheapest viable candidate.'
+    : strategy === 'premium'
+      ? 'xHigh thinking selected; using premium-weight candidate when available.'
+      : 'High thinking selected; using strongest viable candidate.') + premiumFallback + contextReason;
   const scores = Object.fromEntries(candidates.map((c) => [c.modelId, c.modelId === selected.modelId ? 1.0 : 0]));
   return {
     modelId: selected.modelId,
@@ -697,6 +707,13 @@ function pickByCost(
     fallback: false,
     classifierModel: config.classifierModel,
   };
+}
+
+function costStrategyForThinkingEffort(effort?: 'low' | 'medium' | 'high' | 'xhigh'): 'cheapest' | 'strongest' | 'premium' | undefined {
+  if (effort === 'low') return 'cheapest';
+  if (effort === 'high') return 'strongest';
+  if (effort === 'xhigh') return 'premium';
+  return undefined;
 }
 
 function fallbackDecision(

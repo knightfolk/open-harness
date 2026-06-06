@@ -174,6 +174,8 @@ export interface AppConfig {
   installedThemePluginManifests?: string[];
   favoriteModels?: string[];
   roleAssignments: Record<string, string>;
+  thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  roleThinking?: Record<string, 'low' | 'medium' | 'high' | 'xhigh'>;
   trustMode: string;
   autoRouter?: AutoRouterConfig;
   contextConfig?: ContextConfig;
@@ -187,7 +189,7 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests'>>): Promise<void> {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests'>>): Promise<void> {
   await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

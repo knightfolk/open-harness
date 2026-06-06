@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRunStep, ProjectProfile, SidebarTab } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRunStep, ProjectProfile, SidebarTab, ThinkingEffort } from './types';
 import type { PanelId } from './types/layout';
 import { ALL_PANELS } from './types/layout';
 import { Sidebar } from './components/Sidebar';
@@ -8,6 +8,7 @@ import { LayoutEngine } from './components/layout/LayoutEngine';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
 import * as api from './utils/api';
+import { normalizeThinkingEffort } from './utils/modelCapabilities';
 import {
   applyTheme,
   getInstalledThemePluginManifests,
@@ -138,6 +139,10 @@ function roleMapToAssignments(assignments: Record<string, string>): CodingRoleAs
   }));
 }
 
+function defaultRoleThinking(): Record<string, ThinkingEffort> {
+  return Object.fromEntries(DEFAULT_ROLE_ASSIGNMENTS.map((role) => [role.id, 'medium' as ThinkingEffort]));
+}
+
 function App() {
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
@@ -154,6 +159,8 @@ function App() {
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeModel, setActiveModel] = useState('Auto');
+  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>('medium');
+  const [roleThinking, setRoleThinking] = useState<Record<string, ThinkingEffort>>(defaultRoleThinking);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [roleAssignments, setRoleAssignments] = useState<CodingRoleAssignment[]>(DEFAULT_ROLE_ASSIGNMENTS);
   const [activeTheme, setActiveTheme] = useState('midnight');
@@ -286,6 +293,8 @@ function App() {
         if (config) {
           setConfigPath(config.configPath || '');
           setActiveModel(config.activeModel || 'Auto');
+          setThinkingEffort(normalizeThinkingEffort(config.thinkingEffort));
+          setRoleThinking({ ...defaultRoleThinking(), ...(config.roleThinking || {}) });
           const hydrateResult = hydrateInstalledThemePluginManifests(Array.isArray(config.installedThemePluginManifests)
             ? config.installedThemePluginManifests
             : []);
@@ -403,6 +412,19 @@ function App() {
       const map: Record<string, string> = {};
       next.forEach((r) => { map[r.id] = r.modelId; });
       api.updateConfig({ roleAssignments: map }).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const handleThinkingEffortChange = useCallback((effort: ThinkingEffort) => {
+    setThinkingEffort(effort);
+    api.updateConfig({ thinkingEffort: effort }).catch(() => {});
+  }, []);
+
+  const handleAssignRoleThinking = useCallback((roleId: string, effort: ThinkingEffort) => {
+    setRoleThinking((prev) => {
+      const next = { ...prev, [roleId]: effort };
+      api.updateConfig({ roleThinking: next }).catch(() => {});
       return next;
     });
   }, []);
@@ -1207,6 +1229,7 @@ function App() {
           activeProviderId={providers.find(p => p.models?.some(m => m.id === activeModel))?.id}
           activeProviderAccessMode={providers.find(p => p.models?.some(m => m.id === activeModel))?.accessMode}
           activeProviderPlanId={providers.find(p => p.models?.some(m => m.id === activeModel))?.planId}
+          thinkingEffort={thinkingEffort}
           connected={providers.some(p => p.configured)}
           messageCount={msgCount}
           workingDir={workingDir}
@@ -1223,6 +1246,7 @@ function App() {
             };
           })}
           onModelChange={handleSelectModel}
+          onThinkingEffortChange={handleThinkingEffortChange}
           favoriteModelIds={favoriteModelIds}
           onToggleFavoriteModel={handleToggleFavoriteModel}
           enabledToolCount={enabledToolCount}
@@ -1317,8 +1341,10 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         configPath={configPath}
         activeModel={activeModel}
+        thinkingEffort={thinkingEffort}
         providers={providers}
         roleAssignments={roleAssignments}
+        roleThinking={roleThinking}
         activeTheme={activeTheme}
         personalityText={personalityText}
         mcpServers={mcpServers}
@@ -1331,8 +1357,10 @@ function App() {
         onAddMCPServer={handleAddMCPServer}
         onRemoveMCPServer={handleRemoveMCPServer}
         onSelectModel={handleSelectModel}
+        onThinkingEffortChange={handleThinkingEffortChange}
         onToggleProviderModel={handleToggleProviderModel}
         onAssignRoleModel={handleAssignRoleModel}
+        onAssignRoleThinking={handleAssignRoleThinking}
         onSelectTheme={handleSelectTheme}
         onThemePluginManifestsChange={handleThemePluginManifestsChange}
         onRemoveTheme={handleRemoveTheme}

@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Wifi, WifiOff, ChevronUp, Cpu, Zap, Brain, DollarSign,
-  Check, Search, Shield, Settings, Star,
+  Wifi, WifiOff, ChevronUp, Cpu, Brain, DollarSign,
+  Check, Search, Shield, Settings, Star, Eye, Wrench, Layers,
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 import { providerPlanLabel } from '../data/providerPlans';
+import { modelCapabilityFlags, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
+import type { ThinkingEffort } from '../types';
 
 interface ModelOption {
   id: string;
@@ -28,10 +30,12 @@ interface Props {
   activeProviderId?: string;
   activeProviderAccessMode?: 'api-key' | 'subscription';
   activeProviderPlanId?: string;
+  thinkingEffort: ThinkingEffort;
   trustMode: string;
   enabledToolCount?: number;
   configuredProviderCount?: number;
   onModelChange: (modelId: string) => void;
+  onThinkingEffortChange: (effort: ThinkingEffort) => void;
   favoriteModelIds?: string[];
   onToggleFavoriteModel?: (modelId: string) => void;
   onTrustModeChange?: (mode: string) => void;
@@ -75,10 +79,12 @@ export function StatusBar({
   activeProviderId,
   activeProviderAccessMode,
   activeProviderPlanId,
+  thinkingEffort,
   trustMode,
   enabledToolCount,
   configuredProviderCount,
   onModelChange,
+  onThinkingEffortChange,
   favoriteModelIds,
   onToggleFavoriteModel,
   onTrustModeChange,
@@ -154,6 +160,9 @@ export function StatusBar({
   const configuredProviderNames = Array.from(new Set(models.map((m) => m.providerName).filter((name) => name && name !== 'Unknown')));
   const providerCount = configuredProviderCount ?? configuredProviderNames.length;
   const servingProvider = currentModel?.providerName || providerName;
+  const currentProviderId = currentModel?.providerId || activeProviderId;
+  const supportsThinking = modelSupportsThinking(activeModel, currentProviderId);
+  const capabilityFlags = modelCapabilityFlags(activeModel, currentProviderId);
   const connectionLabel = connected
     ? isAuto
       ? `Router ready · ${providerCount || 0} provider${providerCount === 1 ? '' : 's'}`
@@ -379,10 +388,54 @@ export function StatusBar({
 
       <div className="status-bar-separator" />
 
-      {/* Router mode */}
-      <div className="status-bar-item" title={isAuto ? 'Auto-Router chooses the serving model per request.' : 'Router is bypassed for this fixed model selection.'}>
-        <Zap size={12} />
-        {isAuto ? 'Auto-Router' : 'Fixed model'}
+      {supportsThinking && (
+        <>
+          <div className="status-bar-item" title="Thinking effort">
+            <Brain size={12} />
+            <select
+              value={thinkingEffort}
+              onChange={(e) => onThinkingEffortChange(e.target.value as ThinkingEffort)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'inherit',
+                font: 'inherit',
+                padding: 0,
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+              aria-label="Thinking effort"
+            >
+              {THINKING_EFFORTS.map((effort) => (
+                <option key={effort.id} value={effort.id}>{effort.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="status-bar-separator" />
+        </>
+      )}
+
+      {/* Model abilities */}
+      <div className="status-bar-item" title="Model abilities" aria-label="Model abilities">
+        {[
+          { id: 'thinking', label: 'Thinking', active: capabilityFlags.thinking, icon: Brain },
+          { id: 'vision', label: 'Vision', active: capabilityFlags.vision, icon: Eye },
+          { id: 'tools', label: 'Tools', active: capabilityFlags.tools, icon: Wrench },
+          { id: 'context', label: 'Long context', active: capabilityFlags.longContext, icon: Layers },
+        ].map(({ id, label, active, icon: Icon }) => (
+          <span
+            key={id}
+            title={active ? label : `${label} not detected`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              color: active ? 'var(--accent-primary)' : 'var(--text-tertiary)',
+              opacity: active ? 1 : 0.45,
+            }}
+          >
+            <Icon size={12} />
+          </span>
+        ))}
       </div>
 
       {/* Working dir */}

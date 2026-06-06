@@ -769,6 +769,8 @@ app.put('/api/config', (req, res) => {
   if (updates.trustMode !== undefined) appConfig.trustMode = updates.trustMode;
   if (updates.activeTheme !== undefined) appConfig.activeTheme = updates.activeTheme;
   if (updates.roleAssignments !== undefined) appConfig.roleAssignments = updates.roleAssignments;
+  if (updates.thinkingEffort !== undefined) appConfig.thinkingEffort = updates.thinkingEffort;
+  if (updates.roleThinking !== undefined) appConfig.roleThinking = updates.roleThinking;
   if (updates.installedThemePluginManifests !== undefined) {
     appConfig.installedThemePluginManifests = Array.isArray(updates.installedThemePluginManifests)
       ? updates.installedThemePluginManifests

@@ -35,6 +35,8 @@ export interface StoredMCPServer {
   toolCount?: number;
 }
 
+export type ThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
 
 /**
  * Auto-router configuration for per-task model selection.
@@ -99,6 +101,8 @@ export interface StoredConfig {
   installedThemePluginManifests?: string[];
   favoriteModels?: string[];
   roleAssignments: Record<string, string>; // roleId -> modelId
+  thinkingEffort?: ThinkingEffort;
+  roleThinking?: Record<string, ThinkingEffort>;
   autoRouter?: AutoRouterConfig;
   contextConfig?: Partial<ContextConfig>;
   trustMode: string; // TrustMode
@@ -124,6 +128,16 @@ const DEFAULT_CONFIG: StoredConfig = {
   installedThemePluginManifests: [],
   favoriteModels: [],
   trustMode: 'workspace-write',
+  thinkingEffort: 'medium',
+  roleThinking: {
+    coder: 'medium',
+    reasoner: 'medium',
+    summarizer: 'medium',
+    title: 'medium',
+    planner: 'medium',
+    reviewer: 'medium',
+    worker: 'medium',
+  },
   roleAssignments: {
     coder: 'Auto',         // Primary coding agent
     reasoner: 'Auto',      // Complex reasoning / planning
@@ -189,6 +203,8 @@ export function loadConfig(): StoredConfig {
       favoriteModels: normalizedFavoriteModels,
       installedThemePluginManifests: normalizedThemeManifests,
       trustMode: parsed.trustMode || DEFAULT_CONFIG.trustMode,
+      thinkingEffort: normalizeThinkingEffort((parsed as any).thinkingEffort),
+      roleThinking: normalizeRoleThinking((parsed as any).roleThinking || {}),
       roleAssignments: {
         ...DEFAULT_CONFIG.roleAssignments,
         ...normalizeRoleAssignments(parsed.roleAssignments || {}),
@@ -326,6 +342,28 @@ function buildChatURL(provider: StoredProvider): string {
 
 function cloneDefaultConfig(): StoredConfig {
   return structuredClone(DEFAULT_CONFIG);
+}
+
+function normalizeThinkingEffort(value: unknown): ThinkingEffort {
+  return value === 'low' || value === 'high' || value === 'xhigh' ? value : 'medium';
+}
+
+function normalizeRoleThinking(assignments: Record<string, unknown>): Record<string, ThinkingEffort> {
+  const legacyToCurrent: Record<string, string> = {
+    planning: 'planner',
+    implementation: 'coder',
+    bugfix: 'coder',
+    design: 'coder',
+    image: 'worker',
+    toolrunning: 'worker',
+    review: 'reviewer',
+  };
+
+  const normalized: Record<string, ThinkingEffort> = { ...(DEFAULT_CONFIG.roleThinking || {}) };
+  for (const [role, effort] of Object.entries(assignments)) {
+    normalized[legacyToCurrent[role] || role] = normalizeThinkingEffort(effort);
+  }
+  return normalized;
 }
 
 function normalizeRoleAssignments(assignments: Record<string, string>): Record<string, string> {
