@@ -458,6 +458,7 @@ const ARG_ALIASES: Record<string, Record<string, string>> = {
   read_file: { file_path: 'path', filePath: 'path', filepath: 'path' },
   list_directory: { file_path: 'path', filePath: 'path', filepath: 'path', dir: 'path' },
   exec_command: { file_path: 'path', filePath: 'path', filepath: 'path' },
+  web_fetch: { uri: 'url', href: 'url', link: 'url' },
 };
 
 function aliasToolName(name: string, known: Set<string>): string | null {

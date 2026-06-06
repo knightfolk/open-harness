@@ -48,6 +48,7 @@ import { analyzeDomStructure, checkResourceHealth } from './browserCaptureEnhanc
 import { estimateSections, redactSecrets } from "./sectionRedaction";
 import { parseToolCallMarkup, MarkupScrubber, type MarkupParseResult } from './toolCallMarkup';
 import { wrapUntrustedBlock } from './untrustedContent';
+import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -2000,9 +2001,19 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
 
     try {
+      const { tools: orchestrationApiTools, toolServerMap: orchestrationToolServerMap } = gatherMCPToolsForAPI();
+      const orchestrationTrustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+      const orchestrationToolPolicy = filterToolsForTrustMode(orchestrationApiTools, orchestrationTrustMode);
+      const orchestrationTools = orchestrationApiTools.filter((t: any) =>
+        orchestrationToolPolicy.filteredTools?.includes(t.function?.name || t.name)
+      );
+      if (orchestrationToolPolicy.reason) console.log('[trust]' + orchestrationToolPolicy.reason);
+
       const orchResult = await runOrchestratorPipeline(route, content, appConfig, session.workingDir || undefined, {
         onStep: (step) => emitRunStep(res, run, step),
         signal: requestController.signal,
+        tools: orchestrationTools,
+        invokeTool: (toolName, args, workingDir) => invokeMCPTool(toolName, args as Record<string, any>, orchestrationToolServerMap, workingDir),
       });
 
       // Emit per-phase run steps
@@ -2099,6 +2110,9 @@ function gatherMCPToolsForAPI(): { tools: any[]; toolServerMap: Record<string, s
   });
   toolServerMap['exec_command'] = '__builtin__';
 
+  tools.push(webFetchToolDefinition);
+  toolServerMap['web_fetch'] = '__builtin__';
+
   // ── MCP tools from Docker/external servers ──────────
   for (const server of status) {
     if (!server.running) continue;
@@ -2176,6 +2190,8 @@ async function invokeMCPTool(
         const result = await runShellCommand(command, cwd);
         return { output: redactOutputText(result.output), exitCode: result.exitCode, cwd };
       }
+      case 'web_fetch':
+        return safeWebFetch(args);
       default:
         return { error: 'Unknown built-in tool: ' + toolName };
     }

@@ -25,6 +25,7 @@ export interface CommandRisk {
 const READ_TOOLS = [
   'list_directory', 'read_file', 'get_file_info',
   'search_files', 'grep', 'find',
+  'web_fetch',
 ];
 
 const WRITE_TOOLS = [
@@ -51,20 +52,25 @@ const HIGH_RISK_TOOLS = [
 // ── Tool filtering by trust mode ───────────────────────
 
 export function filterToolsForTrustMode(
-  tools: Array<{ name: string; description?: string; inputSchema?: any }>,
+  tools: Array<{ name?: string; description?: string; inputSchema?: any; function?: { name?: string } }>,
   trustMode: TrustMode,
 ): ToolPolicyResult {
-  const filtered = tools.filter(tool => isToolAllowed(tool.name, trustMode));
+  const filtered = tools.filter(tool => isToolAllowed(getToolName(tool), trustMode));
 
-  const blocked = tools.filter(t => !filtered.some(f => f.name === t.name));
+  const filteredNames = new Set(filtered.map(getToolName));
+  const blocked = tools.filter(t => !filteredNames.has(getToolName(t)));
 
   return {
     allowed: true,
-    filteredTools: filtered.map(t => t.name),
+    filteredTools: filtered.map(getToolName).filter(Boolean),
     reason: blocked.length > 0
-      ? `Blocked ${blocked.length} tool(s) by ${trustMode} trust mode: ${blocked.map(t => t.name).join(', ')}`
+      ? `Blocked ${blocked.length} tool(s) by ${trustMode} trust mode: ${blocked.map(getToolName).filter(Boolean).join(', ')}`
       : undefined,
   };
+}
+
+function getToolName(tool: { name?: string; function?: { name?: string } }): string {
+  return tool.name || tool.function?.name || '';
 }
 
 function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {

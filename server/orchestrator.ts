@@ -5,6 +5,7 @@
 // returns a merged result with trace steps.
 
 import { runAgentPhase, type BackgroundAgentArtifact } from './agentRuntime';
+import type { AgentToolDefinition } from './agentRuntime';
 import type { RouteDecision } from './router';
 import type { StoredConfig } from './config';
 import type { HarnessRunStep } from './runTrace';
@@ -32,6 +33,8 @@ export interface OrchestrationPhase {
 export interface OrchestrationCallbacks {
   onStep?: (step: HarnessRunStep) => void;
   signal?: AbortSignal;
+  tools?: AgentToolDefinition[];
+  invokeTool?: (toolName: string, args: Record<string, unknown>, workingDir?: string) => Promise<unknown>;
 }
 
 // ── Public API ─────────────────────────────────────────
@@ -125,6 +128,8 @@ async function runPlanningRoomPipeline(
         workingDir,
         signal: callbacks.signal,
         onStep: callbacks.onStep,
+        tools: callbacks.tools,
+        invokeTool: callbacks.invokeTool,
       });
       phases.push({
         label: `planning-room:plan:${modelId}`,
@@ -188,6 +193,8 @@ async function runPlanningRoomPipeline(
           workingDir,
           signal: callbacks.signal,
           onStep: callbacks.onStep,
+          tools: callbacks.tools,
+          invokeTool: callbacks.invokeTool,
         });
         phases.push({
           label: `planning-room:cross-check:${plan.modelId}`,
@@ -252,6 +259,8 @@ async function runPlanningRoomPipeline(
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
+      tools: callbacks.tools,
+      invokeTool: callbacks.invokeTool,
     });
     phases.push({
       label: 'planning-room:synthesis',
@@ -340,6 +349,8 @@ async function runExecutePipeline(
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
+      tools: callbacks.tools,
+      invokeTool: callbacks.invokeTool,
     });
     phases.push({
       label: 'planner',
@@ -389,6 +400,8 @@ async function runExecutePipeline(
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
+      tools: callbacks.tools,
+      invokeTool: callbacks.invokeTool,
     });
     phases.push({
       label: 'implementer',
@@ -438,6 +451,8 @@ async function runExecutePipeline(
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
+      tools: callbacks.tools,
+      invokeTool: callbacks.invokeTool,
     });
     phases.push({
       label: 'reviewer',
@@ -535,6 +550,8 @@ async function runInvestigatePipeline(
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
+      tools: callbacks.tools,
+      invokeTool: callbacks.invokeTool,
     });
     phases.push({
       label: 'explorer',
@@ -609,6 +626,8 @@ async function runComparePipeline(
         workingDir,
         signal: callbacks.signal,
         onStep: callbacks.onStep,
+        tools: callbacks.tools,
+        invokeTool: callbacks.invokeTool,
       });
       responses.push({ model: modelId, text: art.response || '(empty response)', ok: art.status === 'complete' });
       phases.push({
@@ -657,6 +676,8 @@ async function runComparePipeline(
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
+      tools: callbacks.tools,
+      invokeTool: callbacks.invokeTool,
     });
     phases.push({
       label: 'judge',
