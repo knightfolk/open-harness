@@ -67,6 +67,8 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   const asksCompare = /\b(compare|versus|vs\.?|which model|model a|model b|judge|evaluate outputs?)\b/.test(intentLower);
   const asksExecute = /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower);
   const asksPlan = /\b(plan|planning mode|roadmap|design|architect|architecture|strategy|proposal|approach)\b/.test(intentLower);
+  const asksTeamPlan = asksPlan
+    && /\b(spawn|team|agents?|participants?|planning room|compare notes?|consensus|single plan|guiding document)\b/.test(intentLower);
   const asksReview = /\b(review|audit|inspect|investigate|analy[sz]e|explain|summar|overview|find bugs|security|vuln|performance)\b/.test(intentLower);
   const asksProjectOverview = /\b(overview|summar|explain|describe)\b[\s\S]{0,80}\b(project|codebase|repo|repository|architecture|components)\b/.test(lower)
     || /\b(project|codebase|repo|repository)\b[\s\S]{0,80}\b(overview|summar|explain|describe|architecture|components)\b/.test(lower);
@@ -80,7 +82,8 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     && !asksValidation;
 
   let mode: OrchestrationMode = 'direct';
-  if (asksCompare) mode = 'compare';
+  if (asksTeamPlan) mode = 'plan';
+  else if (asksCompare) mode = 'compare';
   else if (asksExecute) mode = 'execute';
   else if (asksProjectOverview) mode = 'investigate';
   else if (asksPlan) mode = 'plan';
@@ -113,7 +116,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     roleAssignments[role],
     roleAssignments.reasoner,
     activeModel,
-  ].filter(Boolean))) as string[];
+  ].filter((modelId) => modelId && modelId.trim().toLowerCase() !== 'auto'))) as string[];
 
   const reason = mode === 'direct' ? 'Simple request can be answered by one role model.'
     : mode === 'plan' ? 'Request asks for planning, strategy, roadmap, or architecture and should use Planning Room.'

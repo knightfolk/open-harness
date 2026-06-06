@@ -598,12 +598,12 @@ async function runComparePipeline(
   // We use the first two non-duplicate suggestedModels, or fall back to
   // activeModel and a role assignment if only one is available.
   const targetModels = buildCompareModelSet(route, config);
-  if (targetModels.length === 0) {
+  if (targetModels.length < 2) {
     return {
-      finalText: 'No models available for comparison. Configure at least two models in Settings.',
+      finalText: 'Comparison needs at least two distinct configured models. Enable another provider model in Settings, then try again.',
       phases: [],
       ok: false,
-      error: 'Need at least 2 models for comparison',
+      error: 'Need at least 2 distinct models for comparison',
     };
   }
 
@@ -724,13 +724,14 @@ function resolveAgentModel(
   fallback: string,
 ): string {
   // Priority: auto-router suggested model > role assignment for the profile's role > active model
-  if (route.suggestedModels?.[0]) return route.suggestedModels[0];
+  if (isUsableModelId(route.suggestedModels?.[0]) && canResolveModel(config, route.suggestedModels[0])) return route.suggestedModels[0];
   const profile = getProfileFromId(profileId);
   if (profile) {
     const assignment = config.roleAssignments?.[profile.preferredRole];
-    if (assignment) return assignment;
+    if (isUsableModelId(assignment) && canResolveModel(config, assignment)) return assignment;
   }
-  return fallback;
+  if (isUsableModelId(fallback) && canResolveModel(config, fallback)) return fallback;
+  return configuredProviderModels(config).find((modelId) => canResolveModel(config, modelId)) || '';
 }
 
 function getProfileFromId(id: string) {
@@ -744,31 +745,46 @@ function getProfileFromId(id: string) {
   return profiles[id] || null;
 }
 
-function buildCompareModelSet(route: RouteDecision, config: StoredConfig): string[] {
+export function buildCompareModelSet(route: RouteDecision, config: StoredConfig): string[] {
   const seen = new Set<string>();
   const models: string[] = [];
+  const addModel = (modelId?: string) => {
+    if (!isUsableModelId(modelId) || !canResolveModel(config, modelId)) return;
+    const key = canonicalModelKey(config, modelId);
+    if (seen.has(key)) return;
+    seen.add(key);
+    models.push(modelId);
+  };
 
   // First from suggested models (auto-router picks)
   for (const m of route.suggestedModels || []) {
-    if (!seen.has(m)) { seen.add(m); models.push(m); }
+    addModel(m);
+    if (models.length >= 3) break;
   }
 
   // Then from role assignments (supplement with a second model)
   const roleModels = Object.values(config.roleAssignments || {});
   for (const m of roleModels) {
-    if (!seen.has(m) && m) { seen.add(m); models.push(m); }
-    if (models.length >= 2) break;
+    addModel(m);
+    if (models.length >= 3) break;
   }
 
-  // Fall back to active model variants
-  if (models.length < 2 && config.activeModel) {
-    models.push(config.activeModel);
+  addModel(config.activeModel);
+
+  for (const candidate of config.autoRouter?.candidates || []) {
+    addModel(candidate.modelId);
+    if (models.length >= 3) break;
+  }
+
+  for (const modelId of configuredProviderModels(config)) {
+    addModel(modelId);
+    if (models.length >= 3) break;
   }
 
   return models.slice(0, 3); // max 3 models for comparison
 }
 
-function buildPlanningRoomModelSet(route: RouteDecision, config: StoredConfig): string[] {
+export function buildPlanningRoomModelSet(route: RouteDecision, config: StoredConfig): string[] {
   const candidates = [
     ...(route.suggestedModels || []),
     config.roleAssignments?.planner,
@@ -782,8 +798,10 @@ function buildPlanningRoomModelSet(route: RouteDecision, config: StoredConfig): 
   const models: string[] = [];
   const seen = new Set<string>();
   for (const modelId of candidates) {
-    if (!modelId || seen.has(modelId) || !canResolveModel(config, modelId)) continue;
-    seen.add(modelId);
+    if (!isUsableModelId(modelId) || !canResolveModel(config, modelId)) continue;
+    const key = canonicalModelKey(config, modelId);
+    if (seen.has(key)) continue;
+    seen.add(key);
     models.push(modelId);
     if (models.length >= 3) break;
   }
@@ -816,6 +834,29 @@ function canResolveModel(config: StoredConfig, modelId: string): boolean {
   return providers.some((provider) =>
     (provider.models || []).some((model) => model.id === modelId || model.id === bareId)
   );
+}
+
+function isUsableModelId(modelId?: string): modelId is string {
+  return !!modelId && modelId.trim().length > 0 && modelId.trim().toLowerCase() !== 'auto';
+}
+
+function canonicalModelKey(config: StoredConfig, modelId: string): string {
+  const trimmed = modelId.trim();
+  let providerId: string | null = null;
+  let bareId = trimmed;
+  if (trimmed.includes(':')) {
+    const idx = trimmed.indexOf(':');
+    providerId = trimmed.slice(0, idx);
+    bareId = trimmed.slice(idx + 1);
+  }
+
+  const providers = providerId
+    ? (config.providers || []).filter((provider) => provider.id === providerId)
+    : (config.providers || []);
+  const match = providers.find((provider) =>
+    (provider.models || []).some((model) => model.id === trimmed || model.id === bareId)
+  );
+  return `${(match?.id || providerId || '').toLowerCase()}:${bareId.toLowerCase()}`;
 }
 
 function oneLine(text: string): string {
