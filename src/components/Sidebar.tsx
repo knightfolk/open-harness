@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -13,6 +13,8 @@ import {
   Plus,
   Settings,
   Sparkles,
+  SquareSplitHorizontal,
+  SquareSplitVertical,
   Trash2,
 } from 'lucide-react';
 import type { SidebarTab, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
@@ -55,6 +57,8 @@ interface Props {
   clickyEnabled: boolean;
 }
 
+type SidebarSplit = 'vertical' | 'horizontal';
+
 const tabConfig = [
   { key: 'chat' as SidebarTab, icon: MessageSquare, label: 'Chat' },
   { key: 'projects' as SidebarTab, icon: FolderOpen, label: 'Projects' },
@@ -80,11 +84,31 @@ export function Sidebar({
   clickyEnabled,
 }: Props) {
   const [clickyOpen, setClickyOpen] = useState(false);
+  const [visiblePanels, setVisiblePanels] = useState({ chat: false, projects: true });
+  const [split, setSplit] = useState<SidebarSplit>('vertical');
   const sideChatModels = providers.flatMap((provider) =>
     provider.models
       .filter((model) => model.enabled)
       .map((model) => ({ id: model.id, name: model.name || model.id }))
   );
+  const splitLabel = split === 'vertical' ? 'Stack panels vertically' : 'Split panels horizontally';
+  const SplitIcon = split === 'vertical' ? SquareSplitHorizontal : SquareSplitVertical;
+
+  useEffect(() => {
+    setVisiblePanels((prev) => ({ ...prev, [activeTab]: true }));
+  }, [activeTab]);
+
+  const togglePanel = (panel: SidebarTab) => {
+    setVisiblePanels((prev) => {
+      if (prev[panel] && Object.values(prev).filter(Boolean).length === 1) return prev;
+      if (prev[panel]) {
+        onActiveTabChange(panel === 'chat' ? 'projects' : 'chat');
+      } else {
+        onActiveTabChange(panel);
+      }
+      return { ...prev, [panel]: !prev[panel] };
+    });
+  };
 
   if (!isOpen) return null;
 
@@ -94,13 +118,22 @@ export function Sidebar({
         {tabConfig.map(({ key, icon: Icon, label }) => (
           <button
             key={key}
-            className={`sidebar-tab ${activeTab === key ? 'active' : ''}`}
-            onClick={() => onActiveTabChange(key)}
+            className={`sidebar-tab ${visiblePanels[key] ? 'active' : ''}`}
+            onClick={() => togglePanel(key)}
+            title={`${visiblePanels[key] ? 'Hide' : 'Show'} ${label}`}
           >
             <Icon size={13} />
             {label}
           </button>
         ))}
+        <button
+          className="sidebar-tab sidebar-split-tab"
+          onClick={() => setSplit((current) => current === 'vertical' ? 'horizontal' : 'vertical')}
+          title={splitLabel}
+          aria-label={splitLabel}
+        >
+          <SplitIcon size={14} />
+        </button>
         <button
           className="sidebar-tab sidebar-gear-tab"
           onClick={onOpenSettings}
@@ -111,24 +144,26 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className={`sidebar-content sidebar-content--${activeTab}`}>
-        {activeTab === 'chat' && (
-          <div className="sidebar-side-chat-shell">
+      <div className={`sidebar-content sidebar-content--split-${split}`}>
+        {visiblePanels.chat && (
+          <div className="sidebar-panel sidebar-panel--chat">
             <SideChatPanel activeModel={activeModel} models={sideChatModels} />
           </div>
         )}
-        {activeTab === 'projects' && (
-          <ProjectsTab
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            activeSubAgents={activeSubAgents}
-            onSelectSession={onSelectSession}
-            onNewSession={onNewSession}
-            onOpenFolder={onOpenFolder}
-            onFocusAgent={onFocusAgent}
-            onDeleteSession={onDeleteSession}
-            onDeleteProject={onDeleteProject}
-          />
+        {visiblePanels.projects && (
+          <div className="sidebar-panel sidebar-panel--projects">
+            <ProjectsTab
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              activeSubAgents={activeSubAgents}
+              onSelectSession={onSelectSession}
+              onNewSession={onNewSession}
+              onOpenFolder={onOpenFolder}
+              onFocusAgent={onFocusAgent}
+              onDeleteSession={onDeleteSession}
+              onDeleteProject={onDeleteProject}
+            />
+          </div>
         )}
       </div>
 
