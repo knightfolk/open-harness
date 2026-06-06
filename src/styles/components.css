@@ -280,6 +280,22 @@
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-sm);
   margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.project-group-header:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--accent-primary) 18%);
+}
+
+.project-group.collapsed {
+  margin-bottom: 8px;
+}
+
+.project-group.collapsed .project-group-header {
+  margin-bottom: 0;
 }
 
 .project-group-title {

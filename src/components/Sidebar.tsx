@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -201,7 +201,30 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
   onDeleteSession?: (id: string) => void;
   onDeleteProject?: (workingDir: string | null) => void;
 }) {
-  const projectGroups = groupSessionsByProject(sessions);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const projectGroups = useMemo(() => groupSessionsByProject(sessions), [sessions]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const activeGroup = projectGroups.find((group) => group.sessions.some((session) => session.id === activeSessionId));
+    if (!activeGroup) return;
+    setCollapsedGroups((prev) => {
+      if (!prev.has(activeGroup.key)) return prev;
+      const next = new Set(prev);
+      next.delete(activeGroup.key);
+      return next;
+    });
+  }, [activeSessionId, projectGroups]);
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   return (
     <>
       <button className="new-session-btn" onClick={() => onNewSession()}>
@@ -214,10 +237,24 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
           Open Folder
         </button>
       )}
-      {projectGroups.map((group) => (
-        <div className="project-group" key={group.key}>
-          <div className="project-group-header">
+      {projectGroups.map((group) => {
+        const collapsed = collapsedGroups.has(group.key);
+        return (
+        <div className={`project-group ${collapsed ? 'collapsed' : ''}`} key={group.key}>
+          <div
+            className="project-group-header"
+            onClick={() => toggleGroup(group.key)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              toggleGroup(group.key);
+            }}
+            title={`${collapsed ? 'Expand' : 'Collapse'} ${group.name}`}
+          >
             <div className="project-group-title">
+              {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
               <FolderOpen size={13} />
               <span>{group.name}</span>
             </div>
@@ -249,7 +286,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
               )}
             </div>
           </div>
-          {group.sessions.map((session) => {
+          {!collapsed && group.sessions.map((session) => {
             const isActive = session.id === activeSessionId;
             const isRunning = isActive && activeSubAgents.length > 0;
             return (
@@ -299,7 +336,8 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
             );
           })}
         </div>
-      ))}
+        );
+      })}
     </>
   );
 }
