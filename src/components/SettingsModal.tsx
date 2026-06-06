@@ -1867,6 +1867,7 @@ type RouterModelCard = {
   providerHints: string[];
   cost: number;
   supportsImages: boolean;
+  supportsThinking: boolean;
   card: string;
 };
 
@@ -1876,6 +1877,7 @@ const TOP_ROUTER_MODEL_CARDS: RouterModelCard[] = TOP_MODEL_CATALOG.map((card) =
   providerHints: card.providerHints,
   cost: card.routerCost,
   supportsImages: card.supportsImages,
+  supportsThinking: card.supportsThinking,
   card: card.compactDescription,
 }));
 
@@ -1942,15 +1944,21 @@ function findRouterModelCard(modelId: string, providerId = '') {
 
 function fallbackRouterCard(modelId: string) {
   const lower = modelId.toLowerCase();
-  if (lower.includes('claude')) return { cost: 1.0, supportsImages: true, card: 'Claude-family model. Usually strong at code quality and tool use; cost and exact strengths depend on variant.' };
-  if (lower.includes('gemini')) return { cost: 0.6, supportsImages: true, card: 'Gemini-family model. Good for large-context and multimodal tasks; use Pro for harder reasoning.' };
-  if (lower.includes('deepseek')) return { cost: 0.25, supportsImages: false, card: 'DeepSeek-family model. Strong low-cost text coding; image support depends on provider variant.' };
-  if (lower.includes('qwen')) return { cost: 0.25, supportsImages: false, card: 'Qwen-family model. Strong open coding and reasoning; hosting quality and variant matter.' };
-  if (lower.includes('mistral') || lower.includes('codestral') || lower.includes('devstral')) return { cost: 0.45, supportsImages: false, card: 'Mistral-family model. Good structured coding and review; reserve small models for routine tasks.' };
-  if (lower.includes('grok')) return { cost: 0.8, supportsImages: true, card: 'Grok-family model. Good creative coding and UI tasks; can be opinionated.' };
-  if (lower.includes('minimax')) return { cost: 0.3, supportsImages: true, card: 'MiniMax-family model. Good low-cost long-context coding; validate hard reviews with stronger specialists.' };
-  if (lower.includes('llama')) return { cost: 0.2, supportsImages: false, card: 'Llama-family model. Useful local/proxy coding option; exact reliability depends on host and size.' };
-  return { cost: 0.5, supportsImages: false, card: 'Configured model. No detailed catalog card matched, so use this for general text tasks and validate routing quality.' };
+  if (lower.includes('claude')) return { cost: 1.0, supportsImages: true, supportsThinking: false, card: 'Claude-family model. Usually strong at code quality and tool use; cost and exact strengths depend on variant.' };
+  if (lower.includes('gemini')) return { cost: 0.6, supportsImages: true, supportsThinking: false, card: 'Gemini-family model. Good for large-context and multimodal tasks; use Pro for harder reasoning.' };
+  if (lower.includes('deepseek')) return { cost: 0.25, supportsImages: false, supportsThinking: /\b(r1|r2|reasoner)\b/.test(lower), card: 'DeepSeek-family model. Strong low-cost text coding; image support depends on provider variant.' };
+  if (lower.includes('qwen')) return { cost: 0.25, supportsImages: false, supportsThinking: /thinking|think|qwen3.*max/.test(lower), card: 'Qwen-family model. Strong open coding and reasoning; hosting quality and variant matter.' };
+  if (lower.includes('mistral') || lower.includes('codestral') || lower.includes('devstral')) return { cost: 0.45, supportsImages: false, supportsThinking: false, card: 'Mistral-family model. Good structured coding and review; reserve small models for routine tasks.' };
+  if (lower.includes('grok')) return { cost: 0.8, supportsImages: true, supportsThinking: lower.includes('grok-4'), card: 'Grok-family model. Good creative coding and UI tasks; can be opinionated.' };
+  if (lower.includes('minimax')) return { cost: 0.3, supportsImages: true, supportsThinking: lower.includes('m3'), card: 'MiniMax-family model. Good low-cost long-context coding; validate hard reviews with stronger specialists.' };
+  if (lower.includes('llama')) return { cost: 0.2, supportsImages: false, supportsThinking: false, card: 'Llama-family model. Useful local/proxy coding option; exact reliability depends on host and size.' };
+  return { cost: 0.5, supportsImages: false, supportsThinking: false, card: 'Configured model. No detailed catalog card matched, so use this for general text tasks and validate routing quality.' };
+}
+
+function routerCapabilityCard(baseCard: string, supportsThinking: boolean) {
+  const trimmed = baseCard.trim();
+  const thinkingLine = `Native thinking: ${supportsThinking ? 'yes' : 'no'}.`;
+  return /native thinking:/i.test(trimmed) ? trimmed : `${trimmed} ${thinkingLine}`;
 }
 
 function enrichRouterCandidate(candidate: api.AutoRouterCandidateConfig, providerId = ''): api.AutoRouterCandidateConfig {
@@ -1962,7 +1970,8 @@ function enrichRouterCandidate(candidate: api.AutoRouterCandidateConfig, provide
     modelId: candidate.modelId,
     cost: getEffectiveRouterCost(candidate.modelId, resolvedProviderId, baseCost),
     supportsImages: candidate.supportsImages || card?.supportsImages || fallback.supportsImages,
-    card: candidate.card?.trim() || card?.card || fallback.card,
+    supportsThinking: candidate.supportsThinking ?? card?.supportsThinking ?? fallback.supportsThinking,
+    card: routerCapabilityCard(candidate.card?.trim() || card?.card || fallback.card, candidate.supportsThinking ?? card?.supportsThinking ?? fallback.supportsThinking),
   };
 }
 
@@ -1978,7 +1987,8 @@ function refreshConfiguredRouterCosts(
       ...candidate,
       cost: configuredCandidate.cost,
       supportsImages: candidate.supportsImages || configuredCandidate.supportsImages,
-      card: candidate.card?.trim() || configuredCandidate.card,
+      supportsThinking: configuredCandidate.supportsThinking ?? candidate.supportsThinking,
+      card: configuredCandidate.card,
     };
   });
 }
@@ -1998,7 +2008,8 @@ function buildConfiguredRouterCandidates(cfg: api.AppConfig | null): api.AutoRou
         modelId,
         cost: Math.max(0.02, Number(baseCost.toFixed(2))),
         supportsImages: known?.supportsImages ?? fallback.supportsImages,
-        card: known?.card || fallback.card,
+        supportsThinking: known?.supportsThinking ?? fallback.supportsThinking,
+        card: routerCapabilityCard(known?.card || fallback.card, known?.supportsThinking ?? fallback.supportsThinking),
       });
     }
   }
@@ -2122,7 +2133,7 @@ function AutoRouterPane() {
           candidates,
         });
         setConfiguredCandidates(scannedCandidates);
-        setArCandidates(mergeRouterCandidates(candidates, merged.state.candidates.map((c) => ({ ...c, card: '' }))));
+        setArCandidates(mergeRouterCandidates(candidates, merged.state.candidates.map((c) => ({ ...c, card: '', supportsThinking: c.supportsThinking }))));
       }
       setArEnabled(!arEnabled);
     } catch (err) {
@@ -2304,6 +2315,7 @@ function AutoRouterPane() {
                         {c.modelId}
                       </span>
                       {c.supportsImages && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Images</span>}
+                      {c.supportsThinking && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Thinking</span>}
                     </div>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: 10, lineHeight: 1.35, marginTop: 2 }}>
                       {c.card}

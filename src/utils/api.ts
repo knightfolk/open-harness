@@ -133,7 +133,7 @@ export interface AutoRouterState {
   classifierModel: string | null;
   threshold: number;
   candidateCount: number;
-  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; contextWindowTokens: number }>;
+  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking?: boolean; contextWindowTokens: number }>;
   cacheSize: number;
 }
 
@@ -141,6 +141,7 @@ export interface AutoRouterCandidateConfig {
   modelId: string;
   cost: number;
   supportsImages: boolean;
+  supportsThinking?: boolean;
   card: string;
 }
 

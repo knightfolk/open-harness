@@ -66,6 +66,8 @@ export interface AutoRouterCandidateConfig {
   cost: number;
   /** Whether this model can accept image attachments */
   supportsImages: boolean;
+  /** Whether this model exposes native thinking/reasoning output */
+  supportsThinking?: boolean;
   /** Short capability description for the classifier */
   card: string;
 }

@@ -19,7 +19,7 @@ import { getProviderForModel, splitModelRef } from './config';
 import { suggestThresholdAdjustment } from './routerLearning';
 import { getLatestEvalRecommendations } from './evals';
 import { estimateTokens } from './contextManager';
-import { getModelConfig } from './modelProfiles';
+import { getModelConfig, isReasoningModel } from './modelProfiles';
 import type { StoredConfig, StoredProvider } from './config';
 
 // ── Types ──────────────────────────────────────────────
@@ -31,6 +31,8 @@ export interface AutoRouterCandidate {
   cost: number;
   /** Whether this model can accept image attachments */
   supportsImages: boolean;
+  /** Whether this model exposes native thinking/reasoning output */
+  supportsThinking?: boolean;
   /** Short capability description the classifier reads to score this model */
   card: string;
 }
@@ -126,6 +128,16 @@ function annotateCandidatesWithEvalRecommendations(
   });
 }
 
+function normalizeCandidate(candidate: AutoRouterCandidate): AutoRouterCandidate {
+  const supportsThinking = typeof candidate.supportsThinking === 'boolean'
+    ? candidate.supportsThinking
+    : isReasoningModel(candidate.modelId);
+  const baseCard = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
+  const thinkingLine = `Native thinking: ${supportsThinking ? 'yes' : 'no'}.`;
+  const card = /native thinking:/i.test(baseCard) ? baseCard : `${baseCard} ${thinkingLine}`;
+  return { ...candidate, supportsThinking, card };
+}
+
 // ── Public API ─────────────────────────────────────────
 
 /** Configure the auto-router from StoredConfig. Call on startup and config change. */
@@ -141,7 +153,7 @@ export function configureAutoRouter(config: StoredConfig): void {
     if (!c.modelId || !c.card) return false;
     const resolved = getProviderForModel(config, c.modelId);
     return resolved !== null;
-  });
+  }).map(normalizeCandidate);
 
   if (validCandidates.length === 0) {
     autoRouterConfig = null;
@@ -195,6 +207,7 @@ export function getAutoRouterState(): {
       modelId: c.modelId,
       cost: c.cost,
       supportsImages: c.supportsImages,
+      supportsThinking: c.supportsThinking === true,
       contextWindowTokens: candidateContextWindow(c),
     })),
     cacheSize: decisionCache.size,
@@ -677,7 +690,9 @@ function pickByCost(
   }
 
   const preferredCandidates = strategy === 'premium'
-    ? usableCandidates.filter((candidate) => candidate.cost >= 0.8)
+    ? usableCandidates.filter((candidate) => candidate.supportsThinking)
+    : strategy === 'strongest'
+      ? usableCandidates.filter((candidate) => candidate.supportsThinking)
     : usableCandidates;
   const effectiveCandidates = preferredCandidates.length > 0 ? preferredCandidates : usableCandidates;
   const ordered = [...effectiveCandidates].sort((a, b) => (
@@ -690,13 +705,16 @@ function pickByCost(
     ? ` Skipped ${skippedForContext} candidate(s) that could not fit ~${estimatedInputTokens} input tokens.`
     : '';
   const premiumFallback = strategy === 'premium' && preferredCandidates.length === 0
-    ? ' No premium-weight candidate was available; used strongest viable candidate.'
+    ? ' No native-thinking candidate was available; used strongest viable candidate.'
+    : '';
+  const thinkingFallback = strategy === 'strongest' && preferredCandidates.length === 0
+    ? ' No native-thinking candidate was available; used strongest viable candidate.'
     : '';
   const reason = (strategy === 'cheapest'
     ? 'Low thinking selected; using cheapest viable candidate.'
     : strategy === 'premium'
-      ? 'xHigh thinking selected; using premium-weight candidate when available.'
-      : 'High thinking selected; using strongest viable candidate.') + premiumFallback + contextReason;
+      ? 'xHigh thinking selected; using strongest native-thinking candidate when available.'
+      : 'High thinking selected; using strongest native-thinking candidate when available.') + premiumFallback + thinkingFallback + contextReason;
   const scores = Object.fromEntries(candidates.map((c) => [c.modelId, c.modelId === selected.modelId ? 1.0 : 0]));
   return {
     modelId: selected.modelId,
