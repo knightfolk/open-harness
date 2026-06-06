@@ -111,7 +111,7 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar-content">
+      <div className={`sidebar-content sidebar-content--${activeTab}`}>
         {activeTab === 'chat' && (
           <div className="sidebar-side-chat-shell">
             <SideChatPanel activeModel={activeModel} models={sideChatModels} />
