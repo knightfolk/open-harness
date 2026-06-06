@@ -18,6 +18,8 @@ import { parseToolCallMarkup } from './toolCallMarkup';
 import type { HarnessRunStep } from './runTrace';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
+import { getAdapter } from './providers/registry';
+import type { ProviderMessage } from './providers/types';
 
 export interface BackgroundAgentRequest {
   profileId: AgentProfileId;
@@ -506,6 +508,10 @@ async function callAgentModel(
   temperature: number,
   signal: AbortSignal,
 ): Promise<string> {
+  if (provider.providerType === 'anthropic' || provider.providerType === 'google') {
+    return callNativeAgentModel(provider, modelId, messages, temperature, signal);
+  }
+
   const url = buildChatURL(provider);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (provider.apiKey) {
@@ -534,6 +540,61 @@ async function callAgentModel(
   const choice = data.choices?.[0];
   const text = choice?.message?.content || data.content?.[0]?.text || '';
   return typeof text === 'string' ? text : JSON.stringify(text);
+}
+
+async function callNativeAgentModel(
+  provider: { baseURL: string; apiKey: string; providerType: string },
+  modelId: string,
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  temperature: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const adapter = getAdapter({
+    id: 'agent-runtime',
+    name: 'Agent Runtime Provider',
+    type: provider.providerType as any,
+    apiKey: provider.apiKey,
+    baseURL: provider.baseURL,
+    models: [],
+  });
+  if (!adapter) throw new Error(`No adapter found for provider type: ${provider.providerType}`);
+
+  const timeoutSignal = AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS);
+  const combinedSignal = signal.aborted ? signal : AbortSignal.any([signal, timeoutSignal]);
+  const bareModelId = modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId;
+  let text = '';
+
+  for await (const event of adapter.streamChat({
+    model: bareModelId,
+    messages: messages as ProviderMessage[],
+    stream: provider.providerType !== 'google',
+    temperature,
+    max_tokens: 8192,
+  }, {
+    baseURL: provider.baseURL,
+    apiKey: provider.apiKey,
+    signal: combinedSignal,
+  })) {
+    if (event.type === 'text_delta') text += event.text;
+    if (event.type === 'tool_call_done' && event.name) {
+      text += `<tool_call>${JSON.stringify({
+        name: event.name,
+        arguments: safeParseToolArguments(event.arguments),
+      })}</tool_call>`;
+    }
+    if (event.type === 'error') throw new Error(event.error);
+  }
+
+  return text;
+}
+
+function safeParseToolArguments(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function stripAgentToolMarkup(text: string, knownToolNames: string[] = DEFAULT_AGENT_TOOLS.map(getToolName).filter(Boolean)): string {
