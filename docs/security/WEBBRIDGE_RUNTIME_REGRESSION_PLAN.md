@@ -25,7 +25,7 @@ This script validates the local WebBridge contract by checking the Swift source 
 
 - origin gate behavior in `WebBridge.isTrustedBridgeOrigin`
 - main-frame bridge gate in `userContentController(_:didReceive:)`
-- runtime probe opt-in gating via `OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE=1` or `--webbridge-runtime-probe`
+- runtime probe debug-only opt-in gating via `OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE=1` or `--webbridge-runtime-probe`
 - trusted action registration/dispatch for `createSession`, `listDirectory`, `readFile`
 - path allowlist checks for `createSession` (`workingDir` normalization + workspace registration)
 - path allowlist checks for `listDirectory`/`readFile`
@@ -37,12 +37,13 @@ The script exits non-zero if any of these invariants drift, so it can be used as
 
 For normal development passes, do not launch, rebuild, re-sign, or replace `/Applications/OpenHarness.app`.
 Use the automated source check above, plus optional source inspection, to confirm the bridge contract without touching the installed app identity.
+The embedded runtime probe is debug-only; release builds ignore its environment variable and launch argument.
 
 ## Manual runtime confirmation (one operator-in-the-loop pass)
 
-After running the script above, perform one manual OpenHarness.app pass on the release artifact only when runtime proof is explicitly approved:
+After running the script above, perform one manual app pass only when runtime proof is explicitly approved:
 
-1. Use the stable installed app artifact. Do not rebuild, re-sign, replace, or regenerate temporary `/tmp/*.app` bundles for this check.
+1. Use a stable installed debug app artifact if the embedded runtime probe is needed. Do not rebuild, re-sign, replace, or regenerate temporary `/tmp/*.app` bundles for this check.
 2. Launch once with either `OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE=1` or `--webbridge-runtime-probe`.
 3. Tail `/tmp/webbridge-runtime-probe-trace.log` or `~/Library/Logs/OpenHarness/webbridge-runtime-probe-trace.log`.
 4. Stop after the first complete probe result set. Do not relaunch repeatedly if macOS requests authorization.

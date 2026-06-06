@@ -44,8 +44,10 @@ function runChecks(): CheckResult[] {
   );
 
   add(
-    'runtime probe is opt-in by environment variable or launch argument',
-    /enum WebBridgeRuntimeProbe[\s\S]*OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE[\s\S]*--webbridge-runtime-probe/.test(bridgeSource) &&
+    'runtime probe is debug-only and opt-in by environment variable or launch argument',
+    /enum WebBridgeRuntimeProbe[\s\S]*#if DEBUG[\s\S]*OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE[\s\S]*--webbridge-runtime-probe[\s\S]*#else[\s\S]*return false[\s\S]*#endif/.test(
+      bridgeSource,
+    ) &&
       /guard WebBridgeRuntimeProbe\.isEnabled else \{ return \}/.test(bridgeSource) &&
       /guard WebBridgeRuntimeProbe\.isEnabled else \{ return \}/.test(contentSource),
   );

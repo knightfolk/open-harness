@@ -3,10 +3,14 @@ import WebKit
 
 enum WebBridgeRuntimeProbe {
     static var isEnabled: Bool {
+#if DEBUG
         let environment = ProcessInfo.processInfo.environment
         let arguments = ProcessInfo.processInfo.arguments
         return environment["OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE"] == "1"
             || arguments.contains("--webbridge-runtime-probe")
+#else
+        return false
+#endif
     }
 }
 
