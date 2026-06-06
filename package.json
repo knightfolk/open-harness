@@ -15,6 +15,7 @@
     "smoke:ui-clicks": "node scripts/smoke-ui-clicks.mjs",
     "preview": "vite preview",
     "smoke:minimax": "node scripts/smoke-minimax.mjs",
+    "test:webbridge-runtime-regression": "tsx scripts/test-webbridge-runtime-regression.ts",
     "server": "dotenv -- tsx server/index.ts",
     "dev:all": "dotenv -- tsx server/index.ts & vite --port 5173",
     "electron": "electron .",
