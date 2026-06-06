@@ -87,6 +87,24 @@ function providerIsConfigured(provider: any): boolean {
   return !!provider.hasKey || provider.type === 'local' || provider.accessMode === 'subscription';
 }
 
+function formatStreamError(error: string): string {
+  const raw = error || 'Unknown stream error';
+  const jsonStart = raw.indexOf('{');
+  if (jsonStart !== -1) {
+    try {
+      const parsed = JSON.parse(raw.slice(jsonStart));
+      const message = parsed?.error?.message || parsed?.message;
+      if (message) {
+        const prefix = raw.slice(0, jsonStart).trim().replace(/\s+$/, '');
+        return prefix ? `${prefix}: ${message}` : message;
+      }
+    } catch {
+      // Fall back to the raw error string below.
+    }
+  }
+  return raw;
+}
+
 const DEFAULT_ROLE_ASSIGNMENTS: CodingRoleAssignment[] = [
   { id: 'planner', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'Auto' },
   { id: 'coder', name: 'Code Implementer', description: 'Writing code, fixes, debugging, and refactoring', modelId: 'Auto' },
@@ -666,6 +684,7 @@ function App() {
 
     const assistantId = uid();
     streamingTextRef.current.set(assistantId, '');
+    let streamFailed = false;
 
     try {
       await api.sendMessage(sessionId, content, {
@@ -797,11 +816,38 @@ function App() {
         },
         onError: (error) => {
           console.error('Stream error:', error);
+          streamFailed = true;
+          const errorText = `I couldn't get a response from ${activeModel}.\n\n${formatStreamError(error)}\n\nCheck the provider API key or switch to another configured model, then try again.`;
+          streamingTextRef.current.set(assistantId, errorText);
+          setMessages((prev) => {
+            const existing = prev.some((m) => m.id === assistantId);
+            if (!existing) {
+              return [...prev, {
+                id: assistantId,
+                role: 'assistant',
+                content: errorText,
+                timestamp: new Date(),
+                status: 'error' as const,
+              }];
+            }
+            return prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: errorText, status: 'error' as const }
+                : m
+            );
+          });
+          setSubAgents((prev) =>
+            prev.map((a) =>
+              a.status === 'running'
+                ? { ...a, status: 'error', progress: 100, endTime: new Date(), task: 'Provider request failed' }
+                : a
+            )
+          );
         },
         onDone: () => {
           setSubAgents((prev) =>
             prev.map((a) =>
-              a.status === 'running'
+              a.status === 'running' && !streamFailed
                 ? { ...a, status: 'complete', progress: 100, endTime: new Date(), task: 'Response complete' }
                 : a
             )
@@ -809,7 +855,7 @@ function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, status: 'complete' as const }
+                ? { ...m, status: streamFailed ? 'error' as const : 'complete' as const }
                 : m
             )
           );

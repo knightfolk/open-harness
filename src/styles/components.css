@@ -813,6 +813,11 @@
   background: color-mix(in srgb, var(--bg-tertiary) 88%, var(--text-tertiary));
 }
 
+.message-wrapper.error .message-content {
+  border-color: color-mix(in srgb, var(--accent-error) 36%, var(--border-primary));
+  background: color-mix(in srgb, var(--accent-error) 9%, var(--bg-secondary));
+}
+
 .message-content p {
   margin-bottom: 8px;
 }
