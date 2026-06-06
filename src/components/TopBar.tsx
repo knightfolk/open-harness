@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, RotateCcw, FolderOpen,
-  ChevronDown, Check, Wrench, PanelRightOpen, PanelRightClose, Terminal,
+  ChevronDown, Check, Wrench, Terminal,
   Heart, Activity,
 } from 'lucide-react';
 import type { PanelId } from '../types/layout';
@@ -17,9 +17,6 @@ interface Props {
   sessionTitle: string;
   workingDir: string | null;
   onOpenFolder: () => void;
-  rightRailOpen: boolean;
-  onToggleRightRail: () => void;
-  rightRailPinned?: boolean;
   bottomBarOpen: boolean;
   onToggleBottomBar: () => void;
   environmentOpen: boolean;
@@ -31,7 +28,7 @@ interface Props {
 export function TopBar({
   sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout,
   sessionTitle, workingDir, onOpenFolder,
-  rightRailOpen, onToggleRightRail, rightRailPinned = false, bottomBarOpen, onToggleBottomBar,
+  bottomBarOpen, onToggleBottomBar,
   environmentOpen, onToggleEnvironment,
   pinnedTools, onTogglePinnedTool,
 }: Props) {
@@ -51,7 +48,7 @@ export function TopBar({
   }, [panelMenuOpen]);
 
   const menuPanelIds = ALL_PANELS
-    .filter((id) => id !== 'side-chat' && id !== 'terminal')
+    .filter((id) => id !== 'chat' && id !== 'terminal')
     .map((id, index) => ({ id, index }))
     .sort((a, b) => {
       const pinnedDelta = Number(pinnedTools.includes(b.id)) - Number(pinnedTools.includes(a.id));
@@ -132,19 +129,6 @@ export function TopBar({
           aria-label={environmentOpen ? 'Hide Environment' : 'Show Environment'}
         >
           <Activity size={16} />
-        </button>
-
-        <button
-          className={'top-bar-action' + (rightRailOpen ? ' active' : '')}
-          onClick={onToggleRightRail}
-          title={rightRailPinned
-            ? 'Right tools panel stays visible while no workspace panel is open'
-            : rightRailOpen ? 'Hide right tools panel' : 'Show right tools panel'}
-          aria-label={rightRailPinned
-            ? 'Right tools panel pinned open'
-            : rightRailOpen ? 'Hide right tools panel' : 'Show right tools panel'}
-        >
-          {rightRailOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </button>
 
         <div ref={menuRef} style={{ position: 'relative' }}>

@@ -1,20 +1,31 @@
 import { useState } from 'react';
 import {
-  MessageSquare, FileCode, Zap, Brain, Settings, Plus, Clock,
-  Sparkles, Globe, Search, FileText,
-  Command, Layout, Grid, Layers, Loader,
-  ChevronDown, ChevronRight, CheckCircle2, Circle, Bot, AlertCircle, FolderOpen,
+  AlertCircle,
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Clock,
+  FolderOpen,
+  Loader,
+  MessageSquare,
+  Plus,
+  Settings,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
-import type { SidebarTab, Skill, Plugin, MemoryEntry, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
+import type { SidebarTab, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
 import type { SessionInfo } from '../utils/api';
-import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
+import { SideChatPanel } from './SideChatPanel';
 
 interface Props {
   isOpen: boolean;
   sessions: SessionInfo[];
   activeSessionId?: string;
+  activeTab: SidebarTab;
   activeSubAgents: SubAgent[];
+  onActiveTabChange: (tab: SidebarTab) => void;
   onSelectSession: (id: string) => void;
   onNewSession: (workingDir?: string | null) => void;
   activeModel: string;
@@ -41,34 +52,39 @@ interface Props {
   width?: number;
   onDeleteSession?: (id: string) => void;
   onDeleteProject?: (workingDir: string | null) => void;
+  clickyEnabled: boolean;
 }
 
 const tabConfig = [
   { key: 'chat' as SidebarTab, icon: MessageSquare, label: 'Chat' },
-  { key: 'skills' as SidebarTab, icon: Zap, label: 'Skills' },
-  { key: 'memory' as SidebarTab, icon: Brain, label: 'Memory' },
+  { key: 'projects' as SidebarTab, icon: FolderOpen, label: 'Projects' },
 ];
 
-const skillCategoryIcons: Record<string, typeof Sparkles> = {
-  media: Sparkles,
-  reference: FileText,
-  meta: Settings,
-  automation: Globe,
-  web: Layout,
-  review: Search,
-  tools: Command,
-  browser: Globe,
-};
-
-const memoryTypeIcons: Record<string, typeof Brain> = {
-  file: FileCode,
-  skill: Zap,
-  context: Brain,
-  plugin: Layers,
-};
-
-export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, onOpenSettings, onSelectSession, onNewSession, onOpenFolder, onFocusAgent, width, onDeleteSession, onDeleteProject }: Props) {
-  const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
+export function Sidebar({
+  isOpen,
+  sessions,
+  activeSessionId,
+  activeTab,
+  activeSubAgents,
+  onActiveTabChange,
+  onOpenSettings,
+  onSelectSession,
+  onNewSession,
+  onOpenFolder,
+  onFocusAgent,
+  width,
+  onDeleteSession,
+  onDeleteProject,
+  activeModel,
+  providers,
+  clickyEnabled,
+}: Props) {
+  const [clickyOpen, setClickyOpen] = useState(false);
+  const sideChatModels = providers.flatMap((provider) =>
+    provider.models
+      .filter((model) => model.enabled)
+      .map((model) => ({ id: model.id, name: model.name || model.id }))
+  );
 
   if (!isOpen) return null;
 
@@ -79,17 +95,30 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
           <button
             key={key}
             className={`sidebar-tab ${activeTab === key ? 'active' : ''}`}
-            onClick={() => setActiveTab(key)}
+            onClick={() => onActiveTabChange(key)}
           >
             <Icon size={13} />
             {label}
           </button>
         ))}
+        <button
+          className="sidebar-tab sidebar-gear-tab"
+          onClick={onOpenSettings}
+          title="Open settings"
+          aria-label="Open settings"
+        >
+          <Settings size={14} />
+        </button>
       </div>
 
       <div className="sidebar-content">
         {activeTab === 'chat' && (
-          <ChatTab
+          <div className="sidebar-side-chat-shell">
+            <SideChatPanel activeModel={activeModel} models={sideChatModels} />
+          </div>
+        )}
+        {activeTab === 'projects' && (
+          <ProjectsTab
             sessions={sessions}
             activeSessionId={activeSessionId}
             activeSubAgents={activeSubAgents}
@@ -101,35 +130,32 @@ export function Sidebar({ isOpen, sessions, activeSessionId, activeSubAgents, on
             onDeleteProject={onDeleteProject}
           />
         )}
-        {activeTab === 'skills' && <SkillsTab skills={mockSkills} plugins={mockPlugins} />}
-        {activeTab === 'memory' && <MemoryTab entries={mockMemoryEntries} />}
       </div>
 
-      {/* Settings button pinned to sidebar bottom */}
-      <div style={{ borderTop: '1px solid var(--border-primary)', padding: '8px 12px' }}>
-        <button
-          onClick={onOpenSettings}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-            background: 'var(--bg-elevated)', border: '1px solid var(--border-primary)',
-            borderRadius: 'var(--radius-sm)', padding: '8px 12px', cursor: 'pointer',
-            color: 'var(--text-secondary)', fontSize: 12, fontWeight: 500,
-            transition: 'all var(--transition-fast)',
-          }}
-        >
-          <Settings size={14} />
-          Settings
-        </button>
-      </div>
+      {clickyEnabled && (
+        <div className="clicky-wrap">
+          {clickyOpen && (
+            <div className="clicky-popover" role="status">
+              <div className="clicky-popover-title">Clicky tip</div>
+              <div>Use Projects for sessions, and keep quick questions in Chat.</div>
+            </div>
+          )}
+          <button
+            className={`clicky-button ${clickyOpen ? 'active' : ''}`}
+            onClick={() => setClickyOpen((open) => !open)}
+            title="Clicky tips"
+            aria-label="Open Clicky tips"
+          >
+            <Bot size={17} />
+            <Sparkles size={10} className="clicky-spark" />
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Chat Tab — sessions with nested sub-agents                        */
-/* ------------------------------------------------------------------ */
-
-function ChatTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder, onFocusAgent, onDeleteSession, onDeleteProject }: {
+function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSession, onNewSession, onOpenFolder, onFocusAgent, onDeleteSession, onDeleteProject }: {
   sessions: SessionInfo[];
   activeSessionId?: string;
   activeSubAgents: SubAgent[];
@@ -265,10 +291,6 @@ function basename(path: string) {
   return path.split('/').filter(Boolean).pop() || path;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Single sub-agent row in sidebar                                    */
-/* ------------------------------------------------------------------ */
-
 function SubAgentRow({ agent, onFocus }: { agent: SubAgent; onFocus?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const statusColor = {
@@ -290,9 +312,9 @@ function SubAgentRow({ agent, onFocus }: { agent: SubAgent; onFocus?: () => void
       <div
         className="sub-agent-row"
         onClick={onFocus}
-        role={onFocus ? "button" : undefined}
+        role={onFocus ? 'button' : undefined}
         tabIndex={onFocus ? 0 : undefined}
-        title={onFocus ? "Focus on this agent" : undefined}
+        title={onFocus ? 'Focus on this agent' : undefined}
       >
         <span
           onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
@@ -337,85 +359,6 @@ function SubAgentRow({ agent, onFocus }: { agent: SubAgent; onFocus?: () => void
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Skills Tab                                                         */
-/* ------------------------------------------------------------------ */
-
-function SkillsTab({ skills, plugins }: { skills: Skill[]; plugins: Plugin[] }) {
-  const [showPlugins, setShowPlugins] = useState(false);
-
-  return (
-    <>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>
-        Skills ({skills.length})
-      </div>
-      {skills.map((skill) => {
-        const Icon = skillCategoryIcons[skill.category] || Command;
-        return (
-          <div key={skill.name} className="skill-item">
-            <div className="skill-icon">
-              <Icon size={13} style={{ color: 'var(--accent-primary)' }} />
-            </div>
-            <div className="skill-info">
-              <div className="skill-name">{skill.name}</div>
-              <div className="skill-desc">{skill.description}</div>
-            </div>
-          </div>
-        );
-      })}
-
-      <div
-        style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, padding: '16px 4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-        onClick={() => setShowPlugins(!showPlugins)}
-      >
-        Plugins ({plugins.length})
-        {showPlugins ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-      </div>
-      {showPlugins && plugins.map((plugin) => (
-        <div key={plugin.name} className="skill-item" style={{ opacity: plugin.enabled ? 1 : 0.5 }}>
-          <div className="skill-icon">
-            <Grid size={13} style={{ color: plugin.enabled ? 'var(--accent-success)' : 'var(--text-tertiary)' }} />
-          </div>
-          <div className="skill-info">
-            <div className="skill-name">{plugin.name}</div>
-            <div className="skill-desc">{plugin.description}</div>
-          </div>
-        </div>
-      ))}
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Memory Tab                                                         */
-/* ------------------------------------------------------------------ */
-
-function MemoryTab({ entries }: { entries: MemoryEntry[] }) {
-  return (
-    <>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>
-        Active Memory
-      </div>
-      {entries.map((entry) => {
-        const Icon = memoryTypeIcons[entry.type] || Brain;
-        return (
-          <div key={entry.id} className="memory-item">
-            <div className="memory-type-icon">
-              <Icon size={12} style={{ color: 'var(--accent-primary)' }} />
-            </div>
-            <div className="memory-info">
-              <div className="memory-name">{entry.name}</div>
-              <div className="memory-desc">{entry.description}</div>
-              {entry.path && <div className="memory-path">{entry.path}</div>}
-            </div>
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
 
 function formatRelativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();

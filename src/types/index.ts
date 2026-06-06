@@ -203,7 +203,7 @@ export interface Session {
 }
 
 export type ThemeMode = 'dark' | 'light';
-export type SidebarTab = 'chat' | 'files' | 'skills' | 'memory' | 'settings';
+export type SidebarTab = 'chat' | 'projects';
 export type PanelView = 'none' | 'sub-agents' | 'plan' | 'terminal';
 
 // ── Terminal Session Types ──────────────────────────

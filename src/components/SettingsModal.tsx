@@ -6,10 +6,12 @@ import {
   PlayCircle, ShieldCheck, Server, MessageCircle, Palette as ThemeIcon,
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
   Check, ChevronDown, ChevronRight, CheckCircle2, Bot, Container,
-  ArrowRight, BookOpen, Search,
+  ArrowRight, BookOpen, Search, Sparkles, Zap, FileText, Globe, Layout, Command,
+  Grid, Layers,
 } from 'lucide-react';
-import type { ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
+import type { ProviderConfig, CodingRoleAssignment, MCPServerItem, Skill, Plugin, MemoryEntry } from '../types';
 import * as api from '../utils/api';
+import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
 import {
   findModelCatalogCard,
   formatContextWindow,
@@ -39,6 +41,11 @@ const CATEGORIES: SettingsCategory[] = [
     { id: 'add', label: 'Add Provider' },
   ]},
   { id: 'roles', label: 'Agent Roles', icon: SlidersHorizontal },
+  { id: 'assistant', label: 'Assistant', icon: Sparkles, subcategories: [
+    { id: 'clicky', label: 'Clicky' },
+    { id: 'skills', label: 'Skills' },
+    { id: 'memory', label: 'Memory' },
+  ]},
   { id: 'mcp', label: 'MCP Servers', icon: Server, subcategories: [
     { id: 'docker', label: 'Docker MCP' },
     { id: 'curated', label: 'Curated Tools' },
@@ -109,6 +116,8 @@ interface Props {
   onPersonalityChange: (text: string) => void;
   onRestartOnboarding: () => void;
   onMcpStatusRefresh: () => Promise<void>;
+  clickyEnabled: boolean;
+  onClickyEnabledChange: (enabled: boolean) => void;
 }
 
 // ── Model recommendation map ──
@@ -133,6 +142,24 @@ const roleIconMap: Record<string, typeof Bot> = {
   reasoner: Brain, summarizer: MessageCircle, worker: PlayCircle,
 };
 
+const skillCategoryIcons: Record<string, typeof Sparkles> = {
+  media: Sparkles,
+  reference: FileText,
+  meta: Settings,
+  automation: Globe,
+  web: Layout,
+  review: Search,
+  tools: Command,
+  browser: Globe,
+};
+
+const memoryTypeIcons: Record<string, typeof Brain> = {
+  file: FileCode,
+  skill: Zap,
+  context: Brain,
+  plugin: Layers,
+};
+
 // ── Main component ─────────────────────────────────────
 export function SettingsModal({
   isOpen, onClose, activeModel, providers, roleAssignments, activeTheme,
@@ -143,6 +170,8 @@ export function SettingsModal({
   onPersonalityChange,
   onRestartOnboarding,
   onMcpStatusRefresh,
+  clickyEnabled,
+  onClickyEnabledChange,
 }: Props) {
   const [selectedCat, setSelectedCat] = useState('model');
   const [selectedSub, setSelectedSub] = useState<string | null>(null);
@@ -219,6 +248,9 @@ export function SettingsModal({
                 onDone={() => { setSelectedCat('providers'); setSelectedSub('manage'); }} />
             )}
             {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} />}
+            {contentKey === 'assistant/clicky' && <ClickySettingsPane enabled={clickyEnabled} onChange={onClickyEnabledChange} />}
+            {contentKey === 'assistant/skills' && <AssistantSkillsPane skills={mockSkills} plugins={mockPlugins} />}
+            {contentKey === 'assistant/memory' && <AssistantMemoryPane entries={mockMemoryEntries} />}
             {contentKey === 'mcp/docker' && <DockerMCPPane mcpServers={mcpServers} mcpStatus={mcpStatus} onRefresh={onMcpStatusRefresh} />}
             {contentKey === 'mcp/curated' && <CuratedMCPPane />}
             {contentKey === 'mcp/custom' && <CustomMCPServersPane mcpServers={mcpServers} onRemove={onRemoveMCPServer} />}
@@ -243,6 +275,103 @@ export function SettingsModal({
 
 function PaneTitle({ children }: { children: React.ReactNode }) { return <div className="settings-pane-title">{children}</div>; }
 function PaneDesc({ children }: { children: React.ReactNode }) { return <div className="settings-pane-desc">{children}</div>; }
+
+/* ================================================================== */
+/*  ASSISTANT                                                          */
+/* ================================================================== */
+
+function ClickySettingsPane({ enabled, onChange }: { enabled: boolean; onChange: (enabled: boolean) => void }) {
+  return (
+    <>
+      <PaneTitle>Clicky</PaneTitle>
+      <PaneDesc>A small animated helper for quick tips in the left sidebar.</PaneDesc>
+      <div className="settings-card" style={{ marginTop: 16 }}>
+        <div className="settings-item">
+          <div>
+            <div className="settings-item-label">Show Clicky</div>
+            <div className="settings-item-desc">Display the helper icon and tip popover in the sidebar</div>
+          </div>
+          <div className={`toggle ${enabled ? 'active' : ''}`} onClick={() => onChange(!enabled)} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function AssistantSkillsPane({ skills, plugins }: { skills: Skill[]; plugins: Plugin[] }) {
+  const [showPlugins, setShowPlugins] = useState(false);
+  return (
+    <>
+      <PaneTitle>Skills</PaneTitle>
+      <PaneDesc>Assistant capabilities and available plugin bundles.</PaneDesc>
+      <div className="settings-card" style={{ marginTop: 16 }}>
+        <div className="settings-section-header">
+          <div className="settings-section-title">Skills ({skills.length})</div>
+        </div>
+        <div className="assistant-capability-list">
+          {skills.map((skill) => {
+            const Icon = skillCategoryIcons[skill.category] || Command;
+            return (
+              <div key={skill.name} className="assistant-capability-row">
+                <span className="assistant-capability-icon"><Icon size={14} /></span>
+                <span className="assistant-capability-main">
+                  <span className="assistant-capability-name">{skill.name}</span>
+                  <span className="assistant-capability-desc">{skill.description}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <button className="settings-mini-button" style={{ marginTop: 12 }} onClick={() => setShowPlugins(!showPlugins)}>
+          {showPlugins ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          Plugins ({plugins.length})
+        </button>
+        {showPlugins && (
+          <div className="assistant-capability-list" style={{ marginTop: 8 }}>
+            {plugins.map((plugin) => (
+              <div key={plugin.name} className={`assistant-capability-row ${plugin.enabled ? '' : 'muted'}`}>
+                <span className="assistant-capability-icon"><Grid size={14} /></span>
+                <span className="assistant-capability-main">
+                  <span className="assistant-capability-name">{plugin.name}</span>
+                  <span className="assistant-capability-desc">{plugin.description}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function AssistantMemoryPane({ entries }: { entries: MemoryEntry[] }) {
+  return (
+    <>
+      <PaneTitle>Memory</PaneTitle>
+      <PaneDesc>Reference context currently surfaced to the assistant.</PaneDesc>
+      <div className="settings-card" style={{ marginTop: 16 }}>
+        <div className="settings-section-header">
+          <div className="settings-section-title">Active Memory</div>
+        </div>
+        <div className="assistant-capability-list">
+          {entries.map((entry) => {
+            const Icon = memoryTypeIcons[entry.type] || Brain;
+            return (
+              <div key={entry.id} className="assistant-capability-row">
+                <span className="assistant-capability-icon"><Icon size={14} /></span>
+                <span className="assistant-capability-main">
+                  <span className="assistant-capability-name">{entry.name}</span>
+                  <span className="assistant-capability-desc">{entry.description}</span>
+                  {entry.path && <span className="assistant-capability-path">{entry.path}</span>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
 
 /* ================================================================== */
 /*  ACTIVE MODEL                                                       */

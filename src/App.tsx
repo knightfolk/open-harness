@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRunStep, ProjectProfile } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRunStep, ProjectProfile, SidebarTab } from './types';
 import type { PanelId } from './types/layout';
+import { ALL_PANELS } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
@@ -21,6 +22,7 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const SIDEBAR_WIDTH_KEY = 'openharness.sidebar.width.v1';
 const PINNED_TOOLS_KEY = 'openharness.pinned-tools.v1';
 const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
+const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
 
 function loadSidebarWidth() {
   try {
@@ -35,7 +37,8 @@ function loadSidebarWidth() {
 function loadPinnedTools(): PanelId[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(PINNED_TOOLS_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter((id): id is PanelId => typeof id === 'string') : [];
+    const knownPanels = new Set<string>(ALL_PANELS);
+    return Array.isArray(parsed) ? parsed.filter((id): id is PanelId => typeof id === 'string' && knownPanels.has(id)) : [];
   } catch {
     return [];
   }
@@ -44,6 +47,14 @@ function loadPinnedTools(): PanelId[] {
 function loadEnvironmentOpen() {
   try {
     return localStorage.getItem(ENVIRONMENT_HIDDEN_KEY) !== 'true';
+  } catch {
+    return true;
+  }
+}
+
+function loadClickyEnabled() {
+  try {
+    return localStorage.getItem(CLICKY_ENABLED_KEY) !== 'false';
   } catch {
     return true;
   }
@@ -99,11 +110,13 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [pinnedTools, setPinnedTools] = useState<PanelId[]>(loadPinnedTools);
   const [environmentOpen, setEnvironmentOpen] = useState(loadEnvironmentOpen);
+  const [clickyEnabled, setClickyEnabled] = useState(loadClickyEnabled);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [workingDir, setWorkingDir] = useState<string | null>(null);
   const [projectProfile, setProjectProfile] = useState<ProjectProfile | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('projects');
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -205,7 +218,7 @@ function App() {
     } catch { /* ignore */ }
   }, []);
 
-  // Keyboard shortcut: ⇧⌘S or ⌘\ toggles the side-chat tools panel.
+  // Keyboard shortcut: ⇧⌘S or ⌘\ opens the left side chat.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -214,19 +227,21 @@ function App() {
       // ⇧⌘S — explicit toggle
       if (e.shiftKey && key === 's') {
         e.preventDefault();
-        togglePanel('side-chat');
+        setSidebarOpen(true);
+        setSidebarTab('chat');
         return;
       }
       // ⌘\ — also toggles
       if (!e.shiftKey && e.key === '\\') {
         e.preventDefault();
-        togglePanel('side-chat');
+        setSidebarOpen(true);
+        setSidebarTab('chat');
         return;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [togglePanel]);
+  }, []);
 
   // Load project profile whenever the active folder changes.
   useEffect(() => {
@@ -903,9 +918,6 @@ function App() {
 
   const bottomBarOpen = visiblePanels.has('terminal');
 
-  const handleToggleRightRail = useCallback(() => {
-    togglePanel('side-chat');
-  }, [togglePanel]);
   const startResizeSidebar = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -958,6 +970,10 @@ function App() {
     setEnvironmentOpen(open);
     try { localStorage.setItem(ENVIRONMENT_HIDDEN_KEY, open ? 'false' : 'true'); } catch { /* ignore */ }
   }, []);
+  const handleClickyEnabledChange = useCallback((enabled: boolean) => {
+    setClickyEnabled(enabled);
+    try { localStorage.setItem(CLICKY_ENABLED_KEY, enabled ? 'true' : 'false'); } catch { /* ignore */ }
+  }, []);
 
   return (
     <div className="app-layout">
@@ -965,7 +981,9 @@ function App() {
         isOpen={sidebarOpen}
         sessions={sessions}
         activeSessionId={activeSessionId || undefined}
+        activeTab={sidebarTab}
         activeSubAgents={subAgents}
+        onActiveTabChange={setSidebarTab}
         activeModel={activeModel}
         providers={providers}
         roleAssignments={roleAssignments}
@@ -992,6 +1010,7 @@ function App() {
         width={sidebarWidth}
         onDeleteSession={handleDeleteSession}
         onDeleteProject={handleDeleteProject}
+        clickyEnabled={clickyEnabled}
       />
       {sidebarOpen && <div className="sidebar-resizer" onMouseDown={startResizeSidebar} role="separator" aria-orientation="vertical" aria-label="Resize sidebar" />}
 
@@ -1005,9 +1024,6 @@ function App() {
           sessionTitle={sessionTitle}
           workingDir={workingDir}
           onOpenFolder={() => addPanel('files')}
-          rightRailOpen={visiblePanels.has('side-chat')}
-          onToggleRightRail={handleToggleRightRail}
-          rightRailPinned={false}
           bottomBarOpen={bottomBarOpen}
           onToggleBottomBar={handleToggleBottomBar}
           environmentOpen={environmentOpen}
@@ -1194,6 +1210,8 @@ function App() {
         onPersonalityChange={handlePersonalityChange}
         onRestartOnboarding={() => { setSettingsOpen(false); setShowOnboarding(true); }}
         onMcpStatusRefresh={refreshMcpStatus}
+        clickyEnabled={clickyEnabled}
+        onClickyEnabledChange={handleClickyEnabledChange}
       />
       {sidebarOpen && <div className="sidebar-resizer" onMouseDown={startResizeSidebar} role="separator" aria-orientation="vertical" aria-label="Resize sidebar" />}
       </Suspense>
