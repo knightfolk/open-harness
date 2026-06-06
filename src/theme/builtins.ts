@@ -4,6 +4,7 @@ import {
   type ThemeContrastCheck,
   type ThemeQuality,
 } from './themeTokens';
+import { parseThemePluginManifest, type ThemePluginManifest } from './themePluginManifest';
 
 export const FALLBACK_THEME_ID = 'midnight';
 const DEFAULT_EFFECTS = {
@@ -28,9 +29,19 @@ export interface BuiltinTheme {
   tokens: ThemeTokens;
   tags: string[];
   quality: ThemeQuality;
+  pluginId?: string;
+  pluginName?: string;
+  pluginTrust?: string;
 }
 
 export type ThemeRegistry = ReadonlyArray<BuiltinTheme>;
+
+export interface ThemePluginImportResult {
+  ok: boolean;
+  importedThemeIds: string[];
+  errors: string[];
+  warnings: string[];
+}
 
 const BUILTIN_THEME_REGISTRY: ThemeRegistry = [
   {
@@ -787,14 +798,80 @@ const BUILTIN_THEME_REGISTRY: ThemeRegistry = [
   },
 ];
 
-const THEME_BY_ID = new Map(BUILTIN_THEME_REGISTRY.map((entry) => [entry.id, entry]));
+const BUILTIN_THEMES_BY_ID = new Map(BUILTIN_THEME_REGISTRY.map((entry) => [entry.id, entry]));
+const pluginThemes: BuiltinTheme[] = [];
+const THEME_BY_ID = new Map<string, BuiltinTheme>(BUILTIN_THEME_REGISTRY.map((entry) => [entry.id, entry]));
+
+function getAllThemes(): BuiltinTheme[] {
+  return [...BUILTIN_THEME_REGISTRY, ...pluginThemes];
+}
+
+function manifestVariantToBuiltinTheme(manifest: ThemePluginManifest, variant: ThemePluginManifest['variants'][number]): BuiltinTheme {
+  return {
+    id: `${manifest.id}.${variant.id}`,
+    label: variant.name,
+    family: variant.family,
+    group: variant.mode.startsWith('light') ? 'light' : 'dark',
+    mode: variant.mode,
+    color: variant.tokens.color.accentPrimary,
+    tags: [...new Set(['community', ...(variant.tags || []), manifest.provenance.source])],
+    quality: variant.quality,
+    tokens: variant.tokens,
+    pluginId: manifest.id,
+    pluginName: manifest.name,
+    pluginTrust: manifest.provenance.trust,
+  };
+}
+
+function registerThemePluginVariants(manifest: ThemePluginManifest): ThemePluginImportResult {
+  const importedThemeIds: string[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  for (const variant of manifest.variants) {
+    const themeId = `${manifest.id}.${variant.id}`;
+    if (THEME_BY_ID.has(themeId)) {
+      errors.push(`Theme "${themeId}" already exists and was skipped.`);
+      continue;
+    }
+
+    const theme = manifestVariantToBuiltinTheme(manifest, variant);
+    pluginThemes.push(theme);
+    THEME_BY_ID.set(themeId, theme);
+    importedThemeIds.push(themeId);
+  }
+
+  return {
+    ok: errors.length === 0 && importedThemeIds.length > 0,
+    importedThemeIds,
+    errors,
+    warnings,
+  };
+}
 
 export function getBuiltinThemes(): ThemeRegistry {
   return BUILTIN_THEME_REGISTRY;
 }
 
 export function getBuiltinTheme(id: string): BuiltinTheme | undefined {
+  return BUILTIN_THEMES_BY_ID.get(id);
+}
+
+export function getThemeById(id: string): BuiltinTheme | undefined {
   return THEME_BY_ID.get(id);
+}
+
+export function importThemePluginFromJson(rawManifest: string): ThemePluginImportResult {
+  const parseResult = parseThemePluginManifest(rawManifest);
+  if (!parseResult.ok || !parseResult.manifest) {
+    return {
+      ok: parseResult.ok,
+      importedThemeIds: [],
+      errors: parseResult.errors,
+      warnings: parseResult.warnings,
+    };
+  }
+  return registerThemePluginVariants(parseResult.manifest);
 }
 
 export function resolveThemeId(themeId: string | undefined | null): string {
@@ -804,7 +881,7 @@ export function resolveThemeId(themeId: string | undefined | null): string {
 }
 
 export function getThemesByMode(mode: BuiltinTheme['mode']): BuiltinTheme[] {
-  return BUILTIN_THEME_REGISTRY.filter((theme) => theme.mode === mode);
+  return getAllThemes().filter((theme) => theme.mode === mode);
 }
 
 function toPx(value: number): string {

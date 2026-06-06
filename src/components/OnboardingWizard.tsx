@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import * as api from '../utils/api';
 import { defaultProviderPlan } from '../data/providerPlans';
-import { applyTheme, getBuiltinTheme, getThemesByMode, resolveThemeId } from '../theme/builtins';
+import { applyTheme, getThemeById, getThemesByMode, resolveThemeId } from '../theme/builtins';
 
 // ── Provider catalog (shared with onboarding) ──────────
 interface OnboardingProvider {
@@ -789,7 +789,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
             <div className="onboarding-review-section">
               <div className="onboarding-review-label">Theme</div>
               <div className="onboarding-review-value">
-                {getBuiltinTheme(activeTheme)?.label || activeTheme}
+                {getThemeById(activeTheme)?.label || activeTheme}
               </div>
             </div>
 

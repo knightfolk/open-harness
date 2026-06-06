@@ -1,0 +1,188 @@
+{
+  "schemaVersion": "0.1.0",
+  "id": "community.aurora",
+  "name": "Aurora",
+  "version": "1.0.0",
+  "description": "Sample community theme plugin with one paired light and one dark variant.",
+  "author": {
+    "name": "OpenHarness Community",
+    "url": "https://github.com/openharness"
+  },
+  "license": "MIT",
+  "provenance": {
+    "source": "community",
+    "trust": "review-required"
+  },
+  "compatibility": {
+    "openharness": ">=0.1.0",
+    "schema": "0.1.0"
+  },
+  "variants": [
+    {
+      "id": "midnight",
+      "name": "Aurora Midnight",
+      "family": "Aurora",
+      "mode": "dark",
+      "tags": ["community", "background-ready", "terminal-friendly"],
+      "tokens": {
+        "color": {
+          "accentPrimary": "#8b5cf6",
+          "accentPrimaryHover": "#7c3aed",
+          "accentPrimaryMuted": "rgba(139, 92, 246, 0.16)",
+          "accentSuccess": "#22c55e",
+          "accentSuccessMuted": "rgba(34, 197, 94, 0.16)",
+          "accentWarning": "#f59e0b",
+          "accentWarningMuted": "rgba(245, 158, 11, 0.16)",
+          "accentError": "#ef4444",
+          "accentErrorMuted": "rgba(239, 68, 68, 0.16)",
+          "accentInfo": "#38bdf8",
+          "accentInfoMuted": "rgba(56, 189, 248, 0.16)",
+          "selectionBackground": "rgba(139, 92, 246, 0.18)",
+          "focusRing": "#a78bfa"
+        },
+        "surface": {
+          "primary": "#0f1220",
+          "secondary": "#171b2c",
+          "tertiary": "#1e2235",
+          "elevated": "#252a3c",
+          "hover": "#2c324a",
+          "active": "#323a55"
+        },
+        "text": {
+          "primary": "#e7e9ff",
+          "secondary": "#b8bed8",
+          "tertiary": "#8d95b0",
+          "inverse": "#0f1220",
+          "link": "#a78bfa"
+        },
+        "border": {
+          "primary": "#323a55",
+          "secondary": "#252a3c",
+          "accent": "#4f46e5",
+          "focus": "#a78bfa"
+        },
+        "intent": {
+          "success": "#22c55e",
+          "successMuted": "rgba(34, 197, 94, 0.16)",
+          "warning": "#f59e0b",
+          "warningMuted": "rgba(245, 158, 11, 0.16)",
+          "error": "#ef4444",
+          "errorMuted": "rgba(239, 68, 68, 0.16)",
+          "info": "#38bdf8",
+          "infoMuted": "rgba(56, 189, 248, 0.16)"
+        },
+        "chat": {
+          "userBubble": "#a855f7",
+          "userBubbleText": "#ffffff",
+          "assistantBubble": "#232a42",
+          "assistantBubbleText": "#e7e9ff"
+        },
+        "code": {
+          "background": "#0f1220",
+          "border": "#323a55",
+          "foreground": "#e7e9ff",
+          "keyword": "#a78bfa",
+          "string": "#34d399",
+          "comment": "#8b93ad",
+          "diffAdded": "#22c55e",
+          "diffRemoved": "#ef4444"
+        },
+        "shadow": {
+          "sm": "0 1px 2px rgba(0, 0, 0, 0.3)",
+          "md": "0 4px 12px rgba(0, 0, 0, 0.4)",
+          "lg": "0 8px 24px rgba(0, 0, 0, 0.5)"
+        }
+      },
+      "quality": {
+        "contrastPairs": [
+          { "foreground": "#e7e9ff", "background": "#0f1220", "minimumRatio": 4.5 },
+          { "foreground": "#b8bed8", "background": "#171b2c", "minimumRatio": 4.5 },
+          { "foreground": "#8b5cf6", "background": "#0f1220", "minimumRatio": 3 }
+        ]
+      }
+    },
+    {
+      "id": "dawn",
+      "name": "Aurora Dawn",
+      "family": "Aurora",
+      "mode": "light",
+      "tags": ["community", "terminal-friendly"],
+      "tokens": {
+        "color": {
+          "accentPrimary": "#7c3aed",
+          "accentPrimaryHover": "#8b5cf6",
+          "accentPrimaryMuted": "rgba(124, 58, 237, 0.16)",
+          "accentSuccess": "#16a34a",
+          "accentSuccessMuted": "rgba(22, 163, 74, 0.16)",
+          "accentWarning": "#d97706",
+          "accentWarningMuted": "rgba(217, 119, 6, 0.16)",
+          "accentError": "#dc2626",
+          "accentErrorMuted": "rgba(220, 38, 38, 0.16)",
+          "accentInfo": "#0ea5e9",
+          "accentInfoMuted": "rgba(14, 165, 233, 0.16)",
+          "selectionBackground": "rgba(124, 58, 237, 0.16)",
+          "focusRing": "#8b5cf6"
+        },
+        "surface": {
+          "primary": "#f8f7ff",
+          "secondary": "#f1f0fa",
+          "tertiary": "#e9e7f6",
+          "elevated": "#ffffff",
+          "hover": "#ebe8f9",
+          "active": "#e3dff3"
+        },
+        "text": {
+          "primary": "#1f2340",
+          "secondary": "#3c4466",
+          "tertiary": "#5b6383",
+          "inverse": "#f8f7ff",
+          "link": "#7c3aed"
+        },
+        "border": {
+          "primary": "#ddd9ee",
+          "secondary": "#e9e7f6",
+          "accent": "#c4b9ec",
+          "focus": "#7c3aed"
+        },
+        "intent": {
+          "success": "#16a34a",
+          "successMuted": "rgba(22, 163, 74, 0.16)",
+          "warning": "#d97706",
+          "warningMuted": "rgba(217, 119, 6, 0.16)",
+          "error": "#dc2626",
+          "errorMuted": "rgba(220, 38, 38, 0.16)",
+          "info": "#0ea5e9",
+          "infoMuted": "rgba(14, 165, 233, 0.16)"
+        },
+        "chat": {
+          "userBubble": "#7c3aed",
+          "userBubbleText": "#ffffff",
+          "assistantBubble": "#e5e1f3",
+          "assistantBubbleText": "#1f2340"
+        },
+        "code": {
+          "background": "#f1f0fa",
+          "border": "#ddd9ee",
+          "foreground": "#1f2340",
+          "keyword": "#7c3aed",
+          "string": "#16a34a",
+          "comment": "#5b6383",
+          "diffAdded": "#16a34a",
+          "diffRemoved": "#dc2626"
+        },
+        "shadow": {
+          "sm": "0 1px 2px rgba(0, 0, 0, 0.05)",
+          "md": "0 4px 12px rgba(0, 0, 0, 0.07)",
+          "lg": "0 8px 24px rgba(0, 0, 0, 0.10)"
+        }
+      },
+      "quality": {
+        "contrastPairs": [
+          { "foreground": "#1f2340", "background": "#f8f7ff", "minimumRatio": 7 },
+          { "foreground": "#3c4466", "background": "#f1f0fa", "minimumRatio": 4.5 },
+          { "foreground": "#7c3aed", "background": "#f8f7ff", "minimumRatio": 4 }
+        ]
+      }
+    }
+  ]
+}

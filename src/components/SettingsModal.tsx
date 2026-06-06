@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { ContextBudgetControls } from './ContextBudgetControls';
 import { RoutingLearningPane } from './RoutingLearningPane';
 import {
@@ -31,7 +31,12 @@ import {
   providerPlanLabel,
   type ProviderAccessMode,
 } from '../data/providerPlans';
-import { getThemesByMode, resolveThemeId } from '../theme/builtins';
+import {
+  getThemeById,
+  getThemesByMode,
+  importThemePluginFromJson,
+  resolveThemeId,
+} from '../theme/builtins';
 
 // ── Category definition ────────────────────────────────
 interface SettingsCategory {
@@ -1639,12 +1644,52 @@ function PersonalityPane({ personalityText, onChange }: any) {
 /* ================================================================== */
 
 function ThemePane({ activeTheme, onSelectTheme }: any) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resolvedActiveTheme = resolveThemeId(activeTheme);
   const hasRepair = activeTheme !== resolvedActiveTheme;
+  const [importFeedback, setImportFeedback] = useState<{ kind: 'error' | 'success'; message: string; details?: string[] } | null>(null);
   const themeGroups = [
     { mode: 'dark', label: 'Dark themes', themes: getThemesByMode('dark') },
     { mode: 'light', label: 'Light themes', themes: getThemesByMode('light') },
   ] as const;
+
+  const handleImportThemes = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImportFeedback(null);
+    try {
+      const payload = await file.text();
+      const importResult = importThemePluginFromJson(payload);
+      if (!importResult.ok || importResult.errors.length > 0) {
+        setImportFeedback({
+          kind: 'error',
+          message: `Theme import failed: ${importResult.errors[0] || 'unknown error'}`,
+          details: importResult.errors.slice(1),
+        });
+      } else {
+        const imported = importResult.importedThemeIds.length > 0
+          ? importResult.importedThemeIds
+            .map((id) => `${id} (${getThemeById(id)?.label || id})`)
+            .join(', ')
+          : 'No themes';
+        setImportFeedback({
+          kind: 'success',
+          message: `Imported ${importResult.importedThemeIds.length} theme variant(s).`,
+          details: [imported, ...importResult.warnings],
+        });
+      }
+    } catch (error) {
+      setImportFeedback({
+        kind: 'error',
+        message: 'Could not read theme manifest file.',
+        details: [error instanceof Error ? error.message : 'Unknown error'],
+      });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const showImportPicker = () => fileInputRef.current?.click();
 
   return (
     <>
@@ -1654,6 +1699,35 @@ function ThemePane({ activeTheme, onSelectTheme }: any) {
         {hasRepair && (
           <div style={{ color: 'var(--accent-warning)', fontSize: 12, marginBottom: 12 }}>
             Saved theme "{activeTheme}" is unavailable. Reverted to "{resolvedActiveTheme}".
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            Import a validated theme manifest (.json) to add community themes.
+          </div>
+          <button className="settings-mini-button" onClick={showImportPicker}>
+            <Plus size={11} /> Import theme
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          onChange={handleImportThemes}
+          style={{ display: 'none' }}
+        />
+        {importFeedback && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ color: importFeedback.kind === 'error' ? 'var(--accent-error)' : 'var(--accent-success)', fontSize: 12 }}>
+              {importFeedback.message}
+            </div>
+            {importFeedback.details && importFeedback.details.length > 0 && (
+              <ul style={{ margin: '6px 0 0', paddingLeft: 20, color: 'var(--text-tertiary)', fontSize: 11 }}>
+                {importFeedback.details.filter(Boolean).map((line) => (
+                  <li key={`${importFeedback.kind}-${line}`}>{line}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         {themeGroups.map((group) => (
