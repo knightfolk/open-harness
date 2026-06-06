@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Wifi, WifiOff, ChevronUp, Cpu, Zap, Brain, DollarSign,
   Check, Search, Shield, Settings,
@@ -61,17 +62,21 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
   const [searchQuery, setSearchQuery] = useState('');
   const [pickerPos, setPickerPos] = useState<{ left: number; bottom: number } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerPanelRef = useRef<HTMLDivElement>(null);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const trustRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!modelPickerOpen && !trustPickerOpen) return;
     const handler = (e: MouseEvent) => {
-      if (modelPickerOpen && pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const clickedModelButton = modelBtnRef.current?.contains(target);
+      const clickedModelPicker = pickerPanelRef.current?.contains(target);
+      if (modelPickerOpen && !clickedModelButton && !clickedModelPicker) {
         setModelPickerOpen(false);
         setSearchQuery('');
       }
-      if (trustPickerOpen && trustRef.current && !trustRef.current.contains(e.target as Node)) {
+      if (trustPickerOpen && trustRef.current && !trustRef.current.contains(target)) {
         setTrustPickerOpen(false);
       }
     };
@@ -221,8 +226,9 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
           <ChevronUp size={10} style={{ transform: modelPickerOpen ? 'rotate(0)' : 'rotate(180deg)', transition: 'transform 0.15s' }} />
         </button>
 
-        {modelPickerOpen && pickerPos && (
+        {modelPickerOpen && pickerPos && createPortal(
           <div
+            ref={pickerPanelRef}
             className="model-picker"
             style={{ position: 'fixed', left: pickerPos.left, bottom: pickerPos.bottom, zIndex: 20001 }}
           >
@@ -266,7 +272,8 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
                 <div className="model-picker-empty">No models found</div>
               )}
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
 
