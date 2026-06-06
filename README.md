@@ -1,22 +1,34 @@
 # OpenHarness
 
-![OpenHarness icon](public/openharness-icon.png)
+<p align="center">
+  <img src="public/openharness-icon.png" alt="OpenHarness icon" width="96" height="96">
+</p>
 
-OpenHarness is a local-first AI workbench for running, routing, evaluating, and coordinating coding agents across model providers. It combines a dense desktop-style chat surface with provider management, Agent Roles, model intelligence, MCP tools, eval feedback, and an Electron wrapper for people who want the whole harness close at hand.
+OpenHarness is a local-first AI workbench for running, routing, evaluating, and coordinating coding agents across model providers. It keeps chat, models, provider health, MCP tools, routing signals, and review surfaces in one dense workspace so you can see what the harness is doing while you work.
 
-The project is built for experimentation without losing operational discipline: configure many providers, assign the right model to each agent role, let the Auto-Router choose when appropriate, and keep the surrounding tools visible enough to understand what the system is doing.
+![OpenHarness workspace](docs/screenshots/openharness-workspace.png)
 
-## What It Does
+## Why It Exists
 
-- **Chat workspace**: project-aware sessions, markdown/code rendering, tool output, patch surfaces, memory context, and a compact composer aligned to the message rail.
-- **Model Library**: a built-in catalog of top models with dense cards for strengths, weaknesses, objective references, comparable models, context, category color, compact descriptions, and relative cost.
-- **Agent Roles**: map planner, coder, reviewer, reasoner, summarizer, worker, and title roles to specific models instead of treating every task like one generic chat.
-- **Auto-Router**: score configured candidate models by task fit, then use relative cost as the tie-breaker among viable options.
-- **Provider setup**: OpenAI-compatible presets plus local runtimes such as Ollama and LM Studio, with model fetch, enablement, testing, and active model selection.
-- **MCP tools**: Docker MCP status, curated tools, custom server registration, readiness checks, and tool policy hardening.
-- **Model Lab and eval loop**: run prompt suites, compare outputs, and use recommendations to improve role defaults and routing decisions.
-- **Settings and onboarding**: wide settings workspace, My Models access, provider setup, Agent Roles, model docs, routing learn pane, themes, personality, and onboarding reset.
-- **Desktop wrapper**: Electron entry point for packaged desktop usage alongside the browser-based Vite workflow.
+Most AI coding setups treat model choice, provider setup, tools, evals, and project context as separate chores. OpenHarness pulls those controls into the work surface:
+
+- Pick the right model for the task, or let Auto-Router choose from configured candidates.
+- Assign different models to planner, coder, reviewer, reasoner, summarizer, worker, and title roles.
+- Keep provider setup, model cards, MCP tools, patch review, files, terminal state, and project memory nearby.
+- Run evals and routing checks without leaving the harness.
+
+## Core Surfaces
+
+| Surface | What it is for |
+| --- | --- |
+| **Chat workspace** | Project-aware sessions, markdown/code rendering, tool output, patch surfaces, memory context, and a compact composer. |
+| **Model Library** | Dense model cards with strengths, weaknesses, comparable models, context, category, cost, and routing hints. |
+| **Agent Roles** | Role-specific model assignments so every task does not use the same generic chat model. |
+| **Auto-Router** | Task-fit scoring across configured candidates, with relative cost used as a tie-break among viable options. |
+| **Provider setup** | Hosted and local model providers, model fetch, enablement, testing, active model selection, and plan-aware access settings. |
+| **MCP tools** | Docker MCP status, curated tools, custom server registration, readiness checks, and tool policy hardening. |
+| **Model Lab** | Prompt-suite runs, output comparison, and recommendations that can feed better defaults. |
+| **Desktop shell** | Electron packaging for people who want OpenHarness as a local app instead of only a browser tab. |
 
 ## Quick Start
 
