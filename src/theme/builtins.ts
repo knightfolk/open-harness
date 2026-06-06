@@ -43,7 +43,7 @@ export interface ThemePluginImportResult {
   warnings: string[];
 }
 
-const BUILTIN_THEME_REGISTRY: ThemeRegistry = [
+const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
   {
     id: 'midnight',
     label: 'Midnight',
@@ -798,6 +798,74 @@ const BUILTIN_THEME_REGISTRY: ThemeRegistry = [
   },
 ];
 
+interface HighContrastThemeDefinition {
+  sourceThemeId: string;
+  id: string;
+  label: string;
+  family: string;
+  mode: ThemeMode;
+}
+
+const THEME_FAMILY_OVERRIDES: Record<string, { family: string; label: string }> = {
+  midnight: { family: 'Glasshouse', label: 'Glasshouse Night' },
+  daylight: { family: 'Glasshouse', label: 'Glasshouse Day' },
+  charcoal: { family: 'System Classic', label: 'System Classic Dark' },
+  silver: { family: 'System Classic', label: 'System Classic Light' },
+  forest: { family: 'Blueprint', label: 'Blueprint Night' },
+  sage: { family: 'Blueprint', label: 'Blueprint Day' },
+  crimson: { family: 'CRT Console', label: 'CRT Console Green' },
+  blush: { family: 'CRT Console', label: 'CRT Console Light' },
+};
+
+const HIGH_CONTRAST_THEME_DEFINITIONS: HighContrastThemeDefinition[] = [
+  { sourceThemeId: 'midnight', id: 'glasshouse-high-contrast', label: 'Glasshouse High Contrast', family: 'Glasshouse', mode: 'high-contrast-dark' },
+  { sourceThemeId: 'charcoal', id: 'system-classic-high-contrast', label: 'System Classic High Contrast', family: 'System Classic', mode: 'high-contrast-dark' },
+  { sourceThemeId: 'forest', id: 'blueprint-high-contrast', label: 'Blueprint High Contrast', family: 'Blueprint', mode: 'high-contrast-dark' },
+  { sourceThemeId: 'crimson', id: 'crt-console-high-contrast', label: 'CRT Console High Contrast', family: 'CRT Console', mode: 'high-contrast-dark' },
+];
+
+const THEME_WITH_FAMILIES: ThemeRegistry = RAW_BUILTIN_THEME_REGISTRY.map((theme) => {
+  const override = THEME_FAMILY_OVERRIDES[theme.id];
+  if (!override) return theme;
+  return {
+    ...theme,
+    family: override.family,
+    label: override.label,
+  };
+});
+
+function createHighContrastTheme(theme: BuiltinTheme, definition: HighContrastThemeDefinition): BuiltinTheme {
+  const notes = theme.quality.notes
+    ? `${theme.quality.notes} High-contrast tuning profile preserved.`
+    : 'High-contrast tuning profile.';
+  return {
+    ...theme,
+    id: definition.id,
+    label: definition.label,
+    family: definition.family,
+    group: definition.mode.startsWith('light') ? 'light' : 'dark',
+    mode: definition.mode,
+    tags: [...new Set([...theme.tags, 'high-contrast', 'accessibility'])],
+    quality: {
+      ...theme.quality,
+      notes,
+    },
+  };
+}
+
+const BUILTIN_THEME_REGISTRY: ThemeRegistry = (() => {
+  const familyThemes = THEME_WITH_FAMILIES;
+  const themeIndex = new Map(familyThemes.map((theme) => [theme.id, theme]));
+  const highContrastThemes = HIGH_CONTRAST_THEME_DEFINITIONS
+    .map((definition) => {
+      const sourceTheme = themeIndex.get(definition.sourceThemeId);
+      if (!sourceTheme) return null;
+      return createHighContrastTheme(sourceTheme, definition);
+    })
+    .filter((entry): entry is BuiltinTheme => entry !== null);
+  return [...familyThemes, ...highContrastThemes];
+})();
+
 const BUILTIN_THEMES_BY_ID = new Map(BUILTIN_THEME_REGISTRY.map((entry) => [entry.id, entry]));
 const pluginThemes: BuiltinTheme[] = [];
 const THEME_BY_ID = new Map<string, BuiltinTheme>(BUILTIN_THEME_REGISTRY.map((entry) => [entry.id, entry]));
@@ -881,7 +949,10 @@ export function resolveThemeId(themeId: string | undefined | null): string {
 }
 
 export function getThemesByMode(mode: BuiltinTheme['mode']): BuiltinTheme[] {
-  return getAllThemes().filter((theme) => theme.mode === mode);
+  const modeFilter: ThemeMode[] = mode === 'dark'
+    ? ['dark', 'high-contrast-dark']
+    : ['light', 'high-contrast-light'];
+  return getAllThemes().filter((theme) => modeFilter.includes(theme.mode));
 }
 
 function toPx(value: number): string {
