@@ -25,6 +25,7 @@ interface Props {
   isOpen: boolean;
   sessions: SessionInfo[];
   activeSessionId?: string;
+  workingDir?: string | null;
   activeTab: SidebarTab;
   activeSubAgents: SubAgent[];
   onActiveTabChange: (tab: SidebarTab) => void;
@@ -68,6 +69,7 @@ export function Sidebar({
   isOpen,
   sessions,
   activeSessionId,
+  workingDir,
   activeTab,
   activeSubAgents,
   onActiveTabChange,
@@ -99,15 +101,10 @@ export function Sidebar({
   }, [activeTab]);
 
   const togglePanel = (panel: SidebarTab) => {
-    setVisiblePanels((prev) => {
-      if (prev[panel] && Object.values(prev).filter(Boolean).length === 1) return prev;
-      if (prev[panel]) {
-        onActiveTabChange(panel === 'chat' ? 'projects' : 'chat');
-      } else {
-        onActiveTabChange(panel);
-      }
-      return { ...prev, [panel]: !prev[panel] };
-    });
+    if (visiblePanels[panel] && Object.values(visiblePanels).filter(Boolean).length === 1) return;
+    const nextVisible = !visiblePanels[panel];
+    setVisiblePanels({ ...visiblePanels, [panel]: nextVisible });
+    onActiveTabChange(nextVisible ? panel : panel === 'chat' ? 'projects' : 'chat');
   };
 
   if (!isOpen) return null;
@@ -147,7 +144,12 @@ export function Sidebar({
       <div className={`sidebar-content sidebar-content--split-${split}`}>
         {visiblePanels.chat && (
           <div className="sidebar-panel sidebar-panel--chat">
-            <SideChatPanel activeModel={activeModel} models={sideChatModels} />
+            <SideChatPanel
+              activeModel={activeModel}
+              models={sideChatModels}
+              activeSessionId={activeSessionId}
+              workingDir={workingDir}
+            />
           </div>
         )}
         {visiblePanels.projects && (

@@ -117,6 +117,14 @@ export interface StreamCallbacks {
   onDone: () => void;
 }
 
+export interface SendMessageOptions {
+  modelId?: string;
+  sideChat?: {
+    includeMainChat?: boolean;
+    mainSessionId?: string;
+  };
+}
+
 // ── Config API ─────────────────────────────────────────
 
 export interface AutoRouterState {
@@ -670,11 +678,11 @@ export async function deleteSession(id: string): Promise<void> {
 
 // ── Send Message (streaming) ───────────────────────────
 
-export async function sendMessage(sessionId: string, content: string, callbacks: StreamCallbacks, options: { modelId?: string } = {}): Promise<void> {
+export async function sendMessage(sessionId: string, content: string, callbacks: StreamCallbacks, options: SendMessageOptions = {}): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, modelId: options.modelId }),
+    body: JSON.stringify({ content, modelId: options.modelId, sideChat: options.sideChat }),
   });
 
   if (!res.ok) {

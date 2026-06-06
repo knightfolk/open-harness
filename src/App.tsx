@@ -982,6 +982,7 @@ function App() {
         isOpen={sidebarOpen}
         sessions={sessions}
         activeSessionId={activeSessionId || undefined}
+        workingDir={workingDir}
         activeTab={sidebarTab}
         activeSubAgents={subAgents}
         onActiveTabChange={setSidebarTab}

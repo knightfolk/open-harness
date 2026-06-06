@@ -11,6 +11,8 @@ interface SideChatModel {
 interface Props {
   activeModel: string;
   models: SideChatModel[];
+  activeSessionId?: string;
+  workingDir?: string | null;
 }
 
 interface SideMessage {
@@ -32,6 +34,7 @@ interface SideToolCall {
 }
 
 const SIDE_CHAT_MODEL_KEY = 'openharness.side-chat.model.v1';
+const SIDE_CHAT_INCLUDE_MAIN_KEY = 'openharness.side-chat.include-main.v1';
 
 const TOOL_ACTIVITY_COPY: Record<string, { running: string; complete: string; error: string }> = {
   web_fetch: {
@@ -97,12 +100,21 @@ function loadSideChatModel(activeModel: string) {
   }
 }
 
-export function SideChatPanel({ activeModel, models }: Props) {
+function loadIncludeMainChat() {
+  try {
+    return localStorage.getItem(SIDE_CHAT_INCLUDE_MAIN_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function SideChatPanel({ activeModel, models, activeSessionId, workingDir }: Props) {
   const [messages, setMessages] = useState<SideMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(() => loadSideChatModel(activeModel));
+  const [includeMainChat, setIncludeMainChat] = useState(loadIncludeMainChat);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef<Map<string, string>>(new Map());
   const modelOptions = useMemo(
@@ -120,10 +132,16 @@ export function SideChatPanel({ activeModel, models }: Props) {
     if (!modelOptions.some((m) => m.id === selectedModel)) setSelectedModel(fallbackModel);
   }, [modelOptions, selectedModel, fallbackModel]);
 
+  useEffect(() => {
+    setMessages([]);
+    setSessionId(null);
+    streamingRef.current.clear();
+  }, [activeSessionId, workingDir]);
+
   const ensureSession = async (): Promise<string | null> => {
     if (sessionId) return sessionId;
     try {
-      const s = await api.createSession('Side Chat');
+      const s = await api.createSession('Side Chat', workingDir || undefined);
       setSessionId(s.id);
       return s.id;
     } catch { return null; }
@@ -192,7 +210,13 @@ export function SideChatPanel({ activeModel, models }: Props) {
           ));
           setIsTyping(false);
         },
-      }, { modelId: effectiveModel });
+      }, {
+        modelId: effectiveModel,
+        sideChat: {
+          includeMainChat,
+          mainSessionId: activeSessionId,
+        },
+      });
     } catch {
       setIsTyping(false);
     }
@@ -213,49 +237,79 @@ export function SideChatPanel({ activeModel, models }: Props) {
     try { localStorage.setItem(SIDE_CHAT_MODEL_KEY, modelId); } catch { /* ignore */ }
   };
 
+  const handleIncludeMainChatChange = (checked: boolean) => {
+    setIncludeMainChat(checked);
+    try { localStorage.setItem(SIDE_CHAT_INCLUDE_MAIN_KEY, checked ? 'true' : 'false'); } catch { /* ignore */ }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Mini header */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex', flexDirection: 'column', gap: 5,
         padding: '6px 8px', borderBottom: '1px solid var(--border-primary)',
         background: 'var(--bg-secondary)', flexShrink: 0,
       }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <MessageSquare size={12} style={{ color: 'var(--accent-primary)' }} />
-          <select
-            value={effectiveModel}
-            onChange={(e) => handleModelChange(e.target.value)}
-            disabled={isTyping || modelOptions.length <= 1}
-            title="Side chat model"
-            aria-label="Side chat model"
-            style={{
-              minWidth: 0,
-              width: '100%',
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--border-primary)',
-              color: 'var(--text-secondary)',
-              borderRadius: 5,
-              padding: '3px 22px 3px 7px',
-              fontSize: 11,
-              fontWeight: 600,
-              fontFamily: 'inherit',
-              outline: 'none',
-            }}
-          >
-            {modelOptions.map((model) => (
-              <option key={model.id} value={model.id}>{model.name || model.id}</option>
-            ))}
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+            <MessageSquare size={12} style={{ color: 'var(--accent-primary)' }} />
+            <select
+              value={effectiveModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              disabled={isTyping || modelOptions.length <= 1}
+              title="Side chat model"
+              aria-label="Side chat model"
+              style={{
+                minWidth: 0,
+                width: '100%',
+                background: 'var(--bg-tertiary)',
+                border: '1px solid var(--border-primary)',
+                color: 'var(--text-secondary)',
+                borderRadius: 5,
+                padding: '3px 22px 3px 7px',
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: 'inherit',
+                outline: 'none',
+              }}
+            >
+              {modelOptions.map((model) => (
+                <option key={model.id} value={model.id}>{model.name || model.id}</option>
+              ))}
+            </select>
+          </div>
+          {messages.length > 0 && (
+            <button onClick={clearChat} title="Clear chat" style={{
+              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)',
+              padding: 2, display: 'flex', alignItems: 'center',
+            }}>
+              <Trash2 size={12} />
+            </button>
+          )}
         </div>
-        {messages.length > 0 && (
-          <button onClick={clearChat} title="Clear chat" style={{
-            background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)',
-            padding: 2, display: 'flex', alignItems: 'center',
-          }}>
-            <Trash2 size={12} />
-          </button>
-        )}
+        <label
+          title="Share the active main chat transcript with side chat"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            minWidth: 0,
+            color: 'var(--text-tertiary)',
+            fontSize: 10,
+            fontWeight: 600,
+            userSelect: 'none',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={includeMainChat}
+            disabled={isTyping}
+            onChange={(e) => handleIncludeMainChatChange(e.target.checked)}
+            aria-label="Use main chat context"
+            style={{ width: 12, height: 12, margin: 0, accentColor: 'var(--accent-primary)' }}
+          />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Main chat</span>
+        </label>
       </div>
 
       {/* Messages */}
@@ -264,7 +318,7 @@ export function SideChatPanel({ activeModel, models }: Props) {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-tertiary)', fontSize: 12, gap: 8 }}>
             <MessageSquare size={24} style={{ opacity: 0.3 }} />
             <span>Quick side conversation</span>
-            <span style={{ fontSize: 10 }}>Ask questions without losing main chat context</span>
+            <span style={{ fontSize: 10 }}>{includeMainChat ? 'Ask with main chat context' : 'Ask without main chat context'}</span>
           </div>
         )}
         {messages.map((msg) => {
