@@ -1,0 +1,461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openharness.local/schemas/theme-plugin.schema.json",
+  "title": "OpenHarness Theme Plugin",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "description",
+    "author",
+    "license",
+    "provenance",
+    "compatibility",
+    "variants"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "url": { "type": "string", "format": "uri" },
+        "email": { "type": "string", "maxLength": 160 }
+      }
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "trust"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["builtin", "local", "generated", "community", "imported-vscode", "imported-other"]
+        },
+        "trust": {
+          "type": "string",
+          "enum": ["trusted", "review-required", "blocked"]
+        },
+        "homepage": { "type": "string", "format": "uri" },
+        "repository": { "type": "string", "format": "uri" },
+        "commit": { "type": "string", "maxLength": 80 },
+        "signature": { "type": "string", "maxLength": 500 },
+        "importedFrom": { "type": "string", "maxLength": 240 }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["openharness", "schema"],
+      "properties": {
+        "openharness": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "schema": { "type": "string", "const": "0.1.0" },
+        "supportsBackgrounds": { "type": "boolean", "default": true },
+        "supportsInputs": { "type": "boolean", "default": true },
+        "supportsOutputs": { "type": "boolean", "default": true }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/input" },
+      "uniqueItems": true
+    },
+    "outputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/output" },
+      "uniqueItems": true
+    },
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset" },
+      "uniqueItems": true
+    },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/variant" }
+    },
+    "packs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "variantIds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "description": { "type": "string", "maxLength": 500 },
+          "variantIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "type": {
+          "type": "string",
+          "enum": ["color", "number", "boolean", "enum", "image", "text"]
+        },
+        "required": { "type": "boolean", "default": false },
+        "default": {
+          "type": ["string", "number", "boolean", "null"]
+        },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "step": { "type": "number", "exclusiveMinimum": 0 },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "mapsTo": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "type": {
+          "type": "string",
+          "enum": ["cssVariables", "semanticTokens", "backgroundRecipe", "materialRecipe", "componentHints", "preview"]
+        },
+        "description": { "type": "string", "maxLength": 500 },
+        "namespace": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "consumableBy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["core", "ui-plugin", "theme-plugin", "prompt-plugin"]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "src"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "kind": { "type": "string", "enum": ["preview", "background", "texture"] },
+        "src": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "mimeType": {
+          "type": "string",
+          "enum": ["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif", "image/svg+xml"]
+        },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "license": { "type": "string", "maxLength": 80 },
+        "attribution": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "family", "mode", "tokens", "quality"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "family": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "mode": { "type": "string", "enum": ["dark", "light", "high-contrast-dark", "high-contrast-light"] },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["builtin", "community", "minimal", "expressive", "high-contrast", "background-ready", "terminal-friendly"]
+          },
+          "uniqueItems": true
+        },
+        "preview": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assetId": { "type": "string" },
+            "swatches": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 8,
+              "items": { "$ref": "#/$defs/color" }
+            }
+          }
+        },
+        "tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["color", "surface", "text", "border", "intent", "chat", "code", "shadow"],
+          "properties": {
+            "color": { "$ref": "#/$defs/colorTokens" },
+            "surface": { "$ref": "#/$defs/surfaceTokens" },
+            "text": { "$ref": "#/$defs/textTokens" },
+            "border": { "$ref": "#/$defs/borderTokens" },
+            "intent": { "$ref": "#/$defs/intentTokens" },
+            "chat": { "$ref": "#/$defs/chatTokens" },
+            "code": { "$ref": "#/$defs/codeTokens" },
+            "shadow": { "$ref": "#/$defs/shadowTokens" },
+            "effects": { "$ref": "#/$defs/effectTokens" }
+          }
+        },
+        "backgrounds": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/background" }
+        },
+        "componentOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/tokenValue" }
+          }
+        },
+        "quality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["contrastPairs"],
+          "properties": {
+            "contrastPairs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["foreground", "background", "minimumRatio"],
+                "properties": {
+                  "foreground": { "type": "string" },
+                  "background": { "type": "string" },
+                  "minimumRatio": { "type": "number", "minimum": 1, "maximum": 21 },
+                  "surface": { "type": "string", "maxLength": 80 }
+                }
+              }
+            },
+            "reducedMotionSafe": { "type": "boolean", "default": true },
+            "notes": { "type": "string", "maxLength": 1000 }
+          }
+        }
+      }
+    },
+    "colorTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accentPrimary", "accentPrimaryHover", "accentPrimaryMuted"],
+      "properties": {
+        "accentPrimary": { "$ref": "#/$defs/color" },
+        "accentPrimaryHover": { "$ref": "#/$defs/color" },
+        "accentPrimaryMuted": { "$ref": "#/$defs/color" },
+        "selectionBackground": { "$ref": "#/$defs/color" },
+        "focusRing": { "$ref": "#/$defs/color" }
+      }
+    },
+    "surfaceTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "secondary", "tertiary", "elevated", "hover", "active"],
+      "properties": {
+        "primary": { "$ref": "#/$defs/color" },
+        "secondary": { "$ref": "#/$defs/color" },
+        "tertiary": { "$ref": "#/$defs/color" },
+        "elevated": { "$ref": "#/$defs/color" },
+        "hover": { "$ref": "#/$defs/color" },
+        "active": { "$ref": "#/$defs/color" }
+      }
+    },
+    "textTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "secondary", "tertiary", "inverse"],
+      "properties": {
+        "primary": { "$ref": "#/$defs/color" },
+        "secondary": { "$ref": "#/$defs/color" },
+        "tertiary": { "$ref": "#/$defs/color" },
+        "inverse": { "$ref": "#/$defs/color" },
+        "link": { "$ref": "#/$defs/color" }
+      }
+    },
+    "borderTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "secondary", "accent"],
+      "properties": {
+        "primary": { "$ref": "#/$defs/color" },
+        "secondary": { "$ref": "#/$defs/color" },
+        "accent": { "$ref": "#/$defs/color" },
+        "focus": { "$ref": "#/$defs/color" }
+      }
+    },
+    "intentTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["success", "successMuted", "warning", "warningMuted", "error", "errorMuted", "info", "infoMuted"],
+      "properties": {
+        "success": { "$ref": "#/$defs/color" },
+        "successMuted": { "$ref": "#/$defs/color" },
+        "warning": { "$ref": "#/$defs/color" },
+        "warningMuted": { "$ref": "#/$defs/color" },
+        "error": { "$ref": "#/$defs/color" },
+        "errorMuted": { "$ref": "#/$defs/color" },
+        "info": { "$ref": "#/$defs/color" },
+        "infoMuted": { "$ref": "#/$defs/color" }
+      }
+    },
+    "chatTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["userBubble", "userBubbleText", "assistantBubble", "assistantBubbleText"],
+      "properties": {
+        "userBubble": { "$ref": "#/$defs/color" },
+        "userBubbleText": { "$ref": "#/$defs/color" },
+        "assistantBubble": { "$ref": "#/$defs/color" },
+        "assistantBubbleText": { "$ref": "#/$defs/color" }
+      }
+    },
+    "codeTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["background", "border"],
+      "properties": {
+        "background": { "$ref": "#/$defs/color" },
+        "border": { "$ref": "#/$defs/color" },
+        "foreground": { "$ref": "#/$defs/color" },
+        "keyword": { "$ref": "#/$defs/color" },
+        "string": { "$ref": "#/$defs/color" },
+        "comment": { "$ref": "#/$defs/color" },
+        "diffAdded": { "$ref": "#/$defs/color" },
+        "diffRemoved": { "$ref": "#/$defs/color" }
+      }
+    },
+    "shadowTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sm", "md", "lg"],
+      "properties": {
+        "sm": { "$ref": "#/$defs/cssShadow" },
+        "md": { "$ref": "#/$defs/cssShadow" },
+        "lg": { "$ref": "#/$defs/cssShadow" }
+      }
+    },
+    "effectTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "material": {
+          "type": "string",
+          "enum": ["solid", "frosted-glass", "classic-bevel", "paper-grain", "crt", "blueprint-grid", "photo-lab", "custom"]
+        },
+        "backdropBlur": { "type": "number", "minimum": 0, "maximum": 60 },
+        "surfaceOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "borderStyle": {
+          "type": "string",
+          "enum": ["flat", "hairline", "beveled", "double", "inset", "glow"]
+        },
+        "borderContrast": { "type": "number", "minimum": 0, "maximum": 2 },
+        "glowOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "grainOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "scanlineOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "gridOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reducedTransparencyFallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["surfaceColor"],
+          "properties": {
+            "surfaceColor": { "$ref": "#/$defs/color" },
+            "borderColor": { "$ref": "#/$defs/color" },
+            "shadow": { "$ref": "#/$defs/cssShadow" }
+          }
+        }
+      }
+    },
+    "background": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "target", "fallbackColor"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "target": {
+          "type": "string",
+          "enum": ["app", "chat", "sidebar", "settings", "right-panel"]
+        },
+        "assetId": { "type": "string" },
+        "fallbackColor": { "$ref": "#/$defs/color" },
+        "fit": { "type": "string", "enum": ["cover", "contain", "tile", "stretch"], "default": "cover" },
+        "position": { "type": "string", "maxLength": 80 },
+        "focalPoint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "overlayColor": { "$ref": "#/$defs/color" },
+        "overlayOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "blur": { "type": "number", "minimum": 0, "maximum": 40 },
+        "saturation": { "type": "number", "minimum": 0, "maximum": 2 }
+      }
+    },
+    "tokenValue": {
+      "oneOf": [
+        { "$ref": "#/$defs/color" },
+        { "$ref": "#/$defs/cssShadow" },
+        { "type": "string", "minLength": 1, "maxLength": 500 },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    },
+    "color": {
+      "type": "string",
+      "pattern": "^(#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|rgba?\\([^\\n;]+\\)|hsla?\\([^\\n;]+\\)|var\\(--[a-zA-Z0-9_-]+\\))$"
+    },
+    "cssShadow": {
+      "type": "string",
+      "pattern": "^(none|(?:inset\\s+)?-?[0-9.]+px\\s+-?[0-9.]+px\\s+[0-9.]+px(?:\\s+[0-9.]+px)?\\s+(?:#[0-9a-fA-F]{3,8}|rgba?\\([^\\n;]+\\))(?:\\s*,\\s*(?:inset\\s+)?-?[0-9.]+px\\s+-?[0-9.]+px\\s+[0-9.]+px(?:\\s+[0-9.]+px)?\\s+(?:#[0-9a-fA-F]{3,8}|rgba?\\([^\\n;]+\\)))*)$"
+    }
+  }
+}
