@@ -604,9 +604,13 @@ app.put('/api/config', (req, res) => {
   if (updates.activeTheme !== undefined) appConfig.activeTheme = updates.activeTheme;
   if (updates.roleAssignments !== undefined) appConfig.roleAssignments = updates.roleAssignments;
   if (updates.favoriteModels !== undefined) {
-    appConfig.favoriteModels = Array.isArray(updates.favoriteModels)
-      ? [...new Set(updates.favoriteModels.filter((id: unknown) => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
+    const favoriteModels: string[] = Array.isArray(updates.favoriteModels)
+      ? updates.favoriteModels
+        .filter((id: unknown): id is string => typeof id === 'string')
+        .map((id: string) => id.trim())
+        .filter(Boolean)
       : [];
+    appConfig.favoriteModels = [...new Set(favoriteModels)];
   }
   if (updates.autoRouter !== undefined) {
     (appConfig as any).autoRouter = updates.autoRouter;

@@ -89,10 +89,13 @@ export function StatusBar({
   const [trustPickerOpen, setTrustPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [pickerPos, setPickerPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [trustPickerPos, setTrustPickerPos] = useState<{ left: number; bottom: number } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerPanelRef = useRef<HTMLDivElement>(null);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const trustRef = useRef<HTMLDivElement>(null);
+  const trustBtnRef = useRef<HTMLButtonElement>(null);
+  const trustPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!modelPickerOpen && !trustPickerOpen) return;
@@ -100,11 +103,13 @@ export function StatusBar({
       const target = e.target as Node;
       const clickedModelButton = modelBtnRef.current?.contains(target);
       const clickedModelPicker = pickerPanelRef.current?.contains(target);
+      const clickedTrustButton = trustBtnRef.current?.contains(target);
+      const clickedTrustPicker = trustPanelRef.current?.contains(target);
       if (modelPickerOpen && !clickedModelButton && !clickedModelPicker) {
         setModelPickerOpen(false);
         setSearchQuery('');
       }
-      if (trustPickerOpen && trustRef.current && !trustRef.current.contains(target)) {
+      if (trustPickerOpen && !clickedTrustButton && !clickedTrustPicker) {
         setTrustPickerOpen(false);
       }
     };
@@ -179,8 +184,20 @@ export function StatusBar({
       {/* Trust mode badge */}
       <div ref={trustRef} style={{ position: 'relative' }}>
         <button
+          ref={trustBtnRef}
           className="status-bar-item"
-          onClick={() => { setTrustPickerOpen(!trustPickerOpen); setModelPickerOpen(false); }}
+          onClick={() => {
+            const nextOpen = !trustPickerOpen;
+            setTrustPickerOpen(nextOpen);
+            setModelPickerOpen(false);
+            setSearchQuery('');
+            if (nextOpen && trustBtnRef.current) {
+              // Match the model picker: anchor above the status button in a
+              // portal so the menu stays above the chat input.
+              const rect = trustBtnRef.current.getBoundingClientRect();
+              setTrustPickerPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
+            }
+          }}
           style={{ cursor: 'pointer', gap: 4, display: 'flex', alignItems: 'center', background: 'none', border: 'none', color: 'inherit', fontSize: 'inherit', padding: 0 }}
         >
           <Shield size={12} style={{ color: trustColor }} />
@@ -190,11 +207,11 @@ export function StatusBar({
           )}
         </button>
 
-        {trustPickerOpen && (
-          <div style={{
-            position: 'absolute', bottom: '100%', left: 0, marginBottom: 4,
+        {trustPickerOpen && trustPickerPos && createPortal(
+          <div ref={trustPanelRef} style={{
+            position: 'fixed', left: trustPickerPos.left, bottom: trustPickerPos.bottom,
             background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
-            borderRadius: 6, padding: 4, minWidth: 200, zIndex: 1000,
+            borderRadius: 6, padding: 4, minWidth: 200, zIndex: 20001,
             boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
           }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', padding: '4px 8px', textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -220,7 +237,8 @@ export function StatusBar({
                 </div>
               </button>
             ))}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
 
