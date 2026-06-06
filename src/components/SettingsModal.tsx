@@ -2046,6 +2046,29 @@ function mergeRouterCandidates(
   return merged;
 }
 
+function routerCandidateSource(candidate: api.AutoRouterCandidateConfig, configured: api.AutoRouterCandidateConfig[]) {
+  const configuredMatch = configured.some((item) => normalizeModelKey(item.modelId) === normalizeModelKey(candidate.modelId));
+  if (configuredMatch) return { label: 'Configured', tone: 'ok', detail: 'Enabled provider model' };
+  if (findRouterModelCard(candidate.modelId, getProviderIdFromModelId(candidate.modelId))) {
+    return { label: 'Manual catalog', tone: 'catalog', detail: 'Manual entry matched to the model catalog' };
+  }
+  return { label: 'Manual custom', tone: 'custom', detail: 'Manual entry using custom metadata' };
+}
+
+function routerSourceBadgeStyle(tone: string): React.CSSProperties {
+  const base: React.CSSProperties = {
+    fontSize: 10,
+    lineHeight: 1,
+    padding: '3px 5px',
+    borderRadius: 4,
+    border: '1px solid var(--border-color, #d1d5db)',
+    whiteSpace: 'nowrap',
+  };
+  if (tone === 'ok') return { ...base, color: 'var(--success, #22c55e)', background: 'color-mix(in srgb, var(--success, #22c55e) 10%, transparent)' };
+  if (tone === 'catalog') return { ...base, color: 'var(--accent-color, #6366f1)', background: 'color-mix(in srgb, var(--accent-color, #6366f1) 10%, transparent)' };
+  return { ...base, color: 'var(--text-secondary)', background: 'var(--bg-primary, #fff)' };
+}
+
 function AutoRouterPane() {
   const [arEnabled, setArEnabled] = useState(false);
   const [arThreshold, setArThreshold] = useState(0.7);
@@ -2189,6 +2212,8 @@ function AutoRouterPane() {
   const configuredAvailable = configuredCandidates.filter((candidate) => (
     !arCandidates.some((existing) => normalizeModelKey(existing.modelId) === normalizeModelKey(candidate.modelId))
   ));
+  const selectedClassifierMissing = arClassifier && !arCandidates.some((candidate) => normalizeModelKey(candidate.modelId) === normalizeModelKey(arClassifier));
+  const selectedDefaultMissing = arDefaultModel && !arCandidates.some((candidate) => normalizeModelKey(candidate.modelId) === normalizeModelKey(arDefaultModel));
 
   return (
     <>
@@ -2205,14 +2230,14 @@ function AutoRouterPane() {
           {arEnabled && (
             <div className="settings-card" style={{ marginTop: 8, padding: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>Auto-Router Config</div>
-              <div className="settings-item" style={{ marginBottom: 8 }}>
+              <div className="settings-item" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
                 <div>
                   <div className="settings-item-label">Classifier Model</div>
-                  <div className="settings-item-desc">Fast low-cost model that scores candidate fit before cost and context gates are applied</div>
+                  <div className="settings-item-desc">Active candidate used to score task fit before cost and context gates are applied</div>
                 </div>
                 <select
                   value={arClassifier}
-                  style={{ width: 220, height: 30, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                  style={{ width: 260, height: 30, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
                   onChange={async (e) => {
                     const modelId = e.target.value;
                     setArClassifier(modelId);
@@ -2220,10 +2245,33 @@ function AutoRouterPane() {
                     setArClassifier(merged.classifierModel);
                   }}
                 >
-                  {configuredCandidates.length === 0 && arClassifier && (
+                  {selectedClassifierMissing && (
                     <option value={arClassifier}>{arClassifier}</option>
                   )}
-                  {configuredCandidates.map((candidate) => (
+                  {arCandidates.map((candidate) => (
+                    <option key={candidate.modelId} value={candidate.modelId}>{candidate.modelId}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-item" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
+                <div>
+                  <div className="settings-item-label">Default Model</div>
+                  <div className="settings-item-desc">Fallback candidate used when classification fails or no score clears the threshold</div>
+                </div>
+                <select
+                  value={arDefaultModel}
+                  style={{ width: 260, height: 30, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                  onChange={async (e) => {
+                    const modelId = e.target.value;
+                    setArDefaultModel(modelId);
+                    const merged = await persistRouterConfig({ defaultModel: modelId });
+                    setArDefaultModel(merged.defaultModel);
+                  }}
+                >
+                  {selectedDefaultMissing && (
+                    <option value={arDefaultModel}>{arDefaultModel}</option>
+                  )}
+                  {arCandidates.map((candidate) => (
                     <option key={candidate.modelId} value={candidate.modelId}>{candidate.modelId}</option>
                   ))}
                 </select>
@@ -2287,9 +2335,9 @@ function AutoRouterPane() {
                     className="settings-btn"
                     style={{ padding: '5px 9px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', cursor: 'pointer' }}
                     onClick={() => addConfiguredCandidate(candidate)}
-                    title={candidate.card}
+                    title={`Configured provider model. ${candidate.card}`}
                   >
-                    + {candidate.modelId}
+                    + Configured: {candidate.modelId}
                   </button>
                 ))}
               </div>
@@ -2306,8 +2354,12 @@ function AutoRouterPane() {
                   No candidates configured. Add at least one to enable routing.
                 </div>
               )}
-              {arCandidates.map((c, i) => (
-                <div key={c.modelId} style={{
+              {arCandidates.map((c, i) => {
+                const source = routerCandidateSource(c, configuredCandidates);
+                const isClassifier = normalizeModelKey(c.modelId) === normalizeModelKey(arClassifier);
+                const isDefault = normalizeModelKey(c.modelId) === normalizeModelKey(arDefaultModel);
+                return (
+                <div key={c.modelId} title={source.detail} style={{
                   display: 'grid',
                   gridTemplateColumns: 'minmax(0, 1fr) auto',
                   gap: 6,
@@ -2320,6 +2372,9 @@ function AutoRouterPane() {
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--text-primary)' }}>
                         {c.modelId}
                       </span>
+                      <span style={routerSourceBadgeStyle(source.tone)}>{source.label}</span>
+                      {isClassifier && <span style={routerSourceBadgeStyle('catalog')}>Classifier</span>}
+                      {isDefault && <span style={routerSourceBadgeStyle('custom')}>Default</span>}
                       {c.supportsImages && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Images</span>}
                       {c.supportsThinking && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Thinking</span>}
                     </div>
@@ -2383,7 +2438,8 @@ function AutoRouterPane() {
                     <Trash2 size={14} />
                   </button>
                 </div>
-              ))}
+                );
+              })}
 
               {/* Add candidate form */}
               <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border-color, #e5e7eb)', paddingTop: 8 }}>
