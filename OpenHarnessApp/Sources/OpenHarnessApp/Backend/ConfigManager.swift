@@ -91,6 +91,7 @@ class ConfigManager {
         self.configDir = home.appendingPathComponent(".openharness")
         self.configURL = configDir.appendingPathComponent("config.json")
         self.config = ConfigManager.loadConfig(from: configURL)
+        self.migrateStoredKeysFromConfig()
         self.migrateExistingConfigs()
     }
 
@@ -115,7 +116,7 @@ class ConfigManager {
                     "id": provider.id,
                     "name": provider.name,
                     "type": serverType(for: provider.type),
-                    "apiKey": provider.apiKey ?? "",
+                    "apiKey": "",
                     "baseURL": provider.baseURL ?? defaultBaseURL(for: provider.id, type: provider.type),
                     "models": existingProviders[provider.id]?["models"] ?? [],
                 ] as [String: Any]
@@ -133,8 +134,11 @@ class ConfigManager {
     func getAPIKey(for providerID: String) -> String? {
         // 1. Check Keychain
         if let key = getKeychain(providerID: providerID) { return key }
-        // 2. Check config file
-        if let key = config.providers[providerID]?.apiKey { return key }
+        // 2. Migrate legacy config-stored keys into Keychain
+        if let legacyKey = sanitizeStoredKey(config.providers[providerID]?.apiKey) {
+            setAPIKey(legacyKey, for: providerID)
+            return legacyKey
+        }
         // 3. Check environment variable
         let envMap: [String: String] = [
             "openai": "OPENAI_API_KEY",
@@ -154,9 +158,11 @@ class ConfigManager {
 
     func setAPIKey(_ key: String, for providerID: String) {
         setKeychain(providerID: providerID, key: key)
-        // Also update in-memory config
+        // Keep in-memory config metadata, but do not retain plaintext keys
         if config.providers[providerID] != nil {
-            config.providers[providerID]?.apiKey = key
+            var provider = config.providers[providerID]!
+            provider.apiKey = nil
+            config.providers[providerID] = provider
         }
         save()
     }
@@ -200,6 +206,18 @@ class ConfigManager {
 
     // MARK: - Migrate existing configs
 
+    private func migrateStoredKeysFromConfig() {
+        var changed = false
+        for (providerID, var provider) in config.providers {
+            guard let legacyKey = sanitizeStoredKey(provider.apiKey) else { continue }
+            setKeychain(providerID: providerID, key: legacyKey)
+            provider.apiKey = nil
+            config.providers[providerID] = provider
+            changed = true
+        }
+        if changed { save() }
+    }
+
     private func migrateExistingConfigs() {
         var changed = false
 
@@ -209,7 +227,7 @@ class ConfigManager {
            let mmx = try? JSONSerialization.jsonObject(with: mmxData) as? [String: Any],
            let mmxKey = mmx["api_key"] as? String {
             config.providers["minimax"] = ProviderConfig(id: "minimax", name: "MiniMax", type: .openai, apiKey: mmxKey)
-            setKeychain(providerID: "minimax", key: mmxKey)
+            setAPIKey(mmxKey, for: "minimax")
             changed = true
         }
 
@@ -217,6 +235,7 @@ class ConfigManager {
         if config.providers["openai"] == nil,
            let key = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] {
             config.providers["openai"] = ProviderConfig(id: "openai", name: "OpenAI", type: .openai, apiKey: key)
+            setAPIKey(key, for: "openai")
             changed = true
         }
 
@@ -224,10 +243,18 @@ class ConfigManager {
         if config.providers["anthropic"] == nil,
            let key = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] {
             config.providers["anthropic"] = ProviderConfig(id: "anthropic", name: "Anthropic", type: .anthropic, apiKey: key)
+            setAPIKey(key, for: "anthropic")
             changed = true
         }
 
         if changed { save() }
+    }
+
+    private func sanitizeStoredKey(_ key: String?) -> String? {
+        guard let key else { return nil }
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        return trimmed
     }
 
     private func existingConfigObject() -> [String: Any] {

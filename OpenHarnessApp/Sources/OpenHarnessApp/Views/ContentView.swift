@@ -60,7 +60,16 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if let url = navigationAction.request.url,
            navigationAction.targetFrame == nil {
+            if WebBridge.isTrustedBridgeOrigin(url) {
+                decisionHandler(.allow)
+                return
+            }
             NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+        if let url = navigationAction.request.url, !WebBridge.isTrustedBridgeOrigin(url) {
+            print("Blocked unexpected navigation to \(url.absoluteString)")
             decisionHandler(.cancel)
             return
         }

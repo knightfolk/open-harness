@@ -41,6 +41,7 @@ export interface ThemePluginImportResult {
   importedThemeIds: string[];
   errors: string[];
   warnings: string[];
+  persistedManifests: string[];
 }
 
 const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
@@ -866,17 +867,38 @@ const BUILTIN_THEME_REGISTRY: ThemeRegistry = (() => {
   return [...familyThemes, ...highContrastThemes];
 })();
 
+interface ImportedThemeRegistration {
+  theme: BuiltinTheme;
+  manifest: string;
+}
+
 const BUILTIN_THEMES_BY_ID = new Map(BUILTIN_THEME_REGISTRY.map((entry) => [entry.id, entry]));
-const pluginThemes: BuiltinTheme[] = [];
-const THEME_BY_ID = new Map<string, BuiltinTheme>(BUILTIN_THEME_REGISTRY.map((entry) => [entry.id, entry]));
+const pluginThemesById = new Map<string, ImportedThemeRegistration>();
+let THEME_BY_ID = new Map<string, BuiltinTheme>(BUILTIN_THEMES_BY_ID);
+
+function resetThemeRegistry(): void {
+  pluginThemesById.clear();
+  THEME_BY_ID = new Map(BUILTIN_THEMES_BY_ID);
+}
+
+function themeIdFromManifest(manifest: ThemePluginManifest, variant: ThemePluginManifest['variants'][number]): string {
+  return `${manifest.id}.${variant.id}`;
+}
+
+function createSingleVariantManifest(manifest: ThemePluginManifest, variant: ThemePluginManifest['variants'][number]): string {
+  return JSON.stringify({
+    ...manifest,
+    variants: [variant],
+  });
+}
 
 function getAllThemes(): BuiltinTheme[] {
-  return [...BUILTIN_THEME_REGISTRY, ...pluginThemes];
+  return [...BUILTIN_THEME_REGISTRY, ...Array.from(pluginThemesById.values()).map((entry) => entry.theme)];
 }
 
 function manifestVariantToBuiltinTheme(manifest: ThemePluginManifest, variant: ThemePluginManifest['variants'][number]): BuiltinTheme {
   return {
-    id: `${manifest.id}.${variant.id}`,
+    id: themeIdFromManifest(manifest, variant),
     label: variant.name,
     family: variant.family,
     group: variant.mode.startsWith('light') ? 'light' : 'dark',
@@ -891,27 +913,38 @@ function manifestVariantToBuiltinTheme(manifest: ThemePluginManifest, variant: T
   };
 }
 
-function registerThemePluginVariants(manifest: ThemePluginManifest): ThemePluginImportResult {
+function registerThemePluginVariants(
+  manifest: ThemePluginManifest,
+  persistManifests = false
+): ThemePluginImportResult {
   const importedThemeIds: string[] = [];
+  const persistedManifests: string[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
 
   for (const variant of manifest.variants) {
-    const themeId = `${manifest.id}.${variant.id}`;
-    if (THEME_BY_ID.has(themeId)) {
-      errors.push(`Theme "${themeId}" already exists and was skipped.`);
+    const theme = manifestVariantToBuiltinTheme(manifest, variant);
+    if (THEME_BY_ID.has(theme.id)) {
+      errors.push(`Theme "${theme.id}" already exists and was skipped.`);
       continue;
     }
 
-    const theme = manifestVariantToBuiltinTheme(manifest, variant);
-    pluginThemes.push(theme);
-    THEME_BY_ID.set(themeId, theme);
-    importedThemeIds.push(themeId);
+    THEME_BY_ID.set(theme.id, theme);
+    const singleVariantManifest = createSingleVariantManifest(manifest, variant);
+    pluginThemesById.set(theme.id, {
+      theme,
+      manifest: singleVariantManifest,
+    });
+    importedThemeIds.push(theme.id);
+    if (persistManifests) {
+      persistedManifests.push(singleVariantManifest);
+    }
   }
 
   return {
     ok: errors.length === 0 && importedThemeIds.length > 0,
     importedThemeIds,
+    persistedManifests,
     errors,
     warnings,
   };
@@ -935,11 +968,63 @@ export function importThemePluginFromJson(rawManifest: string): ThemePluginImpor
     return {
       ok: parseResult.ok,
       importedThemeIds: [],
+      persistedManifests: [],
       errors: parseResult.errors,
       warnings: parseResult.warnings,
     };
   }
-  return registerThemePluginVariants(parseResult.manifest);
+  return registerThemePluginVariants(parseResult.manifest, true);
+}
+
+export function hydrateInstalledThemePluginManifests(rawManifests: string[]): ThemePluginImportResult {
+  resetThemeRegistry();
+  if (!Array.isArray(rawManifests) || rawManifests.length === 0) {
+    return {
+      ok: true,
+      importedThemeIds: [],
+      persistedManifests: [],
+      errors: [],
+      warnings: [],
+    };
+  }
+
+  const importedThemeIds: string[] = [];
+  const persistedManifests: string[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const normalized = [...new Set(rawManifests.filter((entry) => typeof entry === 'string' && entry.trim().length > 0))];
+
+  for (const rawManifest of normalized) {
+    const parseResult = parseThemePluginManifest(rawManifest);
+    if (!parseResult.ok || !parseResult.manifest) {
+      errors.push(...parseResult.errors);
+      continue;
+    }
+    const importResult = registerThemePluginVariants(parseResult.manifest, true);
+    importedThemeIds.push(...importResult.importedThemeIds);
+    persistedManifests.push(...importResult.persistedManifests);
+    errors.push(...importResult.errors);
+    warnings.push(...parseResult.warnings, ...importResult.warnings);
+  }
+
+  return {
+    ok: errors.length === 0 && importedThemeIds.length > 0,
+    importedThemeIds,
+    persistedManifests: [...new Set(persistedManifests)],
+    errors,
+    warnings,
+  };
+}
+
+export function getInstalledThemePluginManifests(): string[] {
+  return Array.from(pluginThemesById.values()).map((entry) => entry.manifest);
+}
+
+export function removeImportedTheme(themeId: string): boolean {
+  const found = pluginThemesById.delete(themeId);
+  if (!found) return false;
+  THEME_BY_ID.delete(themeId);
+  return true;
 }
 
 export function resolveThemeId(themeId: string | undefined | null): string {

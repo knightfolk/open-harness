@@ -8,7 +8,13 @@ import { LayoutEngine } from './components/layout/LayoutEngine';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
 import * as api from './utils/api';
-import { applyTheme, resolveThemeId } from './theme/builtins';
+import {
+  applyTheme,
+  getInstalledThemePluginManifests,
+  hydrateInstalledThemePluginManifests,
+  removeImportedTheme,
+  resolveThemeId,
+} from './theme/builtins';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -151,6 +157,7 @@ function App() {
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [roleAssignments, setRoleAssignments] = useState<CodingRoleAssignment[]>(DEFAULT_ROLE_ASSIGNMENTS);
   const [activeTheme, setActiveTheme] = useState('midnight');
+  const [, setInstalledThemeManifests] = useState<string[]>([]);
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
@@ -279,6 +286,19 @@ function App() {
         if (config) {
           setConfigPath(config.configPath || '');
           setActiveModel(config.activeModel || 'Auto');
+          const hydrateResult = hydrateInstalledThemePluginManifests(Array.isArray(config.installedThemePluginManifests)
+            ? config.installedThemePluginManifests
+            : []);
+          const restoredThemeManifests = hydrateResult.persistedManifests;
+          setInstalledThemeManifests(restoredThemeManifests);
+          if (restoredThemeManifests.length > 0) {
+            const normalized = [...new Set(restoredThemeManifests.filter((entry) => typeof entry === 'string' && entry.length > 0))];
+            if (JSON.stringify(normalized) !== JSON.stringify(restoredThemeManifests) || !Array.isArray(config.installedThemePluginManifests)) {
+              api.updateConfig({ installedThemePluginManifests: normalized }).catch(() => {});
+            }
+          } else if ((config.installedThemePluginManifests || []).length > 0) {
+            api.updateConfig({ installedThemePluginManifests: [] }).catch(() => {});
+          }
           const resolvedTheme = resolveThemeId(config.activeTheme);
           setActiveTheme(resolvedTheme);
           applyTheme(resolvedTheme);
@@ -402,6 +422,26 @@ function App() {
     setActiveTheme(resolvedThemeId);
     api.updateConfig({ activeTheme: resolvedThemeId }).catch(() => {});
   }, []);
+
+  const handleThemePluginManifestsChange = useCallback((themeManifests: string[]) => {
+    const normalized = [...new Set(themeManifests
+      .filter((entry) => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0))];
+    setInstalledThemeManifests(normalized);
+    api.updateConfig({ installedThemePluginManifests: normalized }).catch(() => {});
+  }, []);
+
+  const handleRemoveTheme = useCallback((themeId: string) => {
+    const removed = removeImportedTheme(themeId);
+    if (!removed) return;
+    handleThemePluginManifestsChange(getInstalledThemePluginManifests());
+    if (activeTheme === themeId) {
+      const resolvedFallback = applyTheme(resolveThemeId('midnight'));
+      setActiveTheme(resolvedFallback);
+      api.updateConfig({ activeTheme: resolvedFallback }).catch(() => {});
+    }
+  }, [activeTheme, handleThemePluginManifestsChange]);
 
   const handlePersonalityChange = useCallback((text: string) => {
     setPersonalityText(text);
@@ -1294,6 +1334,8 @@ function App() {
         onToggleProviderModel={handleToggleProviderModel}
         onAssignRoleModel={handleAssignRoleModel}
         onSelectTheme={handleSelectTheme}
+        onThemePluginManifestsChange={handleThemePluginManifestsChange}
+        onRemoveTheme={handleRemoveTheme}
         onPersonalityChange={handlePersonalityChange}
         onRestartOnboarding={() => { setSettingsOpen(false); setShowOnboarding(true); }}
         onMcpStatusRefresh={refreshMcpStatus}

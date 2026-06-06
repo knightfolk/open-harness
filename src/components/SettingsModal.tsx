@@ -35,6 +35,7 @@ import {
   getThemeById,
   getThemesByMode,
   importThemePluginFromJson,
+  getInstalledThemePluginManifests,
   resolveThemeId,
 } from '../theme/builtins';
 
@@ -128,6 +129,8 @@ interface Props {
   onToggleProviderModel: (providerId: string, modelId: string) => void;
   onAssignRoleModel: (roleId: string, modelId: string) => void;
   onSelectTheme: (themeId: string) => void;
+  onThemePluginManifestsChange: (themeManifests: string[]) => void;
+  onRemoveTheme: (themeId: string) => void;
   onPersonalityChange: (text: string) => void;
   onRestartOnboarding: () => void;
   onMcpStatusRefresh: () => Promise<void>;
@@ -182,6 +185,7 @@ export function SettingsModal({
   onUpdateProvider,
   onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer,
   onSelectModel, onToggleProviderModel, onAssignRoleModel, onSelectTheme,
+  onThemePluginManifestsChange, onRemoveTheme,
   onPersonalityChange,
   onRestartOnboarding,
   onMcpStatusRefresh,
@@ -274,7 +278,14 @@ export function SettingsModal({
             {contentKey === 'mcp/add-mcp' && <AddMCPServerPane onAdd={onAddMCPServer} onDone={() => { setSelectedCat('mcp'); setSelectedSub('custom'); }} />}
             {contentKey === 'onboarding' && <OnboardingPane onRestartOnboarding={onRestartOnboarding} />}
             {contentKey === 'personality' && <PersonalityPane personalityText={personalityText} onChange={onPersonalityChange} />}
-            {contentKey === 'theme' && <ThemePane activeTheme={activeTheme} onSelectTheme={onSelectTheme} />}
+            {contentKey === 'theme' && (
+              <ThemePane
+                activeTheme={activeTheme}
+                onSelectTheme={onSelectTheme}
+                onThemePluginManifestsChange={onThemePluginManifestsChange}
+                onRemoveTheme={onRemoveTheme}
+              />
+            )}
             {contentKey === 'routing' && <RoutingLearningPane enabledModels={enabledModels} onApplyRoleRecommendation={onAssignRoleModel} />}
             {contentKey === 'auto-router' && <AutoRouterPane />}
             {contentKey === 'chat' && <ChatSettingsPane />}
@@ -1643,7 +1654,7 @@ function PersonalityPane({ personalityText, onChange }: any) {
 /*  THEME                                                              */
 /* ================================================================== */
 
-function ThemePane({ activeTheme, onSelectTheme }: any) {
+function ThemePane({ activeTheme, onSelectTheme, onThemePluginManifestsChange, onRemoveTheme }: any) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resolvedActiveTheme = resolveThemeId(activeTheme);
   const hasRepair = activeTheme !== resolvedActiveTheme;
@@ -1667,6 +1678,7 @@ function ThemePane({ activeTheme, onSelectTheme }: any) {
           details: importResult.errors.slice(1),
         });
       } else {
+        onThemePluginManifestsChange(getInstalledThemePluginManifests());
         const imported = importResult.importedThemeIds.length > 0
           ? importResult.importedThemeIds
             .map((id) => `${id} (${getThemeById(id)?.label || id})`)
@@ -1745,6 +1757,7 @@ function ThemePane({ activeTheme, onSelectTheme }: any) {
                     cursor: 'pointer',
                     padding: '10px 12px',
                     border: resolvedActiveTheme === t.id ? '2px solid var(--accent-primary)' : undefined,
+                    position: 'relative',
                   }}
                   onClick={() => onSelectTheme(t.id)}>
                   <div style={{ width: 24, height: 24, borderRadius: 6, background: t.color, flexShrink: 0 }} />
@@ -1752,6 +1765,25 @@ function ThemePane({ activeTheme, onSelectTheme }: any) {
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{t.label}</div>
                     {resolvedActiveTheme === t.id && <div style={{ fontSize: 10, color: 'var(--accent-primary)' }}>Active</div>}
                   </div>
+                  {!t.tags?.includes('builtin') && (
+                    <button
+                      className="settings-mini-button"
+                      title={`Remove ${t.label}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRemoveTheme(t.id);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        right: 8,
+                        top: 8,
+                        minWidth: 'auto',
+                        padding: '2px 6px',
+                      }}
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  )}
                 </button>
               ))}
             </div>

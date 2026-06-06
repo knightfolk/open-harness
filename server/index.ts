@@ -769,6 +769,14 @@ app.put('/api/config', (req, res) => {
   if (updates.trustMode !== undefined) appConfig.trustMode = updates.trustMode;
   if (updates.activeTheme !== undefined) appConfig.activeTheme = updates.activeTheme;
   if (updates.roleAssignments !== undefined) appConfig.roleAssignments = updates.roleAssignments;
+  if (updates.installedThemePluginManifests !== undefined) {
+    appConfig.installedThemePluginManifests = Array.isArray(updates.installedThemePluginManifests)
+      ? updates.installedThemePluginManifests
+        .filter((entry: unknown): entry is string => typeof entry === 'string')
+        .map((entry: string) => entry.trim())
+        .filter((entry: string) => entry.length > 0)
+      : [];
+  }
   if (updates.favoriteModels !== undefined) {
     const favoriteModels: string[] = Array.isArray(updates.favoriteModels)
       ? updates.favoriteModels

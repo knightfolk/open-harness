@@ -4,6 +4,37 @@ import WebKit
 class WebBridge: NSObject, WKScriptMessageHandler {
     static let shared = WebBridge()
     private var webView: WKWebView?
+    private var trustedWorkspaces: Set<String> = []
+    private let allowedActions: Set<String> = [
+        "sendMessage",
+        "listSessions",
+        "createSession",
+        "getSession",
+        "deleteSession",
+        "listDirectory",
+        "readFile",
+        "openFolder",
+        "getProviders",
+        "getModels",
+        "setModel",
+        "setProviderKey",
+    ]
+
+    static func isTrustedBridgeOrigin(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "file" {
+            let normalizedPath = URL(fileURLWithPath: url.path).standardized.path.lowercased()
+            let bundlePath = Bundle.main.bundlePath.lowercased()
+            return normalizedPath.hasPrefix(bundlePath + "/")
+                && (normalizedPath.contains("/openharnessapp_openharnessapp.bundle/resources/dist")
+                    || normalizedPath.contains("/resources/dist"))
+        }
+        if scheme == "http" || scheme == "https" {
+            let host = url.host?.lowercased()
+            return (host == "localhost" || host == "127.0.0.1") && (url.port == 5173 || url.port == nil)
+        }
+        return false
+    }
 
     func setWebView(_ webView: WKWebView) {
         self.webView = webView
@@ -12,9 +43,22 @@ class WebBridge: NSObject, WKScriptMessageHandler {
     // MARK: - Receiving messages from JS
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "nativeBridge",
-              let body = message.body as? [String: Any],
-              let action = body["action"] as? String else { return }
+        guard
+            message.name == "nativeBridge",
+            message.frameInfo.isMainFrame,
+            let messageURL = message.frameInfo.request.url,
+            WebBridge.isTrustedBridgeOrigin(messageURL),
+            let body = message.body as? [String: Any],
+            let action = body["action"] as? String,
+            allowedActions.contains(action)
+        else {
+            if let body = (message.body as? [String: Any]),
+               let payload = body["payload"] as? [String: Any],
+               let callbackID = payload["callbackId"] as? String {
+                reply(callbackID: callbackID, data: ["error": "Bridge access denied"])
+            }
+            return
+        }
 
         let payload = body["payload"] as? [String: Any] ?? [:]
         let callbackID = payload["callbackId"] as? String
@@ -34,8 +78,6 @@ class WebBridge: NSObject, WKScriptMessageHandler {
             handleListDirectory(payload, callbackID: callbackID)
         case "readFile":
             handleReadFile(payload, callbackID: callbackID)
-        case "execCommand":
-            handleExecCommand(payload, callbackID: callbackID)
         case "openFolder":
             handleOpenFolder(callbackID: callbackID)
         case "getProviders":
@@ -56,11 +98,12 @@ class WebBridge: NSObject, WKScriptMessageHandler {
     func sendEvent(_ event: String, data: [String: Any] = [:]) {
         let jsonData = try? JSONSerialization.data(withJSONObject: data)
         let jsonString = jsonData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let escapedEvent = jsonStringEscapedJSLiteral(event)
 
         DispatchQueue.main.async { [weak self] in
             self?.webView?.evaluateJavaScript("""
             if (window.__OPENHARNESS_EVENT) {
-                window.__OPENHARNESS_EVENT('\(event)', \(jsonString));
+                window.__OPENHARNESS_EVENT('\(escapedEvent)', \(jsonString));
             }
             """)
         }
@@ -72,14 +115,75 @@ class WebBridge: NSObject, WKScriptMessageHandler {
         guard let id = callbackID else { return }
         let jsonData = try? JSONSerialization.data(withJSONObject: data)
         let jsonString = jsonData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let escapedID = jsonStringEscapedJSLiteral(id)
 
         DispatchQueue.main.async { [weak self] in
             self?.webView?.evaluateJavaScript("""
             if (window.__OPENHARNESS_CALLBACK) {
-                window.__OPENHARNESS_CALLBACK('\(id)', \(jsonString));
+                window.__OPENHARNESS_CALLBACK('\(escapedID)', \(jsonString));
             }
             """)
         }
+    }
+
+    private func replyError(_ callbackID: String?, message: String) {
+        reply(callbackID: callbackID, data: ["error": message])
+    }
+
+    private func registerWorkspaceRoot(_ path: String) -> Bool {
+        let normalized = normalizedWorkspacePath(path)
+        guard let normalized else { return false }
+        trustedWorkspaces.insert(normalized)
+        return true
+    }
+
+    private func normalizedWorkspacePath(_ path: String) -> String? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let url = URL(fileURLWithPath: trimmed).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+        return url.path
+    }
+
+    private func normalizeCandidatePath(_ path: String) -> String? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(fileURLWithPath: trimmed).standardizedFileURL.path
+    }
+
+    private func ensurePathUnderAllowedWorkspace(_ path: String) -> String? {
+        guard let normalized = normalizeCandidatePath(path),
+              isPathAllowed(normalized) else { return nil }
+        return normalized
+    }
+
+    private func isPathAllowed(_ normalizedPath: String) -> Bool {
+        guard !trustedWorkspaces.isEmpty else { return false }
+        let needle = normalizedPath.lowercased()
+        return trustedWorkspaces.contains { root in
+            let candidate = root.lowercased()
+            return needle == candidate || needle.hasPrefix(candidate + "/")
+        }
+    }
+
+    private func resolveSessionWorkspacePath(from payload: [String: Any]) -> String? {
+        if let path = payload["path"] as? String {
+            return path
+        }
+        if let sessionId = payload["sessionId"] as? String,
+           let workingDir = BackendService.shared.getSession(id: sessionId)?.workingDir {
+            return workingDir
+        }
+        return nil
+    }
+
+    private func jsonStringEscapedJSLiteral(_ value: String) -> String {
+        return value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
     }
 
     // MARK: - Handlers
@@ -160,8 +264,24 @@ class WebBridge: NSObject, WKScriptMessageHandler {
 
     private func handleCreateSession(_ payload: [String: Any], callbackID: String?) {
         let title = payload["title"] as? String ?? "New Session"
-        let workingDir = payload["workingDir"] as? String
-        let session = BackendService.shared.createSession(title: title, workingDir: workingDir)
+        if let requestedDir = payload["workingDir"] as? String {
+            guard let normalizedDir = normalizedWorkspacePath(requestedDir) else {
+                replyError(callbackID, message: "Invalid workingDir")
+                return
+            }
+            _ = registerWorkspaceRoot(normalizedDir)
+            let session = BackendService.shared.createSession(title: title, workingDir: normalizedDir)
+            reply(callbackID: callbackID, data: [
+                "id": session.id,
+                "title": session.title,
+                "workingDir": session.workingDir as Any,
+                "messages": [],
+                "createdAt": ISO8601DateFormatter().string(from: session.createdAt),
+                "updatedAt": ISO8601DateFormatter().string(from: session.updatedAt),
+            ])
+            return
+        }
+        let session = BackendService.shared.createSession(title: title, workingDir: nil)
         reply(callbackID: callbackID, data: [
             "id": session.id,
             "title": session.title,
@@ -201,28 +321,23 @@ class WebBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func handleListDirectory(_ payload: [String: Any], callbackID: String?) {
-        guard let path = payload["path"] as? String else { return }
-        let entries = FileSystemService.listDirectory(path: path)
-        reply(callbackID: callbackID, data: ["path": path, "entries": entries])
+        guard let path = resolveSessionWorkspacePath(from: payload),
+              let allowedPath = ensurePathUnderAllowedWorkspace(path) else {
+            replyError(callbackID, message: "Path is not allowed")
+            return
+        }
+        let entries = FileSystemService.listDirectory(path: allowedPath)
+        reply(callbackID: callbackID, data: ["path": allowedPath, "entries": entries])
     }
 
     private func handleReadFile(_ payload: [String: Any], callbackID: String?) {
-        guard let path = payload["path"] as? String else { return }
-        let result = FileSystemService.readFile(path: path)
+        guard let path = resolveSessionWorkspacePath(from: payload),
+              let allowedPath = ensurePathUnderAllowedWorkspace(path) else {
+            replyError(callbackID, message: "Path is not allowed")
+            return
+        }
+        let result = FileSystemService.readFile(path: allowedPath)
         reply(callbackID: callbackID, data: result)
-    }
-
-    private func handleExecCommand(_ payload: [String: Any], callbackID: String?) {
-        guard let command = payload["command"] as? String else { return }
-        let cwd = payload["cwd"] as? String
-        let result = ProcessRunner.run(command: command, cwd: cwd)
-        reply(callbackID: callbackID, data: [
-            "command": command,
-            "output": result.output,
-            "exitCode": result.exitCode,
-            "duration": result.duration,
-            "cwd": result.cwd,
-        ])
     }
 
     private func handleOpenFolder(callbackID: String?) {
@@ -233,6 +348,7 @@ class WebBridge: NSObject, WKScriptMessageHandler {
         panel.prompt = "Open Folder"
 
         if panel.runModal() == .OK, let url = panel.url {
+            _ = registerWorkspaceRoot(url.path)
             reply(callbackID: callbackID, data: ["path": url.path])
         } else {
             reply(callbackID: callbackID, data: ["path": NSNull()])

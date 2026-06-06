@@ -96,6 +96,7 @@ export interface StoredConfig {
   personality: string;
   activeModel: string;
   activeTheme: string;
+  installedThemePluginManifests?: string[];
   favoriteModels?: string[];
   roleAssignments: Record<string, string>; // roleId -> modelId
   autoRouter?: AutoRouterConfig;
@@ -120,6 +121,7 @@ const DEFAULT_CONFIG: StoredConfig = {
   personality: '',
   activeModel: 'Auto',
   activeTheme: 'midnight',
+  installedThemePluginManifests: [],
   favoriteModels: [],
   trustMode: 'workspace-write',
   roleAssignments: {
@@ -173,12 +175,19 @@ export function loadConfig(): StoredConfig {
     const normalizedFavoriteModels = Array.isArray(parsed.favoriteModels)
       ? [...new Set(parsed.favoriteModels.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
       : [];
+    const normalizedThemeManifests = Array.isArray(parsed.installedThemePluginManifests)
+      ? [...new Set(parsed.installedThemePluginManifests
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0))]
+      : [];
     return {
       ...cloneDefaultConfig(),
       ...parsed,
       providers: normalizedProviders,
       mcpServers: parsed.mcpServers || [],
       favoriteModels: normalizedFavoriteModels,
+      installedThemePluginManifests: normalizedThemeManifests,
       trustMode: parsed.trustMode || DEFAULT_CONFIG.trustMode,
       roleAssignments: {
         ...DEFAULT_CONFIG.roleAssignments,

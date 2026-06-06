@@ -37,3 +37,4 @@ OpenHarnessApp/Sources/OpenHarnessApp/Resources/dist/
 test-fixtures/flappy-bird-eval/
 test-fixtures/prompt-injection-eval/
 .openharness-bench/
+test-results/
