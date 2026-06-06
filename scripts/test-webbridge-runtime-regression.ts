@@ -13,6 +13,10 @@ function assert(condition: boolean, name: string): void {
 function runChecks(): CheckResult[] {
   const bridgeSource = readFileSync('OpenHarnessApp/Sources/OpenHarnessApp/Bridge/WebBridge.swift', 'utf8');
   const contentSource = readFileSync('OpenHarnessApp/Sources/OpenHarnessApp/Views/ContentView.swift', 'utf8');
+  const diagnosticsSource = readFileSync(
+    'OpenHarnessApp/Sources/OpenHarnessApp/Diagnostics/WebBridgeRuntimeDiagnostics.swift',
+    'utf8',
+  );
 
   const checks: CheckResult[] = [];
 
@@ -46,10 +50,18 @@ function runChecks(): CheckResult[] {
   add(
     'runtime probe is debug-only and opt-in by environment variable or launch argument',
     /enum WebBridgeRuntimeProbe[\s\S]*#if DEBUG[\s\S]*OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE[\s\S]*--webbridge-runtime-probe[\s\S]*#else[\s\S]*return false[\s\S]*#endif/.test(
-      bridgeSource,
+      diagnosticsSource,
     ) &&
-      /guard WebBridgeRuntimeProbe\.isEnabled else \{ return \}/.test(bridgeSource) &&
-      /guard WebBridgeRuntimeProbe\.isEnabled else \{ return \}/.test(contentSource),
+      /guard WebBridgeRuntimeProbe\.isEnabled else \{ return \}/.test(diagnosticsSource) &&
+      /runNativeProbeIfEnabled\(webView\)/.test(contentSource),
+  );
+
+  add(
+    'runtime probe implementation is isolated from bridge and content view',
+    /extension WebViewCoordinator[\s\S]*func runNativeProbeIfEnabled/.test(diagnosticsSource) &&
+      /webbridge-native-probe-target\.html/.test(diagnosticsSource) &&
+      !/enum WebBridgeRuntimeProbe/.test(bridgeSource) &&
+      !/webbridge-native-probe-target\.html/.test(contentSource),
   );
 
   sectionContains(

@@ -1,50 +1,6 @@
 import Foundation
 import WebKit
 
-enum WebBridgeRuntimeProbe {
-    static var isEnabled: Bool {
-#if DEBUG
-        let environment = ProcessInfo.processInfo.environment
-        let arguments = ProcessInfo.processInfo.arguments
-        return environment["OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE"] == "1"
-            || arguments.contains("--webbridge-runtime-probe")
-#else
-        return false
-#endif
-    }
-}
-
-func webbridgeRuntimeTrace(_ message: String) {
-    guard WebBridgeRuntimeProbe.isEnabled else { return }
-
-    NSLog(message)
-    let line = "\(Date()) | \(message)\n"
-    fputs(line, stderr)
-    let traceURLs = [
-        URL(fileURLWithPath: "/tmp/webbridge-runtime-probe-trace.log"),
-        FileManager.default.temporaryDirectory.appendingPathComponent("webbridge-runtime-probe-trace.log"),
-        URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Logs/OpenHarness/webbridge-runtime-probe-trace.log"),
-    ]
-    if let data = line.data(using: .utf8) {
-        for traceURL in traceURLs {
-            try? FileManager.default.createDirectory(
-                at: traceURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            if FileManager.default.fileExists(atPath: traceURL.path) {
-                if let handle = try? FileHandle(forWritingTo: traceURL) {
-                    _ = try? handle.seekToEnd()
-                    try? handle.write(contentsOf: data)
-                    try? handle.close()
-                }
-            } else {
-                try? data.write(to: traceURL)
-            }
-        }
-    }
-}
-
 class WebBridge: NSObject, WKScriptMessageHandler {
     static let shared = WebBridge()
     private var webView: WKWebView?

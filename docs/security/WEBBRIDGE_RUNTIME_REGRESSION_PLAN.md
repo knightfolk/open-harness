@@ -26,6 +26,7 @@ This script validates the local WebBridge contract by checking the Swift source 
 - origin gate behavior in `WebBridge.isTrustedBridgeOrigin`
 - main-frame bridge gate in `userContentController(_:didReceive:)`
 - runtime probe debug-only opt-in gating via `OPENHARNESS_WEBBRIDGE_RUNTIME_PROBE=1` or `--webbridge-runtime-probe`
+- runtime probe implementation isolation in `Diagnostics/WebBridgeRuntimeDiagnostics.swift`
 - trusted action registration/dispatch for `createSession`, `listDirectory`, `readFile`
 - path allowlist checks for `createSession` (`workingDir` normalization + workspace registration)
 - path allowlist checks for `listDirectory`/`readFile`
@@ -62,4 +63,5 @@ Any drift against these behaviors means do not ship the runtime without investig
 
 - `OpenHarnessApp/Sources/OpenHarnessApp/Bridge/WebBridge.swift`
 - `OpenHarnessApp/Sources/OpenHarnessApp/Views/ContentView.swift`
+- `OpenHarnessApp/Sources/OpenHarnessApp/Diagnostics/WebBridgeRuntimeDiagnostics.swift`
 - `scripts/test-webbridge-runtime-regression.ts`
