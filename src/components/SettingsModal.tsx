@@ -2055,7 +2055,7 @@ function AutoRouterPane() {
   const [configuredCandidates, setConfiguredCandidates] = useState<api.AutoRouterCandidateConfig[]>([]);
   const [arSaving, setArSaving] = useState(false);
   const [newCandidate, setNewCandidate] = useState<api.AutoRouterCandidateConfig>({
-    modelId: '', cost: 0.5, supportsImages: false, card: ''
+    modelId: '', cost: 0.5, supportsImages: false, supportsThinking: false, card: ''
   });
 
   // Load router state and candidates on mount
@@ -2147,7 +2147,13 @@ function AutoRouterPane() {
     const updated = mergeRouterCandidates(arCandidates, [{ ...newCandidate, modelId: newCandidate.modelId.trim() }]);
     setArCandidates(updated);
     await persistRouterConfig({ candidates: updated });
-    setNewCandidate({ modelId: '', cost: 0.5, supportsImages: false, card: '' });
+    setNewCandidate({ modelId: '', cost: 0.5, supportsImages: false, supportsThinking: false, card: '' });
+  };
+
+  const updateCandidate = async (index: number, candidate: api.AutoRouterCandidateConfig) => {
+    const updated = arCandidates.map((item, itemIndex) => itemIndex === index ? candidate : item);
+    setArCandidates(updated);
+    await persistRouterConfig({ candidates: updated });
   };
 
   const removeCandidate = async (index: number) => {
@@ -2303,39 +2309,71 @@ function AutoRouterPane() {
               {arCandidates.map((c, i) => (
                 <div key={c.modelId} style={{
                   display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+                  gridTemplateColumns: 'minmax(0, 1fr) auto',
                   gap: 6,
                   padding: '7px 8px', marginBottom: 4,
                   borderRadius: 4, fontSize: 12,
                   background: 'var(--bg-secondary, #f3f4f6)',
                 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--text-primary)' }}>
                         {c.modelId}
                       </span>
                       {c.supportsImages && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Images</span>}
                       {c.supportsThinking && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Thinking</span>}
                     </div>
-                    <div style={{ color: 'var(--text-tertiary)', fontSize: 10, lineHeight: 1.35, marginTop: 2 }}>
-                      {c.card}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, max-content)) minmax(80px, 120px)', gap: 8, alignItems: 'center', marginTop: 6 }}>
+                      <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={c.supportsImages}
+                          style={{ accentColor: 'var(--accent-color, #6366f1)' }}
+                          onChange={(e) => updateCandidate(i, { ...c, supportsImages: e.target.checked })}
+                        />
+                        Images
+                      </label>
+                      <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!c.supportsThinking}
+                          style={{ accentColor: 'var(--accent-color, #6366f1)' }}
+                          onChange={(e) => updateCandidate(i, {
+                            ...c,
+                            supportsThinking: e.target.checked,
+                            card: routerCapabilityCard(c.card.replace(/\s*Native thinking:\s*(yes|no)\.\s*/i, ' ').trim(), e.target.checked),
+                          })}
+                        />
+                        Thinking
+                      </label>
+                      <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        Cost
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          max="10"
+                          value={c.cost}
+                          title="Effective routing cost"
+                          style={{ width: 58, height: 24, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                          onChange={(e) => updateCandidate(i, { ...c, cost: parseFloat(e.target.value) || 0 })}
+                        />
+                      </label>
                     </div>
+                    <textarea
+                      aria-label={`${c.modelId} capability card`}
+                      value={c.card}
+                      rows={2}
+                      style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, resize: 'vertical', minHeight: 44, fontSize: 11, lineHeight: 1.35, padding: '5px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                      onChange={(e) => {
+                        const next = [...arCandidates];
+                        next[i] = { ...c, card: e.target.value };
+                        setArCandidates(next);
+                      }}
+                      onBlur={(e) => updateCandidate(i, { ...c, card: e.target.value.trim() || fallbackRouterCard(c.modelId).card })}
+                      placeholder="Capability card for classifier routing"
+                    />
                   </div>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min="0"
-                    max="10"
-                    value={c.cost}
-                    title="Effective routing cost"
-                    style={{ width: 58, height: 26, alignSelf: 'center', fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
-                    onChange={async (e) => {
-                      const next = [...arCandidates];
-                      next[i] = { ...c, cost: parseFloat(e.target.value) || 0 };
-                      setArCandidates(next);
-                      await persistRouterConfig({ candidates: next });
-                    }}
-                  />
                   <button
                     className="settings-btn-icon"
                     style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 2, color: 'var(--text-danger, #ef4444)', lineHeight: 1, alignSelf: 'center' }}
@@ -2375,6 +2413,19 @@ function AutoRouterPane() {
                       onChange={(e) => setNewCandidate({ ...newCandidate, supportsImages: e.target.checked })}
                     />
                     Images
+                  </label>
+                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!newCandidate.supportsThinking}
+                      style={{ accentColor: 'var(--accent-color, #6366f1)' }}
+                      onChange={(e) => setNewCandidate({
+                        ...newCandidate,
+                        supportsThinking: e.target.checked,
+                        card: routerCapabilityCard(newCandidate.card.replace(/\s*Native thinking:\s*(yes|no)\.\s*/i, ' ').trim() || fallbackRouterCard(newCandidate.modelId).card, e.target.checked),
+                      })}
+                    />
+                    Thinking
                   </label>
                 </div>
                 <input
