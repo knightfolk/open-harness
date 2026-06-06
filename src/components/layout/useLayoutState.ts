@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
 import { DEFAULT_LAYOUT, ALL_PANELS } from '../../types/layout';
 
-const STORAGE_KEY = 'openharness-layout.v4';
+const STORAGE_KEY = 'openharness-layout.v5';
 const KNOWN_PANELS = new Set<string>(ALL_PANELS);
 
 /** Panels that prefer to split vertically (top/bottom) when added */

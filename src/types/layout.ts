@@ -18,7 +18,7 @@ export interface PanelConfig {
 
 export const DEFAULT_LAYOUT: LayoutNode = {
   direction: 'horizontal',
-  children: ['chat', 'browser'],
+  children: ['chat', 'sub-agents'],
 };
 
 export const ALL_PANELS: PanelId[] = ['chat', 'diffs', 'browser', 'terminal', 'sub-agents', 'files', 'model-lab', 'safety', 'patches'];

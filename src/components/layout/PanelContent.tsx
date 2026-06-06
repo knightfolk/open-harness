@@ -1,5 +1,6 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import type { PanelId } from '../../types/layout';
+import { LatestUpdatesPanel } from '../LatestUpdatesPanel';
 
 const SubAgentTracker = lazy(() => import('../SubAgentTracker').then((m) => ({ default: m.SubAgentTracker })));
 const ChatPanel = lazy(() => import('../ChatPanel').then((m) => ({ default: m.ChatPanel })));
@@ -10,6 +11,8 @@ const FilesPanel = lazy(() => import('../FilesPanel').then((m) => ({ default: m.
 const ModelLabPanel = lazy(() => import('../ModelLabPanel').then((m) => ({ default: m.ModelLabPanel })));
 const SafetyPanel = lazy(() => import('../SafetyPanel').then((m) => ({ default: m.SafetyPanel })));
 const PatchReviewPanel = lazy(() => import('../PatchReviewPanel').then((m) => ({ default: m.PatchReviewPanel })));
+
+const UPDATES_SEEN_KEY = 'openharness-updates-seen.2026-06-05-ui-milestones';
 
 interface Props {
   panelId: PanelId;
@@ -62,6 +65,23 @@ function PanelFallback() {
 }
 
 export function PanelContent({ panelId, context }: Props) {
+  const [updatesSeen, setUpdatesSeen] = useState(() => {
+    try {
+      return localStorage.getItem(UPDATES_SEEN_KEY) === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const workspaceActive = Boolean(context.workingDir) || context.subAgents.length > 0;
+
+  useEffect(() => {
+    if (updatesSeen || !workspaceActive) return;
+    try {
+      localStorage.setItem(UPDATES_SEEN_KEY, 'true');
+    } catch { /* ignore */ }
+    setUpdatesSeen(true);
+  }, [updatesSeen, workspaceActive]);
+
   const wrapped = (node: React.ReactNode) => (
     <Suspense fallback={<PanelFallback />}>{node}</Suspense>
   );
@@ -75,6 +95,9 @@ export function PanelContent({ panelId, context }: Props) {
     case 'terminal':
       return wrapped(<TerminalPanel workingDir={context.workingDir} onSendToChat={context.onSendToChat} />);
     case 'sub-agents':
+      if (!updatesSeen && !workspaceActive) {
+        return <LatestUpdatesPanel />;
+      }
       return wrapped(<SubAgentTracker agents={context.subAgents} focusedAgentId={context.focusedSubAgentId ?? null} />);
     case 'files':
       return wrapped(<FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />);

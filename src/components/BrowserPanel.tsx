@@ -1,46 +1,11 @@
 import { useState, useCallback } from 'react';
-import {
-  Activity,
-  Bot,
-  Globe,
-  PanelRight,
-  ShieldCheck,
-  Sparkles,
-} from 'lucide-react';
 import * as api from '../utils/api';
+import { LatestUpdatesPanel } from './LatestUpdatesPanel';
 
 interface Props {
   workingDir: string | null;
   onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
 }
-
-const recentUpdates = [
-  {
-    icon: PanelRight,
-    title: 'Browser opens beside chat',
-    body: 'The default workspace now starts with Chat and Browser in a right-side split.',
-  },
-  {
-    icon: Globe,
-    title: 'Read-only web access',
-    body: 'Main chat and sub-agents can share the safe web fetch fallback for current sources.',
-  },
-  {
-    icon: Activity,
-    title: 'Cleaner tool activity',
-    body: 'Side chat tool chatter is condensed into one changing activity line.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Sharper status strip',
-    body: 'The bottom bar now names the serving provider, workspace scope, and routing mode.',
-  },
-  {
-    icon: Bot,
-    title: 'Clicky controls',
-    body: 'The helper icon has settings-backed controls and stays out of the way when disabled.',
-  },
-];
 
 export function BrowserPanel({ onAskAboutScreenshot }: Props) {
   const [url, setUrl] = useState('localhost:5173');
@@ -194,28 +159,7 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
         )}
 
         {!preview && !loading && (
-          <div className="browser-updates">
-            <div className="browser-updates-kicker">
-              <Sparkles size={14} />
-              Latest patch notes
-            </div>
-            <h2>OpenHarness updates</h2>
-            <p>Recent additions in this build.</p>
-            <div className="browser-updates-grid">
-              {recentUpdates.map(({ icon: Icon, title, body }) => (
-                <div className="browser-update-card" key={title}>
-                  <Icon size={16} />
-                  <div>
-                    <strong>{title}</strong>
-                    <span>{body}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button className="browser-updates-preview" onClick={handlePreview}>
-              Preview localhost:5173
-            </button>
-          </div>
+          <LatestUpdatesPanel action={{ label: 'Preview localhost:5173', onClick: handlePreview }} />
         )}
       </div>
 
