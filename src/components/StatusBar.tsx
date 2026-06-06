@@ -8,6 +8,7 @@ import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 import { providerPlanLabel } from '../data/providerPlans';
 import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
+import { autoRouterDecisionLabel, candidateScoresUnavailableLabel, formatAutoRouterScoreList } from '../utils/autoRouterTrace';
 import type { HarnessRunStep, ThinkingEffort } from '../types';
 
 const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
@@ -72,24 +73,17 @@ const TRUST_COLORS: Record<string, string> = {
 
 const ALL_TRUST_MODES = ['chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local'];
 
-function formatRouterScoreList(scores?: Record<string, number>, limit = 5): string {
-  const entries = Object.entries(scores || {})
-    .filter(([, score]) => Number.isFinite(score))
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit);
-  if (entries.length === 0) return 'Candidate scores unavailable';
-  return entries.map(([model, score]) => `${model}: ${score.toFixed(2)}`).join('\n');
-}
-
 function autoRouterTitle(step?: Extract<HarnessRunStep, { type: 'auto_router' }> | null): string {
   if (!step) return 'Auto: route each request to the best configured candidate model.';
   const lines = [
     `Auto selected: ${step.modelId}`,
-    `${step.fallback ? 'Default fallback' : 'Classifier decision'}: ${step.reason}`,
+    `${autoRouterDecisionLabel({ fallback: step.fallback, cached: step.cached })}: ${step.reason}`,
     step.classifierModel ? `Classifier: ${step.classifierModel}` : 'Classifier: unavailable',
     step.cached ? 'Source: cached decision' : 'Source: fresh decision',
     'Top candidate scores:',
-    formatRouterScoreList(step.candidateScores),
+    Object.keys(step.candidateScores || {}).length > 0
+      ? formatAutoRouterScoreList(step.candidateScores)
+      : candidateScoresUnavailableLabel({ fallback: step.fallback }),
   ];
   return lines.join('\n');
 }

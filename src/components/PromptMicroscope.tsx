@@ -2,15 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Eye, EyeOff, ChevronDown, ChevronRight, AlertTriangle, Cpu, Wrench, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
 import type { HarnessRun, HarnessRunStep } from '../types';
 import * as api from '../utils/api';
+import { autoRouterDecisionLabel, autoRouterStepTraceText, candidateScoresUnavailableLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
 
 interface Props {
   runTrace: HarnessRun | undefined;
-}
-
-function sortedCandidateScores(scores?: Record<string, number>) {
-  return Object.entries(scores || {})
-    .filter(([, score]) => Number.isFinite(score))
-    .sort((a, b) => b[1] - a[1]);
 }
 
 export function PromptMicroscope({ runTrace }: Props) {
@@ -37,19 +32,10 @@ export function PromptMicroscope({ runTrace }: Props) {
           text: step.preview || (step.source === 'router' ? '(classifier rationale)' : '(provider thinking stream)'),
         });
       } else if (step.type === 'auto_router') {
-        const scores = sortedCandidateScores(step.candidateScores);
         out.push({
           id: `autorouter:${step.modelId}:${step.score}`,
-          label: `Auto-router ${step.fallback ? 'fallback' : 'decision'}`,
-          text: [
-            `Selected model: ${step.modelId}`,
-            `Score: ${step.score.toFixed(2)}`,
-            `Reason: ${step.reason}`,
-            `Classifier: ${step.classifierModel || 'unavailable'}`,
-            scores.length > 0
-              ? `Candidate scores:\n${scores.map(([model, score]) => `${model}: ${score.toFixed(2)}`).join('\n')}`
-              : 'Candidate scores: unavailable',
-          ].join('\n'),
+          label: `Auto-Router ${step.fallback ? 'fallback' : 'decision'}`,
+          text: autoRouterStepTraceText(step),
         });
       } else if (step.type === 'tool_call') {
         out.push({ id: `toolcall:${step.id}`, label: `Tool call: ${step.name}`, text: typeof step.input === 'string' ? step.input : JSON.stringify(step.input) });
@@ -146,7 +132,11 @@ export function PromptMicroscope({ runTrace }: Props) {
                   <span className="pm-value">{autoRouterStep.modelId}</span>
                 </div>
                 <div className="pm-row">
-                  <span className="pm-key">{autoRouterStep.fallback ? 'Fallback' : 'Decision'}</span>
+                  <span className="pm-key">Decision</span>
+                  <span className="pm-value">{autoRouterDecisionLabel({ fallback: autoRouterStep.fallback, cached: autoRouterStep.cached })}</span>
+                </div>
+                <div className="pm-row">
+                  <span className="pm-key">Reason</span>
                   <span className="pm-value">{autoRouterStep.reason}</span>
                 </div>
                 <div className="pm-row">
@@ -172,7 +162,7 @@ export function PromptMicroscope({ runTrace }: Props) {
                 ) : (
                   <div className="pm-row">
                     <span className="pm-key">Candidate scores</span>
-                    <span className="pm-value">Unavailable for this fallback</span>
+                    <span className="pm-value">{candidateScoresUnavailableLabel({ fallback: autoRouterStep.fallback })}</span>
                   </div>
                 )}
               </div>

@@ -1,6 +1,7 @@
 import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HarnessRunStep, SubAgent } from '../types';
+import { formatAutoRouterStepDetail, formatAutoRouterStepTitle } from '../utils/autoRouterTrace';
 
 interface Props {
   agents: SubAgent[];
@@ -98,7 +99,7 @@ function stepTitle(step: HarnessRunStep): string {
   switch (step.type) {
     case 'orchestration': return `Orchestration · ${step.label}`;
     case 'route': return `Route: ${step.role} → ${step.model}`;
-    case 'auto_router': return `Auto-router · ${step.modelId} (${step.score.toFixed(2)})`;
+    case 'auto_router': return formatAutoRouterStepTitle(step);
     case 'prompt_built': return `Prompt built · ${step.toolCount} tool${step.toolCount === 1 ? '' : 's'}`;
     case 'model_request': return `Model request · round ${step.round}`;
     case 'tool_call': return step.durationMs == null ? `Tool started · ${step.name}` : `Tool finished · ${step.name}`;
@@ -117,7 +118,7 @@ function stepDetail(step: HarnessRunStep): string | null {
   switch (step.type) {
     case 'orchestration': return step.detail || step.mode;
     case 'route': return step.reason || null;
-    case 'auto_router': return `${step.cached ? 'Cached decision' : 'Fresh decision'}${step.fallback ? ' · fallback' : ''}${step.classifierModel ? ` · classifier: ${step.classifierModel}` : ''}\n${step.reason}`;
+    case 'auto_router': return formatAutoRouterStepDetail(step);
     case 'prompt_built': return step.promptPreview;
     case 'model_request': return step.model;
     case 'tool_call': {

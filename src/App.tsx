@@ -16,6 +16,7 @@ import {
   removeImportedTheme,
   resolveThemeId,
 } from './theme/builtins';
+import { describeAutoRouterRunStep, latestAutoRouterStep } from './utils/autoRouterTrace';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -73,11 +74,7 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'orchestration': return `${step.label}: ${step.detail || step.mode}`;
     case 'route': return `Routed to ${step.role} using ${step.model}${step.reason ? ` (${step.reason})` : ''}`;
     case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
-    case 'auto_router': {
-      const scoreCount = Object.keys(step.candidateScores || {}).length;
-      const scoreText = scoreCount > 0 ? ` · ${scoreCount} candidate score${scoreCount === 1 ? '' : 's'}` : '';
-      return `Auto-router ${step.fallback ? 'fell back to' : 'picked'} ${step.modelId} (${step.score.toFixed(2)})${step.cached ? ' from cache' : ''}${scoreText}`;
-    }
+    case 'auto_router': return describeAutoRouterRunStep(step);
     case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
     case 'model_text': return `Received ${step.chars} characters from model`;
@@ -1406,17 +1403,6 @@ function mapApiMessage(m: api.MessageInfo): Message {
     })),
     runTrace: m.runTrace,
   };
-}
-
-function latestAutoRouterStep(messages: Message[]): Extract<HarnessRunStep, { type: 'auto_router' }> | null {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const steps = messages[i].runTrace?.steps || [];
-    for (let j = steps.length - 1; j >= 0; j -= 1) {
-      const step = steps[j];
-      if (step.type === 'auto_router') return step;
-    }
-  }
-  return null;
 }
 
 function applyLoadedMessages(

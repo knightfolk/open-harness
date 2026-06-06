@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { AlertTriangle, BarChart3, CheckCircle2, CircleHelp, Lightbulb, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import * as api from '../utils/api';
+import { candidateScoresUnavailableLabel, routingEventDecisionLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
 
 interface EnabledModelRef {
   id: string;
@@ -40,18 +41,6 @@ function eventStatus(event: api.RoutingEvent) {
   if (event.outcome === 'failure') return { label: 'Failed', icon: XCircle, tone: 'error' };
   if (event.outcome === 'ambiguous') return { label: 'Unclear', icon: CircleHelp, tone: 'muted' };
   return { label: 'Needs review', icon: CircleHelp, tone: 'warning' };
-}
-
-function sortedCandidateScores(scores?: Record<string, number>, limit = 4) {
-  return Object.entries(scores || {})
-    .filter(([, score]) => Number.isFinite(score))
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit);
-}
-
-function decisionKind(event: api.RoutingEvent): string {
-  if (event.wasFallback) return 'Default fallback';
-  return event.wasCached ? 'Cached classifier' : 'Classifier';
 }
 
 export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendation }: Props) {
@@ -322,7 +311,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             {events.slice(0, 12).map((event) => {
               const status = eventStatus(event);
               const Icon = status.icon;
-              const topScores = sortedCandidateScores(event.candidateScores);
+              const topScores = sortedCandidateScores(event.candidateScores, 4);
               return (
                 <div key={event.id} className="routing-event-row">
                   <div className={`routing-event-status ${status.tone}`}>
@@ -335,10 +324,10 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
                       {event.taskType || 'unknown'} / {event.role || 'unknown'} / {event.complexity || 'unknown'} / score {event.score.toFixed(2)}
                     </span>
                     <div className="routing-event-trace">
-                      <span>{decisionKind(event)}</span>
+                      <span>{routingEventDecisionLabel(event)}</span>
                       {event.classifierModel && <span>classifier: {event.classifierModel}</span>}
                       {event.wasCached && <span>cached</span>}
-                      {event.wasFallback && <span>fallback outcome</span>}
+                      {event.wasFallback && <span>fallback used</span>}
                     </div>
                     <div className="routing-score-chips">
                       {topScores.length > 0 ? (
@@ -348,7 +337,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
                           </span>
                         ))
                       ) : (
-                        <span className="muted">No candidate scores</span>
+                        <span className="muted">{candidateScoresUnavailableLabel({ fallback: event.wasFallback })}</span>
                       )}
                     </div>
                   </div>
