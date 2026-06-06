@@ -195,7 +195,9 @@ export function SettingsModal({
   if (!isOpen) return null;
 
   const enabledModels = providers.flatMap((p) =>
-    p.models.filter((m) => m.enabled).map((m) => ({ ...m, providerId: p.id, providerName: p.name }))
+    p.configured
+      ? p.models.filter((m) => m.enabled).map((m) => ({ ...m, providerId: p.id, providerName: p.name }))
+      : []
   );
 
   let contentKey = selectedCat;
@@ -487,7 +489,7 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
     ].join(' ').toLowerCase();
     const queryMatch = !query.trim() || haystack.includes(query.trim().toLowerCase());
     const categoryMatch = categoryFilter === 'all' || category === categoryFilter;
-    const accessMatch = !accessOnly || access.enabled.length > 0 || access.matches.length > 0 || access.providerAccess.length > 0;
+    const accessMatch = !accessOnly || access.enabled.length > 0;
     return queryMatch && categoryMatch && accessMatch;
   });
 
@@ -521,7 +523,7 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
         <button
           className={`settings-mini-button model-library-access-button ${accessOnly ? 'active' : ''}`}
           onClick={() => setAccessOnly((prev) => !prev)}
-          title="Show models available through configured providers or fetched model rows"
+          title="Show enabled models from configured providers"
         >
           {accessOnly ? <Check size={11} /> : <Bot size={11} />}
           My Models
@@ -530,7 +532,7 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
 
       <div className="model-library-summary">
         <div><strong>{TOP_MODEL_CATALOG.length}</strong> catalog cards</div>
-        <div><strong>{providers.flatMap((p) => p.models.filter((m) => m.enabled)).length}</strong> enabled provider models</div>
+        <div><strong>{providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length}</strong> enabled provider models</div>
         <div>Updated {MODEL_CATALOG_UPDATED_AT}</div>
       </div>
 

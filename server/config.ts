@@ -115,35 +115,21 @@ export function getConfigPath(): string {
 
 const DEFAULT_CONFIG: StoredConfig = {
   version: 1,
-  providers: [
-    {
-      id: 'minimax',
-      name: 'MiniMax',
-      type: 'openai-compatible',
-      apiKey: '',
-      baseURL: 'https://api.minimax.io/v1',
-      accessMode: 'subscription',
-      planId: 'token-plan-pro',
-      models: [
-        { id: 'MiniMax-M3', name: 'MiniMax M3', enabled: true },
-        { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', enabled: true },
-      ],
-    },
-  ],
+  providers: [],
   mcpServers: [],
   personality: '',
-  activeModel: 'MiniMax-M3',
+  activeModel: 'Auto',
   activeTheme: 'midnight',
   favoriteModels: [],
   trustMode: 'workspace-write',
   roleAssignments: {
-    coder: 'MiniMax-M3',         // Primary coding agent
-    reasoner: 'MiniMax-M3',      // Complex reasoning / planning
-    summarizer: 'MiniMax-M3',    // Text summarization
-    title: 'MiniMax-M3',         // Short title generation
-    planner: 'MiniMax-M3',       // Task decomposition
-    reviewer: 'MiniMax-M3',      // Code review
-    worker: 'MiniMax-M3',        // Fast parallel tasks
+    coder: 'Auto',         // Primary coding agent
+    reasoner: 'Auto',      // Complex reasoning / planning
+    summarizer: 'Auto',    // Text summarization
+    title: 'Auto',         // Short title generation
+    planner: 'Auto',       // Task decomposition
+    reviewer: 'Auto',      // Code review
+    worker: 'Auto',        // Fast parallel tasks
   },
   contextConfig: {
     repoMapBudget: 2000,
@@ -166,7 +152,11 @@ export function loadConfig(): StoredConfig {
       const mmxKey = tryReadMmxKey();
       const config = cloneDefaultConfig();
       if (mmxKey) {
-        config.providers[0].apiKey = mmxKey;
+        config.providers.push(createMiniMaxProvider(mmxKey));
+        config.activeModel = 'MiniMax-M3';
+        config.roleAssignments = Object.fromEntries(
+          Object.keys(config.roleAssignments).map((role) => [role, 'MiniMax-M3'])
+        );
       }
       saveConfig(config);
       return config;
@@ -254,6 +244,22 @@ function tryReadMmxKey(): string {
   } catch {
     return '';
   }
+}
+
+function createMiniMaxProvider(apiKey: string): StoredProvider {
+  return {
+    id: 'minimax',
+    name: 'MiniMax',
+    type: 'openai-compatible',
+    apiKey,
+    baseURL: 'https://api.minimax.io/v1',
+    accessMode: 'subscription',
+    planId: 'token-plan-pro',
+    models: [
+      { id: 'MiniMax-M3', name: 'MiniMax M3', enabled: true },
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', enabled: true },
+    ],
+  };
 }
 
 function migrateLegacyConfigDir(): void {
