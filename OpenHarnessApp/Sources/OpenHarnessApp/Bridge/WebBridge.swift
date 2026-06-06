@@ -58,10 +58,10 @@ class WebBridge: NSObject, WKScriptMessageHandler {
                let action = body["action"] as? String {
                 if let payload = body["payload"] as? [String: Any],
                    let callbackID = payload["callbackId"] as? String {
-                    webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS untrusted-origin bridge callback error action=\(action) callbackId=\(callbackID) url=\(messageURL.absoluteString)")
+                    WebBridgeRuntimeDiagnostics.deniedUntrustedBridgeMessage(action: action, callbackID: callbackID, url: messageURL)
                     reply(callbackID: callbackID, data: ["error": "Bridge access denied"])
                 } else {
-                    webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS untrusted-origin bridge no-callback case action=\(action) url=\(messageURL.absoluteString)")
+                    WebBridgeRuntimeDiagnostics.deniedUntrustedBridgeMessage(action: action, callbackID: nil, url: messageURL)
                 }
                 return
             }

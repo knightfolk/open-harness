@@ -14,32 +14,122 @@ enum WebBridgeRuntimeProbe {
     }
 }
 
-func webbridgeRuntimeTrace(_ message: String) {
-    guard WebBridgeRuntimeProbe.isEnabled else { return }
+enum WebBridgeRuntimeDiagnostics {
+    static func appStructInitialized() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS app struct init marker")
+    }
 
-    NSLog(message)
-    let line = "\(Date()) | \(message)\n"
-    fputs(line, stderr)
-    let traceURLs = [
-        URL(fileURLWithPath: "/tmp/webbridge-runtime-probe-trace.log"),
-        FileManager.default.temporaryDirectory.appendingPathComponent("webbridge-runtime-probe-trace.log"),
-        URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Logs/OpenHarness/webbridge-runtime-probe-trace.log"),
-    ]
-    if let data = line.data(using: .utf8) {
-        for traceURL in traceURLs {
-            try? FileManager.default.createDirectory(
-                at: traceURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            if FileManager.default.fileExists(atPath: traceURL.path) {
-                if let handle = try? FileHandle(forWritingTo: traceURL) {
-                    _ = try? handle.seekToEnd()
-                    try? handle.write(contentsOf: data)
-                    try? handle.close()
+    static func appLaunched() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS app launch marker")
+    }
+
+    static func webViewCreated() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS makeNSView lifecycle marker")
+    }
+
+    static func webViewLoaderReturned() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS WebViewLoader.load returned")
+    }
+
+    static func allowedAboutBlankBootstrapNavigation() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS allowed about:blank bootstrap navigation")
+    }
+
+    static func blockedUntrustedTargetFrameNavigation(to url: URL) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS blocked untrusted target-frame navigation to \(url.absoluteString)")
+    }
+
+    static func blockedUntrustedInFrameNavigation(to url: URL) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS blocked untrusted in-frame navigation to \(url.absoluteString)")
+    }
+
+    static func navigationFailed(_ error: Error) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: FAIL navigation failed: \(error.localizedDescription)")
+    }
+
+    static func provisionalNavigationFailed(_ error: Error) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: FAIL provisional navigation failed: \(error.localizedDescription)")
+    }
+
+    static func navigationFinished(urlDescription: String) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS didFinish navigation url=\(urlDescription)")
+    }
+
+    static func deniedUntrustedBridgeMessage(action: String, callbackID: String?, url: URL) {
+        if let callbackID {
+            trace("WEBBRIDGE_RUNTIME_PROBE: PASS untrusted-origin bridge callback error action=\(action) callbackId=\(callbackID) url=\(url.absoluteString)")
+        } else {
+            trace("WEBBRIDGE_RUNTIME_PROBE: PASS untrusted-origin bridge no-callback case action=\(action) url=\(url.absoluteString)")
+        }
+    }
+
+    static func noExecutablePathForWebViewLoad() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: FAIL no executable path; falling back to dev server")
+    }
+
+    static func foundBundledDist(at path: String) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS found bundled dist at \(path)")
+    }
+
+    static func couldNotReadBundledIndex(at path: String) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: FAIL could not read bundled index.html at \(path)")
+    }
+
+    static func requestedBundledInlineHTMLLoad() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS requested bundled inline HTML load")
+    }
+
+    static func noBundledDistFound() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS no bundled dist found; loading dev server")
+    }
+
+    static func requestedDevUILoad(_ url: URL) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS requested dev UI load \(url.absoluteString)")
+    }
+
+    static func wroteNativeProbeFixtures() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS wrote native probe fixtures under /tmp")
+    }
+
+    static func failedToWriteNativeProbeFixtures(_ error: Error) {
+        trace("WEBBRIDGE_RUNTIME_PROBE: FAIL writing probe fixtures: \(error.localizedDescription)")
+    }
+
+    static func requestedHiddenTrustedNavigationProbe() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: PASS requested hidden trusted navigation probe")
+    }
+
+    static func couldNotFindTrustedBundleDistURLForNavigationProbe() {
+        trace("WEBBRIDGE_RUNTIME_PROBE: FAIL could not find trusted bundle dist URL for navigation probe")
+    }
+
+    private static func trace(_ message: String) {
+        guard WebBridgeRuntimeProbe.isEnabled else { return }
+
+        NSLog(message)
+        let line = "\(Date()) | \(message)\n"
+        fputs(line, stderr)
+        let traceURLs = [
+            URL(fileURLWithPath: "/tmp/webbridge-runtime-probe-trace.log"),
+            FileManager.default.temporaryDirectory.appendingPathComponent("webbridge-runtime-probe-trace.log"),
+            URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Library/Logs/OpenHarness/webbridge-runtime-probe-trace.log"),
+        ]
+        if let data = line.data(using: .utf8) {
+            for traceURL in traceURLs {
+                try? FileManager.default.createDirectory(
+                    at: traceURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                if FileManager.default.fileExists(atPath: traceURL.path) {
+                    if let handle = try? FileHandle(forWritingTo: traceURL) {
+                        _ = try? handle.seekToEnd()
+                        try? handle.write(contentsOf: data)
+                        try? handle.close()
+                    }
+                } else {
+                    try? data.write(to: traceURL)
                 }
-            } else {
-                try? data.write(to: traceURL)
             }
         }
     }
@@ -104,9 +194,9 @@ extension WebViewCoordinator {
         do {
             try probeHTML.write(to: probePath, atomically: true, encoding: .utf8)
             try targetHTML.write(to: targetPath, atomically: true, encoding: .utf8)
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS wrote native probe fixtures under /tmp")
+            WebBridgeRuntimeDiagnostics.wroteNativeProbeFixtures()
         } catch {
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: FAIL writing probe fixtures: \(error.localizedDescription)")
+            WebBridgeRuntimeDiagnostics.failedToWriteNativeProbeFixtures(error)
             return
         }
 
@@ -148,9 +238,9 @@ extension WebViewCoordinator {
             </body>
             </html>
             """, baseURL: trustedBaseURL)
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS requested hidden trusted navigation probe")
+            WebBridgeRuntimeDiagnostics.requestedHiddenTrustedNavigationProbe()
         } else {
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: FAIL could not find trusted bundle dist URL for navigation probe")
+            WebBridgeRuntimeDiagnostics.couldNotFindTrustedBundleDistURLForNavigationProbe()
         }
     }
 }

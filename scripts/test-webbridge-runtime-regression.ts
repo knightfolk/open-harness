@@ -13,6 +13,7 @@ function assert(condition: boolean, name: string): void {
 function runChecks(): CheckResult[] {
   const bridgeSource = readFileSync('OpenHarnessApp/Sources/OpenHarnessApp/Bridge/WebBridge.swift', 'utf8');
   const contentSource = readFileSync('OpenHarnessApp/Sources/OpenHarnessApp/Views/ContentView.swift', 'utf8');
+  const appSource = readFileSync('OpenHarnessApp/Sources/OpenHarnessApp/App.swift', 'utf8');
   const diagnosticsSource = readFileSync(
     'OpenHarnessApp/Sources/OpenHarnessApp/Diagnostics/WebBridgeRuntimeDiagnostics.swift',
     'utf8',
@@ -62,6 +63,16 @@ function runChecks(): CheckResult[] {
       /webbridge-native-probe-target\.html/.test(diagnosticsSource) &&
       !/enum WebBridgeRuntimeProbe/.test(bridgeSource) &&
       !/webbridge-native-probe-target\.html/.test(contentSource),
+  );
+
+  add(
+    'runtime trace call sites use diagnostics helpers',
+    /enum WebBridgeRuntimeDiagnostics[\s\S]*private static func trace/.test(diagnosticsSource) &&
+      !/webbridgeRuntimeTrace/.test(appSource + bridgeSource + contentSource + diagnosticsSource) &&
+      !/WEBBRIDGE_RUNTIME_PROBE/.test(appSource + bridgeSource + contentSource) &&
+      /WebBridgeRuntimeDiagnostics\.appStructInitialized\(\)/.test(appSource) &&
+      /WebBridgeRuntimeDiagnostics\.deniedUntrustedBridgeMessage/.test(bridgeSource) &&
+      /WebBridgeRuntimeDiagnostics\.webViewCreated\(\)/.test(contentSource),
   );
 
   sectionContains(

@@ -6,7 +6,7 @@ struct OpenHarnessApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS app struct init marker")
+        WebBridgeRuntimeDiagnostics.appStructInitialized()
     }
 
     var body: some Scene {
@@ -43,7 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         backend.initialize()
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS app launch marker")
+        WebBridgeRuntimeDiagnostics.appLaunched()
 
         // Activate and bring window to front
         if let app = NSApp {

@@ -11,7 +11,7 @@ struct ContentView: View {
 
 struct WebViewRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS makeNSView lifecycle marker")
+        WebBridgeRuntimeDiagnostics.webViewCreated()
 
         let config = WKWebViewConfiguration()
         config.preferences = WKPreferences()
@@ -45,7 +45,7 @@ struct WebViewRepresentable: NSViewRepresentable {
 
         // Load the UI now (WebViewLoader handles bundled dist vs dev fallback)
         WebViewLoader.load(webView: webView)
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS WebViewLoader.load returned")
+        WebBridgeRuntimeDiagnostics.webViewLoaderReturned()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             context.coordinator.runNativeProbeIfEnabled(webView)
@@ -70,7 +70,7 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if navigationAction.request.url?.absoluteString == "about:blank" {
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS allowed about:blank bootstrap navigation")
+            WebBridgeRuntimeDiagnostics.allowedAboutBlankBootstrapNavigation()
             decisionHandler(.allow)
             return
         }
@@ -81,13 +81,13 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
                 decisionHandler(.allow)
                 return
             }
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS blocked untrusted target-frame navigation to \(url.absoluteString)")
+            WebBridgeRuntimeDiagnostics.blockedUntrustedTargetFrameNavigation(to: url)
             NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
             return
         }
         if let url = navigationAction.request.url, !WebBridge.isTrustedBridgeOrigin(url) {
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS blocked untrusted in-frame navigation to \(url.absoluteString)")
+            WebBridgeRuntimeDiagnostics.blockedUntrustedInFrameNavigation(to: url)
             decisionHandler(.cancel)
             return
         }
@@ -96,17 +96,17 @@ class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         print("WebView navigation failed: \(error.localizedDescription)")
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: FAIL navigation failed: \(error.localizedDescription)")
+        WebBridgeRuntimeDiagnostics.navigationFailed(error)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation: WKNavigation!, withError error: Error) {
         print("WebView provisional navigation failed: \(error.localizedDescription)")
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: FAIL provisional navigation failed: \(error.localizedDescription)")
+        WebBridgeRuntimeDiagnostics.provisionalNavigationFailed(error)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("WebView finished loading: \(webView.url?.absoluteString ?? "nil")")
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS didFinish navigation url=\(webView.url?.absoluteString ?? "nil")")
+        WebBridgeRuntimeDiagnostics.navigationFinished(urlDescription: webView.url?.absoluteString ?? "nil")
 
         // Check if React actually mounted
         webView.evaluateJavaScript("document.getElementById('root').innerHTML.length") { result, error in
@@ -170,7 +170,7 @@ class WebViewLoader {
         // Try loading bundled React app via inline HTML (avoids ES module CORS issues with file://)
         guard let exePath = Bundle.main.executablePath else {
             print("No executable path — falling back to dev server")
-            webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: FAIL no executable path; falling back to dev server")
+            WebBridgeRuntimeDiagnostics.noExecutablePathForWebViewLoad()
             _loadDev(webView)
             return
         }
@@ -187,11 +187,11 @@ class WebViewLoader {
             let jsDir = base.appendingPathComponent("dist/assets")
 
             if FileManager.default.fileExists(atPath: htmlURL.path) {
-                webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS found bundled dist at \(htmlURL.path)")
+                WebBridgeRuntimeDiagnostics.foundBundledDist(at: htmlURL.path)
                 // Read the JS files and inject them inline to bypass file:// CORS
                 guard let htmlContent = try? String(contentsOf: htmlURL, encoding: .utf8) else {
                     print("Could not read index.html")
-                    webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: FAIL could not read bundled index.html at \(htmlURL.path)")
+                    WebBridgeRuntimeDiagnostics.couldNotReadBundledIndex(at: htmlURL.path)
                     _loadDev(webView)
                     return
                 }
@@ -235,21 +235,21 @@ class WebViewLoader {
 
                 // Load with base URL so CSS relative paths resolve
                 webView.loadHTMLString(inlinedHTML, baseURL: base.appendingPathComponent("dist"))
-                webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS requested bundled inline HTML load")
+                WebBridgeRuntimeDiagnostics.requestedBundledInlineHTMLLoad()
                 print("Loaded inlined React UI from bundle")
                 return
             }
         }
 
         // No bundled dist found — use dev server
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS no bundled dist found; loading dev server")
+        WebBridgeRuntimeDiagnostics.noBundledDistFound()
         _loadDev(webView)
     }
 
     static func _loadDev(_ webView: WKWebView) {
         let devURL = URL(string: "http://localhost:5173")!
         print("Loading dev UI from: \(devURL.absoluteString)")
-        webbridgeRuntimeTrace("WEBBRIDGE_RUNTIME_PROBE: PASS requested dev UI load \(devURL.absoluteString)")
+        WebBridgeRuntimeDiagnostics.requestedDevUILoad(devURL)
         webView.load(URLRequest(url: devURL))
     }
 }
