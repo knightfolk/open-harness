@@ -129,6 +129,8 @@ function App() {
       type: 'openai-compatible' as const,
       endpointLabel: 'api.minimax.io/v1',
       configured: true,
+      accessMode: 'subscription',
+      planId: 'token-plan-pro',
       models: [
         { id: 'MiniMax-M3', name: 'MiniMax M3', enabled: true },
         { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', enabled: true },
@@ -274,6 +276,8 @@ function App() {
               type: p.type || 'openai-compatible',
               endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
               configured: !!p.hasKey || p.type === 'local',
+              accessMode: p.accessMode,
+              planId: p.planId,
               models: p.models || [],
             })));
           }
@@ -340,7 +344,7 @@ function App() {
     });
   }, []);
 
-  const handleUpdateProvider = useCallback(async (providerId: string, updates: { apiKey?: string; baseURL?: string; type?: string; models?: any[] }) => {
+  const handleUpdateProvider = useCallback(async (providerId: string, updates: { apiKey?: string; baseURL?: string; type?: string; accessMode?: 'api-key' | 'subscription'; planId?: string; models?: any[] }) => {
     await api.updateProvider(providerId, updates as any);
     const fresh = await api.getProviders();
     setProviders(fresh.map((p: any) => ({
@@ -349,6 +353,8 @@ function App() {
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
       configured: !!p.hasKey || p.type === 'local',
+      accessMode: p.accessMode,
+      planId: p.planId,
       models: p.models || [],
     })));
   }, []);
@@ -375,7 +381,7 @@ function App() {
   }, []);
 
   // ── Provider management handlers ─────────────────────
-  const handleAddProvider = useCallback(async (provider: { name: string; type: string; apiKey: string; baseURL: string }) => {
+  const handleAddProvider = useCallback(async (provider: { name: string; type: string; apiKey: string; baseURL: string; accessMode?: 'api-key' | 'subscription'; planId?: string }) => {
     const result = await api.addProvider(provider);
     // Re-fetch providers from server
     const fresh = await api.getProviders();
@@ -385,6 +391,8 @@ function App() {
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
       configured: !!p.hasKey || p.type === 'local',
+      accessMode: p.accessMode,
+      planId: p.planId,
       models: p.models || [],
     })));
     return result;
@@ -404,6 +412,8 @@ function App() {
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
       configured: !!p.hasKey || p.type === 'local',
+      accessMode: p.accessMode,
+      planId: p.planId,
       models: p.models || [],
     })));
     return models;
@@ -418,6 +428,8 @@ function App() {
         type: p.type || 'openai-compatible',
         endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
         configured: !!p.hasKey || p.type === 'local',
+        accessMode: p.accessMode,
+        planId: p.planId,
         models: p.models || [],
       })));
     }).catch(() => {});
@@ -1144,6 +1156,8 @@ function App() {
                 type: p.type || 'openai-compatible',
                 endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
                 configured: !!p.hasKey || p.type === 'local',
+                accessMode: p.accessMode,
+                planId: p.planId,
                 models: p.models || [],
               })));
               const models = await api.getModels();

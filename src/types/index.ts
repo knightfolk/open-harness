@@ -95,6 +95,8 @@ export interface ProviderConfig {
   type: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom';
   endpointLabel: string;
   configured: boolean;
+  accessMode?: 'api-key' | 'subscription';
+  planId?: string;
   models: ProviderModel[];
 }
 

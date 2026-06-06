@@ -258,6 +258,8 @@ export interface ProviderInfo {
   apiKey: string;
   hasKey?: boolean;
   baseURL: string;
+  accessMode?: 'api-key' | 'subscription';
+  planId?: string;
   models: ProviderModelInfo[];
 }
 
@@ -303,7 +305,7 @@ export async function discoverLocalProviders(): Promise<LocalProviderDiscovery[]
   return [];
 }
 
-export async function addProvider(provider: { id?: string; name: string; type: string; apiKey: string; baseURL: string; models?: ProviderModelInfo[] }): Promise<ProviderInfo> {
+export async function addProvider(provider: { id?: string; name: string; type: string; apiKey: string; baseURL: string; accessMode?: 'api-key' | 'subscription'; planId?: string; models?: ProviderModelInfo[] }): Promise<ProviderInfo> {
   const res = await fetch(`${API_BASE}/api/providers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -518,7 +520,7 @@ async function responseErrorMessage(res: Response, fallback: string): Promise<st
 }
 
 // ── Multi-provider batch save (Milestone 18 onboarding) ──
-export async function saveProvidersBatch(providers: Array<{ id?: string; name: string; type: string; apiKey: string; baseURL: string }>): Promise<{ providers: ProviderInfo[]; count: number }> {
+export async function saveProvidersBatch(providers: Array<{ id?: string; name: string; type: string; apiKey: string; baseURL: string; accessMode?: 'api-key' | 'subscription'; planId?: string }>): Promise<{ providers: ProviderInfo[]; count: number }> {
   const res = await fetch(`${API_BASE}/api/providers/batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

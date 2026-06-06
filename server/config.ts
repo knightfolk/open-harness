@@ -20,6 +20,8 @@ export interface StoredProvider {
   type: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom';
   apiKey: string;
   baseURL: string;
+  accessMode?: 'api-key' | 'subscription';
+  planId?: string;
   models: StoredProviderModel[];
 }
 
@@ -119,6 +121,8 @@ const DEFAULT_CONFIG: StoredConfig = {
       type: 'openai-compatible',
       apiKey: '',
       baseURL: 'https://api.minimax.io/v1',
+      accessMode: 'subscription',
+      planId: 'token-plan-pro',
       models: [
         { id: 'MiniMax-M3', name: 'MiniMax M3', enabled: true },
         { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', enabled: true },
@@ -171,6 +175,8 @@ export function loadConfig(): StoredConfig {
     const normalizedProviders = (parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
       ...provider,
       apiKey: typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '',
+      accessMode: (provider.accessMode === 'subscription' ? 'subscription' : 'api-key') as StoredProvider['accessMode'],
+      planId: typeof provider.planId === 'string' && provider.planId ? provider.planId : undefined,
     }));
     return {
       ...cloneDefaultConfig(),

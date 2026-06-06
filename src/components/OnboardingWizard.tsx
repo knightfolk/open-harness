@@ -6,6 +6,7 @@ import {
   CheckCircle2, Circle, X, Container, Eye,
 } from 'lucide-react';
 import * as api from '../utils/api';
+import { defaultProviderPlan } from '../data/providerPlans';
 
 // ── Provider catalog (shared with onboarding) ──────────
 interface OnboardingProvider {
@@ -200,12 +201,15 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
       // user tested them one-by-one but some still need a key).
       const toSave = [...selectedProviders].map((id) => {
         const p = allProviders.find((x) => x.id === id)!;
+        const plan = p.isLocal ? undefined : defaultProviderPlan(p.id, p.name);
         return {
           name: p.name,
           id: p.id,
           type: providerType(p),
           apiKey: p.isLocal ? '' : (apiKeys[p.id] || ''),
           baseURL: p.baseURL,
+          accessMode: plan?.accessMode,
+          planId: plan?.id,
         };
       });
       if (toSave.length > 0) {

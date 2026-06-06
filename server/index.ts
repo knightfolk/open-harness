@@ -735,6 +735,8 @@ app.post('/api/providers/batch', (req, res) => {
       type: raw.type as StoredProvider['type'],
       apiKey: incomingApiKey || existing?.apiKey || '',
       baseURL: raw.baseURL,
+      accessMode: raw.accessMode === 'subscription' ? 'subscription' : (existing?.accessMode || 'api-key'),
+      planId: typeof raw.planId === 'string' && raw.planId ? raw.planId : existing?.planId,
       models: incomingModels && incomingModels.length > 0 ? incomingModels : (existing?.models || []),
     };
     appConfig = upsertProvider(appConfig, provider);
@@ -745,7 +747,7 @@ app.post('/api/providers/batch', (req, res) => {
 });
 
 app.post('/api/providers', (req, res) => {
-  const { id, name, type, apiKey, baseURL, models } = req.body as any;
+  const { id, name, type, apiKey, baseURL, accessMode, planId, models } = req.body as any;
   if (!name || !type || !baseURL) {
     return res.status(400).json({ error: 'name, type, and baseURL are required' });
   }
@@ -756,6 +758,8 @@ app.post('/api/providers', (req, res) => {
     type: type as StoredProvider['type'],
     apiKey: normalizedApiKey,
     baseURL,
+    accessMode: accessMode === 'subscription' ? 'subscription' : 'api-key',
+    planId: typeof planId === 'string' && planId ? planId : undefined,
     models: models || [],
   };
   appConfig = upsertProvider(appConfig, provider);
@@ -772,6 +776,8 @@ app.put('/api/providers/:id', (req, res) => {
   if (updates.name !== undefined) existing.name = updates.name;
   if (updates.type !== undefined) existing.type = updates.type;
   if (updates.baseURL !== undefined) existing.baseURL = updates.baseURL;
+  if (updates.accessMode !== undefined) existing.accessMode = updates.accessMode === 'subscription' ? 'subscription' : 'api-key';
+  if (updates.planId !== undefined) existing.planId = typeof updates.planId === 'string' && updates.planId ? updates.planId : undefined;
   if (typeof updates.apiKey === 'string' && !updates.apiKey.startsWith('••••')) {
     existing.apiKey = updates.apiKey.trim();
   }

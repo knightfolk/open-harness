@@ -25,6 +25,12 @@ import {
   normalizeModelCatalogKey,
   TOP_MODEL_CATALOG,
 } from '../data/modelCatalog';
+import {
+  defaultProviderPlan,
+  providerPlanCatalogFor,
+  providerPlanLabel,
+  type ProviderAccessMode,
+} from '../data/providerPlans';
 
 // ── Category definition ────────────────────────────────
 interface SettingsCategory {
@@ -75,6 +81,8 @@ interface ProviderPreset {
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'openai', name: 'OpenAI', type: 'openai-compatible', baseURL: 'https://api.openai.com/v1', description: 'GPT-4.1, o3, o4-mini, GPT-5', color: '#10a37f', featured: true },
+  { id: 'anthropic', name: 'Anthropic', type: 'anthropic', baseURL: 'https://api.anthropic.com/v1', description: 'Claude Sonnet, Opus, Haiku', color: '#d97706', featured: true },
+  { id: 'google', name: 'Google Gemini', type: 'google', baseURL: 'https://generativelanguage.googleapis.com/v1beta', description: 'Gemini Pro, Flash, multimodal models', color: '#4285f4', featured: true },
   { id: 'minimax', name: 'MiniMax', type: 'openai-compatible', baseURL: 'https://api.minimax.io/v1', description: 'MiniMax M3, M2.7', color: '#6366f1', featured: true },
   { id: 'deepseek', name: 'DeepSeek', type: 'openai-compatible', baseURL: 'https://api.deepseek.com/v1', description: 'DeepSeek V4, V4 Flash, R2', color: '#4a9eff', featured: true },
   { id: 'xai', name: 'xAI', type: 'openai-compatible', baseURL: 'https://api.x.ai/v1', description: 'Grok 3, Grok 3 Mini', color: '#1d9bf0', featured: true },
@@ -103,10 +111,10 @@ interface Props {
   personalityText: string;
   mcpServers: MCPServerItem[];
   mcpStatus: any[];
-  onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string }) => Promise<any>;
+  onAddProvider: (provider: { name: string; type: string; apiKey: string; baseURL: string; accessMode?: ProviderAccessMode; planId?: string }) => Promise<any>;
   onTestProvider: (providerId: string, tempKey?: string) => Promise<any>;
   onFetchModels: (providerId: string, tempKey?: string) => Promise<any>;
-  onUpdateProvider: (providerId: string, updates: { apiKey?: string; baseURL?: string; type?: string; models?: any[] }) => Promise<void>;
+  onUpdateProvider: (providerId: string, updates: { apiKey?: string; baseURL?: string; type?: string; accessMode?: ProviderAccessMode; planId?: string; models?: any[] }) => Promise<void>;
   onRemoveProvider: (providerId: string) => void;
   onAddMCPServer: (server: { name: string; endpoint: string; authType: string; authToken: string }) => Promise<any>;
   onRemoveMCPServer: (serverId: string) => void;
@@ -612,6 +620,68 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
   );
 }
 
+function ProviderPlanControls({
+  providerId,
+  providerName,
+  accessMode,
+  planId,
+  onChange,
+}: {
+  providerId?: string;
+  providerName?: string;
+  accessMode: ProviderAccessMode;
+  planId?: string;
+  onChange: (next: { accessMode: ProviderAccessMode; planId: string }) => void;
+}) {
+  const catalog = providerPlanCatalogFor(providerId, providerName);
+  const fallback = defaultProviderPlan(providerId, providerName);
+  const plans = catalog?.plans || [fallback];
+  const selectedPlan = plans.find((plan) => plan.id === planId) || plans.find((plan) => plan.accessMode === accessMode) || plans[0];
+  const selectedMode = selectedPlan?.accessMode || accessMode;
+
+  const setAccessMode = (nextMode: ProviderAccessMode) => {
+    const nextPlan = plans.find((plan) => plan.accessMode === nextMode) || selectedPlan || plans[0];
+    onChange({ accessMode: nextMode, planId: nextPlan.id });
+  };
+
+  return (
+    <div className="provider-plan-controls">
+      <label className="provider-access-toggle">
+        <input
+          type="checkbox"
+          checked={selectedMode === 'subscription'}
+          onChange={(e) => setAccessMode(e.target.checked ? 'subscription' : 'api-key')}
+        />
+        <span>Subscription access</span>
+      </label>
+      <label>
+        Plan level
+        <select
+          value={selectedPlan.id}
+          onChange={(e) => {
+            const nextPlan = plans.find((plan) => plan.id === e.target.value) || plans[0];
+            onChange({ accessMode: nextPlan.accessMode, planId: nextPlan.id });
+          }}
+        >
+          {plans.map((plan) => (
+            <option key={plan.id} value={plan.id}>
+              {plan.label} — {plan.accessMode === 'subscription' ? 'subscription' : 'API key'}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="provider-plan-note">
+        {selectedPlan.description}
+        {catalog && (
+          <>
+            {' '}Source: <a href={catalog.sourceUrl} target="_blank" rel="noreferrer">{catalog.sourceLabel}</a>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ================================================================== */
 /*  MANAGE PROVIDERS — collapsible cards, scales to 10+               */
 /* ================================================================== */
@@ -696,6 +766,8 @@ function ProvidersPane({
                     </div>
                     <div className="prov-card-meta">
                       {provider.type}
+                      <span> • {provider.accessMode === 'subscription' ? 'subscription' : 'API key'}</span>
+                      <span> • {providerPlanLabel(provider.id, provider.planId, provider.name)}</span>
                       {totalCount > 0 && <span> • {enabledCount}/{totalCount} models enabled</span>}
                       <span style={{ color: 'var(--text-tertiary)' }}> • {provider.endpointLabel}</span>
                     </div>
@@ -716,6 +788,13 @@ function ProvidersPane({
               {/* ── Expanded body ── */}
               {isExpanded && (
                 <div className="prov-card-body">
+                  <ProviderPlanControls
+                    providerId={provider.id}
+                    providerName={provider.name}
+                    accessMode={provider.accessMode || 'api-key'}
+                    planId={provider.planId}
+                    onChange={(next) => onUpdateProvider(provider.id, next)}
+                  />
                   {/* Quick actions */}
                   <div className="prov-card-actions">
                     {provider.type !== 'local' && (
@@ -895,12 +974,16 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
   const [presetName, setPresetName] = useState('');
   const [presetURL, setPresetURL] = useState('');
   const [presetType, setPresetType] = useState('openai-compatible');
+  const [presetAccessMode, setPresetAccessMode] = useState<ProviderAccessMode>('api-key');
+  const [presetPlanId, setPresetPlanId] = useState('');
 
   // Custom form state
   const [customMode, setCustomMode] = useState(false);
   const [customName, setCustomName] = useState('');
   const [customURL, setCustomURL] = useState('');
   const [customType, setCustomType] = useState('openai-compatible');
+  const [customAccessMode, setCustomAccessMode] = useState<ProviderAccessMode>('api-key');
+  const [customPlanId, setCustomPlanId] = useState('');
 
   const featured = PROVIDER_PRESETS.filter((p) => p.featured);
   const extended = PROVIDER_PRESETS.filter((p) => !p.featured);
@@ -912,6 +995,9 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
       setPresetName(selectedPreset.name);
       setPresetURL(selectedPreset.baseURL);
       setPresetType(selectedPreset.type);
+      const defaultPlan = defaultProviderPlan(selectedPreset.id, selectedPreset.name);
+      setPresetAccessMode(defaultPlan.accessMode);
+      setPresetPlanId(defaultPlan.id);
     }
   }, [selectedPreset]);
 
@@ -920,7 +1006,14 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
     if (!presetURL.trim()) { setError('Endpoint is required'); return; }
     setSaving(true); setError('');
     try {
-      await onAdd({ name: presetName.trim() || selectedPreset!.name, type: presetType, apiKey: apiKey.trim(), baseURL: presetURL.trim() });
+      await onAdd({
+        name: presetName.trim() || selectedPreset!.name,
+        type: presetType,
+        apiKey: apiKey.trim(),
+        baseURL: presetURL.trim(),
+        accessMode: selectedPreset!.type === 'local' ? 'api-key' : presetAccessMode,
+        planId: selectedPreset!.type === 'local' ? undefined : presetPlanId,
+      });
       onDone();
     } catch (e: any) { setError(e.message || 'Failed to add'); }
     finally { setSaving(false); }
@@ -930,7 +1023,17 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
     if (!customName.trim() || !customURL.trim()) { setError('Name and endpoint are required'); return; }
     setSaving(true); setError('');
     try {
-      await onAdd({ name: customName.trim(), type: customType, apiKey: apiKey.trim(), baseURL: customURL.trim() });
+      const plan = customType === 'local' ? undefined : (customPlanId
+        ? { accessMode: customAccessMode, id: customPlanId }
+        : defaultProviderPlan(undefined, customName.trim()));
+      await onAdd({
+        name: customName.trim(),
+        type: customType,
+        apiKey: apiKey.trim(),
+        baseURL: customURL.trim(),
+        accessMode: plan?.accessMode,
+        planId: plan?.id,
+      });
       onDone();
     } catch (e: any) { setError(e.message || 'Failed to add'); }
     finally { setSaving(false); }
@@ -939,8 +1042,8 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
   const resetForm = () => {
     setSelectedPreset(null); setCustomMode(false);
     setApiKey(''); setError('');
-    setPresetName(''); setPresetURL(''); setPresetType('openai-compatible');
-    setCustomName(''); setCustomURL(''); setCustomType('openai-compatible');
+    setPresetName(''); setPresetURL(''); setPresetType('openai-compatible'); setPresetAccessMode('api-key'); setPresetPlanId('');
+    setCustomName(''); setCustomURL(''); setCustomType('openai-compatible'); setCustomAccessMode('api-key'); setCustomPlanId('');
   };
 
   // ── Preset selected → show full form with pre-filled defaults ──
@@ -977,6 +1080,18 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
                 </select>
               </label>
             </div>
+            {selectedPreset.type !== 'local' && (
+              <ProviderPlanControls
+                providerId={selectedPreset.id}
+                providerName={presetName || selectedPreset.name}
+                accessMode={presetAccessMode}
+                planId={presetPlanId}
+                onChange={(next) => {
+                  setPresetAccessMode(next.accessMode);
+                  setPresetPlanId(next.planId);
+                }}
+              />
+            )}
             {error && <div className="test-result error">{error}</div>}
             <div className="add-provider-actions">
               <button className="settings-mini-button" onClick={resetForm}>Back</button>
@@ -1012,6 +1127,17 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
                 </select>
               </label>
             </div>
+            {customType !== 'local' && (
+              <ProviderPlanControls
+                providerName={customName}
+                accessMode={customAccessMode}
+                planId={customPlanId}
+                onChange={(next) => {
+                  setCustomAccessMode(next.accessMode);
+                  setCustomPlanId(next.planId);
+                }}
+              />
+            )}
             {error && <div className="test-result error">{error}</div>}
             <div className="add-provider-actions">
               <button className="settings-mini-button" onClick={resetForm}>Back</button>
@@ -1578,7 +1704,9 @@ function getProviderIdFromModelId(modelId: string) {
   return modelId.includes(':') ? modelId.split(':')[0] : '';
 }
 
-function getProviderBillingMode(providerId: string): 'subscription' | 'metered' {
+function getProviderBillingMode(providerId: string, accessMode?: string): 'subscription' | 'metered' {
+  if (accessMode === 'subscription') return 'subscription';
+  if (accessMode === 'api-key') return 'metered';
   const normalized = providerId.toLowerCase();
   if (
     normalized === 'minimax' ||
@@ -1591,8 +1719,8 @@ function getProviderBillingMode(providerId: string): 'subscription' | 'metered' 
   return 'metered';
 }
 
-function getEffectiveRouterCost(modelId: string, providerId: string, baseCost: number) {
-  if (getProviderBillingMode(providerId) !== 'subscription') return baseCost;
+function getEffectiveRouterCost(modelId: string, providerId: string, baseCost: number, accessMode?: string) {
+  if (getProviderBillingMode(providerId, accessMode) !== 'subscription') return baseCost;
   const lower = modelId.toLowerCase();
 
   if (providerId === 'minimax') {
@@ -1684,7 +1812,7 @@ function buildConfiguredRouterCandidates(cfg: api.AppConfig | null): api.AutoRou
       const modelId = `${provider.id}:${model.id}`;
       const known = findRouterModelCard(model.id, provider.id);
       const fallback = fallbackRouterCard(model.id);
-      const baseCost = getEffectiveRouterCost(model.id, provider.id, known?.cost ?? fallback.cost);
+      const baseCost = getEffectiveRouterCost(model.id, provider.id, known?.cost ?? fallback.cost, provider.accessMode);
       candidates.push({
         modelId,
         cost: Math.max(0.02, Number(baseCost.toFixed(2))),
