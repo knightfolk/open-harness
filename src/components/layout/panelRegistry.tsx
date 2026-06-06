@@ -22,9 +22,9 @@ const iconMap: Record<PanelId, ComponentType<{ size?: number }>> = {
 };
 
 export const panelConfigs: Record<PanelId, PanelConfig> = {
-  chat:        { id: 'chat',        label: 'Chat',        icon: 'MessageSquare', defaultSize: 500, minSize: 280 },
+  chat:        { id: 'chat',        label: 'Chat',        icon: 'MessageSquare', defaultSize: 920, minSize: 280 },
   diffs:       { id: 'diffs',       label: 'Diffs',       icon: 'GitCompare',    defaultSize: 400, minSize: 200 },
-  browser:     { id: 'browser',     label: 'Browser',     icon: 'Globe',         defaultSize: 400, minSize: 200 },
+  browser:     { id: 'browser',     label: 'Browser',     icon: 'Globe',         defaultSize: 360, minSize: 240 },
   terminal:    { id: 'terminal',    label: 'Terminal',     icon: 'Terminal',      defaultSize: 200, minSize: 120 },
   'sub-agents':{ id: 'sub-agents',  label: 'Sub-Agents',  icon: 'Bot',           defaultSize: 320, minSize: 200 },
   files:       { id: 'files',       label: 'Files',        icon: 'FolderOpen',    defaultSize: 280, minSize: 180 },

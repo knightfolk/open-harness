@@ -8152,3 +8152,90 @@ button:focus-visible {
 
 /* Keep the existing SubAgentTracker card look clean inside focus view. */
 .agent-focus-detail .sub-agent-card { background: var(--bg-elevated); border: 1px solid var(--border-primary); border-radius: 10px; padding: 12px 14px; }
+
+.browser-updates {
+  width: min(100%, 360px);
+  padding: 28px 18px;
+  color: var(--text-primary);
+}
+
+.browser-updates-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  color: var(--accent-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.browser-updates h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.browser-updates p {
+  margin: 6px 0 16px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.browser-updates-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.browser-update-card {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-secondary);
+}
+
+.browser-update-card svg {
+  margin-top: 2px;
+  color: var(--accent-primary);
+}
+
+.browser-update-card strong,
+.browser-update-card span {
+  display: block;
+}
+
+.browser-update-card strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.browser-update-card span {
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.browser-updates-preview {
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent-primary);
+  border-radius: 6px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.browser-updates-preview:hover {
+  filter: brightness(1.08);
+}
