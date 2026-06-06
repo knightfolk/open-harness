@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
+import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HarnessRunStep, SubAgent } from '../types';
 
@@ -34,6 +34,49 @@ function stringifyPreview(value: unknown): string {
   try { return JSON.stringify(value); } catch { return String(value); }
 }
 
+function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch { return value; }
+}
+
+function basename(path: string): string {
+  return path.split('/').filter(Boolean).pop() || path;
+}
+
+function formatBytes(chars: number): string {
+  if (chars < 1000) return `${chars} chars`;
+  return `${(chars / 1000).toFixed(1)}k chars`;
+}
+
+function compactToolInput(input: unknown): string {
+  const parsed = parseMaybeJson(input);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    const path = typeof obj.path === 'string' ? obj.path : typeof obj.cwd === 'string' ? obj.cwd : '';
+    if (path) return `path: ${basename(path)}`;
+    if (typeof obj.command === 'string') return `command: ${obj.command.slice(0, 96)}`;
+    const keys = Object.keys(obj);
+    return keys.length > 0 ? `input: ${keys.slice(0, 4).join(', ')}` : '';
+  }
+  const text = stringifyPreview(input).replace(/\s+/g, ' ').trim();
+  return text ? `input: ${text.slice(0, 120)}` : '';
+}
+
+function compactToolOutput(output?: string): string {
+  if (!output) return '';
+  const parsed = parseMaybeJson(output);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.path === 'string' && typeof obj.content === 'string') {
+      return `output: ${basename(obj.path)} (${formatBytes(obj.content.length)})`;
+    }
+    if (Array.isArray(obj.entries)) return `output: ${obj.entries.length} entries`;
+    if (typeof obj.output === 'string') return `output: ${formatBytes(obj.output.length)}`;
+    if (typeof obj.error === 'string') return `output: ${obj.error.slice(0, 140)}`;
+  }
+  return `output: ${formatBytes(output.length)}`;
+}
+
 function stepIcon(step: HarnessRunStep) {
   switch (step.type) {
     case 'orchestration': return Route;
@@ -43,6 +86,7 @@ function stepIcon(step: HarnessRunStep) {
     case 'model_request': return Zap;
     case 'tool_call': return Terminal;
     case 'model_text': return Gauge;
+    case 'model_thinking': return Brain;
     case 'final_answer': return CheckCircle2;
     case 'error': return AlertTriangle;
     case 'repo_map': return MapIcon;
@@ -59,6 +103,9 @@ function stepTitle(step: HarnessRunStep): string {
     case 'model_request': return `Model request · round ${step.round}`;
     case 'tool_call': return step.durationMs == null ? `Tool started · ${step.name}` : `Tool finished · ${step.name}`;
     case 'model_text': return `Model text · ${step.chars} chars`;
+    case 'model_thinking': return step.source === 'router'
+      ? `Router rationale · ${step.chars} chars`
+      : `Model thinking · ${step.chars} chars`;
     case 'final_answer': return `Final answer · ${step.chars} chars`;
     case 'error': return 'Error';
     case 'repo_map': return `Repo map · ${step.totalFiles} files (${step.tokenBudget} tokens)`;
@@ -75,13 +122,17 @@ function stepDetail(step: HarnessRunStep): string | null {
     case 'model_request': return step.model;
     case 'tool_call': {
       const parts = [];
-      const input = stringifyPreview(step.input);
-      if (input) parts.push(`input: ${input}`);
-      if (step.outputPreview) parts.push(`output: ${step.outputPreview}`);
+      const input = compactToolInput(step.input);
+      const output = compactToolOutput(step.outputPreview);
+      if (input) parts.push(input);
+      if (output) parts.push(output);
       if (step.durationMs != null) parts.push(`${step.durationMs}ms`);
       return parts.join(' · ') || null;
     }
     case 'model_text': return 'Streaming response content from the model.';
+    case 'model_thinking': return step.preview || (step.source === 'router'
+      ? 'Classifier returned a routing rationale.'
+      : 'Provider emitted reasoning/thinking content.');
     case 'final_answer': return 'Assistant response completed.';
     case 'error': return step.message;
     case 'repo_map': return `Indexed ${step.totalFiles} files; top: ${step.topFiles.slice(0, 3).join(', ')}`;

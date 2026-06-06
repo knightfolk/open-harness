@@ -30,6 +30,7 @@ export type HarnessRunStep =
   | { type: 'model_request'; round: number; model: string }
   | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
   | { type: 'model_text'; chars: number }
+  | { type: 'model_thinking'; chars: number; preview?: string; source: 'provider' | 'router' }
   | { type: 'final_answer'; chars: number }
   | { type: 'error'; message: string }
   | {

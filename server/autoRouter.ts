@@ -80,6 +80,8 @@ export interface AutoRouterDecision {
   fallback: boolean;
   /** Classifier model used (or null for fallback) */
   classifierModel: string | null;
+  /** Short classifier-provided scoring rationale, when available. */
+  classifierRationale?: string;
 }
 
 export interface AutoRouterDecisionOptions {
@@ -255,24 +257,25 @@ export async function routeTask(
   }
 
   try {
-    const scores = await callClassifier(
+    const classifierResult = await callClassifier(
       classifierResolved.provider,
       classifierModel,
       signal,
       candidates,
     );
 
-    if (!scores || Object.keys(scores).length === 0) {
+    if (!classifierResult?.scores || Object.keys(classifierResult.scores).length === 0) {
       return fallbackDecision(candidates, autoRouterConfig, 'classifier returned empty scores');
     }
 
     const decision = pickCandidate(
-      scores,
+      classifierResult.scores,
       candidates,
       autoRouterConfig.threshold,
       signal.hasImages,
       signal.estimatedInputTokens,
       autoRouterConfig.defaultModel,
+      classifierResult.reasoning,
     );
 
     // Cache the decision
@@ -306,7 +309,7 @@ async function callClassifier(
   classifierModelId: string,
   signal: AutoRouterSignal,
   candidates: AutoRouterCandidate[],
-): Promise<Record<string, number> | null> {
+): Promise<{ scores: Record<string, number>; reasoning?: string } | null> {
   const systemPrompt = buildClassifierSystemPrompt(candidates);
   const userContent = buildClassifierUserContent(signal, candidates);
 
@@ -537,7 +540,7 @@ function buildClassifierUserContent(signal: AutoRouterSignal, candidates: AutoRo
 
 // ── Score parsing ────────────────────────────────────
 
-function parseClassifierScores(text: string, candidateIds: string[]): Record<string, number> | null {
+function parseClassifierScores(text: string, candidateIds: string[]): { scores: Record<string, number>; reasoning?: string } | null {
   if (!text) return null;
 
   // Find the first JSON object in the response
@@ -557,7 +560,8 @@ function parseClassifierScores(text: string, candidateIds: string[]): Record<str
         : typeof raw === 'string' ? clamp(parseFloat(raw), 0, 1)
           : 0;
     }
-    return result;
+    const reasoning = typeof obj?.reasoning === 'string' ? obj.reasoning.trim().slice(0, 240) : undefined;
+    return { scores: result, reasoning };
   } catch {
     // Try greedy then first-object parsing
     const firstEnd = text.indexOf('}', start);
@@ -573,7 +577,8 @@ function parseClassifierScores(text: string, candidateIds: string[]): Record<str
               : typeof raw === 'string' ? clamp(parseFloat(raw), 0, 1)
                 : 0;
           }
-          return result;
+          const reasoning = typeof obj?.reasoning === 'string' ? obj.reasoning.trim().slice(0, 240) : undefined;
+          return { scores: result, reasoning };
         }
       } catch { /* fall through */ }
     }
@@ -590,7 +595,9 @@ function pickCandidate(
   hasImages: boolean,
   estimatedInputTokens: number,
   defaultModel: string,
+  classifierRationale?: string,
 ): AutoRouterDecision {
+  const rationale = classifierRationale ? ` classifier rationale: ${classifierRationale}` : '';
   // Build scored list with image-incapable models hard-zeroed
   const scored: Array<{ candidate: AutoRouterCandidate; score: number }> = candidates.map((c) => {
     let score = scores[c.modelId] ?? 0;
@@ -611,11 +618,12 @@ function pickCandidate(
     return {
       modelId: winner.candidate.modelId,
       score: winner.score,
-      reason: `score=${winner.score.toFixed(2)} >= ${threshold.toFixed(2)}, cheapest among viable`,
+      reason: `score=${winner.score.toFixed(2)} >= ${threshold.toFixed(2)}, cheapest among viable.${rationale}`,
       scores: Object.fromEntries(scored.map((s) => [s.candidate.modelId, s.score])),
       cached: false,
       fallback: false,
       classifierModel: null, // set by caller
+      classifierRationale,
     };
   }
 
@@ -626,11 +634,12 @@ function pickCandidate(
     return {
       modelId: best.candidate.modelId,
       score: best.score,
-      reason: `no candidate >= ${threshold.toFixed(2)}; picked highest score (${best.score.toFixed(2)})`,
+      reason: `no candidate >= ${threshold.toFixed(2)}; picked highest score (${best.score.toFixed(2)}).${rationale}`,
       scores: Object.fromEntries(scored.map((s) => [s.candidate.modelId, s.score])),
       cached: false,
       fallback: false,
       classifierModel: null,
+      classifierRationale,
     };
   }
 

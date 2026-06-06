@@ -1886,6 +1886,14 @@ function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunSte
   writeSSE(res, 'run_step', { runId: run.id, step: appended });
 }
 
+function compactTracePreview(text: string, max = 240): string {
+  const compact = redactOutputText(text)
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (compact.length <= max) return compact;
+  return `${compact.slice(0, max - 3).trimEnd()}...`;
+}
+
 
 // ── Project Profile ────────────────────────────────────
 app.get('/api/project/profile', (req, res) => {
@@ -2094,6 +2102,12 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       cached: rd.cached ?? false,
       fallback: rd.fallback ?? false,
       classifierModel: rd.classifierModel ?? null,
+    });
+    if (rd.classifierRationale) emitRunStep(res, run, {
+      type: 'model_thinking',
+      chars: rd.classifierRationale.length,
+      preview: rd.classifierRationale,
+      source: 'router',
     });
 
     recordRoutingDecision({
@@ -2338,11 +2352,12 @@ async function parseStreamForContentAndTools(
   assistantId: string,
   streamText: boolean = true,
   knownToolNames: string[] = [],
-): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; arguments: string }> }> {
+): Promise<{ content: string; thinking: string; toolCalls: Array<{ id: string; name: string; arguments: string }> }> {
   const reader = (response as any).body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
+  let thinking = '';
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
   // Markup-recovered calls. Some OpenAI-compatible providers (notably
   // MiniMax) emit tool invocations as plain text using <toolName>...</toolName>
@@ -2374,6 +2389,11 @@ async function parseStreamForContentAndTools(
         const parsed = JSON.parse(data);
         const delta = parsed.choices?.[0]?.delta;
         if (!delta) continue;
+
+        const thinkingDelta = delta.reasoning_content || delta.thinking || delta.reasoning;
+        if (typeof thinkingDelta === 'string' && thinkingDelta.length > 0) {
+          thinking += thinkingDelta;
+        }
 
         // Handle text content — use streaming-aware tag stripping
         if (delta.content) {
@@ -2442,7 +2462,7 @@ async function parseStreamForContentAndTools(
     if (nativeNames.has(mc.name)) continue;
     merged.push(mc);
   }
-  return { content, toolCalls: merged };
+  return { content, thinking, toolCalls: merged };
 }
 
 // ── Universal model streaming (with MCP tool-calling loop) ─
@@ -2502,6 +2522,7 @@ async function streamWithNativeAdapter(
       }
 
       let roundContent = '';
+      let roundThinking = '';
       const roundToolCalls: { id: string; name: string; arguments: string }[] = [];
       let abort = false;
 
@@ -2514,7 +2535,7 @@ async function streamWithNativeAdapter(
             res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: event.text }) + '\n\n');
           }
         } else if (event.type === 'thinking_delta') {
-          if (run) emitRunStep(res, run, { type: 'model_text', chars: event.text.length });
+          roundThinking += event.text;
         } else if (event.type === 'tool_call_done') {
           roundToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
         } else if (event.type === 'error') {
@@ -2525,6 +2546,14 @@ async function streamWithNativeAdapter(
         }
       }
       if (abort) return;
+      if (run && roundThinking.trim()) {
+        emitRunStep(res, run, {
+          type: 'model_thinking',
+          chars: roundThinking.length,
+          preview: compactTracePreview(roundThinking),
+          source: 'provider',
+        });
+      }
 
       // Direct answer (no tool calls) → done.
       if (roundToolCalls.length === 0) {
@@ -2891,7 +2920,13 @@ async function streamModel(
       // Final round: stream text normally for real-time answer display
       const isLastRound = round === MAX_TOOL_ROUNDS - 1;
       const knownToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
-      const { content, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound, knownToolNames);
+      const { content, thinking, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound, knownToolNames);
+      if (run && thinking.trim()) emitRunStep(res, run, {
+        type: 'model_thinking',
+        chars: thinking.length,
+        preview: compactTracePreview(thinking),
+        source: 'provider',
+      });
       if (run && content.length > 0) emitRunStep(res, run, { type: 'model_text', chars: content.length });
 
       // No tool calls → model gave a direct answer (or final round completed)
@@ -2991,6 +3026,12 @@ async function streamModel(
         if (forcedResponse.ok) {
           const forcedToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
           const forcedResult = await parseStreamForContentAndTools(forcedResponse, res, assistantId, true, forcedToolNames);
+          if (run && forcedResult.thinking.trim()) emitRunStep(res, run, {
+            type: 'model_thinking',
+            chars: forcedResult.thinking.length,
+            preview: compactTracePreview(forcedResult.thinking),
+            source: 'provider',
+          });
           if (forcedResult.content.trim()) {
             finalContent = filterMonologue(stripThinkingTags(forcedResult.content));
           }

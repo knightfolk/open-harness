@@ -69,6 +69,9 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
     case 'model_text': return `Received ${step.chars} characters from model`;
+    case 'model_thinking': return step.source === 'router'
+      ? `Captured router rationale (${step.chars} characters)`
+      : `Captured ${step.chars} characters of model thinking`;
     case 'final_answer': return `Final answer ready (${step.chars} characters)`;
     case 'error': return `Error: ${step.message}`;
     case 'repo_map': return `Repo map: ${step.totalFiles} files, ${step.tokenBudget} token budget${step.truncated ? ' (truncated)' : ''}`;

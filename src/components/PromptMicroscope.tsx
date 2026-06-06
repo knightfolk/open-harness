@@ -24,6 +24,12 @@ export function PromptMicroscope({ runTrace }: Props) {
         out.push({ id: `contextpack:${step.tokens}`, label: `Context pack (${step.tokens} tokens)`, text: step.pack });
       } else if (step.type === 'model_text') {
         out.push({ id: `modeltext:${step.chars}`, label: `Model output (${step.chars} chars)`, text: step.chars > 0 ? '(streamed text)' : '(empty)' });
+      } else if (step.type === 'model_thinking') {
+        out.push({
+          id: `modelthinking:${step.source}:${step.chars}`,
+          label: step.source === 'router' ? `Router rationale (${step.chars} chars)` : `Model thinking (${step.chars} chars)`,
+          text: step.preview || (step.source === 'router' ? '(classifier rationale)' : '(provider thinking stream)'),
+        });
       } else if (step.type === 'tool_call') {
         out.push({ id: `toolcall:${step.id}`, label: `Tool call: ${step.name}`, text: typeof step.input === 'string' ? step.input : JSON.stringify(step.input) });
       } else if (step.type === 'final_answer') {

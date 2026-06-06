@@ -21,6 +21,7 @@ export interface RouteDecision {
     cached?: boolean;
     fallback?: boolean;
     classifierModel?: string | null;
+    classifierRationale?: string;
   };
 }
 
@@ -172,6 +173,7 @@ export async function routeWithAutoRouter(
         cached: decision.cached,
         fallback: decision.fallback,
         classifierModel: decision.classifierModel,
+        classifierRationale: decision.classifierRationale,
       };
       if (classifierFailed) {
         recordRoutingAdherenceEvent({

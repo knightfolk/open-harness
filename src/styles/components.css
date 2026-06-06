@@ -964,6 +964,27 @@
   word-break: break-all;
 }
 
+.tool-call-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 8px;
+  margin-bottom: 6px;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.tool-call-row:last-child {
+  margin-bottom: 0;
+}
+
+.tool-call-label {
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
 /* ========== Input Area ========== */
 .input-area {
   padding: 8px 0 12px;
