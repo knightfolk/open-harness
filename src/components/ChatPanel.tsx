@@ -42,6 +42,7 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
   const rootRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const [superWidth, setSuperWidth] = useState(loadSuperWidth);
+  const [inputHeight, setInputHeight] = useState(112);
   const superHidden = !environmentOpen;
   const userScrolledUpRef = useRef(false);
   const previousMessageCountRef = useRef(0);
@@ -122,7 +123,7 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
   }, [isTyping, onEnvironmentOpenChange]);
 
   return (
-    <div ref={rootRef} className={`chat-panel-root ${superHidden ? 'has-hidden-super' : 'has-floating-super'}`} style={{ '--floating-super-width': `${superWidth}px` } as CSSProperties}>
+    <div ref={rootRef} className={`chat-panel-root ${superHidden ? 'has-hidden-super' : 'has-floating-super'}`} style={{ '--floating-super-width': `${superWidth}px`, '--chat-input-height': `${inputHeight}px` } as CSSProperties}>
       <div className="messages" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && !isTyping && (
           <SmartWelcome workingDir={workingDir || null} projectProfile={projectProfile || null} onSuggestionClick={onSendMessage} />
@@ -174,14 +175,25 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
           variant="floating"
         />
       </div>
-      <ChatInputInline onSend={onSendMessage} disabled={isTyping} />
+      <ChatInputInline onSend={onSendMessage} disabled={isTyping} onHeightChange={setInputHeight} />
     </div>
   );
 }
 
-function ChatInputInline({ onSend, disabled }: { onSend: (msg: string) => void; disabled?: boolean }) {
+function ChatInputInline({ onSend, disabled, onHeightChange }: { onSend: (msg: string) => void; disabled?: boolean; onHeightChange?: (height: number) => void }) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = inputAreaRef.current;
+    if (!element || !onHeightChange) return;
+    const report = () => onHeightChange(Math.ceil(element.getBoundingClientRect().height));
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [onHeightChange]);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -210,7 +222,7 @@ function ChatInputInline({ onSend, disabled }: { onSend: (msg: string) => void; 
   };
 
   return (
-    <div className="input-area">
+    <div className="input-area" ref={inputAreaRef}>
       <div className="input-container">
         <div className="input-top">
           <textarea

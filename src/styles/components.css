@@ -575,12 +575,13 @@
 
 .floating-super-panel {
   position: absolute;
-  top: 48px;
+  top: auto;
+  bottom: calc(var(--chat-input-height, 112px) + 12px);
   right: 46px;
   z-index: 8;
   min-width: 260px;
   max-width: 520px;
-  max-height: calc(100% - 190px);
+  max-height: calc(100% - var(--chat-input-height, 112px) - 72px);
   display: flex;
   pointer-events: auto;
   transform: translateX(0);

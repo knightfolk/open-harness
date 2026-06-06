@@ -22,6 +22,7 @@ interface Props {
   models: ModelOption[];
   trustMode: string;
   enabledToolCount?: number;
+  configuredProviderCount?: number;
   onModelChange: (modelId: string) => void;
   onTrustModeChange?: (mode: string) => void;
   runningModel?: string | null;
@@ -54,7 +55,7 @@ const TRUST_COLORS: Record<string, string> = {
 
 const ALL_TRUST_MODES = ['chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local'];
 
-export function StatusBar({ activeModel, providerName, connected, messageCount, workingDir, models, trustMode, enabledToolCount, onModelChange, onTrustModeChange, runningModel, onOpenSettings }: Props) {
+export function StatusBar({ activeModel, providerName, connected, messageCount, workingDir, models, trustMode, enabledToolCount, configuredProviderCount, onModelChange, onTrustModeChange, runningModel, onOpenSettings }: Props) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [trustPickerOpen, setTrustPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -99,19 +100,32 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
   const currentModel = models.find(m => m.id === activeModel);
   const isAuto = activeModel === AUTO_MODEL_ID;
   const autoModelLabel = runningModel ? `Auto · ${runningModel}` : 'Auto';
+  const configuredProviderNames = Array.from(new Set(models.map((m) => m.providerName).filter((name) => name && name !== 'Unknown')));
+  const providerCount = configuredProviderCount ?? configuredProviderNames.length;
+  const servingProvider = currentModel?.providerName || providerName;
+  const connectionLabel = connected
+    ? isAuto
+      ? `Router ready · ${providerCount || 0} provider${providerCount === 1 ? '' : 's'}`
+      : `Serving: ${servingProvider || 'Unknown provider'}`
+    : 'No provider configured';
+  const connectionTitle = connected
+    ? isAuto
+      ? `Auto routes each request across ${providerCount || 0} configured provider${providerCount === 1 ? '' : 's'}.`
+      : `${servingProvider || 'Unknown provider'} is serving ${activeModel}.`
+    : 'Add a configured model provider in Settings.';
   const trustColor = TRUST_COLORS[trustMode] || '#6b7280';
   const trustLabel = TRUST_LABELS[trustMode] || trustMode;
 
   return (
     <div className="status-bar">
       {/* Connection status */}
-      <div className="status-bar-item status-bar-connection">
+      <div className="status-bar-item status-bar-connection" title={connectionTitle}>
         {connected ? (
           <Wifi size={12} style={{ color: 'var(--accent-success)' }} />
         ) : (
           <WifiOff size={12} style={{ color: 'var(--accent-error)' }} />
         )}
-        {connected ? 'Provider connected' : 'No model provider'}
+        {connectionLabel}
       </div>
 
       <div className="status-bar-separator" />
@@ -258,10 +272,10 @@ export function StatusBar({ activeModel, providerName, connected, messageCount, 
 
       <div className="status-bar-separator" />
 
-      {/* Provider */}
-      <div className="status-bar-item">
+      {/* Router mode */}
+      <div className="status-bar-item" title={isAuto ? 'Auto-Router chooses the serving model per request.' : 'Router is bypassed for this fixed model selection.'}>
         <Zap size={12} />
-        {providerName || (isAuto ? 'Router' : 'No provider')}
+        {isAuto ? 'Auto-Router' : 'Fixed model'}
       </div>
 
       {/* Working dir */}

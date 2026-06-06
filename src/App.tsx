@@ -1103,6 +1103,7 @@ function App() {
           })}
           onModelChange={handleSelectModel}
           enabledToolCount={enabledToolCount}
+          configuredProviderCount={providers.filter(p => p.configured).length}
           trustMode={trustMode}
           onTrustModeChange={handleTrustModeChange}
           runningModel={runningModel}
