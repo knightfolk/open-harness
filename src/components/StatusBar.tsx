@@ -8,7 +8,7 @@ import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 import { providerPlanLabel } from '../data/providerPlans';
 import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
-import type { ThinkingEffort } from '../types';
+import type { HarnessRunStep, ThinkingEffort } from '../types';
 
 const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 
@@ -42,6 +42,7 @@ interface Props {
   onToggleFavoriteModel?: (modelId: string) => void;
   onTrustModeChange?: (mode: string) => void;
   runningModel?: string | null;
+  autoRouterStep?: Extract<HarnessRunStep, { type: 'auto_router' }> | null;
   onOpenSettings?: () => void;
 }
 
@@ -71,6 +72,28 @@ const TRUST_COLORS: Record<string, string> = {
 
 const ALL_TRUST_MODES = ['chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local'];
 
+function formatRouterScoreList(scores?: Record<string, number>, limit = 5): string {
+  const entries = Object.entries(scores || {})
+    .filter(([, score]) => Number.isFinite(score))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+  if (entries.length === 0) return 'Candidate scores unavailable';
+  return entries.map(([model, score]) => `${model}: ${score.toFixed(2)}`).join('\n');
+}
+
+function autoRouterTitle(step?: Extract<HarnessRunStep, { type: 'auto_router' }> | null): string {
+  if (!step) return 'Auto: route each request to the best configured candidate model.';
+  const lines = [
+    `Auto selected: ${step.modelId}`,
+    `${step.fallback ? 'Default fallback' : 'Classifier decision'}: ${step.reason}`,
+    step.classifierModel ? `Classifier: ${step.classifierModel}` : 'Classifier: unavailable',
+    step.cached ? 'Source: cached decision' : 'Source: fresh decision',
+    'Top candidate scores:',
+    formatRouterScoreList(step.candidateScores),
+  ];
+  return lines.join('\n');
+}
+
 export function StatusBar({
   activeModel,
   providerName,
@@ -91,6 +114,7 @@ export function StatusBar({
   onToggleFavoriteModel,
   onTrustModeChange,
   runningModel,
+  autoRouterStep,
   onOpenSettings,
 }: Props) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -167,7 +191,10 @@ export function StatusBar({
 
   const currentModel = models.find(m => m.id === activeModel);
   const isAuto = activeModel === AUTO_MODEL_ID;
-  const autoModelLabel = runningModel ? `Auto · ${runningModel}` : 'Auto';
+  const concreteRunningModel = runningModel && runningModel !== AUTO_MODEL_ID ? runningModel : null;
+  const visibleAutoModel = concreteRunningModel || autoRouterStep?.modelId;
+  const autoModelLabel = visibleAutoModel ? `Auto · ${visibleAutoModel}` : 'Auto';
+  const autoTitle = autoRouterTitle(autoRouterStep);
   const configuredProviderNames = Array.from(new Set(models.map((m) => m.providerName).filter((name) => name && name !== 'Unknown')));
   const providerCount = configuredProviderCount ?? configuredProviderNames.length;
   const servingProvider = currentModel?.providerName || providerName;
@@ -285,7 +312,7 @@ export function StatusBar({
         <button
           ref={modelBtnRef}
           className={`status-bar-item status-bar-model-btn ${isAuto ? 'status-bar-model-btn-auto' : ''}`}
-          title={isAuto ? 'Auto: route each request to the best configured candidate model.' : modelCatalogTooltip(activeModel, providerName)}
+          title={isAuto ? autoTitle : modelCatalogTooltip(activeModel, providerName)}
           onClick={() => {
             const nextOpen = !modelPickerOpen;
             setModelPickerOpen(nextOpen);

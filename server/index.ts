@@ -377,7 +377,7 @@ function resolveSelectedModel(route: RouteDecision, requestedModelOverride?: str
   const normalizedOverride = normalizeModelOverride(requestedModelOverride);
   if (normalizedOverride) return normalizedOverride;
 
-  const autoModel = route.routerData?.source === 'auto' && !route.routerData?.fallback
+  const autoModel = route.routerData?.source === 'auto'
     ? route.suggestedModels?.[0]
     : undefined;
   const roleModel = appConfig.roleAssignments?.[route.role];
@@ -2325,6 +2325,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       cached: rd.cached ?? false,
       fallback: rd.fallback ?? false,
       classifierModel: rd.classifierModel ?? null,
+      candidateScores: rd.candidateScores,
     });
     if (rd.classifierRationale) emitRunStep(res, run, {
       type: 'model_thinking',
@@ -2903,8 +2904,8 @@ async function streamModel(
   const classifiedRole = route.role;
   // Check if the user configured a different model for this role
   const roleModelOverride = appConfig.roleAssignments?.[classifiedRole];
-  // Priority: overrideModelId > route.suggestedModels[0] (auto-router, active non-fallback) > Agent Roles > activeModel
-  const autoRouterModel = route.routerData?.source === 'auto' && !route.routerData?.fallback
+  // Priority: overrideModelId > route.suggestedModels[0] (auto-router, including configured fallback) > Agent Roles > activeModel
+  const autoRouterModel = route.routerData?.source === 'auto'
     ? route.suggestedModels?.[0]
     : undefined;
   const effectiveModel = overrideModelId

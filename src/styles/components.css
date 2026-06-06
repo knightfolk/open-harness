@@ -5835,6 +5835,41 @@ button:focus-visible {
   color: var(--text-secondary);
 }
 
+.pm-score-list {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pm-score-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-primary);
+  font-size: 11px;
+}
+
+.pm-score-row:last-child {
+  border-bottom: 0;
+}
+
+.pm-score-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+
+.pm-score-value {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
 .pm-error-msg {
   padding: 6px 8px;
   background: rgba(239, 68, 68, 0.08);

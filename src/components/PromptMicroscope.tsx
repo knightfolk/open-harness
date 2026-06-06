@@ -7,6 +7,12 @@ interface Props {
   runTrace: HarnessRun | undefined;
 }
 
+function sortedCandidateScores(scores?: Record<string, number>) {
+  return Object.entries(scores || {})
+    .filter(([, score]) => Number.isFinite(score))
+    .sort((a, b) => b[1] - a[1]);
+}
+
 export function PromptMicroscope({ runTrace }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [redactionOn, setRedactionOn] = useState(true);
@@ -29,6 +35,21 @@ export function PromptMicroscope({ runTrace }: Props) {
           id: `modelthinking:${step.source}:${step.chars}`,
           label: step.source === 'router' ? `Router rationale (${step.chars} chars)` : `Model thinking (${step.chars} chars)`,
           text: step.preview || (step.source === 'router' ? '(classifier rationale)' : '(provider thinking stream)'),
+        });
+      } else if (step.type === 'auto_router') {
+        const scores = sortedCandidateScores(step.candidateScores);
+        out.push({
+          id: `autorouter:${step.modelId}:${step.score}`,
+          label: `Auto-router ${step.fallback ? 'fallback' : 'decision'}`,
+          text: [
+            `Selected model: ${step.modelId}`,
+            `Score: ${step.score.toFixed(2)}`,
+            `Reason: ${step.reason}`,
+            `Classifier: ${step.classifierModel || 'unavailable'}`,
+            scores.length > 0
+              ? `Candidate scores:\n${scores.map(([model, score]) => `${model}: ${score.toFixed(2)}`).join('\n')}`
+              : 'Candidate scores: unavailable',
+          ].join('\n'),
         });
       } else if (step.type === 'tool_call') {
         out.push({ id: `toolcall:${step.id}`, label: `Tool call: ${step.name}`, text: typeof step.input === 'string' ? step.input : JSON.stringify(step.input) });
@@ -62,6 +83,8 @@ export function PromptMicroscope({ runTrace }: Props) {
   if (!runTrace) return null;
 
   const routeStep = runTrace.steps.find((s): s is Extract<HarnessRunStep, { type: 'route' }> => s.type === 'route');
+  const autoRouterStep = runTrace.steps.find((s): s is Extract<HarnessRunStep, { type: 'auto_router' }> => s.type === 'auto_router');
+  const autoRouterScores = sortedCandidateScores(autoRouterStep?.candidateScores);
   const promptStep = runTrace.steps.find((s): s is Extract<HarnessRunStep, { type: 'prompt_built' }> => s.type === 'prompt_built');
   const orchestrationStep = runTrace.steps.find((s): s is Extract<HarnessRunStep, { type: 'orchestration' }> => s.type === 'orchestration');
   const errorSteps = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'error' }> => s.type === 'error');
@@ -106,6 +129,52 @@ export function PromptMicroscope({ runTrace }: Props) {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Auto-router */}
+          {autoRouterStep && (
+            <div className="pm-section">
+              <div className="pm-section-header">
+                <Cpu size={12} />
+                <span>Auto-Router</span>
+              </div>
+              <div className="pm-section-body">
+                <div className="pm-row">
+                  <span className="pm-key">Selected model</span>
+                  <span className="pm-value">{autoRouterStep.modelId}</span>
+                </div>
+                <div className="pm-row">
+                  <span className="pm-key">{autoRouterStep.fallback ? 'Fallback' : 'Decision'}</span>
+                  <span className="pm-value">{autoRouterStep.reason}</span>
+                </div>
+                <div className="pm-row">
+                  <span className="pm-key">Classifier</span>
+                  <span className="pm-value">{autoRouterStep.classifierModel || 'unavailable'}</span>
+                </div>
+                <div className="pm-row">
+                  <span className="pm-key">Score</span>
+                  <span className="pm-value">{autoRouterStep.score.toFixed(2)}{autoRouterStep.cached ? ' · cached' : ''}</span>
+                </div>
+                {autoRouterScores.length > 0 ? (
+                  <div className="pm-row pm-row-block">
+                    <span className="pm-key">Candidate scores</span>
+                    <div className="pm-score-list">
+                      {autoRouterScores.map(([model, score]) => (
+                        <div key={model} className="pm-score-row">
+                          <span className="pm-score-model">{model}</span>
+                          <span className="pm-score-value">{score.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="pm-row">
+                    <span className="pm-key">Candidate scores</span>
+                    <span className="pm-value">Unavailable for this fallback</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

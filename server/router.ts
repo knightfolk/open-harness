@@ -169,12 +169,10 @@ export async function routeWithAutoRouter(
     if (decision) {
       const isFallback = decision.fallback || decision.score === 0;
       const classifierFailed = decision.fallback && /classifier/i.test(decision.reason);
-      if (!isFallback) {
-        route.suggestedModels = [decision.modelId];
-      }
+      route.suggestedModels = [decision.modelId];
       route.reason += ` | auto-router: ${decision.reason}`;
       route.routerData = {
-        source: isFallback ? 'heuristic' : 'auto',
+        source: 'auto',
         candidateScores: decision.scores,
         score: decision.score,
         cached: decision.cached,

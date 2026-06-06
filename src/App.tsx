@@ -73,7 +73,11 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'orchestration': return `${step.label}: ${step.detail || step.mode}`;
     case 'route': return `Routed to ${step.role} using ${step.model}${step.reason ? ` (${step.reason})` : ''}`;
     case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
-    case 'auto_router': return `Auto-router picked ${step.modelId} (${step.score.toFixed(2)})${step.cached ? ' from cache' : ''}`;
+    case 'auto_router': {
+      const scoreCount = Object.keys(step.candidateScores || {}).length;
+      const scoreText = scoreCount > 0 ? ` · ${scoreCount} candidate score${scoreCount === 1 ? '' : 's'}` : '';
+      return `Auto-router ${step.fallback ? 'fell back to' : 'picked'} ${step.modelId} (${step.score.toFixed(2)})${step.cached ? ' from cache' : ''}${scoreText}`;
+    }
     case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
     case 'model_text': return `Received ${step.chars} characters from model`;
@@ -179,6 +183,7 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [reviewFlyoutOpen, setReviewFlyoutOpen] = useState(false);
   const [focusedSubAgentId, setFocusedSubAgentId] = useState<string | null>(null);
+  const [lastAutoRouterStep, setLastAutoRouterStep] = useState<Extract<HarnessRunStep, { type: 'auto_router' }> | null>(null);
   const { layout, togglePanel, removePanel, swapPanels, resetLayout, addPanel } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
@@ -730,6 +735,7 @@ function App() {
     };
     setMessages((prev) => [...prev, userMsg]);
     setIsTyping(true);
+    setLastAutoRouterStep(null);
 
     // Real activity subagent — tracks what the model is actually doing
     const activityAgent: SubAgent = {
@@ -840,6 +846,7 @@ function App() {
         },
         onRunStep: (runId, step) => {
           const stepText = describeRunStep(step);
+          if (step.type === 'auto_router') setLastAutoRouterStep(step);
           setMessages((prev) => prev.map((m) => {
             if (m.id !== assistantId || !m.runTrace) return m;
             const nextMessage = { ...m, runTrace: { ...m.runTrace, steps: [...m.runTrace.steps, step] } };
@@ -1254,6 +1261,7 @@ function App() {
           trustMode={trustMode}
           onTrustModeChange={handleTrustModeChange}
           runningModel={runningModel}
+          autoRouterStep={lastAutoRouterStep}
           onOpenSettings={() => setSettingsOpen(true)}
         />
       </main>
