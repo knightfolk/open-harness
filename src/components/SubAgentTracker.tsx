@@ -1,5 +1,5 @@
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HarnessRunStep, SubAgent } from '../types';
 
 interface Props {
@@ -91,6 +91,19 @@ function stepDetail(step: HarnessRunStep): string | null {
 
 export function SubAgentTracker({ agents, focusedAgentId }: Props) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollKey = useMemo(
+    () => agents.map((agent) => `${agent.id}:${agent.status}:${agent.runTrace?.steps.length || 0}`).join('|'),
+    [agents],
+  );
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [scrollKey]);
 
   const toggle = (id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -117,8 +130,8 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
     : agents;
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 12, fontSize: 11, color: 'var(--text-tertiary)' }}>
+    <div className="sub-agent-tracker" ref={scrollRef}>
+      <div className="sub-agent-summary">
         <span>{running} running</span>
         <span>{completed} complete</span>
         <span>{formatTokens(totalTokens)} tokens</span>
@@ -175,21 +188,21 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
             </div>
 
             {isExpanded && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="sub-agent-steps">
                 {steps.length === 0 && (
-                  <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>Waiting for run events…</div>
+                  <div className="sub-agent-empty">Waiting for run events…</div>
                 )}
                 {steps.map((step, i) => {
                   const Icon = stepIcon(step);
                   const detail = stepDetail(step);
                   return (
-                    <div key={`${step.type}-${i}`} style={{ display: 'grid', gridTemplateColumns: '18px 1fr', gap: 8, fontSize: 12 }}>
-                      <Icon size={14} style={{ color: step.type === 'error' ? 'var(--danger)' : 'var(--accent-primary)', marginTop: 1 }} />
+                    <div key={`${step.type}-${i}`} className="sub-agent-step">
+                      <Icon size={14} className={step.type === 'error' ? 'sub-agent-step-icon error' : 'sub-agent-step-icon'} />
                       <div>
-                        <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{stepTitle(step)}</div>
+                        <div className="sub-agent-step-title">{stepTitle(step)}</div>
                         {detail && (
-                          <div style={{ color: step.type === 'error' ? 'var(--danger)' : 'var(--text-secondary)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 92, overflow: 'auto' }}>
-                            {detail.length > 900 ? `${detail.slice(0, 900)}…` : detail}
+                          <div className={step.type === 'error' ? 'sub-agent-step-detail error' : 'sub-agent-step-detail'}>
+                            {detail}
                           </div>
                         )}
                       </div>

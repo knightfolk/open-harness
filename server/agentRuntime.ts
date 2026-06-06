@@ -17,6 +17,7 @@ import { extname, isAbsolute, join, resolve } from 'path';
 import { parseToolCallMarkup } from './toolCallMarkup';
 import type { HarnessRunStep } from './runTrace';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
+import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
 
 export interface BackgroundAgentRequest {
   profileId: AgentProfileId;
@@ -299,9 +300,35 @@ export function startBackgroundAgent(
     } catch (err: any) {
       if (controller.signal.aborted) {
         artifact.status = 'cancelled';
+        recordRoutingAdherenceEvent({
+          kind: 'abort',
+          phase: 'agent-request',
+          runId: id,
+          role: profile.preferredRole,
+          selectedModel: modelId,
+          providerId: provider.providerId,
+          promptHash: hashPrompt(req.prompt),
+          timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+          elapsedMs: Date.now() - new Date(startedAt).getTime(),
+          error: 'Agent request aborted',
+          retryable: true,
+        });
       } else {
         artifact.status = 'error';
         artifact.error = err?.message || 'Agent run failed';
+        recordRoutingAdherenceEvent({
+          kind: err?.name === 'TimeoutError' ? 'timeout' : 'error',
+          phase: 'agent-request',
+          runId: id,
+          role: profile.preferredRole,
+          selectedModel: modelId,
+          providerId: provider.providerId,
+          promptHash: hashPrompt(req.prompt),
+          timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+          elapsedMs: Date.now() - new Date(startedAt).getTime(),
+          error: artifact.error,
+          retryable: true,
+        });
       }
     } finally {
       artifact.completedAt = new Date().toISOString();
@@ -434,9 +461,35 @@ export async function runAgentPhase(
   } catch (err: any) {
     if (controller.signal.aborted) {
       artifact.status = 'cancelled';
+      recordRoutingAdherenceEvent({
+        kind: 'abort',
+        phase: 'agent-request',
+        runId: id,
+        role: profile.preferredRole,
+        selectedModel: modelId,
+        providerId: provider.providerId,
+        promptHash: hashPrompt(req.prompt),
+        timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+        elapsedMs: Date.now() - new Date(startedAt).getTime(),
+        error: 'Agent request aborted',
+        retryable: true,
+      });
     } else {
       artifact.status = 'error';
       artifact.error = err?.message || 'Agent run failed';
+      recordRoutingAdherenceEvent({
+        kind: err?.name === 'TimeoutError' ? 'timeout' : 'error',
+        phase: 'agent-request',
+        runId: id,
+        role: profile.preferredRole,
+        selectedModel: modelId,
+        providerId: provider.providerId,
+        promptHash: hashPrompt(req.prompt),
+        timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+        elapsedMs: Date.now() - new Date(startedAt).getTime(),
+        error: artifact.error,
+        retryable: true,
+      });
     }
   } finally {
     artifact.completedAt = new Date().toISOString();

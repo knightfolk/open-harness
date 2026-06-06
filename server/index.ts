@@ -49,6 +49,7 @@ import { estimateSections, redactSecrets } from "./sectionRedaction";
 import { parseToolCallMarkup, MarkupScrubber, type MarkupParseResult } from './toolCallMarkup';
 import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
+import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -694,6 +695,11 @@ app.get('/api/router/learning/events', (req, res) => {
   const sessionId = req.query.sessionId as string | undefined;
   const limit = parseInt(String(req.query.limit || '100'), 10);
   res.json(getRoutingEvents(sessionId, limit));
+});
+
+app.get('/api/router/adherence/events', (req, res) => {
+  const limit = parseInt(String(req.query.limit || '100'), 10);
+  res.json(listRoutingAdherenceEvents(limit));
 });
 
 app.get('/api/router/learning/success-rates', (_req, res) => {
@@ -2017,8 +2023,38 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
 
   const requestController = new AbortController();
   let streamFinished = false;
+  const sseStartedAt = Date.now();
+  const sseContext: {
+    runId?: string;
+    routeMode?: string;
+    role?: string;
+    complexity?: string;
+    selectedModel?: string;
+    providerId?: string;
+    classifierModel?: string | null;
+    candidateScores?: Record<string, number>;
+  } = {};
   res.on('close', () => {
-    if (!streamFinished && !res.writableEnded) requestController.abort();
+    if (!streamFinished && !res.writableEnded) {
+      requestController.abort();
+      recordRoutingAdherenceEvent({
+        kind: 'abort',
+        phase: 'client-sse',
+        sessionId: session.id,
+        runId: sseContext.runId,
+        routeMode: sseContext.routeMode,
+        role: sseContext.role,
+        complexity: sseContext.complexity,
+        selectedModel: sseContext.selectedModel,
+        providerId: sseContext.providerId,
+        classifierModel: sseContext.classifierModel,
+        candidateScores: sseContext.candidateScores,
+        promptHash: hashPrompt(content),
+        elapsedMs: Date.now() - sseStartedAt,
+        error: 'Client closed SSE connection before stream completed',
+        retryable: true,
+      });
+    }
   });
 
   const assistantId = uuid();
@@ -2037,6 +2073,16 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   });
   run.effectiveModel = effectiveModel;
   run.role = route.role;
+  Object.assign(sseContext, {
+    runId: run.id,
+    routeMode: route.mode,
+    role: route.role,
+    complexity: route.complexity,
+    selectedModel: effectiveModel,
+    providerId: resolved?.providerId || 'local',
+    classifierModel: route.routerData?.classifierModel ?? null,
+    candidateScores: route.routerData?.candidateScores,
+  });
   writeSSE(res, 'run_start', run);
   const rd = route.routerData;
   if (rd && rd.source === 'auto') {
@@ -2585,6 +2631,7 @@ async function streamModel(
   routeOverride?: RouteDecision,
   systemTaskContext?: string,
 ) {
+  const providerStartedAt = Date.now();
   // ── Model-aware prompt building ─────────────────────
   // Use the promptBuilder to generate a system prompt, tool config, and
   // generation parameters adapted to the active model's family profile.
@@ -2699,6 +2746,7 @@ async function streamModel(
   if (!isReasoningModel(effectiveModel)) {
     systemPrompt += '\n\nRULE: Start your response directly with the answer. Do NOT narrate your planning process. Never say things like The user wants me to or Let me or I need to or I will or Now I. Begin immediately with the substantive response.';
   }
+  const currentPromptHash = hashPrompt(systemPrompt);
 
 
   // ── Context management: fit conversation within model's token budget ──
@@ -2732,19 +2780,43 @@ async function streamModel(
       { role: 'system', content: systemPrompt },
       ...ctx.messages,
     ];
-    await streamWithNativeAdapter(
-      effectiveResolved.provider,
-      apiModelId,
-      nativeMessages,
-      promptResult.systemInstruction.content,
-      promptResult.generationConfig,
-      filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
-      toolServerMap,
-      res,
-      assistantId,
-      session,
-      run,
-    );
+    try {
+      await streamWithNativeAdapter(
+        effectiveResolved.provider,
+        apiModelId,
+        nativeMessages,
+        promptResult.systemInstruction.content,
+        promptResult.generationConfig,
+        filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
+        toolServerMap,
+        res,
+        assistantId,
+        session,
+        run,
+      );
+    } catch (err: any) {
+      recordRoutingAdherenceEvent({
+        kind: err?.name === 'TimeoutError' ? 'timeout' : err?.name === 'AbortError' ? 'abort' : 'error',
+        phase: 'provider-stream',
+        sessionId: session.id,
+        runId: run?.id,
+        routeMode: route.mode,
+        role: classifiedRole,
+        complexity: route.complexity,
+        selectedModel: effectiveModel,
+        providerId,
+        classifierModel: route.routerData?.classifierModel ?? null,
+        candidateScores: route.routerData?.candidateScores,
+        promptHash: currentPromptHash,
+        timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+        elapsedMs: Date.now() - providerStartedAt,
+        error: err?.message || 'Native provider stream failed',
+        lastEvent: 'native_provider_stream',
+        retryable: true,
+        fallbackAttempted: false,
+      });
+      throw err;
+    }
     return;
   }
 
@@ -2788,6 +2860,27 @@ async function streamModel(
 
       if (!response.ok) {
         const err = await response.text();
+        recordRoutingAdherenceEvent({
+          kind: 'error',
+          phase: 'provider-stream',
+          sessionId: session.id,
+          runId: run?.id,
+          routeMode: route.mode,
+          role: classifiedRole,
+          complexity: route.complexity,
+          selectedModel: effectiveModel,
+          providerId,
+          classifierModel: route.routerData?.classifierModel ?? null,
+          candidateScores: route.routerData?.candidateScores,
+          promptHash: currentPromptHash,
+          timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+          elapsedMs: Date.now() - providerStartedAt,
+          error: `${providerId} API error: ${response.status} ${err}`,
+          statusCode: response.status,
+          lastEvent: 'model_request',
+          retryable: true,
+          fallbackAttempted: false,
+        });
         if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: `${providerId} API error: ${response.status} ${err}` }); }
         res.write('event: error\ndata: ' + JSON.stringify({ error: `${providerId} API error: ${response.status} ${err}` }) + '\n\n');
         return;
@@ -2903,6 +2996,26 @@ async function streamModel(
           }
         }
       } catch (forcedErr: any) {
+        recordRoutingAdherenceEvent({
+          kind: forcedErr?.name === 'TimeoutError' ? 'timeout' : forcedErr?.name === 'AbortError' ? 'abort' : 'error',
+          phase: 'provider-stream',
+          sessionId: session.id,
+          runId: run?.id,
+          routeMode: route.mode,
+          role: classifiedRole,
+          complexity: route.complexity,
+          selectedModel: effectiveModel,
+          providerId,
+          classifierModel: route.routerData?.classifierModel ?? null,
+          candidateScores: route.routerData?.candidateScores,
+          promptHash: currentPromptHash,
+          timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+          elapsedMs: Date.now() - providerStartedAt,
+          error: forcedErr?.message || 'Forced answer request failed',
+          lastEvent: 'forced_answer_request',
+          retryable: true,
+          fallbackAttempted: false,
+        });
         console.error('[stream] Forced answer request failed:', forcedErr.message);
       }
     }
@@ -2928,6 +3041,27 @@ async function streamModel(
 
     sessionStore.saveSession(session);
   } catch (err: any) {
+    const errorMessage = err?.message || 'Model request failed';
+    recordRoutingAdherenceEvent({
+      kind: err?.name === 'TimeoutError' ? 'timeout' : err?.name === 'AbortError' ? 'abort' : 'error',
+      phase: 'provider-stream',
+      sessionId: session.id,
+      runId: run?.id,
+      routeMode: route.mode,
+      role: classifiedRole,
+      complexity: route.complexity,
+      selectedModel: effectiveModel,
+      providerId,
+      classifierModel: route.routerData?.classifierModel ?? null,
+      candidateScores: route.routerData?.candidateScores,
+      promptHash: currentPromptHash,
+      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+      elapsedMs: Date.now() - providerStartedAt,
+      error: errorMessage,
+      lastEvent: 'provider_stream',
+      retryable: true,
+      fallbackAttempted: false,
+    });
     if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
     res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
   }

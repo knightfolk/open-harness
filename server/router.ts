@@ -1,6 +1,7 @@
 import type { HarnessRole } from './runTrace';
 import { isAutoRouterEnabled, routeTask, buildRouterSignal } from './autoRouter';
 import type { StoredConfig } from './config';
+import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
 
 export type OrchestrationMode = 'direct' | 'plan' | 'investigate' | 'execute' | 'compare';
 export type Complexity = 'simple' | 'medium' | 'deep';
@@ -148,6 +149,7 @@ export async function routeWithAutoRouter(
       1,     // turns — approximate; true count from session
       route.needsTools ? 5 : 0,  // approximate tool count
     );
+    const routerStart = Date.now();
     try {
       const decision = await routeTask(signal, config, {
         forceCostStrategy: route.complexity === 'simple'
@@ -158,6 +160,7 @@ export async function routeWithAutoRouter(
       });
     if (decision) {
       const isFallback = decision.fallback || decision.score === 0;
+      const classifierFailed = decision.fallback && /classifier/i.test(decision.reason);
       if (!isFallback) {
         route.suggestedModels = [decision.modelId];
       }
@@ -170,6 +173,24 @@ export async function routeWithAutoRouter(
         fallback: decision.fallback,
         classifierModel: decision.classifierModel,
       };
+      if (classifierFailed) {
+        recordRoutingAdherenceEvent({
+          kind: 'error',
+          phase: 'router-classifier',
+          routeMode: route.mode,
+          role: route.role,
+          complexity: route.complexity,
+          selectedModel: decision.modelId,
+          classifierModel: decision.classifierModel,
+          candidateScores: decision.scores,
+          promptHash: hashPrompt(content),
+          elapsedMs: Date.now() - routerStart,
+          error: decision.reason,
+          retryable: true,
+          fallbackAttempted: true,
+          fallbackModelId: decision.modelId,
+        });
+      }
         console.log(
           `[route] auto-router: ${isFallback ? 'fallback' : 'active'} ` +
           `model=${decision.modelId} score=${decision.score.toFixed(2)} ` +
@@ -180,6 +201,19 @@ export async function routeWithAutoRouter(
     } catch (err) {
       // If auto-router fails, fall through to heuristic suggestedModels
       console.warn('[route] auto-router decision failed, using heuristic:', err);
+      recordRoutingAdherenceEvent({
+        kind: 'error',
+        phase: 'router-classifier',
+        routeMode: route.mode,
+        role: route.role,
+        complexity: route.complexity,
+        classifierModel: config.autoRouter?.classifierModel ?? null,
+        promptHash: hashPrompt(content),
+        elapsedMs: Date.now() - routerStart,
+        error: err instanceof Error ? err.message : String(err),
+        retryable: true,
+        fallbackAttempted: true,
+      });
     }
   }
 
