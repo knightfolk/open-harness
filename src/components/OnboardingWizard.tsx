@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import * as api from '../utils/api';
 import { defaultProviderPlan } from '../data/providerPlans';
+import { applyTheme, getBuiltinTheme, getThemesByMode, resolveThemeId } from '../theme/builtins';
 
 // ── Provider catalog (shared with onboarding) ──────────
 interface OnboardingProvider {
@@ -53,17 +54,6 @@ const PERSONALITIES: PersonalityPreset[] = [
   { id: 'chatty', label: 'Chatty', text: 'Be warm, friendly, and conversational. Use humor when it fits and explain things in plain English.' },
   { id: 'teacher', label: 'Helpful teacher', text: 'Explain the why behind every change. When you write code, teach the underlying patterns. Be patient and supportive.' },
   { id: 'creative', label: 'Creative', text: 'Think outside the box. Suggest unconventional approaches when appropriate. Prioritize elegance and developer experience.' },
-];
-
-const THEME_CHOICES = [
-  { id: 'midnight', label: 'Midnight', group: 'dark', color: '#6366f1' },
-  { id: 'charcoal', label: 'Charcoal', group: 'dark', color: '#a1a1aa' },
-  { id: 'forest', label: 'Forest', group: 'dark', color: '#10b981' },
-  { id: 'crimson', label: 'Crimson', group: 'dark', color: '#f43f5e' },
-  { id: 'daylight', label: 'Daylight', group: 'light', color: '#6366f1' },
-  { id: 'silver', label: 'Silver', group: 'light', color: '#3b82f6' },
-  { id: 'sage', label: 'Sage', group: 'light', color: '#10b981' },
-  { id: 'blush', label: 'Blush', group: 'light', color: '#f43f5e' },
 ];
 
 // ── Trust mode options ─────────────────────────────────
@@ -127,9 +117,13 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           setStep(savedStep);
         }
         if (typeof (cfg as any).activeTheme === 'string' && (cfg as any).activeTheme) {
-          const themeId = (cfg as any).activeTheme as string;
+          const rawThemeId = (cfg as any).activeTheme as string;
+          const themeId = resolveThemeId(rawThemeId);
           setActiveTheme(themeId);
-          document.documentElement.setAttribute('data-theme', themeId);
+          applyTheme(themeId);
+          if (rawThemeId !== themeId) {
+            try { await api.updateConfig({ activeTheme: themeId } as any); } catch {}
+          }
         }
       } catch {}
 
@@ -329,6 +323,11 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
 
   // ── Step 1: Theme choice ──
   if (step === 1) {
+    const themeGroups = [
+      { mode: 'dark', themes: getThemesByMode('dark'), label: 'Dark themes' },
+      { mode: 'light', themes: getThemesByMode('light'), label: 'Light themes' },
+    ] as const;
+
     return (
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 620 }}>
@@ -337,22 +336,22 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </h2>
           <p className="onboarding-step-subtitle">Choose a UI theme first, then continue through setup.</p>
 
-          {['dark', 'light'].map((group) => (
-            <div key={group} style={{ marginBottom: 16 }}>
+          {themeGroups.map((group) => (
+            <div key={group.mode} style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-tertiary)', marginBottom: 8 }}>
-                {group === 'dark' ? 'Dark themes' : 'Light themes'}
+                {group.label}
               </div>
               <div className="onboarding-theme-grid">
-                {THEME_CHOICES.filter((theme) => theme.group === group).map((theme) => {
+                {group.themes.map((theme) => {
                   const isSelected = activeTheme === theme.id;
                   return (
                     <button
                       key={theme.id}
                       className={`onboarding-theme-card ${isSelected ? 'selected' : ''}`}
                       onClick={async () => {
-                        setActiveTheme(theme.id);
-                        document.documentElement.setAttribute('data-theme', theme.id);
-                        try { await api.updateConfig({ activeTheme: theme.id } as any); } catch {}
+                        const resolvedTheme = applyTheme(theme.id);
+                        setActiveTheme(resolvedTheme);
+                        try { await api.updateConfig({ activeTheme: resolvedTheme } as any); } catch {}
                       }}
                     >
                       <div className="onboarding-theme-swatch" style={{ background: theme.color }} />
@@ -790,7 +789,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
             <div className="onboarding-review-section">
               <div className="onboarding-review-label">Theme</div>
               <div className="onboarding-review-value">
-                {THEME_CHOICES.find((theme) => theme.id === activeTheme)?.label || activeTheme}
+                {getBuiltinTheme(activeTheme)?.label || activeTheme}
               </div>
             </div>
 

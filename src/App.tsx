@@ -8,6 +8,7 @@ import { LayoutEngine } from './components/layout/LayoutEngine';
 import { StatusBar } from './components/StatusBar';
 import { useLayoutState } from './components/layout/useLayoutState';
 import * as api from './utils/api';
+import { applyTheme, resolveThemeId } from './theme/builtins';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -271,17 +272,21 @@ function App() {
 
   // Load config from server on mount
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', 'midnight');
+    applyTheme('midnight');
     (async () => {
       try {
         const config = await api.getConfig();
         if (config) {
           setConfigPath(config.configPath || '');
           setActiveModel(config.activeModel || 'Auto');
-          setActiveTheme(config.activeTheme || 'midnight');
+          const resolvedTheme = resolveThemeId(config.activeTheme);
+          setActiveTheme(resolvedTheme);
+          applyTheme(resolvedTheme);
+          if (config.activeTheme && config.activeTheme !== resolvedTheme) {
+            api.updateConfig({ activeTheme: resolvedTheme }).catch(() => {});
+          }
           setPersonalityText(config.personality || '');
           setFavoriteModelIds(Array.isArray(config.favoriteModels) ? config.favoriteModels : []);
-          document.documentElement.setAttribute('data-theme', config.activeTheme || 'midnight');
           if (config.providers?.length > 0) {
             setProviders(config.providers.map((p: any) => ({
               id: p.id,
@@ -393,9 +398,9 @@ function App() {
   }, []);
 
   const handleSelectTheme = useCallback((themeId: string) => {
-    setActiveTheme(themeId);
-    document.documentElement.setAttribute('data-theme', themeId);
-    api.updateConfig({ activeTheme: themeId }).catch(() => {});
+    const resolvedThemeId = applyTheme(themeId);
+    setActiveTheme(resolvedThemeId);
+    api.updateConfig({ activeTheme: resolvedThemeId }).catch(() => {});
   }, []);
 
   const handlePersonalityChange = useCallback((text: string) => {
@@ -1237,8 +1242,8 @@ function App() {
               if (result?.trustMode) setTrustMode(result.trustMode as any);
               if (result?.roleAssignments) setRoleAssignments(roleMapToAssignments(result.roleAssignments));
               if (result?.activeTheme) {
-                setActiveTheme(result.activeTheme);
-                document.documentElement.setAttribute('data-theme', result.activeTheme);
+                const resolvedTheme = applyTheme(result.activeTheme);
+                setActiveTheme(resolvedTheme);
               }
               // If the user picked a folder, open it as a session.
               if (result?.folderPath) {

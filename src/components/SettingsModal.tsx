@@ -31,6 +31,7 @@ import {
   providerPlanLabel,
   type ProviderAccessMode,
 } from '../data/providerPlans';
+import { getThemesByMode, resolveThemeId } from '../theme/builtins';
 
 // ── Category definition ────────────────────────────────
 interface SettingsCategory {
@@ -1638,35 +1639,44 @@ function PersonalityPane({ personalityText, onChange }: any) {
 /* ================================================================== */
 
 function ThemePane({ activeTheme, onSelectTheme }: any) {
-  const themes = [
-    { id: 'midnight', label: 'Midnight', color: '#6366f1', group: 'dark' },
-    { id: 'charcoal', label: 'Charcoal', color: '#a1a1aa', group: 'dark' },
-    { id: 'forest', label: 'Forest', color: '#10b981', group: 'dark' },
-    { id: 'crimson', label: 'Crimson', color: '#f43f5e', group: 'dark' },
-    { id: 'daylight', label: 'Daylight', color: '#6366f1', group: 'light' },
-    { id: 'silver', label: 'Silver', color: '#3b82f6', group: 'light' },
-    { id: 'sage', label: 'Sage', color: '#10b981', group: 'light' },
-    { id: 'blush', label: 'Blush', color: '#f43f5e', group: 'light' },
-  ];
+  const resolvedActiveTheme = resolveThemeId(activeTheme);
+  const hasRepair = activeTheme !== resolvedActiveTheme;
+  const themeGroups = [
+    { mode: 'dark', label: 'Dark themes', themes: getThemesByMode('dark') },
+    { mode: 'light', label: 'Light themes', themes: getThemesByMode('light') },
+  ] as const;
+
   return (
     <>
       <PaneTitle>Theme</PaneTitle>
       <PaneDesc>Choose a colorway. Changes apply instantly.</PaneDesc>
       <div style={{ marginTop: 16 }}>
-        {['dark', 'light'].map((group) => (
-          <div key={group} style={{ marginBottom: 16 }}>
+        {hasRepair && (
+          <div style={{ color: 'var(--accent-warning)', fontSize: 12, marginBottom: 12 }}>
+            Saved theme "{activeTheme}" is unavailable. Reverted to "{resolvedActiveTheme}".
+          </div>
+        )}
+        {themeGroups.map((group) => (
+          <div key={group.mode} style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-tertiary)', marginBottom: 8 }}>
-              {group === 'dark' ? 'Dark themes' : 'Light themes'}
+              {group.label}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
-              {themes.filter((t) => t.group === group).map((t) => (
-                <button key={t.id} className={`settings-card ${activeTheme === t.id ? 'active' : ''}`}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '10px 12px', border: activeTheme === t.id ? '2px solid var(--accent-primary)' : undefined }}
+              {group.themes.map((t) => (
+                <button key={t.id} className={`settings-card ${resolvedActiveTheme === t.id ? 'active' : ''}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    cursor: 'pointer',
+                    padding: '10px 12px',
+                    border: resolvedActiveTheme === t.id ? '2px solid var(--accent-primary)' : undefined,
+                  }}
                   onClick={() => onSelectTheme(t.id)}>
                   <div style={{ width: 24, height: 24, borderRadius: 6, background: t.color, flexShrink: 0 }} />
                   <div style={{ textAlign: 'left' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{t.label}</div>
-                    {activeTheme === t.id && <div style={{ fontSize: 10, color: 'var(--accent-primary)' }}>Active</div>}
+                    {resolvedActiveTheme === t.id && <div style={{ fontSize: 10, color: 'var(--accent-primary)' }}>Active</div>}
                   </div>
                 </button>
               ))}
