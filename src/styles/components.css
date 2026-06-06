@@ -3407,6 +3407,13 @@ button:focus-visible {
   color: var(--text-tertiary);
 }
 
+.routing-event-help {
+  margin-top: 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .routing-event-actions {
   display: flex;
   gap: 4px;

@@ -8,7 +8,7 @@ import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 import { providerPlanLabel } from '../data/providerPlans';
 import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
-import { autoRouterDecisionLabel, candidateScoresUnavailableLabel, formatAutoRouterScoreList } from '../utils/autoRouterTrace';
+import { ROUTING_FEEDBACK_GUIDANCE, autoRouterDecisionLabel, candidateScoresUnavailableLabel, formatAutoRouterScoreList } from '../utils/autoRouterTrace';
 import type { HarnessRunStep, ThinkingEffort } from '../types';
 
 const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
@@ -80,6 +80,7 @@ function autoRouterTitle(step?: Extract<HarnessRunStep, { type: 'auto_router' }>
     `${autoRouterDecisionLabel({ fallback: step.fallback, cached: step.cached })}: ${step.reason}`,
     step.classifierModel ? `Classifier: ${step.classifierModel}` : 'Classifier: unavailable',
     step.cached ? 'Source: cached decision' : 'Source: fresh decision',
+    `Feedback: ${ROUTING_FEEDBACK_GUIDANCE}`,
     'Top candidate scores:',
     Object.keys(step.candidateScores || {}).length > 0
       ? formatAutoRouterScoreList(step.candidateScores)

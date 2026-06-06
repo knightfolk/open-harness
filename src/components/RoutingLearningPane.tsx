@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { AlertTriangle, BarChart3, CheckCircle2, CircleHelp, Lightbulb, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import * as api from '../utils/api';
-import { candidateScoresUnavailableLabel, routingEventDecisionLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
+import { ROUTING_FEEDBACK_GUIDANCE, candidateScoresUnavailableLabel, routingEventDecisionLabel, routingOutcomeHelp, routingOutcomeLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
 
 interface EnabledModelRef {
   id: string;
@@ -37,10 +37,10 @@ function sampleTone(total: number): 'empty' | 'low' | 'ok' {
 }
 
 function eventStatus(event: api.RoutingEvent) {
-  if (event.outcome === 'success') return { label: 'Worked', icon: CheckCircle2, tone: 'success' };
-  if (event.outcome === 'failure') return { label: 'Failed', icon: XCircle, tone: 'error' };
-  if (event.outcome === 'ambiguous') return { label: 'Unclear', icon: CircleHelp, tone: 'muted' };
-  return { label: 'Needs review', icon: CircleHelp, tone: 'warning' };
+  if (event.outcome === 'success') return { label: routingOutcomeLabel(event.outcome), icon: CheckCircle2, tone: 'success' };
+  if (event.outcome === 'failure') return { label: routingOutcomeLabel(event.outcome), icon: XCircle, tone: 'error' };
+  if (event.outcome === 'ambiguous') return { label: routingOutcomeLabel(event.outcome), icon: CircleHelp, tone: 'muted' };
+  return { label: routingOutcomeLabel(event.outcome), icon: CircleHelp, tone: 'warning' };
 }
 
 export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendation }: Props) {
@@ -300,7 +300,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         <div className="routing-section-header">
           <div>
             <h3>Recent Routing Decisions</h3>
-            <p>Mark outcomes here. These labels are what make the learning data useful.</p>
+            <p>{ROUTING_FEEDBACK_GUIDANCE} These labels are what make the learning data useful.</p>
           </div>
         </div>
 
@@ -340,11 +340,12 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
                         <span className="muted">{candidateScoresUnavailableLabel({ fallback: event.wasFallback })}</span>
                       )}
                     </div>
+                    <div className="routing-event-help">{routingOutcomeHelp(event.outcome)}</div>
                   </div>
                   <div className="routing-event-actions">
-                    <button onClick={() => handleMarkOutcome(event.id, 'success')} disabled={event.outcome === 'success'}>Worked</button>
-                    <button onClick={() => handleMarkOutcome(event.id, 'failure')} disabled={event.outcome === 'failure'}>Failed</button>
-                    <button onClick={() => handleMarkOutcome(event.id, 'ambiguous')} disabled={event.outcome === 'ambiguous'}>Unclear</button>
+                    <button title={routingOutcomeHelp('success')} onClick={() => handleMarkOutcome(event.id, 'success')} disabled={event.outcome === 'success'}>{routingOutcomeLabel('success')}</button>
+                    <button title={routingOutcomeHelp('failure')} onClick={() => handleMarkOutcome(event.id, 'failure')} disabled={event.outcome === 'failure'}>{routingOutcomeLabel('failure')}</button>
+                    <button title={routingOutcomeHelp('ambiguous')} onClick={() => handleMarkOutcome(event.id, 'ambiguous')} disabled={event.outcome === 'ambiguous'}>{routingOutcomeLabel('ambiguous')}</button>
                   </div>
                 </div>
               );

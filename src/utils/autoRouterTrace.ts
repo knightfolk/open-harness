@@ -1,6 +1,7 @@
 import type { HarnessRunStep, Message } from '../types';
 
 export type AutoRouterStep = Extract<HarnessRunStep, { type: 'auto_router' }>;
+export type RoutingOutcome = 'success' | 'failure' | 'ambiguous' | null;
 
 export interface RoutingTraceEventLike {
   selectedModel: string;
@@ -12,6 +13,21 @@ export interface RoutingTraceEventLike {
 }
 
 export const AUTO_ROUTER_LABEL = 'Auto-Router';
+export const ROUTING_FEEDBACK_GUIDANCE = 'Mark this route as Worked, Failed, or Unclear in Routing Learning.';
+
+export function routingOutcomeLabel(outcome: RoutingOutcome): string {
+  if (outcome === 'success') return 'Worked';
+  if (outcome === 'failure') return 'Failed';
+  if (outcome === 'ambiguous') return 'Unclear';
+  return 'Needs review';
+}
+
+export function routingOutcomeHelp(outcome: RoutingOutcome): string {
+  if (outcome === 'success') return 'The selected model handled this route well.';
+  if (outcome === 'failure') return 'The selected model was the wrong fit or failed the task.';
+  if (outcome === 'ambiguous') return 'The result needs judgment before it should count as a win or loss.';
+  return ROUTING_FEEDBACK_GUIDANCE;
+}
 
 export function sortedCandidateScores(scores?: Record<string, number>, limit?: number): Array<[string, number]> {
   const entries = Object.entries(scores || {})
@@ -45,7 +61,7 @@ export function formatAutoRouterStepDetail(step: AutoRouterStep): string {
     step.classifierModel ? `classifier: ${step.classifierModel}` : 'classifier: unavailable',
   ];
   if (step.cached) parts.push('cached');
-  return `${parts.join(' · ')}\n${step.reason}`;
+  return `${parts.join(' · ')}\n${step.reason}\n${ROUTING_FEEDBACK_GUIDANCE}`;
 }
 
 export function describeAutoRouterRunStep(step: AutoRouterStep): string {
@@ -66,6 +82,7 @@ export function autoRouterStepTraceText(step: AutoRouterStep): string {
     scores.length > 0
       ? `Candidate scores:\n${scores.map(([model, score]) => `${model}: ${score.toFixed(2)}`).join('\n')}`
       : `Candidate scores: ${candidateScoresUnavailableLabel({ fallback: step.fallback })}`,
+    `Feedback: ${ROUTING_FEEDBACK_GUIDANCE}`,
   ].join('\n');
 }
 

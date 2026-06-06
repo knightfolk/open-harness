@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Eye, EyeOff, ChevronDown, ChevronRight, AlertTriangle, Cpu, Wrench, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
 import type { HarnessRun, HarnessRunStep } from '../types';
 import * as api from '../utils/api';
-import { autoRouterDecisionLabel, autoRouterStepTraceText, candidateScoresUnavailableLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
+import { ROUTING_FEEDBACK_GUIDANCE, autoRouterDecisionLabel, autoRouterStepTraceText, candidateScoresUnavailableLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
 
 interface Props {
   runTrace: HarnessRun | undefined;
@@ -146,6 +146,10 @@ export function PromptMicroscope({ runTrace }: Props) {
                 <div className="pm-row">
                   <span className="pm-key">Score</span>
                   <span className="pm-value">{autoRouterStep.score.toFixed(2)}{autoRouterStep.cached ? ' · cached' : ''}</span>
+                </div>
+                <div className="pm-row">
+                  <span className="pm-key">Feedback</span>
+                  <span className="pm-value">{ROUTING_FEEDBACK_GUIDANCE}</span>
                 </div>
                 {autoRouterScores.length > 0 ? (
                   <div className="pm-row pm-row-block">
