@@ -2069,6 +2069,18 @@ function routerSourceBadgeStyle(tone: string): React.CSSProperties {
   return { ...base, color: 'var(--text-secondary)', background: 'var(--bg-primary, #fff)' };
 }
 
+function resolveRouterSelection(
+  currentModelId: string,
+  candidates: api.AutoRouterCandidateConfig[],
+  fallbackModelId = '',
+) {
+  const current = currentModelId.trim();
+  if (current && candidates.some((candidate) => normalizeModelKey(candidate.modelId) === normalizeModelKey(current))) return current;
+  const fallback = fallbackModelId.trim();
+  if (fallback && candidates.some((candidate) => normalizeModelKey(candidate.modelId) === normalizeModelKey(fallback))) return fallback;
+  return candidates[0]?.modelId || '';
+}
+
 function AutoRouterPane() {
   const [arEnabled, setArEnabled] = useState(false);
   const [arThreshold, setArThreshold] = useState(0.7);
@@ -2168,8 +2180,16 @@ function AutoRouterPane() {
   const addCandidate = async () => {
     if (!newCandidate.modelId.trim()) return;
     const updated = mergeRouterCandidates(arCandidates, [{ ...newCandidate, modelId: newCandidate.modelId.trim() }]);
+    const nextClassifier = resolveRouterSelection(arClassifier, updated, newCandidate.modelId);
+    const nextDefaultModel = resolveRouterSelection(arDefaultModel, updated, newCandidate.modelId);
     setArCandidates(updated);
-    await persistRouterConfig({ candidates: updated });
+    setArClassifier(nextClassifier);
+    setArDefaultModel(nextDefaultModel);
+    await persistRouterConfig({
+      classifierModel: nextClassifier,
+      defaultModel: nextDefaultModel,
+      candidates: updated,
+    });
     setNewCandidate({ modelId: '', cost: 0.5, supportsImages: false, supportsThinking: false, card: '' });
   };
 
@@ -2181,8 +2201,16 @@ function AutoRouterPane() {
 
   const removeCandidate = async (index: number) => {
     const updated = arCandidates.filter((_, i) => i !== index);
+    const nextClassifier = resolveRouterSelection(arClassifier, updated, arDefaultModel);
+    const nextDefaultModel = resolveRouterSelection(arDefaultModel, updated, nextClassifier);
     setArCandidates(updated);
-    await persistRouterConfig({ candidates: updated });
+    setArClassifier(nextClassifier);
+    setArDefaultModel(nextDefaultModel);
+    await persistRouterConfig({
+      classifierModel: nextClassifier,
+      defaultModel: nextDefaultModel,
+      candidates: updated,
+    });
   };
 
   const syncConfiguredCandidates = async () => {
@@ -2191,11 +2219,15 @@ function AutoRouterPane() {
       const cfg = await api.getConfig();
       const scannedCandidates = buildConfiguredRouterCandidates(cfg);
       const updated = mergeRouterCandidates(refreshConfiguredRouterCosts(arCandidates, scannedCandidates), scannedCandidates);
+      const nextClassifier = resolveRouterSelection(arClassifier, updated);
+      const nextDefaultModel = resolveRouterSelection(arDefaultModel, updated, nextClassifier);
       setConfiguredCandidates(scannedCandidates);
       setArCandidates(updated);
+      setArClassifier(nextClassifier);
+      setArDefaultModel(nextDefaultModel);
       await persistRouterConfig({
-        classifierModel: arClassifier || updated[0]?.modelId || 'minimax:MiniMax-M3',
-        defaultModel: arDefaultModel || updated[0]?.modelId || 'minimax:MiniMax-M3',
+        classifierModel: nextClassifier,
+        defaultModel: nextDefaultModel,
         candidates: updated,
       });
     } finally {
@@ -2205,8 +2237,16 @@ function AutoRouterPane() {
 
   const addConfiguredCandidate = async (candidate: api.AutoRouterCandidateConfig) => {
     const updated = mergeRouterCandidates(arCandidates, [candidate]);
+    const nextClassifier = resolveRouterSelection(arClassifier, updated, candidate.modelId);
+    const nextDefaultModel = resolveRouterSelection(arDefaultModel, updated, candidate.modelId);
     setArCandidates(updated);
-    await persistRouterConfig({ candidates: updated });
+    setArClassifier(nextClassifier);
+    setArDefaultModel(nextDefaultModel);
+    await persistRouterConfig({
+      classifierModel: nextClassifier,
+      defaultModel: nextDefaultModel,
+      candidates: updated,
+    });
   };
 
   const configuredAvailable = configuredCandidates.filter((candidate) => (
