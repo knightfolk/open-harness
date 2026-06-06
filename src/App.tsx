@@ -212,6 +212,7 @@ function App() {
         setActiveSessionId(session.id);
         setWorkingDir(session.workingDir || null);
         setMessages([]);
+        setLastAutoRouterStep(null);
         setSubAgents([]);
       }
       if (action === 'open-folder' && path) {
@@ -228,6 +229,7 @@ function App() {
         setActiveSessionId(session.id);
         setWorkingDir(path);
         setMessages([]);
+        setLastAutoRouterStep(null);
         setSubAgents([]);
       }
     });
@@ -566,7 +568,7 @@ function App() {
         setActiveSessionId(list[0].id);
         setWorkingDir(list[0].workingDir);
         const detail = await api.getSession(list[0].id);
-        setMessages(detail.messages.map(mapApiMessage));
+        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
       } catch (err) {
         console.error('Failed to load sessions:', err);
       } finally {
@@ -582,10 +584,11 @@ function App() {
     try {
       const detail = await api.getSession(id);
       setWorkingDir(detail.workingDir || null);
-      setMessages(detail.messages.map(mapApiMessage));
+      applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
     } catch (err) {
       console.error('Failed to load session:', err);
       setMessages([]);
+      setLastAutoRouterStep(null);
     }
   }, [activeSessionId]);
 
@@ -611,7 +614,7 @@ function App() {
         setActiveSessionId(next.id);
         setWorkingDir(next.workingDir || null);
         const detail = await api.getSession(next.id);
-        setMessages(detail.messages.map(mapApiMessage));
+        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
         setSubAgents([]);
       }
     } catch (err) {
@@ -642,7 +645,7 @@ function App() {
         setActiveSessionId(next.id);
         setWorkingDir(next.workingDir || null);
         const detail = await api.getSession(next.id);
-        setMessages(detail.messages.map(mapApiMessage));
+        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
         setSubAgents([]);
       }
     } catch (err) {
@@ -666,6 +669,7 @@ function App() {
       setActiveSessionId(session.id);
       setWorkingDir(session.workingDir || null);
       setMessages([]);
+      setLastAutoRouterStep(null);
       setSubAgents([]);
     } catch (err) {
       console.error('Failed to create session:', err);
@@ -692,6 +696,7 @@ function App() {
       setActiveSessionId(session.id);
       setWorkingDir(folderPath);
       setMessages([]);
+      setLastAutoRouterStep(null);
       setSubAgents([]);
     } catch (err) {
       console.error('Failed to open folder:', err);
@@ -1401,6 +1406,27 @@ function mapApiMessage(m: api.MessageInfo): Message {
     })),
     runTrace: m.runTrace,
   };
+}
+
+function latestAutoRouterStep(messages: Message[]): Extract<HarnessRunStep, { type: 'auto_router' }> | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const steps = messages[i].runTrace?.steps || [];
+    for (let j = steps.length - 1; j >= 0; j -= 1) {
+      const step = steps[j];
+      if (step.type === 'auto_router') return step;
+    }
+  }
+  return null;
+}
+
+function applyLoadedMessages(
+  rawMessages: api.MessageInfo[],
+  setMessages: (messages: Message[]) => void,
+  setLastAutoRouterStep: (step: Extract<HarnessRunStep, { type: 'auto_router' }> | null) => void,
+) {
+  const mapped = rawMessages.map(mapApiMessage);
+  setMessages(mapped);
+  setLastAutoRouterStep(latestAutoRouterStep(mapped));
 }
 
 // ── Snap Zone Overlay (FancyZones-style) ──

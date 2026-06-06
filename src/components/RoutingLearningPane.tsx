@@ -42,6 +42,18 @@ function eventStatus(event: api.RoutingEvent) {
   return { label: 'Needs review', icon: CircleHelp, tone: 'warning' };
 }
 
+function sortedCandidateScores(scores?: Record<string, number>, limit = 4) {
+  return Object.entries(scores || {})
+    .filter(([, score]) => Number.isFinite(score))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+}
+
+function decisionKind(event: api.RoutingEvent): string {
+  if (event.wasFallback) return 'Default fallback';
+  return event.wasCached ? 'Cached classifier' : 'Classifier';
+}
+
 export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendation }: Props) {
   const [summary, setSummary] = useState<api.RouterLearningSummary | null>(null);
   const [events, setEvents] = useState<api.RoutingEvent[]>([]);
@@ -310,6 +322,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             {events.slice(0, 12).map((event) => {
               const status = eventStatus(event);
               const Icon = status.icon;
+              const topScores = sortedCandidateScores(event.candidateScores);
               return (
                 <div key={event.id} className="routing-event-row">
                   <div className={`routing-event-status ${status.tone}`}>
@@ -318,7 +331,26 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
                   </div>
                   <div className="routing-event-main">
                     <div>{event.selectedModel}</div>
-                    <span>{event.taskType || 'unknown'} / {event.role || 'unknown'} / {event.complexity || 'unknown'} / score {event.score.toFixed(2)}{event.wasFallback ? ' / fallback' : ''}</span>
+                    <span>
+                      {event.taskType || 'unknown'} / {event.role || 'unknown'} / {event.complexity || 'unknown'} / score {event.score.toFixed(2)}
+                    </span>
+                    <div className="routing-event-trace">
+                      <span>{decisionKind(event)}</span>
+                      {event.classifierModel && <span>classifier: {event.classifierModel}</span>}
+                      {event.wasCached && <span>cached</span>}
+                      {event.wasFallback && <span>fallback outcome</span>}
+                    </div>
+                    <div className="routing-score-chips">
+                      {topScores.length > 0 ? (
+                        topScores.map(([model, score]) => (
+                          <span key={model} title={`${model}: ${score.toFixed(2)}`}>
+                            {model} {score.toFixed(2)}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="muted">No candidate scores</span>
+                      )}
+                    </div>
                   </div>
                   <div className="routing-event-actions">
                     <button onClick={() => handleMarkOutcome(event.id, 'success')} disabled={event.outcome === 'success'}>Worked</button>

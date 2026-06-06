@@ -1897,6 +1897,7 @@ export interface RoutingEvent {
   candidateScores?: Record<string, number>;
   wasFallback: boolean;
   wasCached: boolean;
+  classifierModel?: string | null;
   outcome: 'success' | 'failure' | 'ambiguous' | null;
 }
 
