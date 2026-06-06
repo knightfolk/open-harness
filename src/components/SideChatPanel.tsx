@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Send, MessageSquare, Trash2 } from 'lucide-react';
 import * as api from '../utils/api';
+import { MarkdownContent } from './MarkdownContent';
 
 interface SideChatModel {
   id: string;
@@ -293,8 +294,8 @@ export function SideChatPanel({ activeModel, models }: Props) {
                 )}
               {/* Content */}
               {msg.content && (
-                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {msg.content}
+                <div className="side-chat-message-content">
+                  <MarkdownContent content={msg.content} />
                 </div>
               )}
               {msg.status === 'streaming' && !msg.content && (
