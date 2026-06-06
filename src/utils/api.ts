@@ -170,6 +170,7 @@ export interface AppConfig {
   personality: string;
   activeModel: string;
   activeTheme: string;
+  favoriteModels?: string[];
   roleAssignments: Record<string, string>;
   trustMode: string;
   autoRouter?: AutoRouterConfig;
@@ -184,7 +185,7 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'trustMode' | 'contextConfig'>>): Promise<void> {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'trustMode' | 'contextConfig' | 'favoriteModels'>>): Promise<void> {
   await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

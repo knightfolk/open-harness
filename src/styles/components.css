@@ -4884,6 +4884,31 @@ button:focus-visible {
   min-width: 0;
 }
 
+.model-picker-favorite-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.model-picker-favorite-btn:hover,
+.model-picker-favorite-btn:focus-visible {
+  color: var(--accent-primary);
+  outline: none;
+}
+
+.model-picker-favorite-btn[aria-pressed='true'] {
+  color: var(--accent-primary);
+}
+
 .model-picker-item-desc {
   display: block;
   color: var(--text-tertiary);

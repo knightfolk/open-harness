@@ -96,6 +96,7 @@ export interface StoredConfig {
   personality: string;
   activeModel: string;
   activeTheme: string;
+  favoriteModels?: string[];
   roleAssignments: Record<string, string>; // roleId -> modelId
   autoRouter?: AutoRouterConfig;
   contextConfig?: Partial<ContextConfig>;
@@ -133,6 +134,7 @@ const DEFAULT_CONFIG: StoredConfig = {
   personality: '',
   activeModel: 'MiniMax-M3',
   activeTheme: 'midnight',
+  favoriteModels: [],
   trustMode: 'workspace-write',
   roleAssignments: {
     coder: 'MiniMax-M3',         // Primary coding agent
@@ -178,11 +180,15 @@ export function loadConfig(): StoredConfig {
       accessMode: (provider.accessMode === 'subscription' ? 'subscription' : 'api-key') as StoredProvider['accessMode'],
       planId: typeof provider.planId === 'string' && provider.planId ? provider.planId : undefined,
     }));
+    const normalizedFavoriteModels = Array.isArray(parsed.favoriteModels)
+      ? [...new Set(parsed.favoriteModels.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
+      : [];
     return {
       ...cloneDefaultConfig(),
       ...parsed,
       providers: normalizedProviders,
       mcpServers: parsed.mcpServers || [],
+      favoriteModels: normalizedFavoriteModels,
       trustMode: parsed.trustMode || DEFAULT_CONFIG.trustMode,
       roleAssignments: {
         ...DEFAULT_CONFIG.roleAssignments,

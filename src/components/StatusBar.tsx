@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Wifi, WifiOff, ChevronUp, Cpu, Zap, Brain, DollarSign,
-  Check, Search, Shield, Settings,
+  Check, Search, Shield, Settings, Star,
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
@@ -32,6 +32,8 @@ interface Props {
   enabledToolCount?: number;
   configuredProviderCount?: number;
   onModelChange: (modelId: string) => void;
+  favoriteModelIds?: string[];
+  onToggleFavoriteModel?: (modelId: string) => void;
   onTrustModeChange?: (mode: string) => void;
   runningModel?: string | null;
   onOpenSettings?: () => void;
@@ -77,6 +79,8 @@ export function StatusBar({
   enabledToolCount,
   configuredProviderCount,
   onModelChange,
+  favoriteModelIds,
+  onToggleFavoriteModel,
   onTrustModeChange,
   runningModel,
   onOpenSettings,
@@ -114,16 +118,29 @@ export function StatusBar({
     (modelCatalogSummary(m.id, m.providerName) || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
   const hasSearch = searchQuery.trim().length > 0;
-  const pickerModels = [
-    { id: AUTO_MODEL_ID, name: AUTO_MODEL_LABEL, providerName: 'Router', contextWindow: 0 },
-    ...filtered,
-  ];
+  const autoModel: ModelOption = { id: AUTO_MODEL_ID, name: AUTO_MODEL_LABEL, providerName: 'Router', contextWindow: 0 };
+  const favoriteSet = useMemo(() => new Set(favoriteModelIds || []), [favoriteModelIds]);
+  const favoriteModels = filtered.filter((m) => m.id !== AUTO_MODEL_ID && favoriteSet.has(m.id));
+  const regularModels = filtered.filter((m) => m.id !== AUTO_MODEL_ID && !favoriteSet.has(m.id));
 
-  const grouped = new Map<string, ModelOption[]>();
-  for (const m of pickerModels) {
-    const list = grouped.get(m.providerName) || [];
-    list.push(m);
-    grouped.set(m.providerName, list);
+  const groupModelsByProvider = (list: ModelOption[]) => {
+    const grouped = new Map<string, ModelOption[]>();
+    for (const m of list) {
+      const existing = grouped.get(m.providerName);
+      if (existing) existing.push(m);
+      else grouped.set(m.providerName, [m]);
+    }
+    return Array.from(grouped.entries());
+  };
+  const groupedFavorites = groupModelsByProvider(favoriteModels);
+  const groupedRegular = groupModelsByProvider(regularModels);
+
+  const modelGroups: Array<{ label: string; models: ModelOption[] }> = [];
+  if (groupedFavorites.length > 0) {
+    modelGroups.push({ label: 'Favorites', models: groupedFavorites.flatMap(([_, list]) => list) });
+  }
+  for (const [provider, providerModels] of groupedRegular) {
+    modelGroups.push({ label: provider, models: providerModels });
   }
 
   const currentModel = models.find(m => m.id === activeModel);
@@ -267,20 +284,61 @@ export function StatusBar({
               />
             </div>
             <div className="model-picker-list">
-              {Array.from(grouped.entries()).map(([provider, providerModels]) => (
-                <div key={provider} className="model-picker-group">
-                  <div className="model-picker-group-label">{provider}</div>
-                  {providerModels.map(m => {
-                    const description = m.id === AUTO_MODEL_ID
-                      ? 'Route each request through configured Auto-Router candidates.'
-                      : modelCatalogSummary(m.id, m.providerName);
+              <div className="model-picker-group">
+                <div className="model-picker-group-label">Router</div>
+                <button
+                  key={autoModel.id}
+                  className={`model-picker-item ${autoModel.id === activeModel ? 'active' : ''}`}
+                  onClick={() => { onModelChange(autoModel.id); setModelPickerOpen(false); setSearchQuery(''); }}
+                  title="Route each request through configured Auto-Router candidates."
+                >
+                  <span className="model-picker-item-main">
+                    <span className="model-picker-item-name">{autoModel.name}</span>
+                    <span className="model-picker-item-desc">Route each request through configured Auto-Router candidates.</span>
+                  </span>
+                  {autoModel.contextWindow ? <span className="model-picker-item-ctx">{formatContext(autoModel.contextWindow)}</span> : null}
+                  {autoModel.id === activeModel && <Check size={14} className="model-picker-item-check" />}
+                </button>
+              </div>
+              {modelGroups.map(({ label, models: providerModels }) => (
+                <div key={label} className="model-picker-group">
+                  <div className="model-picker-group-label">{label}</div>
+                  {providerModels.map((m) => {
+                    const isFavorite = favoriteSet.has(m.id);
+                    const description = modelCatalogSummary(m.id, m.providerName);
+                    const rowTitle = m.id === AUTO_MODEL_ID ? '' : modelCatalogTooltip(m.id, m.providerName);
+                    const rowLabel = `${m.providerName} • ${m.id}`;
                     return (
                       <button
-                        key={m.id}
+                        key={`${m.providerName}:${m.id}`}
                         className={`model-picker-item ${m.id === activeModel ? 'active' : ''}`}
                         onClick={() => { onModelChange(m.id); setModelPickerOpen(false); setSearchQuery(''); }}
-                        title={m.id === AUTO_MODEL_ID ? description || undefined : modelCatalogTooltip(m.id, m.providerName)}
+                        title={rowTitle || rowLabel}
                       >
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={isFavorite}
+                          className="model-picker-favorite-btn"
+                          title={isFavorite ? `Unfavorite ${m.id}` : `Favorite ${m.id}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onToggleFavoriteModel?.(m.id);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onToggleFavoriteModel?.(m.id);
+                            }
+                          }}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                          }}
+                        >
+                          {isFavorite ? <Star size={14} fill="currentColor" color="var(--accent-primary)" /> : <Star size={14} />}
+                        </span>
                         <span className="model-picker-item-main">
                           <span className="model-picker-item-name">{m.name}</span>
                           {description && <span className="model-picker-item-desc">{description}</span>}

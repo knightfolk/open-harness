@@ -145,6 +145,7 @@ function App() {
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
   const [contextWarning, setContextWarning] = useState<string | null>(null);
   const [trustMode, setTrustMode] = useState('workspace-write');
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>([]);
   const [configPath, setConfigPath] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
@@ -268,6 +269,7 @@ function App() {
           setActiveModel(config.activeModel || 'MiniMax-M3');
           setActiveTheme(config.activeTheme || 'midnight');
           setPersonalityText(config.personality || '');
+          setFavoriteModelIds(Array.isArray(config.favoriteModels) ? config.favoriteModels : []);
           document.documentElement.setAttribute('data-theme', config.activeTheme || 'midnight');
           if (config.providers?.length > 0) {
             setProviders(config.providers.map((p: any) => ({
@@ -365,6 +367,16 @@ function App() {
       const map: Record<string, string> = {};
       next.forEach((r) => { map[r.id] = r.modelId; });
       api.updateConfig({ roleAssignments: map }).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const handleToggleFavoriteModel = useCallback((modelId: string) => {
+    setFavoriteModelIds((prev) => {
+      const next = prev.includes(modelId)
+        ? prev.filter((id) => id !== modelId)
+        : [...prev, modelId];
+      api.updateConfig({ favoriteModels: next }).catch(() => {});
       return next;
     });
   }, []);
@@ -1127,6 +1139,8 @@ function App() {
             };
           })}
           onModelChange={handleSelectModel}
+          favoriteModelIds={favoriteModelIds}
+          onToggleFavoriteModel={handleToggleFavoriteModel}
           enabledToolCount={enabledToolCount}
           configuredProviderCount={providers.filter(p => p.configured).length}
           trustMode={trustMode}
