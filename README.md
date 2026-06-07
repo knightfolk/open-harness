@@ -14,6 +14,7 @@ Most AI coding setups treat model choice, provider setup, tools, evals, and proj
 
 - Pick the right model for the task, or let Auto-Router choose from configured candidates.
 - Assign different models to planner, coder, reviewer, reasoner, summarizer, worker, and title roles.
+- Watch orchestration unfold in the main chat through transient router, model, phase, and tool bubbles while the final answer is being prepared.
 - Keep provider setup, model cards, MCP tools, patch review, files, terminal state, and project memory nearby.
 - Run evals and routing checks without leaving the harness.
 
@@ -21,7 +22,7 @@ Most AI coding setups treat model choice, provider setup, tools, evals, and proj
 
 | Surface | What it is for |
 | --- | --- |
-| **Chat workspace** | Project-aware sessions, markdown/code rendering, tool output, patch surfaces, memory context, and a compact composer. |
+| **Chat workspace** | Project-aware sessions, markdown/code rendering, live team-room bubbles, tool output, patch surfaces, memory context, and a compact composer. |
 | **Model Library** | Dense model cards with strengths, weaknesses, comparable models, context, category, cost, and routing hints. |
 | **Agent Roles** | Role-specific model assignments so every task does not use the same generic chat model. |
 | **Auto-Router** | Task-fit scoring across configured candidates, with relative cost used as a tie-break among viable options. |
@@ -78,6 +79,12 @@ Related references:
 - [docs/MODEL_PROMPTING_GUIDE.md](docs/MODEL_PROMPTING_GUIDE.md): model-family prompting behavior and system prompt strategy.
 - [docs/MODEL_LANDSCAPE.md](docs/MODEL_LANDSCAPE.md): model catalog snapshot, role recommendations, providers, and pricing notes.
 - [AGENTS.md](AGENTS.md): project rules, routing architecture, validation expectations, and current engineering constraints.
+
+## Live Orchestration UX
+
+When Auto-Router selects an orchestration mode, OpenHarness now fills the main chat with transient activity bubbles instead of leaving the user staring at an empty assistant response. Router choices, planning-room phases, model requests, model output summaries, and tool activity each get their own compact bubble with a label and icon. These updates are client-only progress UI; they are not written into the saved session transcript.
+
+The durable assistant message still stores only the final answer. Reasoning-capable providers may also emit live thinking progress before answer text begins; that indicator clears when final answer text starts streaming.
 
 ## Architecture
 

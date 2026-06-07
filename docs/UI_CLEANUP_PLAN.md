@@ -70,6 +70,7 @@ The current default layout and screenshots show too many competing surfaces:
 - Sidebar with project/session navigation.
 - Top bar with panel buttons.
 - Chat stream.
+- Transient orchestration/team-room bubbles during multi-agent work.
 - Right-side environment card.
 - Status bar.
 - Optional panels for terminal, plan, sub-agents, diffs, browser, safety, model lab, patches.
@@ -83,6 +84,7 @@ Default screen:
 
 - Left sidebar: project/session navigation only.
 - Center: chat stream and composer.
+- Multi-agent progress: show compact transient bubbles inside the chat stream; reserve the side panel for deeper trace inspection.
 - Top bar: title, model selector, and one "Tools" button.
 - Right rail: slim environment summary, collapsed by default on smaller widths.
 - Bottom status: remove unless there is an active warning or background job.
@@ -326,4 +328,3 @@ Deliverables:
 - "Review changes" opens a flyout.
 - Diff and patch proposal workflows live together.
 - Old panel entry points remain available during transition.
-

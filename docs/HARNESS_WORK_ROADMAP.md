@@ -273,6 +273,10 @@ interface ProjectProfile {
 
 Replace one-size-fits-all model calls with a practical orchestration layer.
 
+## UX Note
+
+Orchestrated runs should be visible in the main chat, not only in the sub-agent side panel. The chat stream now renders transient team-room bubbles for router decisions, orchestration phases, model requests, model output summaries, and tool work while the final answer is being prepared. These bubbles are live progress UI and are intentionally not persisted into the saved transcript.
+
 ## Modes
 
 ### Direct Mode
@@ -393,6 +397,7 @@ interface RouteDecision {
 - [x] Planning prompts use Planning Room.
 - [x] Review/debug prompts use investigate mode.
 - [x] Run trace shows each orchestration step.
+- [x] Main chat shows live orchestration/team-room progress while waiting.
 - [x] Existing chat behavior is not regressed.
 - [x] `npm run lint` passes.
 - [x] `npm run build` passes.
