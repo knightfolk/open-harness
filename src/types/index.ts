@@ -23,6 +23,10 @@ export interface Message {
   codeBlocks?: CodeBlock[];
   thinkingChars?: number;
   thinkingStatus?: string;
+  transient?: boolean;
+  agentName?: string;
+  agentModel?: string;
+  agentRole?: 'planner' | 'coder' | 'reviewer' | 'summarizer' | 'worker' | 'reasoner' | 'router' | 'tool';
 }
 
 export interface HarnessRun {

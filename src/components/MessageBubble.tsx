@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Bot, User, Cpu, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
+import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap } from 'lucide-react';
 import type { Message, ToolCall, ProjectProfile } from '../types';
 import { ToolCallComponent } from './ToolCall';
 import { NextBestActions } from './NextBestActions';
@@ -57,6 +57,23 @@ const senderNames = {
   system: 'System',
 };
 
+function agentIcon(message: Message) {
+  if (message.role !== 'assistant') return avatarIcons[message.role];
+  switch (message.agentRole) {
+    case 'planner': return <Route size={14} />;
+    case 'reviewer': return <ShieldCheck size={14} />;
+    case 'reasoner': return <Brain size={14} />;
+    case 'worker': return <Zap size={14} />;
+    case 'tool': return <Wrench size={14} />;
+    case 'router': return <Sparkles size={14} />;
+    default: return <Bot size={14} />;
+  }
+}
+
+function senderName(message: Message, assistantName: string) {
+  if (message.role === 'assistant') return message.agentName || assistantName;
+  return senderNames[message.role];
+}
 
 function stripThinking(content: string): string {
   return content
@@ -132,14 +149,15 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
   );
 
   return (
-    <div className={`message-wrapper ${message.role} ${message.status === 'error' ? 'error' : ''}`}>
+    <div className={`message-wrapper ${message.role} ${message.transient ? 'transient-agent' : ''} ${message.agentRole ? `agent-${message.agentRole}` : ''} ${message.status === 'error' ? 'error' : ''}`}>
       <div className="message">
         <div className={`message-avatar ${message.role}`}>
-          {avatarIcons[message.role]}
+          {agentIcon(message)}
         </div>
         <div className="message-body">
           <div className="message-sender">
-            {message.role === 'assistant' ? assistantName : senderNames[message.role]}
+            {senderName(message, assistantName)}
+            {message.agentModel && <span className="agent-model-label">{message.agentModel}</span>}
             <span className="timestamp">
               {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>

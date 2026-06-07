@@ -791,6 +791,16 @@
   margin-left: 8px;
 }
 
+.agent-model-label {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-primary);
+  border-radius: 10px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .message-content {
   max-width: min(760px, 100%);
   padding: 10px 12px;
@@ -810,6 +820,33 @@
   color: var(--text-tertiary);
   font-size: 12px;
   font-style: italic;
+}
+
+.message-wrapper.transient-agent .message-content {
+  max-width: min(660px, 94%);
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent-primary);
+  background: color-mix(in srgb, var(--bg-tertiary) 92%, var(--accent-primary));
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.message-wrapper.transient-agent .message-sender {
+  font-size: 12px;
+}
+
+.message-wrapper.transient-agent .message-avatar.assistant {
+  color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+}
+
+.message-wrapper.agent-reviewer .message-content {
+  border-left-color: var(--accent-success);
+}
+
+.message-wrapper.agent-tool .message-content,
+.message-wrapper.agent-worker .message-content {
+  border-left-color: var(--accent-warning);
 }
 
 .message-wrapper.user .message-content {

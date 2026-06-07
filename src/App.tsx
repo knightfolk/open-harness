@@ -17,6 +17,7 @@ import {
   resolveThemeId,
 } from './theme/builtins';
 import { describeAutoRouterRunStep, latestAutoRouterStep } from './utils/autoRouterTrace';
+import { shortModelName } from './utils/modelDisplay';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -132,6 +133,91 @@ function parsePhaseDetail(detail?: string): { model?: string; status?: SubAgent[
     status: rawStatus,
     durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
   };
+}
+
+function transientMessageId(assistantId: string, key: string): string {
+  return `${assistantId}:live:${key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'event'}`;
+}
+
+function agentRoleFromLabel(label: string): Message['agentRole'] {
+  const lower = label.toLowerCase();
+  if (lower.includes('review')) return 'reviewer';
+  if (lower.includes('implement') || lower.includes('coder')) return 'coder';
+  if (lower.includes('reason') || lower.includes('synthesis')) return 'reasoner';
+  if (lower.includes('tool')) return 'tool';
+  if (lower.includes('route') || lower.includes('model')) return 'router';
+  return 'planner';
+}
+
+function compactAgentUpdate(step: HarnessRunStep): { idKey: string; name: string; model?: string; role: Message['agentRole']; content: string; status?: Message['status'] } | null {
+  switch (step.type) {
+    case 'auto_router':
+      return {
+        idKey: 'router',
+        name: 'Router',
+        model: step.classifierModel ? shortModelName(step.classifierModel) : undefined,
+        role: 'router',
+        content: `Choosing a model for this request. ${step.reason}`,
+        status: 'streaming',
+      };
+    case 'route':
+      return {
+        idKey: 'router',
+        name: 'Router',
+        model: shortModelName(step.model),
+        role: 'router',
+        content: `Routing this to the ${step.role} role with ${shortModelName(step.model)}.`,
+        status: 'complete',
+      };
+    case 'orchestration':
+      if (!isVisibleOrchestrationPhase(step.label)) return null;
+      return {
+        idKey: `phase-${step.label}`,
+        name: step.label,
+        model: parsePhaseDetail(step.detail).model ? shortModelName(parsePhaseDetail(step.detail).model) : undefined,
+        role: agentRoleFromLabel(step.label),
+        content: step.detail || `Working on ${step.label}.`,
+        status: parsePhaseDetail(step.detail).status === 'complete' ? 'complete' : 'streaming',
+      };
+    case 'model_request':
+      return {
+        idKey: `model-${step.model}`,
+        name: shortModelName(step.model),
+        model: `round ${step.round}`,
+        role: 'reasoner',
+        content: `I’m working on this part now.`,
+        status: 'streaming',
+      };
+    case 'model_text':
+      return {
+        idKey: 'model-output',
+        name: 'Model output',
+        role: 'reasoner',
+        content: `A model returned ${step.chars.toLocaleString()} characters for the team to use.`,
+        status: 'complete',
+      };
+    case 'tool_call':
+      return {
+        idKey: `tool-${step.name}`,
+        name: 'Tool runner',
+        model: step.name,
+        role: 'tool',
+        content: step.durationMs == null
+          ? `I’m using ${step.name}.`
+          : `Finished ${step.name} in ${step.durationMs}ms.`,
+        status: step.durationMs == null ? 'streaming' : 'complete',
+      };
+    case 'model_thinking':
+      return {
+        idKey: step.source === 'router' ? 'router-thinking' : 'model-thinking',
+        name: step.source === 'router' ? 'Router' : 'Model thinking',
+        role: step.source === 'router' ? 'router' : 'reasoner',
+        content: step.preview || `Thinking stream captured (${step.chars.toLocaleString()} chars).`,
+        status: 'streaming',
+      };
+    default:
+      return null;
+  }
 }
 
 const DEFAULT_ROLE_ASSIGNMENTS: CodingRoleAssignment[] = [
@@ -885,6 +971,28 @@ function App() {
         onRunStep: (runId, step) => {
           const stepText = describeRunStep(step);
           if (step.type === 'auto_router') setLastAutoRouterStep(step);
+          const agentUpdate = compactAgentUpdate(step);
+          if (agentUpdate) {
+            const liveId = transientMessageId(assistantId, agentUpdate.idKey);
+            setMessages((prev) => {
+              const nextMessage: Message = {
+                id: liveId,
+                role: 'assistant',
+                content: agentUpdate.content,
+                timestamp: new Date(),
+                status: agentUpdate.status || 'streaming',
+                transient: true,
+                agentName: agentUpdate.name,
+                agentModel: agentUpdate.model,
+                agentRole: agentUpdate.role,
+              };
+              const existing = prev.findIndex((m) => m.id === liveId);
+              if (existing >= 0) {
+                return prev.map((m, i) => (i === existing ? { ...m, ...nextMessage } : m));
+              }
+              return [...prev, nextMessage];
+            });
+          }
           setMessages((prev) => prev.map((m) => {
             if (m.id !== assistantId || !m.runTrace) return m;
             const nextMessage = { ...m, runTrace: { ...m.runTrace, steps: [...m.runTrace.steps, step] } };
