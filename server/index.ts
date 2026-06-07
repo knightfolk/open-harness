@@ -53,6 +53,7 @@ import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
 import type { PersistedSession } from './sessionStore';
+import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -174,6 +175,7 @@ interface SessionRow {
   messages: MessageRow[];
   createdAt: string;
   updatedAt: string;
+  kind?: SessionKind;
 }
 
 interface MessageRow {
@@ -197,6 +199,7 @@ interface ToolCallRow {
 interface SideChatRequestContext {
   includeMainChat?: boolean;
   mainSessionId?: string;
+  mainMessages?: Array<{ role?: string; content?: string; timestamp?: string }>;
 }
 
 // ── Config ─────────────────────────────────────────────
@@ -426,9 +429,20 @@ function excerptForPrompt(content: string, limit: number): string {
   return `${trimmed.slice(0, limit).trimEnd()}\n[truncated]`;
 }
 
-function formatMainChatMemory(mainSession: SessionRow): string {
-  const sourceMessages = mainSession.messages
-    .filter((message) => (message.role === 'user' || message.role === 'assistant') && message.content.trim())
+function formatMainChatMessages(
+  source: {
+    title: string;
+    workingDir: string | null;
+    updatedAt: string;
+    messages: Array<{ role?: string; content?: string; timestamp?: string }>;
+  },
+): string {
+  const sourceMessages = source.messages
+    .flatMap((message) => {
+      const content = message.content?.trim();
+      if ((message.role !== 'user' && message.role !== 'assistant') || !content) return [];
+      return [{ role: message.role, content, timestamp: message.timestamp }];
+    })
     .slice(-SIDE_CHAT_CONTEXT_TURN_LIMIT);
 
   const turns = sourceMessages.map((message, index) => [
@@ -437,9 +451,9 @@ function formatMainChatMemory(mainSession: SessionRow): string {
   ].join('\n'));
 
   const header = [
-    `Main session: ${mainSession.title}`,
-    mainSession.workingDir ? `Working directory: ${mainSession.workingDir}` : 'Working directory: none',
-    `Updated: ${mainSession.updatedAt}`,
+    `Main session: ${source.title}`,
+    source.workingDir ? `Working directory: ${source.workingDir}` : 'Working directory: none',
+    `Updated: ${source.updatedAt}`,
   ].join('\n');
 
   const parts = [header, '', ...turns];
@@ -449,6 +463,10 @@ function formatMainChatMemory(mainSession: SessionRow): string {
   }
 
   return parts.join('\n');
+}
+
+function formatMainChatMemory(mainSession: SessionRow): string {
+  return formatMainChatMessages(mainSession);
 }
 
 function buildSideChatPromptContext(sideChat: SideChatRequestContext | undefined, sideSessionId: string): string | undefined {
@@ -465,6 +483,17 @@ function buildSideChatPromptContext(sideChat: SideChatRequestContext | undefined
 
   if (!sideChat.includeMainChat) {
     lines.push('', 'Main chat memory sharing is disabled for this request.');
+    return lines.join('\n');
+  }
+
+  if (Array.isArray(sideChat.mainMessages) && sideChat.mainMessages.some((message) => message.content?.trim())) {
+    const mainSession = sideChat.mainSessionId ? sessions.get(sideChat.mainSessionId) : undefined;
+    lines.push('', wrapUntrustedBlock('main chat memory', formatMainChatMessages({
+      title: mainSession?.title || 'Current main chat',
+      workingDir: mainSession?.workingDir || null,
+      updatedAt: mainSession?.updatedAt || new Date().toISOString(),
+      messages: sideChat.mainMessages,
+    })));
     return lines.join('\n');
   }
 
@@ -690,6 +719,7 @@ app.post('/api/mcp/watchdog/restart', async (_req, res) => {
 });
 app.get('/api/sessions', (_req, res) => {
   const list = Array.from(sessions.values())
+    .filter((session) => isMainSessionKind(session.kind))
     .map(({ id, title, workingDir, createdAt, updatedAt, messages }) => ({
       id,
       title,
@@ -706,13 +736,15 @@ app.get('/api/sessions', (_req, res) => {
 app.get('/api/sessions/:id', (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
-  const { id, title, workingDir, messages, createdAt, updatedAt } = session;
-  res.json({ id, title, workingDir, messages, createdAt, updatedAt });
+  const { id, title, workingDir, messages, createdAt, updatedAt, kind } = session;
+  res.json({ id, title, workingDir, messages, createdAt, updatedAt, kind });
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { title } = req.body as { title?: string; workingDir?: string };
+  const { title } = req.body as { title?: string; workingDir?: string; kind?: string };
   let { workingDir } = req.body as { title?: string; workingDir?: string };
+  const rawKind = (req.body as { kind?: string }).kind;
+  const kind = normalizeSessionKind(rawKind);
   const mutation = ensureLocalMutationWithControl(req);
   if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   if (workingDir) {
@@ -727,6 +759,7 @@ app.post('/api/sessions', (req, res) => {
     messages: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    kind,
   };
   sessions.set(session.id, session);
   sessionStore.saveSession(session);
@@ -2241,7 +2274,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   };
   session.messages.push(userMsg);
 
-  if (session.messages.filter((m) => m.role === 'user').length === 1) {
+  if (session.kind !== 'side-chat' && session.messages.filter((m) => m.role === 'user').length === 1) {
     session.title = content.slice(0, 60);
   }
   session.updatedAt = new Date().toISOString();

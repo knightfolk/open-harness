@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlink
 import { join } from 'path';
 import { homedir } from 'os';
 import { redactSecrets } from './sectionRedaction';
+import type { SessionKind } from './sessionKinds';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ export interface PersistedSession {
   messages: PersistedMessage[];
   createdAt: string;
   updatedAt: string;
+  kind?: SessionKind;
   version?: number;
 }
 
@@ -103,7 +105,7 @@ export function deleteSession(id: string): boolean {
 
 // ── List summaries ─────────────────────────────────────
 
-export function listSessionSummaries(): Array<{ id: string; title: string; workingDir: string | null; createdAt: string; updatedAt: string; messageCount: number; preview: string }> {
+export function listSessionSummaries(): Array<{ id: string; title: string; workingDir: string | null; createdAt: string; updatedAt: string; messageCount: number; preview: string; kind?: SessionKind }> {
   const sessions = loadAllSessions();
   return sessions.map(s => ({
     id: s.id,
@@ -113,5 +115,6 @@ export function listSessionSummaries(): Array<{ id: string; title: string; worki
     updatedAt: s.updatedAt,
     messageCount: s.messages.length,
     preview: s.messages.length > 0 ? s.messages[s.messages.length - 1].content.slice(0, 80) : '',
+    kind: s.kind,
   })).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }

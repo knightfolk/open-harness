@@ -18,6 +18,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { SidebarTab, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem } from '../types';
+import type { Message } from '../types';
 import type { SessionInfo } from '../utils/api';
 import { SideChatPanel } from './SideChatPanel';
 
@@ -28,6 +29,7 @@ interface Props {
   workingDir?: string | null;
   activeTab: SidebarTab;
   activeSubAgents: SubAgent[];
+  mainMessages?: Message[];
   onActiveTabChange: (tab: SidebarTab) => void;
   onSelectSession: (id: string) => void;
   onNewSession: (workingDir?: string | null) => void;
@@ -72,6 +74,7 @@ export function Sidebar({
   workingDir,
   activeTab,
   activeSubAgents,
+  mainMessages = [],
   onActiveTabChange,
   onOpenSettings,
   onSelectSession,
@@ -149,6 +152,7 @@ export function Sidebar({
               models={sideChatModels}
               activeSessionId={activeSessionId}
               workingDir={workingDir}
+              mainMessages={mainMessages}
             />
           </div>
         )}

@@ -13,6 +13,7 @@ interface Props {
   models: SideChatModel[];
   activeSessionId?: string;
   workingDir?: string | null;
+  mainMessages?: Array<{ role?: string; content?: string; timestamp?: string | Date }>;
 }
 
 interface SideMessage {
@@ -108,7 +109,7 @@ function loadIncludeMainChat() {
   }
 }
 
-export function SideChatPanel({ activeModel, models, activeSessionId, workingDir }: Props) {
+export function SideChatPanel({ activeModel, models, activeSessionId, workingDir, mainMessages = [] }: Props) {
   const [messages, setMessages] = useState<SideMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -141,7 +142,7 @@ export function SideChatPanel({ activeModel, models, activeSessionId, workingDir
   const ensureSession = async (): Promise<string | null> => {
     if (sessionId) return sessionId;
     try {
-      const s = await api.createSession('Side Chat', workingDir || undefined);
+      const s = await api.createSession('Side Chat', workingDir || undefined, 'side-chat');
       setSessionId(s.id);
       return s.id;
     } catch { return null; }
@@ -215,6 +216,14 @@ export function SideChatPanel({ activeModel, models, activeSessionId, workingDir
         sideChat: {
           includeMainChat,
           mainSessionId: activeSessionId,
+          mainMessages: mainMessages
+            .filter((message) => (message.role === 'user' || message.role === 'assistant') && message.content?.trim())
+            .slice(-16)
+            .map((message) => ({
+              role: message.role,
+              content: message.content,
+              timestamp: message.timestamp instanceof Date ? message.timestamp.toISOString() : message.timestamp,
+            })),
         },
       });
     } catch {

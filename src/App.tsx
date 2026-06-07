@@ -1123,6 +1123,7 @@ function App() {
         sessions={sessions}
         activeSessionId={activeSessionId || undefined}
         workingDir={workingDir}
+        mainMessages={messages}
         activeTab={sidebarTab}
         activeSubAgents={subAgents}
         onActiveTabChange={setSidebarTab}

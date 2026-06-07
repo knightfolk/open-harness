@@ -76,6 +76,7 @@ export interface SessionInfo {
   updatedAt: string;
   preview: string;
   messageCount: number;
+  kind?: 'main' | 'side-chat';
 }
 
 export interface SessionDetail {
@@ -85,6 +86,7 @@ export interface SessionDetail {
   messages: MessageInfo[];
   createdAt: string;
   updatedAt: string;
+  kind?: 'main' | 'side-chat';
 }
 
 export interface MessageInfo {
@@ -123,6 +125,7 @@ export interface SendMessageOptions {
   sideChat?: {
     includeMainChat?: boolean;
     mainSessionId?: string;
+    mainMessages?: Array<{ role?: string; content?: string; timestamp?: string }>;
   };
 }
 
@@ -670,11 +673,11 @@ export async function getSession(id: string): Promise<SessionDetail> {
   return res.json();
 }
 
-export async function createSession(title?: string, workingDir?: string): Promise<SessionDetail> {
+export async function createSession(title?: string, workingDir?: string, kind?: 'main' | 'side-chat'): Promise<SessionDetail> {
   const res = await fetch(`${API_BASE}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, workingDir }),
+    body: JSON.stringify({ title, workingDir, kind }),
   });
   if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
   return res.json();
