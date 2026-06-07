@@ -78,6 +78,36 @@ function compactToolOutput(output?: string): string {
   return `output: ${formatBytes(output.length)}`;
 }
 
+function compactToolBundle(steps: Array<Extract<HarnessRunStep, { type: 'tool_call' }>>): string {
+  const completed = steps.filter((step) => step.durationMs != null).length;
+  const running = steps.length - completed;
+  const counts = new Map<string, number>();
+  for (const step of steps) counts.set(step.name, (counts.get(step.name) || 0) + 1);
+  const names = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([name, count]) => count > 1 ? `${name} x${count}` : name);
+  const status = running > 0 ? `${running} running, ${completed} complete` : `${completed} complete`;
+  return `${status}${names.length > 0 ? ` · ${names.join(', ')}` : ''}`;
+}
+
+function visibleRunSteps(steps: HarnessRunStep[]): HarnessRunStep[] {
+  const toolSteps = steps.filter((step): step is Extract<HarnessRunStep, { type: 'tool_call' }> => step.type === 'tool_call');
+  const nonToolSteps = steps.filter((step) => step.type !== 'tool_call');
+  if (toolSteps.length === 0) return nonToolSteps;
+  const latestToolStep = toolSteps[toolSteps.length - 1];
+  return [
+    ...nonToolSteps,
+    {
+      ...latestToolStep,
+      name: `Tools · ${toolSteps.length} call${toolSteps.length === 1 ? '' : 's'}`,
+      input: compactToolBundle(toolSteps),
+      outputPreview: undefined,
+      durationMs: latestToolStep.durationMs,
+    },
+  ];
+}
+
 function stepIcon(step: HarnessRunStep) {
   switch (step.type) {
     case 'orchestration': return Route;
@@ -153,7 +183,7 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
     const el = scrollRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
+      el.scrollTop = 0;
     });
   }, [scrollKey]);
 
@@ -177,9 +207,9 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
   const orderedAgents = focusedAgentId
     ? [
         ...agents.filter((agent) => agent.id === focusedAgentId),
-        ...agents.filter((agent) => agent.id !== focusedAgentId),
+        ...agents.filter((agent) => agent.id !== focusedAgentId).reverse(),
       ]
-    : agents;
+    : [...agents].reverse();
 
   return (
     <div className="sub-agent-tracker" ref={scrollRef}>
@@ -191,7 +221,7 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
 
       {orderedAgents.map((agent) => {
         const trace = agent.runTrace;
-        const steps = trace?.steps || [];
+        const steps = [...visibleRunSteps(trace?.steps || [])].reverse();
         const isFocused = agent.id === focusedAgentId;
         const isExpanded = expanded[agent.id] ?? (isFocused || agents.length === 1);
 

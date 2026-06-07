@@ -1204,9 +1204,14 @@
 }
 
 .sub-agent-summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   gap: 12px;
   margin-bottom: 12px;
+  padding: 0 0 8px;
+  background: var(--bg-primary);
   font-size: 11px;
   color: var(--text-tertiary);
 }

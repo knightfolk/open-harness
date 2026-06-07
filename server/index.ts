@@ -2137,6 +2137,14 @@ data: ${JSON.stringify(data)}
 `);
 }
 
+async function streamTextSSE(res: express.Response, event: string, text: string, chunkSize = 72) {
+  const chunks = text.match(new RegExp(`[\\s\\S]{1,${chunkSize}}`, 'g')) || [];
+  for (const chunk of chunks) {
+    writeSSE(res, event, { text: chunk });
+    await new Promise((resolve) => setTimeout(resolve, 12));
+  }
+}
+
 function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep) {
   const appended = appendRunStep(run, step);
   writeSSE(res, 'run_step', { runId: run.id, step: appended });
@@ -2428,9 +2436,11 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
         });
       }
 
-      // Stream the final text
+      // Stream the final text into the chat progressively. The orchestration
+      // pipeline produces a complete synthesis, so chunk it at the SSE layer
+      // instead of dropping it into the UI all at once.
       const finalText = orchResult.finalText || '(no output)';
-      writeSSE(res, 'orchestration_text', { text: finalText });
+      await streamTextSSE(res, 'orchestration_text', finalText);
 
       // Write full response
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: finalText });
