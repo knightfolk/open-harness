@@ -111,7 +111,7 @@ export interface StreamCallbacks {
   onUserMessage: (msg: MessageInfo) => void;
   onAssistantStart: (id: string) => void;
   onText: (id: string, text: string) => void;
-  onThinking?: (id: string, chars: number) => void;
+  onThinking?: (id: string, chars: number, message?: string) => void;
   onAssistantMessage?: (msg: MessageInfo) => void;
   onToolCall: (toolCall: ToolCallInfo) => void;
   onRunStart?: (run: HarnessRun) => void;
@@ -734,7 +734,7 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
           case 'user_message': callbacks.onUserMessage(parsed as MessageInfo); break;
           case 'assistant_start': callbacks.onAssistantStart(parsed.id); break;
           case 'text': callbacks.onText(parsed.id, parsed.text); break;
-          case 'thinking': callbacks.onThinking?.(parsed.id, parsed.chars); break;
+          case 'thinking': callbacks.onThinking?.(parsed.id, parsed.chars, parsed.message); break;
           case 'orchestration_text': callbacks.onText('', parsed.text); break;
           case 'assistant_message': callbacks.onAssistantMessage?.(parsed as MessageInfo); break;
           case 'tool_call': callbacks.onToolCall(parsed as ToolCallInfo); break;

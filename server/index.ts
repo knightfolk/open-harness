@@ -2145,17 +2145,42 @@ async function streamTextSSE(res: express.Response, event: string, text: string,
   }
 }
 
-function maybeEmitThinkingSSE(res: express.Response, assistantId: string, chars: number, state: { lastChars: number; lastAt: number }) {
+function maybeEmitThinkingSSE(res: express.Response, assistantId: string, chars: number, state: { lastChars: number; lastAt: number }, message = 'Thinking live') {
   const now = Date.now();
   if (chars - state.lastChars < 160 && now - state.lastAt < 500) return;
   state.lastChars = chars;
   state.lastAt = now;
-  writeSSE(res, 'thinking', { id: assistantId, chars });
+  writeSSE(res, 'thinking', { id: assistantId, chars, message });
 }
 
 function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep) {
   const appended = appendRunStep(run, step);
   writeSSE(res, 'run_step', { runId: run.id, step: appended });
+}
+
+function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
+  switch (step.type) {
+    case 'orchestration': return step.label;
+    case 'route': return `Routing to ${step.role}`;
+    case 'auto_router': return 'Choosing model';
+    case 'prompt_built': return 'Building prompt';
+    case 'model_request': return `Waiting on ${step.model}`;
+    case 'tool_call': return step.durationMs == null ? `Using ${step.name}` : `Finished ${step.name}`;
+    case 'model_thinking': return step.source === 'router' ? 'Router thinking' : 'Model thinking';
+    case 'repo_map': return 'Mapping repo';
+    case 'context_pack': return 'Preparing context';
+    default: return null;
+  }
+}
+
+function emitVisibleRunActivity(res: express.Response, assistantId: string, step: HarnessRunStep, state: { chars: number; lastAt: number }) {
+  const message = thinkingMessageForRunStep(step);
+  if (!message) return;
+  state.chars += step.type === 'model_thinking' ? step.chars : 24;
+  const now = Date.now();
+  if (now - state.lastAt < 250 && step.type !== 'model_thinking') return;
+  state.lastAt = now;
+  writeSSE(res, 'thinking', { id: assistantId, chars: state.chars, message });
 }
 
 function compactTracePreview(text: string, max = 240): string {
@@ -2364,9 +2389,14 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     candidateScores: route.routerData?.candidateScores,
   });
   writeSSE(res, 'run_start', run);
+  const visibleActivityState = { chars: 0, lastAt: 0 };
+  const emitVisibleStep = (step: HarnessRunStep) => {
+    emitRunStep(res, run, step);
+    emitVisibleRunActivity(res, assistantId, step, visibleActivityState);
+  };
   const rd = route.routerData;
   if (rd && rd.source === 'auto') {
-    emitRunStep(res, run, {
+    emitVisibleStep({
       type: 'auto_router',
       modelId: route.suggestedModels[0] || requestedModel,
       score: rd.score ?? 0,
@@ -2376,7 +2406,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       classifierModel: rd.classifierModel ?? null,
       candidateScores: rd.candidateScores,
     });
-    if (rd.classifierRationale) emitRunStep(res, run, {
+    if (rd.classifierRationale) emitVisibleStep({
       type: 'model_thinking',
       chars: rd.classifierRationale.length,
       preview: rd.classifierRationale,
@@ -2405,7 +2435,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   // Keep this path active even if model resolution is unclear because
   // routing and orchestration still provide deterministic behavior.
   if (route.mode !== 'direct') {
-    if (run) emitRunStep(res, run, {
+    if (run) emitVisibleStep({
       type: 'route',
       role: route.role,
       model: effectiveModel,
@@ -2413,7 +2443,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     });
 
     // Emit orchestration step headers
-    for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
+    for (const step of orchestrationTraceSteps(route)) emitVisibleStep(step);
 
     try {
       const { tools: orchestrationApiTools, toolServerMap: orchestrationToolServerMap } = gatherMCPToolsForAPI();
@@ -2428,7 +2458,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
         ? `${sideChatPromptContext}\n\n## Current Side Chat User Request\n${content}`
         : content;
       const orchResult = await runOrchestratorPipeline(route, orchestrationContent, appConfig, session.workingDir || undefined, {
-        onStep: (step) => emitRunStep(res, run, step),
+        onStep: (step) => emitVisibleStep(step),
         signal: requestController.signal,
         tools: orchestrationTools,
         invokeTool: (toolName, args, workingDir) => invokeMCPTool(toolName, args as Record<string, any>, orchestrationToolServerMap, workingDir),
@@ -2436,7 +2466,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
 
       // Emit per-phase run steps
       for (const phase of orchResult.phases) {
-        emitRunStep(res, run, {
+        emitVisibleStep({
           type: 'orchestration',
           mode: route.mode,
           label: phase.label,
@@ -2458,11 +2488,12 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     } catch (err: any) {
       console.error('[orchestrator] pipeline error:', err);
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: `Orchestration failed: ${err?.message || err}` });
-      if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err?.message || 'Orchestration failed' }); }
+      if (run) { run.status = 'error'; emitVisibleStep({ type: 'error', message: err?.message || 'Orchestration failed' }); }
     }
   } else if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session, run);
   } else {
+    writeSSE(res, 'thinking', { id: assistantId, chars: 24, message: `Waiting on ${effectiveModel}` });
     await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel, sideChatPromptContext);
   }
 

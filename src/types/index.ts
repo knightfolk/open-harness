@@ -22,6 +22,7 @@ export interface Message {
   runTrace?: HarnessRun;
   codeBlocks?: CodeBlock[];
   thinkingChars?: number;
+  thinkingStatus?: string;
 }
 
 export interface HarnessRun {

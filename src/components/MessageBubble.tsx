@@ -151,7 +151,7 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
           <div className="message-content">
             {showThinkingStatus && (
               <div className="message-thinking-status">
-                Thinking live · {message.thinkingChars!.toLocaleString()} chars
+                {message.thinkingStatus || 'Thinking live'} · {message.thinkingChars!.toLocaleString()} chars
               </div>
             )}
             <MarkdownContent content={visibleContent} />

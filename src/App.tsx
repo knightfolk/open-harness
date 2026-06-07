@@ -114,6 +114,26 @@ function formatStreamError(error: string): string {
   return raw;
 }
 
+function orchestrationAgentId(runId: string, label: string): string {
+  return `${runId}:phase:${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'phase'}`;
+}
+
+function isVisibleOrchestrationPhase(label: string): boolean {
+  return !/^(plan|investigate|execute|compare) mode$/i.test(label);
+}
+
+function parsePhaseDetail(detail?: string): { model?: string; status?: SubAgent['status']; durationMs?: number } {
+  if (!detail) return {};
+  const model = detail.match(/\bmodel=([^\s]+)/)?.[1];
+  const rawStatus = detail.match(/\bstatus=(complete|error|running|idle)\b/)?.[1] as SubAgent['status'] | undefined;
+  const durationMs = Number(detail.match(/\bduration=(\d+)ms\b/)?.[1]);
+  return {
+    model,
+    status: rawStatus,
+    durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
+  };
+}
+
 const DEFAULT_ROLE_ASSIGNMENTS: CodingRoleAssignment[] = [
   { id: 'planner', name: 'Planner', description: 'Research, architecture decisions, breaking down tasks', modelId: 'Auto' },
   { id: 'coder', name: 'Code Implementer', description: 'Writing code, fixes, debugging, and refactoring', modelId: 'Auto' },
@@ -788,16 +808,16 @@ function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, content: streamingTextRef.current.get(assistantId) || '', thinkingChars: undefined }
+                ? { ...m, content: streamingTextRef.current.get(assistantId) || '', thinkingChars: undefined, thinkingStatus: undefined }
                 : m
             )
           );
         },
-        onThinking: (_id, chars) => {
+        onThinking: (_id, chars, message) => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId && !streamingTextRef.current.get(assistantId)
-                ? { ...m, thinkingChars: chars }
+                ? { ...m, thinkingChars: chars, thinkingStatus: message }
                 : m
             )
           );
@@ -808,7 +828,7 @@ function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, content: finalContent, status: 'complete' as const, thinkingChars: undefined }
+                ? { ...m, content: finalContent, status: 'complete' as const, thinkingChars: undefined, thinkingStatus: undefined }
                 : m
             )
           );
@@ -884,6 +904,36 @@ function App() {
               : [...existing, nextTool];
             return { ...nextMessage, toolCalls };
           }));
+          if (step.type === 'orchestration' && isVisibleOrchestrationPhase(step.label)) {
+            const phase = parsePhaseDetail(step.detail);
+            const phaseId = orchestrationAgentId(runId, step.label);
+            setSubAgents((prev) => {
+              const existing = prev.find((a) => a.id === phaseId);
+              const nextStatus = phase.status || existing?.status || 'running';
+              const nextAgent: SubAgent = {
+                ...(existing || {
+                  id: phaseId,
+                  name: step.label,
+                  model: phase.model || 'Auto',
+                  startTime: new Date(),
+                  messages: [],
+                }),
+                model: phase.model || existing?.model || 'Auto',
+                status: nextStatus,
+                task: step.detail || stepText,
+                progress: nextStatus === 'complete' || nextStatus === 'error' ? 100 : Math.min(90, (existing?.progress || 10) + 20),
+                endTime: nextStatus === 'complete' || nextStatus === 'error' ? new Date() : existing?.endTime,
+                messages: [
+                  ...(existing?.messages || []),
+                  { id: uid(), role: 'system', content: stepText, timestamp: new Date(), status: 'complete' as const },
+                ],
+                runTrace: existing?.runTrace,
+              };
+              return existing
+                ? prev.map((a) => (a.id === phaseId ? nextAgent : a))
+                : [...prev, nextAgent];
+            });
+          }
           setSubAgents((prev) => prev.map((a) => a.id === runId ? {
             ...a,
             task: stepText,
@@ -895,16 +945,29 @@ function App() {
         },
         onRunComplete: (run) => {
           setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, runTrace: run } : m)));
-          setSubAgents((prev) => prev.map((a) => a.id === run.id ? {
-            ...a,
-            model: run.effectiveModel,
-            status: run.status === 'error' ? 'error' : 'complete',
-            progress: 100,
-            endTime: run.completedAt ? new Date(run.completedAt) : new Date(),
-            tokensUsed: run.context.tokensUsed,
-            task: run.status === 'error' ? 'Run ended with an error' : 'Run complete',
-            runTrace: run,
-          } : a));
+          setSubAgents((prev) => prev.map((a) => {
+            if (a.id === run.id) {
+              return {
+                ...a,
+                model: run.effectiveModel,
+                status: run.status === 'error' ? 'error' : 'complete',
+                progress: 100,
+                endTime: run.completedAt ? new Date(run.completedAt) : new Date(),
+                tokensUsed: run.context.tokensUsed,
+                task: run.status === 'error' ? 'Run ended with an error' : 'Run complete',
+                runTrace: run,
+              };
+            }
+            if (a.id.startsWith(`${run.id}:phase:`) && a.status === 'running') {
+              return {
+                ...a,
+                status: run.status === 'error' ? 'error' : 'complete',
+                progress: 100,
+                endTime: run.completedAt ? new Date(run.completedAt) : new Date(),
+              };
+            }
+            return a;
+          }));
         },
         onError: (error) => {
           console.error('Stream error:', error);
