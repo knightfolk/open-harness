@@ -357,18 +357,23 @@ function scoreModelForEffort(model: any, effort: ThinkingEffort): number {
   const hugeContext = context >= 1_000_000 ? 10 : 0;
   const thinking = modelSupportsThinking(model.id, model.providerId) ? 16 : 0;
   const tools = card?.supportsTools ? 8 : 0;
-  const category = card?.bestCategory;
+  const category = card ? modelBestCategory(card) : undefined;
+  const bestFor = (card?.bestFor || []).join(' ').toLowerCase();
+  const workerFit = category === 'worker' || /worker|summary|summaries|title|classification|fast/.test(bestFor);
+  const codingFit = category === 'coding' || /coding|code|implementation|bug fix|refactor/.test(bestFor);
+  const reviewFit = category === 'review' || /review|audit|security|correctness/.test(bestFor);
+  const reasoningFit = category === 'reasoning' || /reasoning|planning|analysis|tradeoff/.test(bestFor);
 
   if (effort === 'low') {
-    return 40 - cost * 8 + (category === 'worker' ? 14 : 0) + tools + (thinking ? 2 : 0) + longContext;
+    return 60 - cost * 12 + (workerFit ? 28 : 0) + tools + (thinking ? -10 : 8) - hugeContext;
   }
   if (effort === 'medium') {
-    return 30 - cost * 3 + tools + thinking + longContext + (category === 'coding' ? 14 : 0) + (category === 'long-context' ? 6 : 0);
+    return 35 - cost * 3 + tools + (codingFit ? 34 : 0) + (workerFit ? 8 : 0) + (thinking && codingFit ? 4 : 0);
   }
   if (effort === 'high') {
-    return 20 - cost + thinking * 1.4 + tools + longContext + hugeContext + (category === 'review' ? 16 : 0) + (category === 'coding' ? 8 : 0);
+    return 25 - cost + tools + (reviewFit ? 30 : 0) + (reasoningFit ? 22 : 0) + (codingFit ? 14 : 0) + (thinking ? 10 : 0);
   }
-  return 10 + thinking * 1.8 + tools + longContext + hugeContext * 1.5 + (category === 'reasoning' ? 22 : 0) + (category === 'long-context' ? 12 : 0) - cost * 0.5;
+  return 10 + thinking * 1.8 + tools + longContext + hugeContext * 1.5 + (reasoningFit ? 22 : 0) + (category === 'long-context' || category === 'rag' ? 12 : 0) - cost * 0.5;
 }
 
 function bestModelForEffort(enabledModels: any[], effort: ThinkingEffort): any | null {
