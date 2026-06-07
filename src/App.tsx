@@ -788,7 +788,16 @@ function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, content: streamingTextRef.current.get(assistantId) || '' }
+                ? { ...m, content: streamingTextRef.current.get(assistantId) || '', thinkingChars: undefined }
+                : m
+            )
+          );
+        },
+        onThinking: (_id, chars) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId && !streamingTextRef.current.get(assistantId)
+                ? { ...m, thinkingChars: chars }
                 : m
             )
           );
@@ -799,7 +808,7 @@ function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, content: finalContent, status: 'complete' as const }
+                ? { ...m, content: finalContent, status: 'complete' as const, thinkingChars: undefined }
                 : m
             )
           );

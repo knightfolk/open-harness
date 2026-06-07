@@ -21,6 +21,7 @@ export interface Message {
   toolCalls?: ToolCall[];
   runTrace?: HarnessRun;
   codeBlocks?: CodeBlock[];
+  thinkingChars?: number;
 }
 
 export interface HarnessRun {

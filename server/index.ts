@@ -2145,6 +2145,14 @@ async function streamTextSSE(res: express.Response, event: string, text: string,
   }
 }
 
+function maybeEmitThinkingSSE(res: express.Response, assistantId: string, chars: number, state: { lastChars: number; lastAt: number }) {
+  const now = Date.now();
+  if (chars - state.lastChars < 160 && now - state.lastAt < 500) return;
+  state.lastChars = chars;
+  state.lastAt = now;
+  writeSSE(res, 'thinking', { id: assistantId, chars });
+}
+
 function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep) {
   const appended = appendRunStep(run, step);
   writeSSE(res, 'run_step', { runId: run.id, step: appended });
@@ -2638,6 +2646,7 @@ async function parseStreamForContentAndTools(
   const knownToolNameSet = new Set(knownToolNames);
   const scrubber = new MarkupScrubber();
   let nextMarkupId = 0;
+  const thinkingSseState = { lastChars: 0, lastAt: 0 };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -2660,6 +2669,9 @@ async function parseStreamForContentAndTools(
         const thinkingDelta = delta.reasoning_content || delta.thinking || delta.reasoning;
         if (typeof thinkingDelta === 'string' && thinkingDelta.length > 0) {
           thinking += thinkingDelta;
+          if (streamText && content.length === 0) {
+            maybeEmitThinkingSSE(res, assistantId, thinking.length, thinkingSseState);
+          }
         }
 
         // Handle text content — use streaming-aware tag stripping
@@ -2792,6 +2804,7 @@ async function streamWithNativeAdapter(
       let roundThinking = '';
       const roundToolCalls: { id: string; name: string; arguments: string }[] = [];
       let abort = false;
+      const thinkingSseState = { lastChars: 0, lastAt: 0 };
 
       for await (const event of streamWithAdapter(provider, request)) {
         if (event.type === 'text_delta') {
@@ -2803,6 +2816,9 @@ async function streamWithNativeAdapter(
           }
         } else if (event.type === 'thinking_delta') {
           roundThinking += event.text;
+          if (isLastRound && roundContent.length === 0) {
+            maybeEmitThinkingSSE(res, assistantId, roundThinking.length, thinkingSseState);
+          }
         } else if (event.type === 'tool_call_done') {
           roundToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
         } else if (event.type === 'error') {

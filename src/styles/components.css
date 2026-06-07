@@ -803,6 +803,15 @@
   word-wrap: break-word;
 }
 
+.message-thinking-status {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: italic;
+}
+
 .message-wrapper.user .message-content {
   max-width: min(680px, 82%);
   background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-secondary));

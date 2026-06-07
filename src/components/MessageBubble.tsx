@@ -114,6 +114,7 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
   const visibleContent = stripThinking(message.content);
   const isStreaming = message.status === 'streaming';
   const isAssistant = message.role === 'assistant';
+  const showThinkingStatus = isAssistant && isStreaming && !visibleContent.trim() && !!message.thinkingChars;
 
   // Compute delight signals for assistant messages
   const confidenceSignals = useMemo(
@@ -148,6 +149,11 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
             )}
           </div>
           <div className="message-content">
+            {showThinkingStatus && (
+              <div className="message-thinking-status">
+                Thinking live · {message.thinkingChars!.toLocaleString()} chars
+              </div>
+            )}
             <MarkdownContent content={visibleContent} />
             {isStreaming && (
               <div className="typing-indicator">
