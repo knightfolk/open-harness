@@ -4,7 +4,7 @@ import { v4 as uuid } from 'uuid';
 import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync } from 'fs';
 import { join, basename, extname, resolve, parse as parsePath } from 'path';
 import { execFileSync, spawn } from 'child_process';
-import { timingSafeEqual } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef, getConfigPath } from './config';
 import type { StoredMCPServer, StoredProvider } from './config';
@@ -935,8 +935,183 @@ app.get('/api/providers', (_req, res) => {
     ...p,
     apiKey: p.apiKey ? '••••' + p.apiKey.slice(-4) : '',
     hasKey: !!p.apiKey,
+    oauth: maskProviderOAuth(p.oauth),
   }));
   res.json(providers);
+});
+
+type OAuthProviderId = 'openai' | 'anthropic' | 'google';
+
+interface ProviderOAuthConfig {
+  id: OAuthProviderId;
+  authUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  clientIdEnv: string;
+  clientSecretEnv: string;
+}
+
+interface ProviderOAuthTokenResponse {
+  access_token?: unknown;
+  refresh_token?: unknown;
+  expires_in?: unknown;
+  scope?: unknown;
+  error?: unknown;
+  error_description?: unknown;
+}
+
+const PROVIDER_OAUTH_CONFIG: Record<OAuthProviderId, ProviderOAuthConfig> = {
+  openai: {
+    id: 'openai',
+    authUrl: process.env.OPENAI_OAUTH_AUTH_URL || 'https://auth.openai.com/oauth/authorize',
+    tokenUrl: process.env.OPENAI_OAUTH_TOKEN_URL || 'https://auth.openai.com/oauth/token',
+    scopes: (process.env.OPENAI_OAUTH_SCOPES || 'openid profile email offline_access').split(/\s+/).filter(Boolean),
+    clientIdEnv: 'OPENAI_OAUTH_CLIENT_ID',
+    clientSecretEnv: 'OPENAI_OAUTH_CLIENT_SECRET',
+  },
+  anthropic: {
+    id: 'anthropic',
+    authUrl: process.env.ANTHROPIC_OAUTH_AUTH_URL || 'https://claude.ai/oauth/authorize',
+    tokenUrl: process.env.ANTHROPIC_OAUTH_TOKEN_URL || 'https://claude.ai/oauth/token',
+    scopes: (process.env.ANTHROPIC_OAUTH_SCOPES || 'openid profile email offline_access').split(/\s+/).filter(Boolean),
+    clientIdEnv: 'ANTHROPIC_OAUTH_CLIENT_ID',
+    clientSecretEnv: 'ANTHROPIC_OAUTH_CLIENT_SECRET',
+  },
+  google: {
+    id: 'google',
+    authUrl: process.env.GOOGLE_OAUTH_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: process.env.GOOGLE_OAUTH_TOKEN_URL || 'https://oauth2.googleapis.com/token',
+    scopes: (process.env.GOOGLE_OAUTH_SCOPES || 'openid profile email https://www.googleapis.com/auth/generative-language').split(/\s+/).filter(Boolean),
+    clientIdEnv: 'GOOGLE_OAUTH_CLIENT_ID',
+    clientSecretEnv: 'GOOGLE_OAUTH_CLIENT_SECRET',
+  },
+};
+
+const pendingProviderOAuth = new Map<string, { providerId: string; oauthProviderId: OAuthProviderId; createdAt: number }>();
+
+function maskProviderOAuth(oauth: StoredProvider['oauth']) {
+  if (!oauth?.accessToken && !oauth?.refreshToken) return oauth?.connectedAt ? { connected: true, connectedAt: oauth.connectedAt, accountLabel: oauth.accountLabel, scopes: oauth.scopes, expiresAt: oauth.expiresAt } : undefined;
+  return {
+    connected: true,
+    connectedAt: oauth.connectedAt,
+    accountLabel: oauth.accountLabel,
+    scopes: oauth.scopes || [],
+    expiresAt: oauth.expiresAt,
+    hasRefreshToken: !!oauth.refreshToken,
+  };
+}
+
+function oauthProviderForStoredProvider(provider: StoredProvider): OAuthProviderId | null {
+  const id = provider.id.toLowerCase();
+  const name = provider.name.toLowerCase();
+  if (id.includes('openai') || name.includes('openai')) return 'openai';
+  if (id.includes('anthropic') || name.includes('anthropic') || name.includes('claude')) return 'anthropic';
+  if (id.includes('google') || id.includes('gemini') || name.includes('google') || name.includes('gemini')) return 'google';
+  return null;
+}
+
+function getOAuthRedirectUri(req: express.Request, oauthProviderId: OAuthProviderId): string {
+  const explicit = process.env.OPENHARNESS_OAUTH_REDIRECT_BASE;
+  const base = explicit || `${req.protocol}://${req.get('host')}`;
+  return `${base.replace(/\/+$/, '')}/api/providers/oauth/${oauthProviderId}/callback`;
+}
+
+app.get('/api/providers/:id/oauth/status', (req, res) => {
+  const provider = appConfig.providers.find((p) => p.id === req.params.id);
+  if (!provider) return res.status(404).json({ error: 'Provider not found' });
+  const oauthProviderId = oauthProviderForStoredProvider(provider);
+  const oauthConfig = oauthProviderId ? PROVIDER_OAUTH_CONFIG[oauthProviderId] : undefined;
+  res.json({
+    supported: !!oauthProviderId,
+    provider: oauthProviderId,
+    configured: !!(oauthConfig && process.env[oauthConfig.clientIdEnv] && process.env[oauthConfig.clientSecretEnv]),
+    connected: !!provider.oauth?.accessToken,
+    accountLabel: provider.oauth?.accountLabel,
+    connectedAt: provider.oauth?.connectedAt,
+    scopes: provider.oauth?.scopes || [],
+    expiresAt: provider.oauth?.expiresAt,
+  });
+});
+
+app.post('/api/providers/:id/oauth/start', (req, res) => {
+  const provider = appConfig.providers.find((p) => p.id === req.params.id);
+  if (!provider) return res.status(404).json({ error: 'Provider not found' });
+  const oauthProviderId = oauthProviderForStoredProvider(provider);
+  if (!oauthProviderId) return res.status(400).json({ error: 'OAuth is only available for OpenAI, Anthropic, and Google providers' });
+  const oauthConfig = PROVIDER_OAUTH_CONFIG[oauthProviderId];
+  const clientId = process.env[oauthConfig.clientIdEnv];
+  const clientSecret = process.env[oauthConfig.clientSecretEnv];
+  if (!clientId || !clientSecret) {
+    return res.status(400).json({ error: `OAuth is not configured. Set ${oauthConfig.clientIdEnv} and ${oauthConfig.clientSecretEnv}.` });
+  }
+  const state = randomBytes(24).toString('hex');
+  pendingProviderOAuth.set(state, { providerId: provider.id, oauthProviderId, createdAt: Date.now() });
+  const authUrl = new URL(oauthConfig.authUrl);
+  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('redirect_uri', getOAuthRedirectUri(req, oauthProviderId));
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('scope', oauthConfig.scopes.join(' '));
+  authUrl.searchParams.set('state', state);
+  authUrl.searchParams.set('access_type', 'offline');
+  authUrl.searchParams.set('prompt', 'consent');
+  res.json({ authUrl: authUrl.toString() });
+});
+
+app.get('/api/providers/oauth/:oauthProvider/callback', async (req, res) => {
+  const oauthProviderId = req.params.oauthProvider as OAuthProviderId;
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const pending = pendingProviderOAuth.get(state);
+  if (!code || !pending || pending.oauthProviderId !== oauthProviderId || Date.now() - pending.createdAt > 10 * 60 * 1000) {
+    return res.status(400).send('OpenHarness OAuth callback is invalid or expired.');
+  }
+  pendingProviderOAuth.delete(state);
+  const provider = appConfig.providers.find((p) => p.id === pending.providerId);
+  const oauthConfig = PROVIDER_OAUTH_CONFIG[oauthProviderId];
+  const clientId = process.env[oauthConfig.clientIdEnv];
+  const clientSecret = process.env[oauthConfig.clientSecretEnv];
+  if (!provider || !clientId || !clientSecret) return res.status(400).send('OpenHarness OAuth provider is no longer configured.');
+
+  try {
+    const tokenRes = await fetch(oauthConfig.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: getOAuthRedirectUri(req, oauthProviderId),
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    });
+    const tokenBody = await tokenRes.json().catch(() => ({})) as ProviderOAuthTokenResponse;
+    if (!tokenRes.ok || !tokenBody.access_token) {
+      return res.status(400).send(`OpenHarness OAuth token exchange failed: ${tokenBody.error_description || tokenBody.error || tokenRes.status}`);
+    }
+    provider.oauth = {
+      accessToken: String(tokenBody.access_token),
+      refreshToken: typeof tokenBody.refresh_token === 'string' ? tokenBody.refresh_token : provider.oauth?.refreshToken,
+      expiresAt: typeof tokenBody.expires_in === 'number' ? Date.now() + tokenBody.expires_in * 1000 : undefined,
+      scopes: typeof tokenBody.scope === 'string' ? tokenBody.scope.split(/\s+/).filter(Boolean) : oauthConfig.scopes,
+      accountLabel: provider.name,
+      connectedAt: new Date().toISOString(),
+    };
+    provider.accessMode = 'subscription';
+    appConfig = upsertProvider(appConfig, provider);
+    saveConfig(appConfig);
+    res.send('<html><body><h1>OpenHarness OAuth connected</h1><p>You can close this tab and return to OpenHarness.</p></body></html>');
+  } catch (err: any) {
+    res.status(500).send(`OpenHarness OAuth token exchange failed: ${err?.message || 'Unknown error'}`);
+  }
+});
+
+app.delete('/api/providers/:id/oauth', (req, res) => {
+  const provider = appConfig.providers.find((p) => p.id === req.params.id);
+  if (!provider) return res.status(404).json({ error: 'Provider not found' });
+  provider.oauth = undefined;
+  appConfig = upsertProvider(appConfig, provider);
+  saveConfig(appConfig);
+  res.status(204).end();
 });
 
 // Save multiple providers in one call (used by guided onboarding)
@@ -963,7 +1138,7 @@ app.post('/api/providers/batch', (req, res) => {
       models: incomingModels && incomingModels.length > 0 ? incomingModels : (existing?.models || []),
     };
     appConfig = upsertProvider(appConfig, provider);
-    created.push({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey });
+    created.push({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey, oauth: maskProviderOAuth(provider.oauth) });
   }
   saveConfig(appConfig);
   res.status(201).json({ providers: created, count: created.length });
@@ -987,7 +1162,7 @@ app.post('/api/providers', (req, res) => {
   };
   appConfig = upsertProvider(appConfig, provider);
   saveConfig(appConfig);
-  res.status(201).json({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey });
+  res.status(201).json({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey, oauth: maskProviderOAuth(provider.oauth) });
 });
 
 app.put('/api/providers/:id', (req, res) => {
@@ -1008,7 +1183,7 @@ app.put('/api/providers/:id', (req, res) => {
 
   appConfig = upsertProvider(appConfig, existing);
   saveConfig(appConfig);
-  res.json({ ...existing, apiKey: '••••', hasKey: !!existing.apiKey });
+  res.json({ ...existing, apiKey: '••••', hasKey: !!existing.apiKey, oauth: maskProviderOAuth(existing.oauth) });
 });
 
 app.delete('/api/providers/:id', (req, res) => {

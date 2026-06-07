@@ -5,6 +5,7 @@ export interface ProviderPlanOption {
   label: string;
   accessMode: ProviderAccessMode;
   description: string;
+  authMethod?: 'api-key' | 'oauth';
 }
 
 export interface ProviderPlanCatalogEntry {
@@ -43,6 +44,9 @@ export const PROVIDER_PLAN_CATALOG: ProviderPlanCatalogEntry[] = [
       { id: 'usage-tier-4-plus', label: 'API tier 4+', accessMode: 'api-key', description: 'High-volume API usage tier; check the OpenAI dashboard for exact limits.' },
       { id: 'priority', label: 'Priority processing', accessMode: 'api-key', description: 'Usage-based API with reliable high-speed processing where available.' },
       { id: 'scale-enterprise', label: 'Scale / Enterprise', accessMode: 'api-key', description: 'Reserved capacity, data residency, SLA, or custom enterprise terms.' },
+      { id: 'chatgpt-plus', label: 'ChatGPT Plus', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed ChatGPT Plus account access; not equivalent to OpenAI API billing.' },
+      { id: 'chatgpt-pro', label: 'ChatGPT Pro', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed ChatGPT Pro account access for subscription-aware routing and account state.' },
+      { id: 'chatgpt-team', label: 'ChatGPT Team', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed ChatGPT Team workspace access where an OAuth client is configured.' },
     ],
   },
   {
@@ -56,6 +60,9 @@ export const PROVIDER_PLAN_CATALOG: ProviderPlanCatalogEntry[] = [
       { id: 'tier-3', label: 'API tier 3', accessMode: 'api-key', description: 'Higher-volume API tier; exact limits are shown in Anthropic Console.' },
       { id: 'tier-4', label: 'API tier 4', accessMode: 'api-key', description: 'Top documented automatic API tier; check Console for RPM/ITPM/OTPM.' },
       { id: 'enterprise', label: 'Enterprise', accessMode: 'api-key', description: 'Custom commercial terms, controls, and support.' },
+      { id: 'claude-pro', label: 'Claude Pro', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed Claude Pro account access; separate from Anthropic Console API billing.' },
+      { id: 'claude-max', label: 'Claude Max', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed Claude Max account access for subscription-aware routing and status.' },
+      { id: 'claude-team', label: 'Claude Team', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed Claude Team workspace access where an OAuth client is configured.' },
     ],
   },
   {
@@ -67,6 +74,8 @@ export const PROVIDER_PLAN_CATALOG: ProviderPlanCatalogEntry[] = [
       { id: 'free', label: 'Free API tier', accessMode: 'api-key', description: 'Lower rate limits and free quota for testing in Google AI Studio.' },
       { id: 'paid', label: 'Paid API tier', accessMode: 'api-key', description: 'Billing-enabled Gemini API with higher limits and paid model/tool access.' },
       { id: 'enterprise', label: 'Google Cloud / Vertex enterprise', accessMode: 'api-key', description: 'Cloud billing, enterprise controls, and negotiated terms.' },
+      { id: 'google-ai-pro', label: 'Google AI Pro', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed Google AI Pro account access; separate from Gemini API key billing.' },
+      { id: 'google-ai-ultra', label: 'Google AI Ultra', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed Google AI Ultra account access for subscription-aware routing and status.' },
     ],
   },
   {

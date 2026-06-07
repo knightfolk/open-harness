@@ -14,6 +14,15 @@ export interface StoredProviderModel {
   enabled: boolean;
 }
 
+export interface StoredProviderOAuth {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  scopes?: string[];
+  accountLabel?: string;
+  connectedAt?: string;
+}
+
 export interface StoredProvider {
   id: string;
   name: string;
@@ -22,6 +31,7 @@ export interface StoredProvider {
   baseURL: string;
   accessMode?: 'api-key' | 'subscription';
   planId?: string;
+  oauth?: StoredProviderOAuth;
   models: StoredProviderModel[];
 }
 
@@ -187,6 +197,7 @@ export function loadConfig(): StoredConfig {
       apiKey: typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '',
       accessMode: (provider.accessMode === 'subscription' ? 'subscription' : 'api-key') as StoredProvider['accessMode'],
       planId: typeof provider.planId === 'string' && provider.planId ? provider.planId : undefined,
+      oauth: normalizeProviderOAuth((provider as any).oauth),
     }));
     const normalizedFavoriteModels = Array.isArray(parsed.favoriteModels)
       ? [...new Set(parsed.favoriteModels.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
@@ -344,6 +355,19 @@ function buildChatURL(provider: StoredProvider): string {
 
 function cloneDefaultConfig(): StoredConfig {
   return structuredClone(DEFAULT_CONFIG);
+}
+
+function normalizeProviderOAuth(value: unknown): StoredProviderOAuth | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const oauth: StoredProviderOAuth = {};
+  if (typeof raw.accessToken === 'string' && raw.accessToken.trim()) oauth.accessToken = raw.accessToken.trim();
+  if (typeof raw.refreshToken === 'string' && raw.refreshToken.trim()) oauth.refreshToken = raw.refreshToken.trim();
+  if (typeof raw.expiresAt === 'number' && Number.isFinite(raw.expiresAt)) oauth.expiresAt = raw.expiresAt;
+  if (Array.isArray(raw.scopes)) oauth.scopes = raw.scopes.filter((scope): scope is string => typeof scope === 'string' && scope.trim().length > 0);
+  if (typeof raw.accountLabel === 'string' && raw.accountLabel.trim()) oauth.accountLabel = raw.accountLabel.trim();
+  if (typeof raw.connectedAt === 'string' && raw.connectedAt.trim()) oauth.connectedAt = raw.connectedAt.trim();
+  return Object.keys(oauth).length > 0 ? oauth : undefined;
 }
 
 function normalizeThinkingEffort(value: unknown): ThinkingEffort {

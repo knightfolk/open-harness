@@ -795,6 +795,105 @@ function ProviderPlanControls({
   );
 }
 
+function selectedProviderPlan(providerId?: string, providerName?: string, accessMode?: ProviderAccessMode, planId?: string) {
+  const catalog = providerPlanCatalogFor(providerId, providerName);
+  const plans = catalog?.plans || [defaultProviderPlan(providerId, providerName)];
+  return plans.find((plan) => plan.id === planId) || plans.find((plan) => plan.accessMode === accessMode) || plans[0];
+}
+
+function ProviderOAuthControls({ provider }: { provider: ProviderConfig }) {
+  const [status, setStatus] = useState<api.ProviderOAuthState | null>(provider.oauth || null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const plan = selectedProviderPlan(provider.id, provider.name, provider.accessMode, provider.planId);
+  const shouldShow = provider.accessMode === 'subscription' && plan?.authMethod === 'oauth';
+
+  useEffect(() => {
+    if (!shouldShow) return;
+    let cancelled = false;
+    api.getProviderOAuthStatus(provider.id)
+      .then((next) => { if (!cancelled) setStatus(next); })
+      .catch((err) => { if (!cancelled) setMessage(err?.message || 'OAuth status unavailable'); });
+    return () => { cancelled = true; };
+  }, [provider.id, shouldShow]);
+
+  if (!shouldShow) return null;
+
+  const connected = !!status?.connected || !!provider.oauth?.connected;
+  const configured = status?.configured !== false;
+  const providerLabel = status?.provider ? status.provider[0].toUpperCase() + status.provider.slice(1) : provider.name;
+
+  const startOAuth = async () => {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api.startProviderOAuth(provider.id);
+      window.open(result.authUrl, '_blank', 'noopener,noreferrer');
+      setMessage('OAuth sign-in opened in a browser tab. Refresh this provider after approving access.');
+    } catch (err: any) {
+      setMessage(err?.message || 'OAuth setup failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnectOAuth = async () => {
+    setBusy(true);
+    setMessage('');
+    try {
+      await api.disconnectProviderOAuth(provider.id);
+      const next = await api.getProviderOAuthStatus(provider.id);
+      setStatus(next);
+      setMessage('OAuth disconnected.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Failed to disconnect OAuth');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="provider-plan-controls" style={{ marginTop: 8 }}>
+      <div className="provider-plan-note">
+        {connected
+          ? `${providerLabel} OAuth connected${status?.connectedAt ? ` on ${new Date(status.connectedAt).toLocaleDateString()}` : ''}.`
+          : configured
+            ? `${providerLabel} OAuth is ready for this subscription plan.`
+            : `${providerLabel} OAuth needs client credentials on the server before sign-in can start.`}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button className="settings-mini-button" onClick={startOAuth} disabled={busy || !configured}>
+          {busy ? <Loader size={11} className="spin" /> : <KeyRound size={11} />}
+          {connected ? 'Reconnect OAuth' : 'Connect OAuth'}
+        </button>
+        {connected && (
+          <button className="settings-mini-button" onClick={disconnectOAuth} disabled={busy}>
+            <Trash2 size={11} /> Disconnect
+          </button>
+        )}
+        <button
+          className="settings-mini-button"
+          onClick={async () => {
+            setBusy(true);
+            setMessage('');
+            try {
+              setStatus(await api.getProviderOAuthStatus(provider.id));
+            } catch (err: any) {
+              setMessage(err?.message || 'OAuth status unavailable');
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={busy}
+        >
+          <RefreshCw size={11} /> Refresh
+        </button>
+      </div>
+      {message && <div className={`test-result ${message.includes('failed') || message.includes('needs') || message.includes('unavailable') ? 'error' : 'success'}`}>{message}</div>}
+    </div>
+  );
+}
+
 /* ================================================================== */
 /*  MANAGE PROVIDERS — collapsible cards, scales to 10+               */
 /* ================================================================== */
@@ -908,6 +1007,7 @@ function ProvidersPane({
                     planId={provider.planId}
                     onChange={(next) => onUpdateProvider(provider.id, next)}
                   />
+                  <ProviderOAuthControls provider={provider} />
                   {/* Quick actions */}
                   <div className="prov-card-actions">
                     {provider.type !== 'local' && (

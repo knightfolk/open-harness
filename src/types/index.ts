@@ -104,6 +104,17 @@ export interface ProviderConfig {
   configured: boolean;
   accessMode?: 'api-key' | 'subscription';
   planId?: string;
+  oauth?: {
+    connected?: boolean;
+    configured?: boolean;
+    supported?: boolean;
+    provider?: string | null;
+    accountLabel?: string;
+    connectedAt?: string;
+    scopes?: string[];
+    expiresAt?: number;
+    hasRefreshToken?: boolean;
+  };
   models: ProviderModel[];
 }
 

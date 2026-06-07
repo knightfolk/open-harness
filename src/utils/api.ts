@@ -270,7 +270,20 @@ export interface ProviderInfo {
   baseURL: string;
   accessMode?: 'api-key' | 'subscription';
   planId?: string;
+  oauth?: ProviderOAuthState;
   models: ProviderModelInfo[];
+}
+
+export interface ProviderOAuthState {
+  connected?: boolean;
+  configured?: boolean;
+  supported?: boolean;
+  provider?: string | null;
+  accountLabel?: string;
+  connectedAt?: string;
+  scopes?: string[];
+  expiresAt?: number;
+  hasRefreshToken?: boolean;
 }
 
 export interface ProviderModelInfo {
@@ -337,6 +350,24 @@ export async function updateProvider(id: string, updates: Partial<ProviderInfo>)
 
 export async function deleteProvider(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/providers/${id}`, { method: 'DELETE' });
+}
+
+export async function getProviderOAuthStatus(providerId: string): Promise<ProviderOAuthState> {
+  const res = await fetch(`${API_BASE}/api/providers/${providerId}/oauth/status`);
+  if (!res.ok) throw new Error(`Failed to get OAuth status: ${res.status}`);
+  return res.json();
+}
+
+export async function startProviderOAuth(providerId: string): Promise<{ authUrl: string }> {
+  const res = await fetch(`${API_BASE}/api/providers/${providerId}/oauth/start`, { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Failed to start OAuth: ${res.status}`);
+  return body;
+}
+
+export async function disconnectProviderOAuth(providerId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/providers/${providerId}/oauth`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Failed to disconnect OAuth: ${res.status}`);
 }
 
 export interface TestConnectionResult {

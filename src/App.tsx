@@ -442,6 +442,7 @@ function App() {
               configured: providerIsConfigured(p),
               accessMode: p.accessMode,
               planId: p.planId,
+              oauth: p.oauth,
               models: p.models || [],
             })));
           }
@@ -519,6 +520,7 @@ function App() {
       configured: providerIsConfigured(p),
       accessMode: p.accessMode,
       planId: p.planId,
+      oauth: p.oauth,
       models: p.models || [],
     })));
   }, []);
@@ -600,6 +602,7 @@ function App() {
       configured: providerIsConfigured(p),
       accessMode: p.accessMode,
       planId: p.planId,
+      oauth: p.oauth,
       models: p.models || [],
     })));
     return result;
@@ -621,6 +624,7 @@ function App() {
       configured: providerIsConfigured(p),
       accessMode: p.accessMode,
       planId: p.planId,
+      oauth: p.oauth,
       models: p.models || [],
     })));
     return models;
@@ -637,6 +641,7 @@ function App() {
         configured: providerIsConfigured(p),
         accessMode: p.accessMode,
         planId: p.planId,
+        oauth: p.oauth,
         models: p.models || [],
       })));
     }).catch(() => {});
@@ -1489,6 +1494,7 @@ function App() {
                 configured: providerIsConfigured(p),
                 accessMode: p.accessMode,
                 planId: p.planId,
+                oauth: p.oauth,
                 models: p.models || [],
               })));
               const models = await api.getModels();
