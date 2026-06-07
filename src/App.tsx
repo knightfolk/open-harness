@@ -141,7 +141,14 @@ function roleMapToAssignments(assignments: Record<string, string>): CodingRoleAs
 }
 
 function defaultRoleThinking(): Record<string, ThinkingEffort> {
-  return Object.fromEntries(DEFAULT_ROLE_ASSIGNMENTS.map((role) => [role.id, 'medium' as ThinkingEffort]));
+  return {
+    planner: 'medium',
+    coder: 'medium',
+    reviewer: 'high',
+    reasoner: 'xhigh',
+    summarizer: 'low',
+    worker: 'low',
+  };
 }
 
 function App() {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'react';
 import { ContextBudgetControls } from './ContextBudgetControls';
 import { RoutingLearningPane } from './RoutingLearningPane';
 import {
@@ -329,6 +329,51 @@ function ModelAbilityIcons({ modelId, providerId }: { modelId: string; providerI
       })}
     </div>
   );
+}
+
+const ROLE_DEFAULT_EFFORT: Record<string, ThinkingEffort> = {
+  planner: 'medium',
+  coder: 'medium',
+  reviewer: 'high',
+  reasoner: 'xhigh',
+  summarizer: 'low',
+  worker: 'low',
+};
+
+const COST_SCORE: Record<string, number> = {
+  free: 0,
+  budget: 1,
+  low: 2,
+  mid: 3,
+  premium: 4,
+  luxury: 5,
+};
+
+function scoreModelForEffort(model: any, effort: ThinkingEffort): number {
+  const card = findModelCatalogCard(model.id, model.providerId);
+  const cost = COST_SCORE[card?.relativeCost || 'mid'] ?? 3;
+  const context = card?.contextWindowTokens || model.contextWindowTokens || 0;
+  const longContext = context >= 200_000 ? 8 : 0;
+  const hugeContext = context >= 1_000_000 ? 10 : 0;
+  const thinking = modelSupportsThinking(model.id, model.providerId) ? 16 : 0;
+  const tools = card?.supportsTools ? 8 : 0;
+  const category = card?.bestCategory;
+
+  if (effort === 'low') {
+    return 40 - cost * 8 + (category === 'worker' ? 14 : 0) + tools + (thinking ? 2 : 0) + longContext;
+  }
+  if (effort === 'medium') {
+    return 30 - cost * 3 + tools + thinking + longContext + (category === 'coding' ? 14 : 0) + (category === 'long-context' ? 6 : 0);
+  }
+  if (effort === 'high') {
+    return 20 - cost + thinking * 1.4 + tools + longContext + hugeContext + (category === 'review' ? 16 : 0) + (category === 'coding' ? 8 : 0);
+  }
+  return 10 + thinking * 1.8 + tools + longContext + hugeContext * 1.5 + (category === 'reasoning' ? 22 : 0) + (category === 'long-context' ? 12 : 0) - cost * 0.5;
+}
+
+function bestModelForEffort(enabledModels: any[], effort: ThinkingEffort): any | null {
+  return ([...enabledModels]
+    .sort((a, b) => scoreModelForEffort(b, effort) - scoreModelForEffort(a, effort))[0]) || null;
 }
 
 /* ================================================================== */
@@ -1259,55 +1304,170 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
 
 
 function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssignRoleModel, onAssignRoleThinking }: any) {
+  const autoDefaultedRef = useRef(false);
+  const effortCopy: Record<ThinkingEffort, { summary: string; intent: string }> = {
+    low: {
+      summary: 'Fast and inexpensive',
+      intent: 'Best for routine tool use, small edits, summaries, and other low-risk work.',
+    },
+    medium: {
+      summary: 'Balanced default',
+      intent: 'A good everyday setting for planning, coding, reviewing, and mixed tasks.',
+    },
+    high: {
+      summary: 'Deeper reasoning',
+      intent: 'Use for tricky debugging, architecture choices, security review, and tradeoffs.',
+    },
+    xhigh: {
+      summary: 'Maximum effort',
+      intent: 'Reserve for the hardest investigations where quality matters more than speed.',
+    },
+  };
+
+  const modelOptions = (
+    <>
+      <option value="Auto">Auto</option>
+      {enabledModels.map((model: any) => (
+        <option key={`${model.providerId}:${model.id}`} value={model.id}>
+          {model.providerName} — {model.name}
+        </option>
+      ))}
+    </>
+  );
+
+  const assignModelToEffort = useCallback((effortId: ThinkingEffort, modelId: string) => {
+    roleAssignments
+      .filter((role: CodingRoleAssignment) => (roleThinking?.[role.id] || 'medium') === effortId)
+      .forEach((role: CodingRoleAssignment) => onAssignRoleModel(role.id, modelId));
+  }, [onAssignRoleModel, roleAssignments, roleThinking]);
+
+  const recommendedModels = Object.fromEntries(
+    THINKING_EFFORTS.map((effort) => [effort.id, bestModelForEffort(enabledModels, effort.id)])
+  ) as Record<ThinkingEffort, any | null>;
+
+  const applyRecommendedDefaults = useCallback(() => {
+    roleAssignments.forEach((role: CodingRoleAssignment) => {
+      const effort = ROLE_DEFAULT_EFFORT[role.id] || 'medium';
+      onAssignRoleThinking(role.id, effort);
+      const recommended = recommendedModels[effort];
+      if (recommended) onAssignRoleModel(role.id, recommended.id);
+    });
+  }, [onAssignRoleModel, onAssignRoleThinking, recommendedModels, roleAssignments]);
+
+  useEffect(() => {
+    if (autoDefaultedRef.current || enabledModels.length === 0) return;
+    const allRolesAreAuto = roleAssignments.every((role: CodingRoleAssignment) => role.modelId === 'Auto');
+    if (!allRolesAreAuto) return;
+    autoDefaultedRef.current = true;
+    applyRecommendedDefaults();
+  }, [applyRecommendedDefaults, enabledModels.length, roleAssignments]);
+
   return (
     <>
       <PaneTitle>Agent Roles</PaneTitle>
-      <PaneDesc>Assign models and thinking effort to specialized coding roles. Models marked ✓ are recommended based on capabilities.</PaneDesc>
-      <div className="role-bucket-list" style={{ marginTop: 16 }}>
-        {roleAssignments.map((role: CodingRoleAssignment) => {
-          const Icon = roleIconMap[role.id] || Bot;
-          const selectedModel = enabledModels.find((model: any) => model.id === role.modelId);
-          const supportsThinking = modelSupportsThinking(role.modelId, selectedModel?.providerId);
-          const thinkingTitle = role.modelId === 'Auto'
-            ? `${role.name} uses Thinking to bias Auto routing depth and cost.`
-            : `${role.name} thinking effort for this reasoning-capable model.`;
+      <PaneDesc>Pick how much thinking each kind of work deserves. Use Auto for the model unless you want a specific role override.</PaneDesc>
+      <div className="role-recommendation-bar">
+        <div>
+          <div className="role-recommendation-title">Recommended setup</div>
+          <div className="role-recommendation-copy">Uses only enabled provider models: Low for quick work, Medium for day-to-day coding, High for review, xHigh for hardest reasoning.</div>
+        </div>
+        <button className="settings-mini-button" onClick={applyRecommendedDefaults} disabled={enabledModels.length === 0}>
+          <Sparkles size={12} /> Apply defaults
+        </button>
+      </div>
+      <div className="role-effort-list">
+        {THINKING_EFFORTS.map((effort) => {
+          const rolesForEffort = roleAssignments.filter((role: CodingRoleAssignment) => (roleThinking?.[role.id] || 'medium') === effort.id);
+          const sharedModel = rolesForEffort.length > 0 && rolesForEffort.every((role: CodingRoleAssignment) => role.modelId === rolesForEffort[0].modelId)
+            ? rolesForEffort[0].modelId
+            : '';
           return (
-            <div key={role.id} className="role-bucket-card">
-              <div className="role-bucket-icon"><Icon size={15} /></div>
-              <div className="role-bucket-body">
-                <div className="role-bucket-name">{role.name}</div>
-                <div className="role-bucket-desc">{role.description}</div>
-                <div className="settings-model-controls">
-                  <select className="settings-select settings-select-wide" value={role.modelId} onChange={(e) => onAssignRoleModel(role.id, e.target.value)}>
-                    <option value="Auto">Auto</option>
-                    {enabledModels.map((model: any) => {
-                      const rec = isModelRecommended(role.id, model.id);
-                      return (
-                        <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>
-                          {rec ? '✓ ' : ''}{model.providerName} — {model.name}{rec ? ' (Recommended)' : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  {supportsThinking && (
-                    <label className="settings-thinking-control" title={thinkingTitle}>
-                      <span><Brain size={12} /> Thinking</span>
-                      <select className="settings-select" value={roleThinking?.[role.id] || 'medium'} onChange={(e) => onAssignRoleThinking(role.id, e.target.value as ThinkingEffort)} aria-label={`${role.name} thinking effort`}>
-                        {THINKING_EFFORTS.map((effort) => (
-                          <option key={effort.id} value={effort.id}>{effort.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  <ModelAbilityIcons modelId={role.modelId} providerId={selectedModel?.providerId} />
-                </div>
-                {findModelCatalogCard(role.modelId) && (
-                  <div className="role-bucket-model-note" title={modelCatalogTooltip(role.modelId)}>
-                    {findModelCatalogCard(role.modelId)?.compactDescription}
+            <section key={effort.id} className="role-effort-section">
+              <div className="role-effort-header">
+                <div className="role-effort-title-row">
+                  <span className="role-effort-icon"><Brain size={14} /></span>
+                  <div>
+                    <div className="role-effort-title">{effort.label}</div>
+                    <div className="role-effort-summary">{effortCopy[effort.id].summary}</div>
                   </div>
-                )}
+                  <span className="role-effort-count">{rolesForEffort.length}</span>
+                </div>
+                <div className="role-effort-controls">
+                  <span>Use model</span>
+                  <select
+                    className="settings-select settings-select-wide"
+                    value={sharedModel}
+                    onChange={(e) => assignModelToEffort(effort.id, e.target.value)}
+                    disabled={rolesForEffort.length === 0}
+                    aria-label={`Model for ${effort.label} roles`}
+                  >
+                    {rolesForEffort.length > 0 && sharedModel === '' && <option value="">Mixed</option>}
+                    {modelOptions}
+                  </select>
+                </div>
               </div>
-            </div>
+              <div className="role-effort-intent">{effortCopy[effort.id].intent}</div>
+              {recommendedModels[effort.id] && (
+                <div className="role-effort-recommendation">
+                  Best available: {recommendedModels[effort.id]?.providerName} — {recommendedModels[effort.id]?.name}
+                </div>
+              )}
+              <div className="role-bucket-list">
+                {rolesForEffort.length === 0 && (
+                  <div className="role-effort-empty">No roles are using {effort.label.toLowerCase()} thinking.</div>
+                )}
+                {rolesForEffort.map((role: CodingRoleAssignment) => {
+                  const Icon = roleIconMap[role.id] || Bot;
+                  const selectedModel = enabledModels.find((model: any) => model.id === role.modelId);
+                  const supportsThinking = modelSupportsThinking(role.modelId, selectedModel?.providerId);
+                  const thinkingTitle = role.modelId === 'Auto'
+                    ? `${role.name} uses Thinking to bias Auto routing depth and cost.`
+                    : `${role.name} thinking effort for this reasoning-capable model.`;
+                  return (
+                    <div key={role.id} className="role-bucket-card">
+                      <div className="role-bucket-icon"><Icon size={15} /></div>
+                      <div className="role-bucket-body">
+                        <div className="role-bucket-topline">
+                          <div>
+                            <div className="role-bucket-name">{role.name}</div>
+                            <div className="role-bucket-desc">{role.description}</div>
+                          </div>
+                          <ModelAbilityIcons modelId={role.modelId} providerId={selectedModel?.providerId} />
+                        </div>
+                        <div className="settings-model-controls">
+                          <select className="settings-select settings-select-wide" value={role.modelId} onChange={(e) => onAssignRoleModel(role.id, e.target.value)} aria-label={`${role.name} model`}>
+                            <option value="Auto">Auto</option>
+                            {enabledModels.map((model: any) => {
+                              const rec = isModelRecommended(role.id, model.id);
+                              return (
+                                <option key={`${role.id}:${model.providerId}:${model.id}`} value={model.id}>
+                                  {rec ? '✓ ' : ''}{model.providerName} — {model.name}{rec ? ' (Recommended)' : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          {supportsThinking && (
+                            <label className="settings-thinking-control" title={thinkingTitle}>
+                              <span><Brain size={12} /> Move to</span>
+                              <select className="settings-select" value={roleThinking?.[role.id] || 'medium'} onChange={(e) => onAssignRoleThinking(role.id, e.target.value as ThinkingEffort)} aria-label={`${role.name} thinking effort`}>
+                                {THINKING_EFFORTS.map((option) => (
+                                  <option key={option.id} value={option.id}>{option.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                        </div>
+                        {findModelCatalogCard(role.modelId) && (
+                          <div className="role-bucket-model-note" title={modelCatalogTooltip(role.modelId)}>
+                            {findModelCatalogCard(role.modelId)?.compactDescription}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           );
         })}
       </div>

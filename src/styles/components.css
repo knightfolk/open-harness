@@ -3462,10 +3462,116 @@ button:focus-visible {
 }
 
 /* Role bucket cards */
+.role-recommendation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.role-recommendation-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.role-recommendation-copy {
+  max-width: 760px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+.role-effort-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.role-effort-section {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  padding: 12px;
+}
+.role-effort-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.role-effort-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.role-effort-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.role-effort-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.role-effort-summary,
+.role-effort-intent,
+.role-effort-recommendation,
+.role-effort-empty {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+.role-effort-count {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-active);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.role-effort-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.role-effort-intent {
+  margin-top: 8px;
+}
+.role-effort-recommendation {
+  margin-top: 4px;
+  color: var(--text-secondary);
+}
+.role-effort-empty {
+  padding: 9px 10px;
+  border: 1px dashed var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
 .role-bucket-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin-top: 10px;
 }
 .role-bucket-card {
   display: flex;
@@ -3497,6 +3603,12 @@ button:focus-visible {
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 1px;
+}
+.role-bucket-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 .role-bucket-desc {
   font-size: 10px;

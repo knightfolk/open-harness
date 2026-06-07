@@ -133,12 +133,12 @@ const DEFAULT_CONFIG: StoredConfig = {
   thinkingEffort: 'medium',
   roleThinking: {
     coder: 'medium',
-    reasoner: 'medium',
-    summarizer: 'medium',
+    reasoner: 'xhigh',
+    summarizer: 'low',
     title: 'medium',
     planner: 'medium',
-    reviewer: 'medium',
-    worker: 'medium',
+    reviewer: 'high',
+    worker: 'low',
   },
   roleAssignments: {
     coder: 'Auto',         // Primary coding agent
