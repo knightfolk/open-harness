@@ -2333,6 +2333,48 @@ function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunSte
   writeSSE(res, 'run_step', { runId: run.id, step: appended });
 }
 
+function persistAssistantMessage(
+  session: SessionRow,
+  assistantId: string,
+  content: string,
+  run?: HarnessRun,
+) {
+  const existing = session.messages.find((m) => m.id === assistantId && m.role === 'assistant');
+  if (existing) return;
+  session.messages.push({
+    id: assistantId,
+    role: 'assistant',
+    content,
+    timestamp: new Date().toISOString(),
+    runTrace: run,
+  });
+  session.updatedAt = new Date().toISOString();
+  sessionStore.saveSession(session);
+}
+
+function persistAssistantError(
+  session: SessionRow,
+  assistantId: string,
+  errorContent: string,
+  run?: HarnessRun,
+): void {
+  const existing = session.messages.find((m) => m.id === assistantId && m.role === 'assistant');
+  if (existing) {
+    existing.content = errorContent;
+    existing.runTrace = run;
+  } else {
+    session.messages.push({
+      id: assistantId,
+      role: 'assistant',
+      content: errorContent,
+      timestamp: new Date().toISOString(),
+      runTrace: run,
+    });
+  }
+  session.updatedAt = new Date().toISOString();
+  sessionStore.saveSession(session);
+}
+
 function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
   switch (step.type) {
     case 'orchestration': return step.label;
@@ -2564,6 +2606,10 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     candidateScores: route.routerData?.candidateScores,
   });
   writeSSE(res, 'run_start', run);
+
+  // Outer try/catch ensures a persisted assistant error on any unhandled failure
+  // so the session never ends up user-only after a crash.
+  try {
   const visibleActivityState = { chars: 0, lastAt: 0 };
   const emitVisibleStep = (step: HarnessRunStep) => {
     emitRunStep(res, run, step);
@@ -2660,10 +2706,13 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
 
       if (run) emitRunStep(res, run, { type: 'final_answer', chars: finalText.length });
       if (!orchResult.ok) run.status = 'error';
+      persistAssistantMessage(session, assistantId, finalText, run);
     } catch (err: any) {
       console.error('[orchestrator] pipeline error:', err);
-      writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: `Orchestration failed: ${err?.message || err}` });
+      const orchErrorContent = `Orchestration failed: ${err?.message || err}`;
+      writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: orchErrorContent });
       if (run) { run.status = 'error'; emitVisibleStep({ type: 'error', message: err?.message || 'Orchestration failed' }); }
+      persistAssistantError(session, assistantId, orchErrorContent, run);
     }
   } else if (!resolved) {
     await streamLocalFallback(content, res, assistantId, session, run);
@@ -2677,6 +2726,18 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   writeSSE(res, 'done', {});
   streamFinished = true;
   res.end();
+  } catch (err: any) {
+    console.error('[messages] unhandled error:', err);
+    const errorContent = `Error: ${err?.message || err}`;
+    if (!res.writableEnded) {
+      writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: errorContent });
+      writeSSE(res, 'run_complete', { ...run, status: 'error' });
+      writeSSE(res, 'done', {});
+      streamFinished = true;
+      res.end();
+    }
+    persistAssistantError(session, assistantId, errorContent, run);
+  }
 });
 
 // ── MCP tool helpers for chat ──────────────────────────
@@ -2746,6 +2807,7 @@ function gatherMCPToolsForAPI(): { tools: any[]; toolServerMap: Record<string, s
     if (!client) continue;
     const mcpTools = client.getTools();
     for (const tool of mcpTools) {
+      if (/^subagent-/i.test(tool.name)) continue;
       tools.push({
         type: 'function',
         function: {
@@ -2765,13 +2827,19 @@ async function invokeMCPTool(
   args: Record<string, any>,
   toolServerMap: Record<string, string>,
   workingDir?: string,
+  run?: HarnessRun,
+  res?: express.Response,
 ): Promise<any> {
   const serverId = toolServerMap[toolName];
   if (!serverId) throw new Error('No server for tool: ' + toolName);
   const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
   const toolPolicy = checkToolActionPolicy(toolName, args, trustMode, workingDir || process.cwd());
   if (!toolPolicy.allowed) {
-    throw new Error(toolPolicy.reason || 'Tool call not allowed by trust mode');
+    const reason = toolPolicy.reason || 'Tool call not allowed by trust mode';
+    const trustMessage = `Trust policy denied tool '${toolName}': ${reason}`;
+    console.warn(`[trust-policy] Blocked tool ${toolName}: ${reason}`);
+    if (run && res) emitRunStep(res, run, { type: 'error', message: trustMessage });
+    throw new Error(trustMessage);
   }
 
   // ── Built-in tools (handled locally) ────────────────
@@ -3090,8 +3158,18 @@ async function streamWithNativeAdapter(
           continue;
         }
 
+        if (/^subagent-/i.test(tc.name)) {
+          const rejectMsg = `Tool '${tc.name}' is not a registered tool. Multi-agent tasks must use the built-in orchestration system. Do not invent tool names starting with 'subagent-'.`;
+          console.warn(`[tool-guard] Rejected fake subagent tool call: ${tc.name}`);
+          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'error', message: `Rejected fake subagent tool: ${tc.name}` });
+          roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: wrapToolResultForModel(tc.name, rejectMsg) });
+          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 });
+          continue;
+        }
+
         try {
-          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined);
+          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined, run, res);
           output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } catch (err: any) {
           output = redactOutputText('Error: ' + err.message);
@@ -3333,6 +3411,7 @@ async function streamModel(
         retryable: true,
         fallbackAttempted: false,
       });
+      persistAssistantError(session, assistantId, `Error: Native provider stream failed — ${err?.message || err}`, run);
       throw err;
     }
     return;
@@ -3401,6 +3480,7 @@ async function streamModel(
         });
         if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: `${providerId} API error: ${response.status} ${err}` }); }
         res.write('event: error\ndata: ' + JSON.stringify({ error: `${providerId} API error: ${response.status} ${err}` }) + '\n\n');
+        persistAssistantError(session, assistantId, `Error: ${providerId} API returned ${response.status}. ${err}`, run);
         return;
       }
 
@@ -3468,8 +3548,18 @@ async function streamModel(
           continue;
         }
 
+        if (/^subagent-/i.test(tc.name)) {
+          const rejectMsg = `Tool '${tc.name}' is not a registered tool. Multi-agent tasks must use the built-in orchestration system. Do not invent tool names starting with 'subagent-'.`;
+          console.warn(`[tool-guard] Rejected fake subagent tool call: ${tc.name}`);
+          res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'error', message: `Rejected fake subagent tool: ${tc.name}` });
+          apiMessages.push({ role: 'tool', tool_call_id: tcId, content: wrapToolResultForModel(tc.name, rejectMsg) });
+          sessionToolCalls.push({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 });
+          continue;
+        }
+
         try {
-          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined);
+          const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined, run, res);
           output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } catch (err: any) {
           output = redactOutputText('Error: ' + err.message);
@@ -3594,6 +3684,7 @@ async function streamModel(
     });
     if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
     res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
+    persistAssistantError(session, assistantId, `Error: ${errorMessage}`, run);
   }
 }
 
@@ -5178,6 +5269,7 @@ async function streamModelWithFallback(
   }
   writeSSE(res, 'text', { id: assistantId, text: failureMessage });
   writeSSE(res, 'error', { error: failureMessage });
+  persistAssistantError(session, assistantId, `Error: ${failureMessage}`, run);
 }
 
 // ── Cost estimation ────────────────────────────────────

@@ -13,6 +13,8 @@
     "test:router-learning-outcomes": "tsx scripts/test-router-learning-outcome-persistence.ts",
     "test:side-chat-main-session-isolation": "tsx scripts/test-side-chat-main-session-isolation.ts",
     "test:routing-adherence": "tsx scripts/test-routing-adherence.ts",
+    "test:session-persistence": "tsx scripts/test-session-persistence-regression.ts",
+    "test:sse-progress": "tsx scripts/test-sse-progress-regression.ts",
     "test:hardening": "tsx scripts/test-tool-policy.ts && tsx scripts/test-auto-router-context.ts && tsx scripts/test-redaction.ts && tsx scripts/test-session-redaction.ts && tsx scripts/test-artifact-redaction.ts && tsx scripts/test-process-ledger-redaction.ts && tsx scripts/test-mcp-redaction.ts && tsx scripts/test-prompt-injection-boundaries.ts && tsx scripts/test-command-safety.ts",
     "smoke:tool-boundaries": "node scripts/smoke-tool-boundaries.mjs",
     "smoke:docker-ui": "node scripts/smoke-docker-ui.mjs",

@@ -48,6 +48,7 @@ const config: StoredConfig = {
         modelId: 'local:claude-opus-4.8',
         cost: 1.2,
         supportsImages: true,
+        supportsThinking: true,
         card: 'Premium frontier-style model for hard reasoning, architecture, and code review.',
       },
     ],
