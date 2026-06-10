@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { routeRequest } from '../server/router';
 import { buildCompareModelSet, buildPlanningRoomModelSet } from '../server/orchestrator';
+import { repairProviderAliasCredentials } from '../server/config';
 import type { StoredConfig } from '../server/config';
 
 const config: StoredConfig = {
@@ -63,5 +64,43 @@ assert.deepEqual(compareModels, ['MiniMax-M3', 'zai:glm-4.6'], 'compare model se
 
 const planningModels = buildPlanningRoomModelSet(teamPlan, config);
 assert.deepEqual(planningModels, ['MiniMax-M3', 'zai:glm-4.6'], 'planning room should ignore Auto and duplicate aliases');
+
+const splitZaiConfig: StoredConfig = {
+  ...config,
+  providers: [
+    {
+      id: 'z-ai-zhipu',
+      name: 'Z.AI / Zhipu',
+      type: 'openai-compatible',
+      apiKey: '',
+      baseURL: 'https://api.z.ai/api/coding/paas/v4',
+      models: [
+        { id: 'glm-4.7', name: 'glm-4.7', enabled: true },
+      ],
+    },
+    {
+      id: 'zhipu',
+      name: 'Z.AI / Zhipu',
+      type: 'openai-compatible',
+      apiKey: 'test-key',
+      baseURL: 'https://api.z.ai/api/coding/paas/v4',
+      models: [],
+    },
+    ...config.providers,
+  ],
+  roleAssignments: {
+    planner: 'z-ai-zhipu:glm-4.7',
+    reviewer: 'minimax:MiniMax-M3',
+  },
+};
+
+const splitZaiModels = buildPlanningRoomModelSet(teamPlan, splitZaiConfig);
+assert.ok(!splitZaiModels.includes('z-ai-zhipu:glm-4.7'), 'planning room should not choose keyless split Z.ai provider before config repair');
+
+const repairedSplitZaiModels = buildPlanningRoomModelSet(teamPlan, {
+  ...splitZaiConfig,
+  providers: repairProviderAliasCredentials(splitZaiConfig.providers),
+});
+assert.ok(repairedSplitZaiModels.includes('z-ai-zhipu:glm-4.7'), 'config repair should copy the Z.ai key onto the provider entry that owns GLM models');
 
 console.log('Orchestration routing tests passed.');

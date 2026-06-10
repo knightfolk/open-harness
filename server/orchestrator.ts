@@ -130,18 +130,21 @@ async function runPlanningRoomPipeline(
         onStep: callbacks.onStep,
         tools: callbacks.tools,
         invokeTool: callbacks.invokeTool,
+        maxToolRounds: 2,
       });
+      const text = sanitizeAgentOutput(artifact.response || '');
+      const complete = artifact.status === 'complete' && !!text.trim();
       phases.push({
         label: `planning-room:plan:${modelId}`,
         modelId,
         durationMs: artifact.durationMs,
-        status: artifact.status === 'complete' ? 'complete' : 'error',
+        status: complete ? 'complete' : 'error',
         artifact,
-        summary: artifact.status === 'complete'
-          ? artifact.response.slice(0, 200)
-          : `Planning participant error: ${artifact.error}`,
+        summary: complete
+          ? text.slice(0, 200)
+          : `Planning participant error: ${artifact.error || 'empty response after cleanup'}`,
       });
-      return { modelId, text: artifact.response || '', ok: artifact.status === 'complete' };
+      return { modelId, text, ok: complete };
     } catch (err: any) {
       phases.push({
         label: `planning-room:plan:${modelId}`,
@@ -156,8 +159,18 @@ async function runPlanningRoomPipeline(
 
   const usablePlans = independentPlans.filter((plan) => plan.ok && plan.text.trim());
   if (usablePlans.length === 0) {
+    const phaseIssues = phases
+      .filter((phase) => phase.status !== 'complete')
+      .map((phase) => `- ${phase.label}: ${phase.summary}`);
     return {
-      finalText: 'Planning Room failed because no participant returned a usable plan.',
+      finalText: [
+        '## Planning Room Failed',
+        '',
+        'No participant returned a usable plan.',
+        '',
+        '### Phase Issues',
+        ...(phaseIssues.length > 0 ? phaseIssues : ['- No phase details were recorded.']),
+      ].join('\n'),
       phases,
       ok: false,
       error: 'No usable planning outputs',
@@ -194,19 +207,22 @@ async function runPlanningRoomPipeline(
           signal: callbacks.signal,
           onStep: callbacks.onStep,
           tools: callbacks.tools,
-          invokeTool: callbacks.invokeTool,
-        });
+        invokeTool: callbacks.invokeTool,
+        maxToolRounds: 1,
+      });
+        const text = sanitizeAgentOutput(artifact.response || '');
+        const complete = artifact.status === 'complete' && !!text.trim();
         phases.push({
           label: `planning-room:cross-check:${plan.modelId}`,
           modelId: plan.modelId,
           durationMs: artifact.durationMs,
-          status: artifact.status === 'complete' ? 'complete' : 'error',
+          status: complete ? 'complete' : 'error',
           artifact,
-          summary: artifact.status === 'complete'
-            ? artifact.response.slice(0, 200)
-            : `Cross-check error: ${artifact.error}`,
+          summary: complete
+            ? text.slice(0, 200)
+            : `Cross-check error: ${artifact.error || 'empty response after cleanup'}`,
         });
-        return { modelId: plan.modelId, text: artifact.response || '', ok: artifact.status === 'complete' };
+        return { modelId: plan.modelId, text, ok: complete };
       } catch (err: any) {
         phases.push({
           label: `planning-room:cross-check:${plan.modelId}`,
@@ -261,16 +277,19 @@ async function runPlanningRoomPipeline(
       onStep: callbacks.onStep,
       tools: callbacks.tools,
       invokeTool: callbacks.invokeTool,
+      maxToolRounds: 1,
     });
+    const text = sanitizeAgentOutput(synthesisArtifact.response || '');
+    const complete = synthesisArtifact.status === 'complete' && !!text.trim();
     phases.push({
       label: 'planning-room:synthesis',
       modelId: synthesisModel,
       durationMs: synthesisArtifact.durationMs,
-      status: synthesisArtifact.status === 'complete' ? 'complete' : 'error',
+      status: complete ? 'complete' : 'error',
       artifact: synthesisArtifact,
-      summary: synthesisArtifact.status === 'complete'
-        ? synthesisArtifact.response.slice(0, 200)
-        : `Synthesis error: ${synthesisArtifact.error}`,
+      summary: complete
+        ? text.slice(0, 200)
+        : `Synthesis error: ${synthesisArtifact.error || 'empty response after cleanup'}`,
     });
   } catch (err: any) {
     phases.push({
@@ -285,13 +304,18 @@ async function runPlanningRoomPipeline(
   const participantLine = targetModels.length === 1
     ? `${targetModels[0]} (single configured participant)`
     : targetModels.join(', ');
-  const finalPlan = synthesisArtifact?.response?.trim()
-    || usablePlans[0]?.text
+  const finalPlan = synthesisArtifact?.status === 'complete' && sanitizeAgentOutput(synthesisArtifact.response || '').trim()
+    ? sanitizeAgentOutput(synthesisArtifact.response)
+    : usablePlans[0]?.text
     || 'Planning Room did not produce a final plan.';
   const ok = phases.every((p) => p.status === 'complete');
   const planSummaries = usablePlans
     .map((plan) => `- ${plan.modelId}: ${oneLine(plan.text)}`)
     .join('\n');
+  const phaseIssues = phases
+    .filter((phase) => phase.status !== 'complete')
+    .map((phase) => `- ${phase.label}: ${phase.summary}`);
+  const safeFinalPlan = finalPlan.trim() || usablePlans[0]?.text || 'Planning Room did not produce a final plan.';
 
   return {
     finalText: [
@@ -300,7 +324,14 @@ async function runPlanningRoomPipeline(
       `Participants: ${participantLine}`,
       ``,
       `### Final Team Plan`,
-      finalPlan,
+      safeFinalPlan,
+      ...(phaseIssues.length > 0
+        ? [
+          ``,
+          `### Phase Issues`,
+          ...phaseIssues,
+        ]
+        : []),
       ``,
       `### Participant Signals`,
       planSummaries || '- No participant summaries available.',
@@ -832,8 +863,15 @@ function canResolveModel(config: StoredConfig, modelId: string): boolean {
     ? (config.providers || []).filter((provider) => provider.id === providerId)
     : (config.providers || []);
   return providers.some((provider) =>
+    providerCanAuthenticate(provider) &&
     (provider.models || []).some((model) => model.id === modelId || model.id === bareId)
   );
+}
+
+function providerCanAuthenticate(provider: StoredConfig['providers'][number]): boolean {
+  return provider.type === 'local'
+    || !!provider.apiKey
+    || !!provider.oauth?.accessToken;
 }
 
 function isUsableModelId(modelId?: string): modelId is string {
@@ -861,9 +899,22 @@ function canonicalModelKey(config: StoredConfig, modelId: string): string {
 
 function oneLine(text: string): string {
   return text
+    .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 180) || '(empty)';
+}
+
+function sanitizeAgentOutput(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/<\|tool_call(?:_begin|_end)?\|>[\s\S]*?(?:<\|tool_call(?:_begin|_end)?\|>|$)/gi, '')
+    .replace(/<\|invoke\|=[\s\S]*?(?:<\/\|invoke\|>|$)/gi, '')
+    .trim();
 }
 
 // ── Legacy exports (used by streamModel fallback and trace steps) ──

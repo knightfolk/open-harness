@@ -31,6 +31,7 @@ export interface BackgroundAgentRequest {
   onStep?: (step: HarnessRunStep) => void;
   tools?: AgentToolDefinition[];
   invokeTool?: (toolName: string, args: Record<string, unknown>, workingDir?: string) => Promise<unknown>;
+  maxToolRounds?: number;
 }
 
 export interface BackgroundAgentArtifact {
@@ -193,6 +194,7 @@ function pickProviderForModel(config: StoredConfig, modelId: string): { baseURL:
   let candidates = providerId ? providers.filter((p) => p.id === providerId) : providers;
   if (candidates.length === 0) candidates = providers;
   for (const p of candidates) {
+    if (!providerCanAuthenticate(p)) continue;
     if (p.models.some((m) => m.id === modelId || m.id === bareId)) {
       return {
         baseURL: p.baseURL,
@@ -203,7 +205,7 @@ function pickProviderForModel(config: StoredConfig, modelId: string): { baseURL:
     }
   }
   // Final fallback: first configured provider.
-  const first = providers[0];
+  const first = providers.find(providerCanAuthenticate);
   if (!first) return null;
   return {
     baseURL: first.baseURL,
@@ -211,6 +213,12 @@ function pickProviderForModel(config: StoredConfig, modelId: string): { baseURL:
     providerId: first.id,
     providerType: first.type,
   };
+}
+
+function providerCanAuthenticate(provider: StoredConfig['providers'][number]): boolean {
+  return provider.type === 'local'
+    || !!provider.apiKey
+    || !!provider.oauth?.accessToken;
 }
 
 /**
@@ -409,8 +417,9 @@ export async function runAgentPhase(
       { role: 'user', content: req.prompt },
     ];
     let exhaustedToolRounds = false;
+    const maxToolRounds = Math.max(0, Math.min(req.maxToolRounds ?? MAX_AGENT_TOOL_ROUNDS, MAX_AGENT_TOOL_ROUNDS));
 
-    for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round++) {
+    for (let round = 0; round < maxToolRounds; round++) {
       req.onStep?.({ type: 'model_request', round: round + 1, model: modelId });
       const text = await callAgentModel(provider, modelId, messages, profile.temperature, controller.signal);
       if (text) req.onStep?.({ type: 'model_text', chars: text.length });
@@ -452,19 +461,19 @@ export async function runAgentPhase(
           `Tool results:`,
           toolResultText,
           ``,
-          round === MAX_AGENT_TOOL_ROUNDS - 1
+          round === maxToolRounds - 1
             ? `Now produce the final answer from the gathered evidence. Do not request more tools.`
             : `Use these results to continue. If you need more context, request one read-only tool call. Otherwise produce the final answer.`,
         ].join('\n'),
       });
 
-      if (round === MAX_AGENT_TOOL_ROUNDS - 1) {
+      if (round === maxToolRounds - 1) {
         exhaustedToolRounds = true;
       }
     }
 
     if (exhaustedToolRounds && !artifact.response.trim()) {
-      req.onStep?.({ type: 'model_request', round: MAX_AGENT_TOOL_ROUNDS + 1, model: modelId });
+      req.onStep?.({ type: 'model_request', round: maxToolRounds + 1, model: modelId });
       const finalText = await callAgentModel(provider, modelId, [
         ...messages,
         {
@@ -625,7 +634,17 @@ function safeParseToolArguments(raw: string): Record<string, unknown> {
 
 function stripAgentToolMarkup(text: string, knownToolNames: string[] = DEFAULT_AGENT_TOOLS.map(getToolName).filter(Boolean)): string {
   const parsed = parseToolCallMarkup(text, knownToolNames);
-  return (parsed.matchedAny ? parsed.remainder : text).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  return stripResidualAgentMarkup(parsed.matchedAny ? parsed.remainder : text).trim();
+}
+
+function stripResidualAgentMarkup(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/<\|tool_call(?:_begin|_end)?\|>[\s\S]*?(?:<\|tool_call(?:_begin|_end)?\|>|$)/gi, '')
+    .replace(/<\|invoke\|=[\s\S]*?(?:<\/\|invoke\|>|$)/gi, '');
 }
 
 async function invokeAgentTool(

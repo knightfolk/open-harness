@@ -4,6 +4,10 @@ Purpose: turn OpenHarness from a model chat interface into a local coding harnes
 
 Use this document for work assignment, issue creation, milestone planning, and progress tracking.
 
+## Current Top Priority - Prompt, Routing, and Output
+
+Use `docs/PROMPT_ROUTING_OUTPUT_ROADMAP.md` as the current implementation roadmap for refining prompt processing, routing decisions, Planning Room model-team output, single-model responses, eval feedback, and native-app presentation.
+
 ## Source of Truth — Planning Room First
 
 OpenHarness's next product center is **Planning Room + Project Companion**:

@@ -21,6 +21,26 @@ export interface BuildPromptOptions {
   enableThinking?: boolean;
 }
 
+export interface PromptAssemblySection {
+  id: string;
+  label: string;
+  source: string;
+  tokenEstimate: number;
+  included: boolean;
+  reason: string;
+  redacted: boolean;
+  preview: string;
+}
+
+export interface PromptAssembly {
+  modelId: string;
+  family: string;
+  style: ModelPromptConfig['systemPromptStyle'];
+  target: 'system-message' | 'anthropic-system' | 'gemini-systemInstruction';
+  sections: PromptAssemblySection[];
+  totalTokenEstimate: number;
+}
+
 export interface PromptBuildResult {
   systemPrompt: string;
   systemInstruction: {
@@ -40,6 +60,7 @@ export interface PromptBuildResult {
   toolsDescription?: string;
   thinkingEnabled: boolean;
   streamFieldsToCapture: string[];
+  assembly: PromptAssembly;
 }
 
 // ── Role system prompts ────────────────────────────────
@@ -94,15 +115,17 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
   if (isThinking && config.reasoningSupport === 'native-thinking') {
     streamFields.push('reasoning_content');
   }
+  const target = config.family === 'anthropic'
+    ? 'anthropic-system'
+    : config.family === 'gemini'
+      ? 'gemini-systemInstruction'
+      : 'system-message';
+  const assembly = buildPromptAssembly(config, options, systemPrompt, toolsDescription, systemPromptWithTools, target);
 
   return {
     systemPrompt: systemPromptWithTools,
     systemInstruction: {
-      target: config.family === 'anthropic'
-        ? 'anthropic-system'
-        : config.family === 'gemini'
-          ? 'gemini-systemInstruction'
-          : 'system-message',
+      target,
       content: systemPromptWithTools,
     },
     adaptedTools,
@@ -115,6 +138,106 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
     toolsDescription,
     thinkingEnabled: isThinking && config.reasoningSupport === 'native-thinking',
     streamFieldsToCapture: streamFields,
+    assembly,
+  };
+}
+
+function estimatePromptTokens(text: string | undefined): number {
+  if (!text) return 0;
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function buildPromptAssembly(
+  config: ModelPromptConfig,
+  options: BuildPromptOptions,
+  systemPrompt: string,
+  toolsDescription: string | undefined,
+  finalPrompt: string,
+  target: PromptAssembly['target'],
+): PromptAssembly {
+  const role = options.role || config.defaultRole || 'coder';
+  const rolePrompt = ROLE_PROMPTS[role] || ROLE_PROMPTS.coder;
+  const personality = normalizePersonality(options.personality);
+  const sections: PromptAssemblySection[] = [
+    {
+      id: 'identity',
+      label: 'Identity and role',
+      source: personality ? 'user personality' : `role:${role}`,
+      tokenEstimate: estimatePromptTokens(personality || rolePrompt),
+      included: true,
+      reason: personality ? 'Active personality overrides the default role prompt.' : 'Default role prompt selected by route role.',
+      redacted: false,
+      preview: personality || rolePrompt,
+    },
+    {
+      id: 'model-family-renderer',
+      label: 'Model-family renderer',
+      source: `modelProfiles:${config.family}`,
+      tokenEstimate: estimatePromptTokens(config.systemPromptStyle),
+      included: true,
+      reason: `${config.family} uses ${config.systemPromptStyle} system prompt formatting.`,
+      redacted: false,
+      preview: `family=${config.family}; style=${config.systemPromptStyle}; target=${target}`,
+    },
+    {
+      id: 'context-pack',
+      label: 'Project context',
+      source: options.workingDir || 'none',
+      tokenEstimate: estimatePromptTokens(options.projectProfileSummary),
+      included: !!options.workingDir,
+      reason: options.workingDir ? 'Workspace, project profile, memory, orchestration contract, repo map, and context pack are included.' : 'No workspace was provided.',
+      redacted: true,
+      preview: options.projectProfileSummary || '',
+    },
+    {
+      id: 'safety-rules',
+      label: 'Safety and trust rules',
+      source: 'untrustedContent',
+      tokenEstimate: estimatePromptTokens(UNTRUSTED_CONTEXT_RULES),
+      included: true,
+      reason: 'Untrusted context boundaries are always included in system prompt rules.',
+      redacted: false,
+      preview: UNTRUSTED_CONTEXT_RULES,
+    },
+    {
+      id: 'task-contract',
+      label: 'Task contract',
+      source: 'runtime',
+      tokenEstimate: estimatePromptTokens(options.taskDescription),
+      included: !!options.taskDescription,
+      reason: options.taskDescription ? 'Side-chat or orchestration task context was provided.' : 'No extra task context was provided.',
+      redacted: false,
+      preview: options.taskDescription || '',
+    },
+    {
+      id: 'tools',
+      label: 'Tools',
+      source: options.tools?.length ? 'mcp/built-in tools' : 'none',
+      tokenEstimate: estimatePromptTokens(toolsDescription),
+      included: !!toolsDescription,
+      reason: toolsDescription ? 'Model does not use native tool calls, so tool instructions are rendered into text.' : 'No text-rendered tools were appended to emitted prompt text.',
+      redacted: false,
+      preview: toolsDescription || '',
+    },
+    {
+      id: 'output-style',
+      label: 'Output style',
+      source: 'promptBuilder',
+      tokenEstimate: estimatePromptTokens(systemPrompt),
+      included: true,
+      reason: 'Role, formatting, and response rules are emitted as the system prompt.',
+      redacted: false,
+      preview: systemPrompt.slice(0, 500),
+    },
+  ];
+
+  return {
+    modelId: options.modelId,
+    family: config.family,
+    style: config.systemPromptStyle,
+    target,
+    sections,
+    totalTokenEstimate: estimatePromptTokens(finalPrompt),
   };
 }
 

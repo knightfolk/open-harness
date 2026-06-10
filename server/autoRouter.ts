@@ -65,6 +65,12 @@ export interface AutoRouterSignal {
   toolCount: number;
   /** Estimated input tokens that must fit in the selected model context */
   estimatedInputTokens: number;
+  /** Number of attached or generated artifacts that may influence routing risk */
+  artifactCount?: number;
+  /** Whether the current workspace has uncommitted git changes */
+  dirtyGitState?: boolean;
+  /** User-visible thinking effort hint */
+  thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 export interface AutoRouterDecision {
@@ -788,6 +794,12 @@ export function buildRouterSignal(
   hasImages: boolean,
   totalUserTurns: number,
   toolCount: number,
+  options: {
+    estimatedInputTokens?: number;
+    artifactCount?: number;
+    dirtyGitState?: boolean;
+    thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  } = {},
 ): AutoRouterSignal {
   return {
     task: latestUserMessage,
@@ -795,7 +807,10 @@ export function buildRouterSignal(
     hasImages,
     turns: totalUserTurns,
     toolCount,
-    estimatedInputTokens: Math.max(estimateTokens(latestUserMessage), 1),
+    estimatedInputTokens: Math.max(options.estimatedInputTokens ?? estimateTokens(latestUserMessage), 1),
+    artifactCount: options.artifactCount,
+    dirtyGitState: options.dirtyGitState,
+    thinkingEffort: options.thinkingEffort,
   };
 }
 

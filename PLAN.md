@@ -1,5 +1,11 @@
 # OpenHarness — Roadmap & Implementation Plan
 
+## Top Priority - Prompt, Routing, and Output Refinement
+
+The current top-priority roadmap is `docs/PROMPT_ROUTING_OUTPUT_ROADMAP.md`.
+
+Use it as the working source of truth for the next refinement pass across prompt processing, workflow routing, model-team Planning Room output, single-model response quality, eval feedback loops, and native-app presentation of AI work products.
+
 ## Source of Truth — 2026-06-05
 
 OpenHarness is moving from "single assistant with optional model comparison" toward a **Planning Room + Project Companion** product model.

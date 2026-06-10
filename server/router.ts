@@ -16,6 +16,19 @@ export interface RouteDecision {
   reason: string;
   routerData?: {
     source: 'heuristic' | 'auto';
+    heuristicMode?: OrchestrationMode;
+    heuristicRole?: HarnessRole;
+    heuristicComplexity?: Complexity;
+    policy?: string;
+    signal?: {
+      hasImages: boolean;
+      turns: number;
+      toolCount: number;
+      estimatedInputTokens: number;
+      artifactCount?: number;
+      dirtyGitState?: boolean;
+      thinkingEffort?: string;
+    };
     candidateScores?: Record<string, number>;
     score?: number;
     cached?: boolean;
@@ -23,6 +36,16 @@ export interface RouteDecision {
     classifierModel?: string | null;
     classifierRationale?: string;
   };
+}
+
+export interface RouteSignalOptions {
+  hasImages?: boolean;
+  turns?: number;
+  toolCount?: number;
+  estimatedInputTokens?: number;
+  artifactCount?: number;
+  dirtyGitState?: boolean;
+  thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 const FILE_REFERENCE_RE = /\b(?:[\w-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|py|java|go|rs|cpp|c|cs|rb|swift|kt|php|html|css|scss|less|md|json|yml|yaml|toml|sh|bash|mjs|cjs|sql|txt|lock)\b/g;
@@ -70,6 +93,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   const asksTeamPlan = asksPlan
     && /\b(spawn|team|agents?|participants?|planning room|compare notes?|consensus|single plan|guiding document)\b/.test(intentLower);
   const asksReview = /\b(review|audit|inspect|investigate|analy[sz]e|explain|summar|overview|find bugs|security|vuln|performance)\b/.test(intentLower);
+  const tinyAmbiguousReview = /^\s*(?:please\s+)?review(?:\s+(?:this|it))?\s*[.!?]?\s*$/.test(lower);
   const asksProjectOverview = /\b(overview|summar|explain|describe)\b[\s\S]{0,80}\b(project|codebase|repo|repository|architecture|components)\b/.test(lower)
     || /\b(project|codebase|repo|repository)\b[\s\S]{0,80}\b(overview|summar|explain|describe|architecture|components)\b/.test(lower);
   const asksValidation = /\b(test|lint|build|typecheck|validate|verify|smoke)\b/.test(lower);
@@ -100,13 +124,14 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   else if (/\b(why|reason|trade.?off|pros? and cons?)\b/.test(lower)) role = 'reasoner';
   else if (/\b(rename|move|delete|create|add|remove|install|update|bump)\b/.test(lower) && lower.length < 140) role = 'worker';
 
-  const explicitDeepSignal = /\b(deep|comprehensive|full|entire|all|thorough|architecture)\b/.test(lower);
+  const explicitDeepSignal = !tinyAmbiguousReview && /\b(deep|comprehensive|full|entire|all|thorough|architecture)\b/.test(lower);
   const complexity: Complexity = complexitySignals.hasLongTask
     || complexitySignals.hasCodeBlock
     || complexitySignals.hasArchitectureSignal
     || complexitySignals.hasMultipleFileRefs
     || explicitDeepSignal
       ? 'deep'
+    : tinyAmbiguousReview ? 'simple'
     : mode === 'direct' && simpleQuestion ? 'simple'
       : 'medium';
   const needsTools = mode !== 'direct' || /\b(repo|project|folder|file|codebase|current|this app|this project)\b/.test(lower);
@@ -118,7 +143,8 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     activeModel,
   ].filter((modelId) => modelId && modelId.trim().toLowerCase() !== 'auto'))) as string[];
 
-  const reason = mode === 'direct' ? 'Simple request can be answered by one role model.'
+  const reason = tinyAmbiguousReview ? 'Tiny ambiguous review request uses a bounded shallow review default.'
+    : mode === 'direct' ? 'Simple request can be answered by one role model.'
     : mode === 'plan' ? 'Request asks for planning, strategy, roadmap, or architecture and should use Planning Room.'
     : mode === 'investigate' ? 'Request asks for repo analysis, review, debugging, or explanation.'
       : mode === 'execute' ? 'Request asks for code or file changes and should plan, implement, validate, and review.'
@@ -135,27 +161,41 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
 export async function routeWithAutoRouter(
   content: string,
   config: StoredConfig,
+  options: RouteSignalOptions = {},
 ): Promise<RouteDecision> {
   // First run the heuristic router for role/mode classification
   const activeModel = config.activeModel || '';
   const route = routeRequest(content, activeModel, config.roleAssignments || {});
   const shouldUseAutoRouter = activeModel.trim().toLowerCase() === 'auto';
+  const roleThinking = options.thinkingEffort
+    || config.roleThinking?.[route.role]
+    || config.thinkingEffort
+    || 'medium';
+  route.routerData = {
+    source: 'heuristic',
+    heuristicMode: route.mode,
+    heuristicRole: route.role,
+    heuristicComplexity: route.complexity,
+    policy: route.complexity === 'simple' ? 'bounded-simple' : route.complexity === 'deep' ? 'deep-capability' : 'classifier-eligible',
+  };
 
   // If auto-router is enabled, use it for model selection
   if (isAutoRouterEnabled() && shouldUseAutoRouter) {
-    // TODO(P1): Pass real hasImages, turns, and toolCount from session state.
-    // Currently hardcoded because routeWithAutoRouter doesn't have access to the session.
-    // The classifier still works, but accuracy improves with real signal values.
     const signal = buildRouterSignal(
       content,
       'orchestrator',
-      false, // hasImages — would need to check message content
-      1,     // turns — approximate; true count from session
-      route.needsTools ? 5 : 0,  // approximate tool count
+      options.hasImages ?? false,
+      options.turns ?? 1,
+      options.toolCount ?? (route.needsTools ? 5 : 0),
+      {
+        estimatedInputTokens: options.estimatedInputTokens,
+        artifactCount: options.artifactCount,
+        dirtyGitState: options.dirtyGitState,
+        thinkingEffort: roleThinking,
+      },
     );
     const routerStart = Date.now();
     try {
-      const roleThinking = config.roleThinking?.[route.role] || config.thinkingEffort || 'medium';
       const decision = await routeTask(signal, config, {
         forceCostStrategy: roleThinking === 'medium'
           ? route.complexity === 'simple'
@@ -173,6 +213,23 @@ export async function routeWithAutoRouter(
       route.reason += ` | auto-router: ${decision.reason}`;
       route.routerData = {
         source: 'auto',
+        heuristicMode: route.mode,
+        heuristicRole: route.role,
+        heuristicComplexity: route.complexity,
+        policy: route.complexity === 'simple'
+          ? 'simple task: deterministic cheapest viable model; classifier skipped'
+          : route.complexity === 'deep' && route.mode !== 'investigate'
+            ? 'deep non-investigation task: strongest suitable model'
+            : 'medium or review task: classifier/cost-aware selection',
+        signal: {
+          hasImages: signal.hasImages,
+          turns: signal.turns,
+          toolCount: signal.toolCount,
+          estimatedInputTokens: signal.estimatedInputTokens,
+          artifactCount: signal.artifactCount,
+          dirtyGitState: signal.dirtyGitState,
+          thinkingEffort: signal.thinkingEffort,
+        },
         candidateScores: decision.scores,
         score: decision.score,
         cached: decision.cached,

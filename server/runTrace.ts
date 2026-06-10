@@ -22,11 +22,45 @@ export interface HarnessRun {
   steps: HarnessRunStep[];
 }
 
+export interface PromptAssemblySection {
+  id: string;
+  label: string;
+  source: string;
+  tokenEstimate: number;
+  included: boolean;
+  reason: string;
+  redacted: boolean;
+  preview: string;
+}
+
+export interface PromptAssemblyTrace {
+  modelId: string;
+  family: string;
+  style: string;
+  target: string;
+  sections: PromptAssemblySection[];
+  totalTokenEstimate: number;
+}
+
+export interface RoutingStageTrace {
+  heuristic?: { mode: string; role: string; complexity: string };
+  policy?: string;
+  signal?: {
+    hasImages: boolean;
+    turns: number;
+    toolCount: number;
+    estimatedInputTokens: number;
+    artifactCount?: number;
+    dirtyGitState?: boolean;
+    thinkingEffort?: string;
+  };
+}
+
 export type HarnessRunStep =
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
-  | { type: 'route'; role: string; model: string; reason?: string }
-  | { type: 'prompt_built'; promptPreview: string; toolCount: number }
-  | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number> }
+  | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
+  | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace }
+  | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number>; stages?: RoutingStageTrace }
   | { type: 'model_request'; round: number; model: string }
   | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
   | { type: 'model_text'; chars: number }

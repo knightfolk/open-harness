@@ -192,13 +192,13 @@ export function loadConfig(): StoredConfig {
     const raw = readFileSync(CONFIG_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as StoredConfig;
     // Merge with defaults for forward-compat
-    const normalizedProviders = (parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
+    const normalizedProviders = repairProviderAliasCredentials((parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
       ...provider,
       apiKey: typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '',
       accessMode: (provider.accessMode === 'subscription' ? 'subscription' : 'api-key') as StoredProvider['accessMode'],
       planId: typeof provider.planId === 'string' && provider.planId ? provider.planId : undefined,
       oauth: normalizeProviderOAuth((provider as any).oauth),
-    }));
+    })));
     const normalizedFavoriteModels = Array.isArray(parsed.favoriteModels)
       ? [...new Set(parsed.favoriteModels.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
       : [];
@@ -322,6 +322,7 @@ export function getProviderForModel(config: StoredConfig, modelId: string): Reso
   const { providerId, bareModelId } = splitModelRef(modelId);
   for (const provider of config.providers) {
     if (providerId && provider.id !== providerId) continue;
+    if (!providerCanAuthenticate(provider)) continue;
     const match = provider.models.find((m) => m.id === bareModelId && m.enabled);
     if (match) {
       return {
@@ -332,6 +333,12 @@ export function getProviderForModel(config: StoredConfig, modelId: string): Reso
     }
   }
   return null;
+}
+
+function providerCanAuthenticate(provider: StoredProvider): boolean {
+  return provider.type === 'local'
+    || !!provider.apiKey
+    || !!provider.oauth?.accessToken;
 }
 
 export function splitModelRef(modelRef: string): { providerId?: string; bareModelId: string } {
@@ -368,6 +375,34 @@ function normalizeProviderOAuth(value: unknown): StoredProviderOAuth | undefined
   if (typeof raw.accountLabel === 'string' && raw.accountLabel.trim()) oauth.accountLabel = raw.accountLabel.trim();
   if (typeof raw.connectedAt === 'string' && raw.connectedAt.trim()) oauth.connectedAt = raw.connectedAt.trim();
   return Object.keys(oauth).length > 0 ? oauth : undefined;
+}
+
+export function repairProviderAliasCredentials(providers: StoredProvider[]): StoredProvider[] {
+  const aliasGroups = [
+    new Set(['z-ai-zhipu', 'zhipu']),
+  ];
+
+  return providers.map((provider) => {
+    const group = aliasGroups.find((aliases) => aliases.has(provider.id));
+    if (!group) return provider;
+
+    const siblings = providers.filter((candidate) => group.has(candidate.id));
+    const credentialSource = siblings.find((candidate) => candidate.apiKey)
+      || siblings.find((candidate) => candidate.oauth?.accessToken);
+    const allModels = new Map<string, StoredProviderModel>();
+    for (const sibling of siblings) {
+      for (const model of sibling.models || []) {
+        allModels.set(model.id, model);
+      }
+    }
+
+    return {
+      ...provider,
+      apiKey: provider.apiKey || credentialSource?.apiKey || '',
+      oauth: provider.oauth || credentialSource?.oauth,
+      models: provider.models.length > 0 ? provider.models : Array.from(allModels.values()),
+    };
+  });
 }
 
 function normalizeThinkingEffort(value: unknown): ThinkingEffort {

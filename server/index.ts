@@ -14,7 +14,7 @@ import { checkDockerReadiness } from './dockerReadiness';
 import { dockerDesktopEnv } from './dockerDesktopEnv';
 import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAllCuratedServers } from './curatedMcp';
 import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost } from './modelProfiles';
-import { buildContextWindow } from './contextManager';
+import { buildContextWindow, estimateTokens } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
 import { formatProjectProfileForPrompt, getProjectProfile } from './projectProfile';
 import {
@@ -2596,7 +2596,31 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
 
   const requestedModel = requestedModelOverride || getActiveModel();
-  const route = await routeWithAutoRouter(content, appConfig);
+  const routeToolCount = gatherMCPToolsForAPI().tools.length;
+  let dirtyGitState = false;
+  if (session.workingDir) {
+    try {
+      dirtyGitState = getProjectProfile(session.workingDir).git.dirty;
+    } catch {
+      dirtyGitState = false;
+    }
+  }
+  const artifactCount = session.messages.reduce((count, message) => (
+    count + (message.runTrace?.steps.filter((step) => 'artifact' in step).length || 0)
+  ), 0);
+  const route = await routeWithAutoRouter(content, appConfig, {
+    hasImages: /\b(image|screenshot|photo|diagram)\b/i.test(content),
+    turns: session.messages.filter((m) => m.role === 'user').length,
+    toolCount: routeToolCount,
+    estimatedInputTokens: estimateTokens([
+      content,
+      ...session.messages.slice(-8).map((m) => m.content),
+      sideChatPromptContext,
+    ].filter(Boolean).join('\n\n')),
+    artifactCount,
+    dirtyGitState,
+    thinkingEffort: appConfig.roleThinking?.[routeRequest(content, requestedModel, appConfig.roleAssignments || {}).role] || appConfig.thinkingEffort || 'medium',
+  });
   const effectiveModel = resolveSelectedModel(route, requestedModelOverride);
   const resolved = resolveProviderForModel(effectiveModel);
   const run = createHarnessRun({
@@ -2638,6 +2662,15 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       fallback: rd.fallback ?? false,
       classifierModel: rd.classifierModel ?? null,
       candidateScores: rd.candidateScores,
+      stages: {
+        heuristic: {
+          mode: rd.heuristicMode || route.mode,
+          role: rd.heuristicRole || route.role,
+          complexity: rd.heuristicComplexity || route.complexity,
+        },
+        policy: rd.policy,
+        signal: rd.signal,
+      },
     });
     if (rd.classifierRationale) emitVisibleStep({
       type: 'model_thinking',
@@ -2673,6 +2706,15 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       role: route.role,
       model: effectiveModel,
       reason: `${route.mode} mode · ${route.reason}`,
+      stages: route.routerData ? {
+        heuristic: {
+          mode: route.routerData.heuristicMode || route.mode,
+          role: route.routerData.heuristicRole || route.role,
+          complexity: route.routerData.heuristicComplexity || route.complexity,
+        },
+        policy: route.routerData.policy,
+        signal: route.routerData.signal,
+      } : undefined,
     });
 
     // Emit orchestration step headers
@@ -3276,7 +3318,21 @@ async function streamModel(
     if (route.mode !== 'direct') {
       for (const step of orchestrationTraceSteps(route)) emitRunStep(res, run, step);
     }
-    emitRunStep(res, run, { type: 'route', role: classifiedRole, model: effectiveModel, reason: `${route.mode} mode · ${route.reason}` });
+    emitRunStep(res, run, {
+      type: 'route',
+      role: classifiedRole,
+      model: effectiveModel,
+      reason: `${route.mode} mode · ${route.reason}`,
+      stages: route.routerData ? {
+        heuristic: {
+          mode: route.routerData.heuristicMode || route.mode,
+          role: route.routerData.heuristicRole || route.role,
+          complexity: route.routerData.heuristicComplexity || route.complexity,
+        },
+        policy: route.routerData.policy,
+        signal: route.routerData.signal,
+      } : undefined,
+    });
   }
   const effectiveResolved = resolveProviderForModel(effectiveModel);
   if (effectiveResolved) {
@@ -3373,7 +3429,12 @@ async function streamModel(
   ];
   if (run) {
     run.context = { tokensUsed: ctx.tokensUsed, budget: ctx.budget.availableForHistory, compressedCount: ctx.compressedCount, summarized: ctx.summarized };
-    emitRunStep(res, run, { type: 'prompt_built', promptPreview: systemPrompt.slice(0, 500), toolCount: filteredMcpTools.length });
+    emitRunStep(res, run, {
+      type: 'prompt_built',
+      promptPreview: systemPrompt.slice(0, 500),
+      toolCount: filteredMcpTools.length,
+      assembly: promptResult.assembly,
+    });
   }
 
   if (ctx.compressedCount > 0 || ctx.summarized) {

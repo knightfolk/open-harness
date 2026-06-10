@@ -18,7 +18,18 @@ export function PromptMicroscope({ runTrace }: Props) {
     const out: Array<{ id: string; label: string; text: string }> = [];
     for (const step of runTrace.steps) {
       if (step.type === 'prompt_built') {
-        out.push({ id: `prompt:${step.toolCount}`, label: 'System prompt', text: step.promptPreview });
+        if (step.assembly?.sections?.length) {
+          for (const section of step.assembly.sections) {
+            if (!section.included && !section.preview) continue;
+            out.push({
+              id: `assembly:${section.id}`,
+              label: `${section.label} · ${section.source} · ${section.reason}`,
+              text: section.preview || '(not included)',
+            });
+          }
+        } else {
+          out.push({ id: `prompt:${step.toolCount}`, label: 'System prompt', text: step.promptPreview });
+        }
       } else if (step.type === 'repo_map') {
         out.push({ id: `repomap:${step.tokenBudget}`, label: `Repo map (budget ${step.tokenBudget})`, text: step.topFiles.join('\n') });
       } else if (step.type === 'context_pack') {
@@ -147,6 +158,26 @@ export function PromptMicroscope({ runTrace }: Props) {
                   <span className="pm-key">Score</span>
                   <span className="pm-value">{autoRouterStep.score.toFixed(2)}{autoRouterStep.cached ? ' · cached' : ''}</span>
                 </div>
+                {autoRouterStep.stages?.heuristic && (
+                  <div className="pm-row">
+                    <span className="pm-key">Heuristic route</span>
+                    <span className="pm-value">
+                      {autoRouterStep.stages.heuristic.mode} · {autoRouterStep.stages.heuristic.role} · {autoRouterStep.stages.heuristic.complexity}
+                    </span>
+                  </div>
+                )}
+                {autoRouterStep.stages?.policy && (
+                  <div className="pm-row">
+                    <span className="pm-key">Policy gate</span>
+                    <span className="pm-value">{autoRouterStep.stages.policy}</span>
+                  </div>
+                )}
+                {autoRouterStep.stages?.signal && (
+                  <div className="pm-row pm-row-block">
+                    <span className="pm-key">Route input features</span>
+                    <pre className="pm-pre">{JSON.stringify(autoRouterStep.stages.signal, null, 2)}</pre>
+                  </div>
+                )}
                 <div className="pm-row">
                   <span className="pm-key">Feedback</span>
                   <span className="pm-value">{ROUTING_FEEDBACK_GUIDANCE}</span>
@@ -195,6 +226,26 @@ export function PromptMicroscope({ runTrace }: Props) {
                     <span className="pm-value">{routeStep.reason}</span>
                   </div>
                 )}
+                {routeStep.stages?.heuristic && (
+                  <div className="pm-row">
+                    <span className="pm-key">Heuristic route</span>
+                    <span className="pm-value">
+                      {routeStep.stages.heuristic.mode} · {routeStep.stages.heuristic.role} · {routeStep.stages.heuristic.complexity}
+                    </span>
+                  </div>
+                )}
+                {routeStep.stages?.policy && (
+                  <div className="pm-row">
+                    <span className="pm-key">Policy gate</span>
+                    <span className="pm-value">{routeStep.stages.policy}</span>
+                  </div>
+                )}
+                {routeStep.stages?.signal && (
+                  <div className="pm-row pm-row-block">
+                    <span className="pm-key">Route input features</span>
+                    <pre className="pm-pre">{JSON.stringify(routeStep.stages.signal, null, 2)}</pre>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -237,6 +288,18 @@ export function PromptMicroscope({ runTrace }: Props) {
                   <span className="pm-key">Available tools</span>
                   <span className="pm-value">{promptStep.toolCount}</span>
                 </div>
+                {promptStep.assembly && (
+                  <>
+                    <div className="pm-row">
+                      <span className="pm-key">Renderer</span>
+                      <span className="pm-value">{promptStep.assembly.family} · {promptStep.assembly.style} · {promptStep.assembly.target}</span>
+                    </div>
+                    <div className="pm-row">
+                      <span className="pm-key">Assembly sections</span>
+                      <span className="pm-value">{promptStep.assembly.sections.length} · {promptStep.assembly.totalTokenEstimate} estimated tokens</span>
+                    </div>
+                  </>
+                )}
                 {promptStep.promptPreview && (
                   <div className="pm-row pm-row-block">
                     <span className="pm-key">System prompt preview</span>

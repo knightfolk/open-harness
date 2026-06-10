@@ -9,6 +9,10 @@ You are **Friday**, the AI assistant for OpenHarness. Follow all rules in `AGENT
 - `npm run lint` — PASSED
 - `npm run build` — PASSED
 
+## Current Top Priority
+
+Use `docs/PROMPT_ROUTING_OUTPUT_ROADMAP.md` as the next roadmap for refining prompt processing, routing, Planning Room/team-model output, single-model responses, eval feedback, and native-app presentation.
+
 ## Current Runtime Status
 - ✅ **Server**: Running on `http://127.0.0.1:3001` (via `screen -S oh-server`)
 - ✅ **Frontend**: Running on `http://127.0.0.1:5173` (via `screen -S oh-vite`)
