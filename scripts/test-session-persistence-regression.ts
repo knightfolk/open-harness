@@ -1,91 +1,11 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, utimesSync } from 'fs';
+import { unlinkSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { saveSession, type PersistedSession } from '../server/sessionStore';
+import { scanForLatestUserOnlySessions } from '../server/sessionHealth';
 
 const SESSIONS_DIR = join(homedir(), '.openharness', 'sessions');
-const THRESHOLD_MS = 2 * 60 * 1000;
-const RECENT_FILE_MS = 30 * 1000;
-
-interface FlaggedSession {
-  id: string;
-  title: string;
-  lastRole: string;
-  lastTimestamp: string;
-  ageMs: number;
-}
-
-function hasCanceledMarker(session: PersistedSession): boolean {
-  for (const msg of session.messages) {
-    if (msg.role === 'assistant' && msg.runTrace) {
-      const run = msg.runTrace;
-      if (run.status === 'error') {
-        const steps = run.steps ?? [];
-        const hasAbort = steps.some(
-          (s: any) =>
-            s.type === 'error' &&
-            typeof s.message === 'string' &&
-            /cancel|abort|client.disconnect|client-sse/i.test(s.message),
-        );
-        if (hasAbort) return true;
-      }
-    }
-    if (
-      msg.role === 'assistant' &&
-      typeof msg.content === 'string' &&
-      /\[cancel|\babort\b|\binterrupted\b/i.test(msg.content)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function scanForLatestUserOnly(): FlaggedSession[] {
-  if (!existsSync(SESSIONS_DIR)) return [];
-  const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
-  const now = Date.now();
-  const flagged: FlaggedSession[] = [];
-
-  for (const file of files) {
-    try {
-      const filePath = join(SESSIONS_DIR, file);
-      const raw = readFileSync(filePath, 'utf-8');
-      const session = JSON.parse(raw) as PersistedSession;
-      if (!session.messages || session.messages.length === 0) continue;
-
-      const fileAge = now - statSync(filePath).mtimeMs;
-      if (fileAge < RECENT_FILE_MS) continue;
-
-      if (hasCanceledMarker(session)) continue;
-
-      const sorted = [...session.messages].sort(
-        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
-      const last = sorted[sorted.length - 1];
-      if (last.role !== 'user') continue;
-
-      const ageMs = now - new Date(last.timestamp).getTime();
-      if (ageMs < THRESHOLD_MS) continue;
-
-      const assistantExists = sorted.some(
-        m => m.role === 'assistant' && new Date(m.timestamp).getTime() > new Date(last.timestamp).getTime(),
-      );
-      if (assistantExists) continue;
-
-      flagged.push({
-        id: session.id,
-        title: session.title,
-        lastRole: last.role,
-        lastTimestamp: last.timestamp,
-        ageMs,
-      });
-    } catch { /* skip corrupted */ }
-  }
-
-  return flagged;
-}
 
 const testSessionId = `persistence-regression-test-${Date.now()}`;
 const testSession: PersistedSession = {
@@ -135,7 +55,7 @@ try {
   utimesSync(join(SESSIONS_DIR, `${testSessionId}.json`), backdate, backdate);
   utimesSync(join(SESSIONS_DIR, `${canceledSessionId}.json`), backdate, backdate);
 
-  const flagged = scanForLatestUserOnly();
+  const flagged = scanForLatestUserOnlySessions();
   const found = flagged.find(f => f.id === testSessionId);
 
   assert.equal(!!found, true, 'Test session with latest-user-only should be flagged');
@@ -154,7 +74,7 @@ try {
   if (realFlagged.length > 0) {
     console.log(`\n  WARNING: ${realFlagged.length} real session(s) flagged as latest-user-only:`);
     for (const s of realFlagged) {
-      console.log(`    - ${s.id} (${s.title?.slice(0, 50)}) — ${Math.round(s.ageMs / 1000)}s old`);
+      console.log(`    - ${s.id} (${s.title?.slice(0, 50)}) — ${Math.round(s.ageMs / 1000)}s old, messages=${s.messageCount}, cwd=${s.workingDir || 'none'}`);
     }
   } else {
     console.log('  No real sessions flagged (healthy).');

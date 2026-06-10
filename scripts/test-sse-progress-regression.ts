@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 
 const BASE_URL = process.env.OPENHARNESS_URL || 'http://localhost:3001';
 const MOCK_MODE = process.env.SSE_MOCK === '1';
+const LIVE_MODEL_ID = process.env.OPENHARNESS_SSE_MODEL || '__openharness-local-regression__';
 
 const PROGRESS_EVENTS = new Set([
   'assistant_start',
@@ -45,6 +46,28 @@ function parseSSELines(raw: string): CapturedEvent[] {
   return events;
 }
 
+function parseSSEBlock(block: string, timestamp = Date.now()): CapturedEvent | null {
+  let currentType = '';
+  let currentData = '';
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event: ')) {
+      currentType = line.slice(7).trim();
+    } else if (line.startsWith('data: ')) {
+      currentData = line.slice(6).trim();
+    }
+  }
+  if (!currentType) return null;
+  try {
+    return {
+      type: currentType,
+      data: currentData ? JSON.parse(currentData) : {},
+      timestamp,
+    };
+  } catch {
+    return { type: currentType, data: { _raw: currentData }, timestamp };
+  }
+}
+
 function validateEventOrdering(events: CapturedEvent[]): {
   passed: boolean;
   firstProgressIdx: number;
@@ -76,6 +99,36 @@ function validateEventOrdering(events: CapturedEvent[]): {
   };
 }
 
+async function captureSSEEvents(res: Response): Promise<CapturedEvent[]> {
+  if (!res.body) {
+    throw new Error('Response body is null — streaming not available');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const events: CapturedEvent[] = [];
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    const chunk = decoder.decode(value, { stream: true });
+    buffer += chunk;
+
+    while (buffer.includes('\n\n')) {
+      const blockEnd = buffer.indexOf('\n\n');
+      const block = buffer.slice(0, blockEnd);
+      buffer = buffer.slice(blockEnd + 2);
+      const event = parseSSEBlock(block, Date.now());
+      if (event) events.push(event);
+    }
+  }
+
+  return events;
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string>) } });
   if (!res.ok) throw new Error(`${init?.method || 'GET'} ${url} → ${res.status}`);
@@ -83,10 +136,18 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 interface SessionResponse { id: string }
+interface SessionDetail {
+  messages?: Array<{
+    role?: string;
+    content?: string;
+    runTrace?: { status?: string; completedAt?: string };
+  }>;
+}
 
 async function runLiveTest(): Promise<void> {
   console.log('SSE progress regression test (live mode)');
   console.log(`  Target: ${BASE_URL}`);
+  console.log(`  Model: ${LIVE_MODEL_ID}`);
 
   const session = await fetchJSON<SessionResponse>(`${BASE_URL}/api/sessions`, {
     method: 'POST',
@@ -95,35 +156,20 @@ async function runLiveTest(): Promise<void> {
   const sessionId = session.id;
   console.log(`  Created session: ${sessionId}`);
 
-  let sseRaw = '';
   let sessionIdCleaned = false;
 
   try {
     const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: 'Say hello in one word.' }),
+      body: JSON.stringify({ content: 'Say hello in one word.', modelId: LIVE_MODEL_ID }),
     });
 
     if (!res.ok) {
       throw new Error(`POST /messages returned ${res.status}`);
     }
 
-    if (!res.body) {
-      throw new Error('Response body is null — streaming not available');
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let done = false;
-
-    while (!done) {
-      const { value, done: readerDone } = await reader.read();
-      done = readerDone;
-      if (value) sseRaw += decoder.decode(value, { stream: true });
-    }
-
-    const events = parseSSELines(sseRaw);
+    const events = await captureSSEEvents(res);
     console.log(`  Captured ${events.length} SSE events`);
 
     const types = events.map((e) => e.type);
@@ -132,19 +178,24 @@ async function runLiveTest(): Promise<void> {
     const result = validateEventOrdering(events);
 
     assert.equal(result.passed, true, 'At least one progress event must arrive before first text event');
+    assert.ok(result.firstTextIdx >= 0, 'Live stream must include answer text, not only progress or error events');
 
     console.log(`  First progress event index: ${result.firstProgressIdx} (${events[result.firstProgressIdx]?.type})`);
-    if (result.firstTextIdx >= 0) {
-      console.log(`  First text event index: ${result.firstTextIdx}`);
-    } else {
-      console.log('  No text event found (progress-only stream)');
-    }
+    console.log(`  First text event index: ${result.firstTextIdx}`);
 
     if (result.timeToProgress >= 0) console.log(`  Time to first progress: ${result.timeToProgress}ms`);
     if (result.timeToText >= 0) console.log(`  Time to first text: ${result.timeToText}ms`);
 
     const doneEvent = events.find((e) => e.type === 'done');
     assert.equal(!!doneEvent, true, 'Stream should end with a "done" event');
+    const errorEvent = events.find((e) => e.type === 'error');
+    assert.equal(!!errorEvent, false, `Live stream should not complete through an error-only path: ${JSON.stringify(errorEvent?.data)}`);
+
+    const savedSession = await fetchJSON<SessionDetail>(`${BASE_URL}/api/sessions/${sessionId}`);
+    const savedAssistant = savedSession.messages?.find((m) => m.role === 'assistant');
+    assert.equal(!!savedAssistant, true, 'Assistant message should be persisted after stream completion');
+    assert.equal(savedAssistant?.runTrace?.status, 'complete', 'Persisted assistant run trace should be complete');
+    assert.equal(typeof savedAssistant?.runTrace?.completedAt, 'string', 'Persisted assistant run trace should include completedAt');
 
     console.log('  SSE progress regression test passed.');
   } finally {

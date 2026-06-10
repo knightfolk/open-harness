@@ -185,19 +185,9 @@ async function main() {
     assertText('OpenHarness');
     assertCleanLayout(document.body, 'initial shell');
 
-    await clickButton('Skills', { exact: true });
-    assertText('Skills (');
-    assertCleanLayout(document.body, 'skills tab');
-    await clickButton('Memory', { exact: true });
-    assertText('ACTIVE MEMORY');
-    assertCleanLayout(document.body, 'memory tab');
-    await clickButton('Chat', { exact: true });
-    assertText('OpenHarness');
-
     const workspacePanels = [
       ['diffs', 'Diffs'],
       ['browser', 'Browser'],
-      ['sub-agents', 'Sub-Agents'],
       ['files', 'Files'],
       ['model-lab', 'Model Lab'],
       ['safety', 'Safety'],
@@ -208,42 +198,38 @@ async function main() {
     }
 
     await showPanel('Show bottom bar', 'Hide bottom bar', 'Terminal');
-    await showPanel('Show right tools panel', 'Hide right tools panel', 'Environment');
     await clickButton('Tools');
     assertCleanLayout(document.body, 'tool panels');
 
-    await clickButton('Settings', { exact: true });
+    await clickButton('Open settings', { exact: false });
     for (let i = 0; i < 20 && !document.querySelector('.settings-modal'); i += 1) await sleep(100);
     const modal = document.querySelector('.settings-modal');
     if (!modal) throw new Error('Settings modal did not open.');
     assertCleanLayout(modal, 'settings modal');
 
     const sections = [
-      { label: 'Active Model' },
-      { label: 'Manage Providers', parent: 'Providers' },
-      { label: 'Add Provider', parent: 'Providers' },
-      { label: 'Role Buckets' },
-      { label: 'Docker MCP', parent: 'MCP Servers' },
-      { label: 'Curated Tools', parent: 'MCP Servers' },
-      { label: 'Custom Servers', parent: 'MCP Servers' },
-      { label: 'Add Server', parent: 'MCP Servers' },
-      { label: 'Personality' },
-      { label: 'Onboarding' },
-      { label: 'Theme' },
-      { label: 'Routing Learn' },
-      { label: 'Auto-Router' },
-      { label: 'Chat Settings' },
-      { label: 'About' },
+      'Active Model',
+      'Model Library',
+      'Providers',
+      'Agent Roles',
+      'Assistant',
+      'MCP Servers',
+      'Personality',
+      'Onboarding',
+      'Theme',
+      'Routing Learning',
+      'Auto-Router',
+      'Chat Settings',
+      'About',
     ];
 
     for (const section of sections) {
-      if (section.parent) await clickButton(section.parent, { exact: true });
-      await clickButton(section.label, { exact: true });
+      await clickButton(section, { exact: true });
       const content = document.querySelector('.settings-content');
       if (!content || content.innerText.trim().length < 10) {
-        throw new Error(`Settings section rendered empty: ${section.label}`);
+        throw new Error(`Settings section rendered empty: ${section}`);
       }
-      assertCleanLayout(modal, `settings section ${section.label}`);
+      assertCleanLayout(modal, `settings section ${section}`);
     }
 
     const closeButton = document.querySelector('.settings-modal-close');

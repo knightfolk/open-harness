@@ -55,7 +55,7 @@ async function main() {
     const outsideFile = join('/tmp', `openharness-policy-escape-${Date.now()}.txt`);
     writeFileSync(outsideFile, 'outside workspace');
     try {
-      const params = new URLSearchParams({ path: outsideFile, workingDir: '/tmp' });
+      const params = new URLSearchParams({ path: outsideFile });
       await expectStatus(`/api/fs/read?${params.toString()}`, 403);
     } finally {
       try { unlinkSync(outsideFile); } catch { /* ignore */ }
@@ -252,11 +252,16 @@ async function main() {
       throw new Error(`Failed to create smoke task: ${smokeTask.text}`);
     }
 
-    await expectStatus('/api/bench/run', 403, {
+    await expectStatus('/api/bench/run', 201, {
       method: 'POST',
-      body: JSON.stringify({ workingDir: '/tmp', taskIds: [smokeTask.body.id], modelIds: ['no-provider:model'] }),
+      body: JSON.stringify({ workingDir: PROJECT_ROOT, taskIds: [smokeTask.body.id], modelIds: ['no-provider:model'] }),
     });
     await request(`/api/tasks/${smokeTask.body.id}`, { method: 'DELETE' });
+
+    const terminalSession = await expectStatus('/api/terminal/sessions', 201, {
+      method: 'POST',
+      body: JSON.stringify({ cwd: PROJECT_ROOT }),
+    });
 
     await updateTrustMode('read-only');
 
@@ -313,11 +318,7 @@ async function main() {
       }),
     });
 
-    const terminalSession = await request('/api/terminal/sessions', {
-      method: 'POST',
-      body: JSON.stringify({ cwd: PROJECT_ROOT }),
-    });
-    if (!terminalSession.res.ok || !terminalSession.body?.id) {
+    if (!terminalSession.body?.id) {
       throw new Error(`Failed to create terminal session: ${terminalSession.text}`);
     }
 

@@ -2375,6 +2375,18 @@ function persistAssistantError(
   sessionStore.saveSession(session);
 }
 
+function persistAssistantRunTrace(
+  session: SessionRow,
+  assistantId: string,
+  run: HarnessRun,
+): void {
+  const existing = session.messages.find((m) => m.id === assistantId && m.role === 'assistant');
+  if (!existing) return;
+  existing.runTrace = run;
+  session.updatedAt = new Date().toISOString();
+  sessionStore.saveSession(session);
+}
+
 function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
   switch (step.type) {
     case 'orchestration': return step.label;
@@ -2722,6 +2734,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   }
 
   completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
+  persistAssistantRunTrace(session, assistantId, run);
   writeSSE(res, 'run_complete', run);
   writeSSE(res, 'done', {});
   streamFinished = true;
@@ -2729,9 +2742,10 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   } catch (err: any) {
     console.error('[messages] unhandled error:', err);
     const errorContent = `Error: ${err?.message || err}`;
+    completeHarnessRun(run, 'error');
     if (!res.writableEnded) {
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: errorContent });
-      writeSSE(res, 'run_complete', { ...run, status: 'error' });
+      writeSSE(res, 'run_complete', run);
       writeSSE(res, 'done', {});
       streamFinished = true;
       res.end();
