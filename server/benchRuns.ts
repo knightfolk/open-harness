@@ -36,6 +36,7 @@ export interface BenchRunResult {
   startedAt: string;
   completedAt: string;
   error?: string;
+  assistedByFallback?: boolean;
 }
 
 export interface BenchScores extends EvalScores {
@@ -43,10 +44,11 @@ export interface BenchScores extends EvalScores {
   validationScore: number;
   styleScore: number;
   breakdown: EvalScoreBreakdown;
-  resolvedStatus: 'resolved' | 'unresolved' | 'partial';
+  resolvedStatus: 'resolved' | 'unresolved' | 'partial' | 'assisted';
   stepCount: number;
   tokenCount: number;
   costEstimate: number;
+  assistedByFallback: boolean;
 }
 
 export interface BenchRun {
@@ -88,6 +90,7 @@ export interface BenchSummary {
     resolved: number;
     unresolved: number;
     partial: number;
+    assisted: number;
     resolvedRate: number;
     avgScore: number;
     avgValidationScore: number;
@@ -289,6 +292,33 @@ export function validateChangedFiles(params: {
   return results;
 }
 
+export function validateExpectedPathChanges(params: {
+  before: string[];
+  after: string[];
+  expectedChangedFiles?: string[];
+}): ValidationCommandResult[] {
+  const expected = (params.expectedChangedFiles || []).map(normalizeChangedPath).filter(Boolean);
+  if (expected.length === 0) return [];
+
+  const before = new Map(params.before.map((entry) => {
+    const parsed = parseChangedFileEntry(entry);
+    return [parsed.path, parsed.signature] as const;
+  }));
+  const after = params.after.map(parseChangedFileEntry).filter(({ path }) => !!path);
+  const changed = after.filter(({ path, signature }) => before.get(path) !== signature);
+  const missing = expected.filter((pattern) => !changed.some(({ path }) => changedPathMatches(path, pattern)));
+
+  return [{
+    command: 'openharness expected-path manifest',
+    exitCode: missing.length === 0 ? 0 : 1,
+    stdout: changed.map(({ path }) => path).join('\n'),
+    stderr: missing.length > 0 ? missing.map((path) => `- Expected path change not observed: ${path}`).join('\n') : '',
+    findings: missing.map((path) => `Expected path change not observed: ${path}`),
+    durationMs: 0,
+    passed: missing.length === 0,
+  }];
+}
+
 function startsWithPreamble(response: string): boolean {
   return /^\s*(?:i have enough|let me|i need to|i will|now i|the user wants|we need to|i'll|i’m|i am going to)\b/i.test(response);
 }
@@ -313,8 +343,9 @@ export function computeBenchScores(params: {
   stepCount: number;
   tokenCount: number;
   costEstimate: number;
+  assistedByFallback?: boolean;
 }): BenchScores {
-  const { response, toolCalls, wallMs, validationResults, stepCount, tokenCount, costEstimate } = params;
+  const { response, toolCalls, wallMs, validationResults, stepCount, tokenCount, costEstimate, assistedByFallback = false } = params;
 
   const usedTools = toolCalls.length > 0;
   const answeredUser = response.length > 100;
@@ -338,7 +369,7 @@ export function computeBenchScores(params: {
     (noPreamble ? 0.5 : 0) +
     (substantiveShape ? 0.5 : 0) +
     (conciseEnough ? 0.5 : 0);
-  const breakdown = buildScoreBreakdown([
+  const signals = [
     { id: 'answered-user', label: 'Answered user', category: 'structural', passed: answeredUser, score: answeredUser ? 2 : 0, maxScore: 2 },
     { id: 'real-files', label: 'Referenced real files', category: 'structural', passed: referencedRealFiles, score: referencedRealFiles ? 1.5 : 0, maxScore: 1.5 },
     { id: 'no-missing-paths', label: 'Avoided missing paths', category: 'structural', passed: avoidedHallucinatedPaths, score: avoidedHallucinatedPaths ? 1 : 0, maxScore: 1 },
@@ -350,17 +381,30 @@ export function computeBenchScores(params: {
     { id: 'no-preamble', label: 'No preamble leakage', category: 'style', passed: noPreamble, score: noPreamble ? 0.5 : 0, maxScore: 0.5 },
     { id: 'answer-shape', label: 'Human-facing answer shape', category: 'style', passed: substantiveShape, score: substantiveShape ? 0.5 : 0, maxScore: 0.5 },
     { id: 'bounded-length', label: 'Bounded output length', category: 'style', passed: conciseEnough, score: conciseEnough ? 0.5 : 0, maxScore: 0.5 },
-  ]);
+  ] satisfies Parameters<typeof buildScoreBreakdown>[0];
+  if (assistedByFallback) {
+    signals.push({
+      id: 'model-authored-delivery',
+      label: 'Model-authored delivery',
+      category: 'runtime',
+      passed: false,
+      score: 0,
+      maxScore: 1,
+    });
+  }
+  const breakdown = buildScoreBreakdown(signals);
 
   let overallScore = Math.min(10, breakdown.total);
   if (!validationConfigured) overallScore = Math.min(overallScore, 6.5);
   if (!noPreamble) overallScore = Math.min(overallScore, 5.5);
   if (!substantiveShape) overallScore = Math.min(overallScore, 6.5);
   if (!conciseEnough) overallScore = Math.min(overallScore, 8);
+  if (assistedByFallback) overallScore = Math.min(overallScore, 7);
 
   // Resolved status
   let resolvedStatus: BenchScores['resolvedStatus'] = 'unresolved';
-  if (validationPassed && answeredUser && usedTools && substantiveShape && noPreamble) resolvedStatus = 'resolved';
+  if (assistedByFallback && validationPassed && answeredUser && substantiveShape && noPreamble) resolvedStatus = 'assisted';
+  else if (validationPassed && answeredUser && usedTools && substantiveShape && noPreamble) resolvedStatus = 'resolved';
   else if (answeredUser && substantiveShape && noPreamble) resolvedStatus = 'partial';
 
   return {
@@ -380,6 +424,7 @@ export function computeBenchScores(params: {
     stepCount,
     tokenCount,
     costEstimate,
+    assistedByFallback,
   };
 }
 
@@ -523,17 +568,18 @@ export function listBenchRuns(): Array<Pick<BenchRun, 'id' | 'name' | 'status' |
 
 export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
   const byModel: Record<string, {
-    resolved: number; unresolved: number; partial: number;
+    resolved: number; unresolved: number; partial: number; assisted: number;
     scores: number[]; validationScores: number[]; latencies: number[];
     costs: number[]; steps: number[];
   }> = {};
 
   for (const r of results) {
     if (!byModel[r.modelId]) {
-      byModel[r.modelId] = { resolved: 0, unresolved: 0, partial: 0, scores: [], validationScores: [], latencies: [], costs: [], steps: [] };
+      byModel[r.modelId] = { resolved: 0, unresolved: 0, partial: 0, assisted: 0, scores: [], validationScores: [], latencies: [], costs: [], steps: [] };
     }
     const m = byModel[r.modelId];
     if (r.scores.resolvedStatus === 'resolved') m.resolved++;
+    else if (r.scores.resolvedStatus === 'assisted') m.assisted++;
     else if (r.scores.resolvedStatus === 'partial') m.partial++;
     else m.unresolved++;
     m.scores.push(r.scores.overallScore);
@@ -574,6 +620,7 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
       resolved: data.resolved,
       unresolved: data.unresolved,
       partial: data.partial,
+      assisted: data.assisted,
       resolvedRate: Math.round(resolvedRate * 1000) / 1000,
       avgScore: Math.round(avgScore * 10) / 10,
       avgValidationScore: Math.round(avgValidationScore * 10) / 10,
@@ -587,7 +634,7 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
     if (composite > bestComposite) {
       bestComposite = composite;
       bestModel = modelId;
-      bestReason = `Best composite: resolved ${(resolvedRate * 100).toFixed(0)}%, score ${avgScore.toFixed(1)}/10, validation ${avgValidationScore.toFixed(1)}/2, cost $${avgCost.toFixed(6)}, latency ${Math.round(avgLatency)}ms.`;
+      bestReason = `Best composite: resolved ${(resolvedRate * 100).toFixed(0)}%, assisted ${data.assisted}/${totalRuns}, score ${avgScore.toFixed(1)}/10, validation ${avgValidationScore.toFixed(1)}/2, cost $${avgCost.toFixed(6)}, latency ${Math.round(avgLatency)}ms.`;
     }
   }
 

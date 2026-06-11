@@ -152,6 +152,7 @@ try {
     );
 
     assert.equal(artifactResult.ok, true, 'workspace-write artifact creation should be ok when write_file runs and validation passes');
+    assert.equal(artifactResult.assistedByFallback, false, 'model-authored artifact writes should not be marked fallback-assisted');
     assert.match(artifactResult.finalText, /## Delivered/);
     assert.match(artifactResult.finalText, /Direct artifact file writes were used/i);
     assert.match(artifactResult.finalText, /Workspace write tool used by implementer/i);

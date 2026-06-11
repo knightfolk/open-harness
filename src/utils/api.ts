@@ -1602,10 +1602,11 @@ export interface BenchScores {
   styleScore: number;
   overallScore: number;
   breakdown: EvalScoreBreakdown;
-  resolvedStatus: 'resolved' | 'unresolved' | 'partial';
+  resolvedStatus: 'resolved' | 'unresolved' | 'partial' | 'assisted';
   stepCount: number;
   tokenCount: number;
   costEstimate: number;
+  assistedByFallback: boolean;
 }
 
 export interface BenchRunResult {
@@ -1625,6 +1626,7 @@ export interface BenchRunResult {
   startedAt: string;
   completedAt: string;
   error?: string;
+  assistedByFallback?: boolean;
 }
 
 export interface BenchRun {
@@ -1641,7 +1643,7 @@ export interface BenchRun {
   completedAt?: string;
   summary?: {
     byModel: Record<string, {
-      resolved: number; unresolved: number; partial: number;
+      resolved: number; unresolved: number; partial: number; assisted: number;
       resolvedRate: number;
       avgScore: number; avgValidationScore: number;
       avgLatencyMs: number; avgCost: number; valueScore: number; avgSteps: number; totalRuns: number;

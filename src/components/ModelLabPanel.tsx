@@ -439,6 +439,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
                             <span style={{ color: '#22c55e' }}>{data.resolved} resolved</span>
+                            {' · '}<span style={{ color: '#38bdf8' }}>{data.assisted || 0} assisted</span>
                             {' · '}<span style={{ color: '#f59e0b' }}>{data.partial} partial</span>
                             {' · '}<span style={{ color: '#ef4444' }}>{data.unresolved} failed</span>
                           </div>
@@ -1045,6 +1046,7 @@ function scoreColor(score: number): string {
 
 function resolvedColor(status: string): string {
   if (status === 'resolved') return '#22c55e';
+  if (status === 'assisted') return '#38bdf8';
   if (status === 'partial') return '#f59e0b';
   return '#ef4444';
 }

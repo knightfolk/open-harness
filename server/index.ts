@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
 import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync } from 'fs';
-import { join, basename, dirname, extname, isAbsolute, resolve, parse as parsePath } from 'path';
+import { join, basename, dirname, extname, isAbsolute, resolve, relative, parse as parsePath } from 'path';
 import { execFileSync, spawn } from 'child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
@@ -1923,6 +1923,38 @@ function getChangedFileSnapshot(dir: string): string[] {
   } catch {
     return [];
   }
+}
+
+function getExpectedPathSnapshot(dir: string, patterns: string[] = []): string[] {
+  const entries: string[] = [];
+  const seen = new Set<string>();
+  const addFile = (fullPath: string) => {
+    const rel = relative(dir, fullPath).replace(/\\/g, '/');
+    if (!rel || rel.startsWith('..')) return;
+    if (seen.has(rel)) return;
+    seen.add(rel);
+    entries.push(`${rel}\t${getChangedFileSignature(dir, rel)}`);
+  };
+  const visit = (fullPath: string) => {
+    if (!existsSync(fullPath)) return;
+    const stat = statSync(fullPath);
+    if (stat.isFile()) {
+      addFile(fullPath);
+      return;
+    }
+    if (!stat.isDirectory()) return;
+    for (const entry of readdirSync(fullPath)) {
+      if (entry === '.git' || entry === 'node_modules') continue;
+      visit(join(fullPath, entry));
+    }
+  };
+
+  for (const pattern of patterns) {
+    const trimmed = pattern.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/g, '');
+    if (!trimmed) continue;
+    visit(resolve(dir, trimmed));
+  }
+  return entries.sort();
 }
 
 function getChangedFileSignature(dir: string, file: string): string {
@@ -4584,6 +4616,7 @@ app.post('/api/bench/run', async (req, res) => {
         continue;
       }
       const changedFilesBeforeRun = getChangedFileSnapshot(taskDir);
+      const expectedPathsBeforeRun = getExpectedPathSnapshot(taskDir, task.expectedChangedFiles);
 
       // Create a temporary session for this task run
       const taskSession: SessionRow = {
@@ -4604,6 +4637,7 @@ app.post('/api/bench/run', async (req, res) => {
       const chunks: string[] = [];
       const toolCallsAccum: Array<{ name: string; status: string; input?: string; output?: string; duration?: number }> = [];
       let stepCount = 0;
+      let assistedByFallback = false;
 
       const writer = {
         write: (data: string) => {
@@ -4683,6 +4717,7 @@ app.post('/api/bench/run', async (req, res) => {
                 ),
               });
               chunks.push(orchResult.finalText);
+              assistedByFallback = !!orchResult.assistedByFallback;
               if (!orchResult.ok) {
                 toolCallsAccum.push({ name: 'orchestrator', status: 'error', output: orchResult.error });
               }
@@ -4746,10 +4781,14 @@ app.post('/api/bench/run', async (req, res) => {
           OPENHARNESS_BENCH_TASK: task.name,
         });
       }
+      validationResults.push(...benchRuns.validateExpectedPathChanges({
+        before: expectedPathsBeforeRun,
+        after: getExpectedPathSnapshot(taskDir, task.expectedChangedFiles),
+        expectedChangedFiles: task.expectedChangedFiles,
+      }));
       validationResults.push(...benchRuns.validateChangedFiles({
         before: changedFilesBeforeRun,
         after: getChangedFileSnapshot(taskDir),
-        expectedChangedFiles: task.expectedChangedFiles,
         forbiddenChangedFiles: task.forbiddenChangedFiles,
       }));
 
@@ -4771,6 +4810,7 @@ app.post('/api/bench/run', async (req, res) => {
         stepCount,
         tokenCount: usage.tokenCount,
         costEstimate: usage.cost,
+        assistedByFallback,
       });
 
       const status: BenchRunResult['status'] = !validationResults.every(r => r.passed) && validationResults.length > 0
@@ -4793,6 +4833,7 @@ app.post('/api/bench/run', async (req, res) => {
         scores,
         startedAt,
         completedAt: new Date().toISOString(),
+        assistedByFallback,
       });
       run.completed++;
       benchRuns.saveBenchRun(run);

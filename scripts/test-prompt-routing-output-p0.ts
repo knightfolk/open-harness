@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeBenchScores, generateBenchSummary, runSetupCommands, validateChangedFiles } from '../server/benchRuns';
+import { computeBenchScores, generateBenchSummary, runSetupCommands, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
 import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
@@ -226,6 +226,81 @@ function testBenchRankingUsesSpendAndLatency() {
   assert.match(summary.bestModelReason || '', /cost/i);
 }
 
+function testFallbackAssistedRunsDoNotLookModelResolved() {
+  const validationResults = [{
+    command: 'synthetic',
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+    findings: [],
+    durationMs: 1,
+    passed: true,
+  }];
+  const response = [
+    '## Delivered',
+    '',
+    '### Assistance',
+    'OpenHarness generated a deterministic fallback scaffold because the selected model did not create artifact files.',
+    '',
+    '### Implementation',
+    'Created a runnable browser game artifact and validation passed.',
+  ].join('\n');
+  const assistedScore = computeBenchScores({
+    response,
+    toolCalls: [],
+    wallMs: 12_000,
+    validationResults,
+    stepCount: 4,
+    tokenCount: 600,
+    costEstimate: 0.001,
+    assistedByFallback: true,
+  });
+
+  assert.equal(assistedScore.resolvedStatus, 'assisted', 'fallback output should be marked assisted, not resolved');
+  assert.equal(assistedScore.assistedByFallback, true);
+  assert.ok(assistedScore.overallScore <= 7, `fallback-assisted score should be capped, got ${assistedScore.overallScore}`);
+  assert.equal(
+    assistedScore.breakdown.signals.find((signal) => signal.id === 'model-authored-delivery')?.passed,
+    false,
+    'fallback-assisted score should expose missing model-authored delivery',
+  );
+
+  const authoredScore = computeBenchScores({
+    response: '## Delivered\n\n### Implementation\nThe model wrote the requested artifact files directly, listed the changed files, and validation passed with concrete proof for human testing.',
+    toolCalls: [{ name: 'write_file', status: 'complete' }],
+    wallMs: 12_000,
+    validationResults,
+    stepCount: 4,
+    tokenCount: 600,
+    costEstimate: 0.001,
+  });
+  assert.equal(authoredScore.resolvedStatus, 'resolved', 'model-authored validated writes can still resolve');
+
+  const summary = generateBenchSummary([
+    {
+      taskId: 'task',
+      taskName: 'Task',
+      modelId: 'fallback-model',
+      providerId: 'provider',
+      status: 'ok',
+      prompt: 'Prompt',
+      response,
+      responseLength: response.length,
+      toolCalls: [{ name: 'write_file', status: 'complete' }],
+      validationResults,
+      validationPassed: true,
+      wallMs: 12_000,
+      scores: assistedScore,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      assistedByFallback: true,
+    },
+  ] as any);
+  assert.equal(summary.byModel['fallback-model'].resolved, 0, 'assisted fallback should not increase resolved count');
+  assert.equal(summary.byModel['fallback-model'].assisted, 1, 'assisted fallback should be counted separately');
+  assert.match(summary.bestModelReason || '', /assisted 1\/1/i);
+}
+
 function testUnknownModelPricingIsNotFree() {
   const unknown = estimateCostForRanking('unknown-provider:brand-new-model', 1000, 500);
   assert.equal(unknown.estimated, true, 'unknown model pricing should be marked as estimated');
@@ -306,6 +381,23 @@ function testBenchChangedFileValidation() {
     expectedChangedFiles: ['test-fixtures/game/src/App.tsx'],
   });
   assert.equal(editedDirtyFile[0].passed, true, 'hash changes should prove edits to files that were already dirty before the run');
+
+  const recreatedTrackedFixture = validateExpectedPathChanges({
+    before: [],
+    after: [
+      'test-fixtures/standalone-artifact-eval/index.html\tnew-html',
+      'test-fixtures/standalone-artifact-eval/game.js\tnew-js',
+    ],
+    expectedChangedFiles: ['test-fixtures/standalone-artifact-eval/'],
+  });
+  assert.equal(recreatedTrackedFixture[0].passed, true, 'manifest proof should count recreated expected artifact files');
+
+  const unchangedManifest = validateExpectedPathChanges({
+    before: ['test-fixtures/standalone-artifact-eval/index.html\tsame'],
+    after: ['test-fixtures/standalone-artifact-eval/index.html\tsame'],
+    expectedChangedFiles: ['test-fixtures/standalone-artifact-eval/'],
+  });
+  assert.equal(unchangedManifest[0].passed, false, 'unchanged expected path manifest should not prove a new artifact');
 }
 
 testPromptAssemblyMetadata();
@@ -316,6 +408,7 @@ testCreationPromptRouting();
 testMiniMaxInvokeDelimiterRegression();
 testScoringRejectsBadOutput();
 testBenchRankingUsesSpendAndLatency();
+testFallbackAssistedRunsDoNotLookModelResolved();
 testUnknownModelPricingIsNotFree();
 await testSetupCommandsAreScoredAsValidation();
 testBenchChangedFileValidation();

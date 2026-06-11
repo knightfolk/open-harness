@@ -24,6 +24,8 @@ export interface OrchestrationResult {
   ok: boolean;
   /** Error message if ok is false */
   error?: string;
+  /** True when OpenHarness shipped a deterministic scaffold after the model failed to write files. */
+  assistedByFallback?: boolean;
 }
 
 export interface OrchestrationPhase {
@@ -665,6 +667,11 @@ async function runExecutePipeline(
   parts.push(`### Delivery Status`);
   parts.push(proof.summary);
   parts.push(``);
+  if (fallbackArtifactUsed) {
+    parts.push(`### Assistance`);
+    parts.push(`OpenHarness generated a deterministic fallback scaffold because the selected model did not create artifact files after the initial pass and retry. Treat this as human-test-ready output, not full model-authored delivery.`);
+    parts.push(``);
+  }
 
   // Planner output
   if (plannerArtifact?.response) {
@@ -695,6 +702,7 @@ async function runExecutePipeline(
     phases,
     ok,
     error: ok ? undefined : 'Execute mode did not produce applied-and-validated proof',
+    assistedByFallback: fallbackArtifactUsed,
   };
 }
 
