@@ -50,6 +50,7 @@ export interface RouteSignalOptions {
 
 const FILE_REFERENCE_RE = /\b(?:[\w-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|py|java|go|rs|cpp|c|cs|rb|swift|kt|php|html|css|scss|less|md|json|yml|yaml|toml|sh|bash|mjs|cjs|sql|txt|lock)\b/g;
 const CODE_BLOCK_RE = /```[\s\S]*?```/;
+const ARTIFACT_NOUN_RE = /\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact|clone|platformer|roguelike|rogue.?like|rpg|shooter|puzzle|arcade|metroidvania|tower defense|flappy|runner|brawler|strategy|simulator|sim)\b/;
 
 function detectFileReferences(text: string): string[] {
   const refs = new Set<string>();
@@ -101,8 +102,8 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     || /\bperform\b[\s\S]{0,80}\b(?:test|tests|validation|verification|checks?)\b/.test(intentLower)
   );
   const asksCreateArtifact = !asksInformationalCreationQuestion && (
-    /\b(?:build|make|create|scaffold|prototype|generate)\b[\s\S]{0,80}\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact)\b/.test(intentLower)
-    || /\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact)\b[\s\S]{0,80}\b(?:build|made|created|scaffolded|prototyped|generated)\b/.test(intentLower)
+    new RegExp(`\\b(?:build|make|create|scaffold|prototype|generate)\\b[\\s\\S]{0,80}${ARTIFACT_NOUN_RE.source}`).test(intentLower)
+    || new RegExp(`${ARTIFACT_NOUN_RE.source}[\\s\\S]{0,80}\\b(?:build|made|created|scaffolded|prototyped|generated)\\b`).test(intentLower)
   );
   const asksExecute = asksExplicitExecution
     || asksCreateArtifact

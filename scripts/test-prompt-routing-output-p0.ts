@@ -76,6 +76,9 @@ function testCreationPromptRouting() {
     'Make a small browser app for testing model routing.',
     'Create a demo website that compares three model choices.',
     'Scaffold a prototype tool for checking generated artifacts.',
+    'Make me a Flappy Bird clone in a new folder.',
+    'Prototype a platformer in a standalone directory.',
+    'Generate an arcade puzzle in its own folder.',
   ]) {
     const route = routeRequest(prompt, 'local-model');
     assert.equal(route.mode, 'execute', `${prompt} should route to execution`);

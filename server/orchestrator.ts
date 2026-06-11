@@ -1659,7 +1659,7 @@ function buildExecuteProofSummary(implementationText: string, applyProof: Execut
 function isArtifactCreationTask(message: string): boolean {
   const lower = message.toLowerCase();
   const creationVerb = /\b(?:build|make|create|scaffold|prototype|generate)\b/.test(lower);
-  const artifactNoun = /\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact)\b/.test(lower);
+  const artifactNoun = /\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact|clone|platformer|roguelike|rogue.?like|rpg|shooter|puzzle|arcade|metroidvania|tower defense|flappy|runner|brawler|strategy|simulator|sim)\b/.test(lower);
   const ownFolder = /\b(?:own|new|separate|standalone)\s+(?:folder|directory|project)\b/.test(lower)
     || /\b(?:folder|directory)\b/.test(lower);
   return creationVerb && artifactNoun && (ownFolder || !/\b(?:fix|modify|update|refactor|patch|edit existing)\b/.test(lower));
