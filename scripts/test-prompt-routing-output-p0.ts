@@ -325,11 +325,25 @@ function testFallbackAssistedRunsDoNotLookModelResolved() {
     startedAt: new Date().toISOString(),
     completedAt: new Date().toISOString(),
     assistedByFallback: true,
+    traceProof: {
+      mode: 'execute',
+      role: 'coder',
+      complexity: 'medium',
+      routeSource: 'heuristic',
+      selectedModel: 'fallback-model',
+      providerId: 'provider',
+      modelRequests: 2,
+      toolCalls: 1,
+      validationChecks: 1,
+      assistedByFallback: true,
+      summary: 'execute/coder · heuristic · 2 model requests · 1 tool call · 1 validation check · assisted fallback',
+      warnings: ['Result was assisted by OpenHarness fallback.'],
+    },
   });
   saveBenchRun(run);
   const csv = exportBenchRunCSV(run.id) || '';
-  assert.match(csv.split('\n')[0], /assisted_by_fallback,model_authored_delivery/);
-  assert.match(csv, /fallback-model,assisted,assisted,true,false/);
+  assert.match(csv.split('\n')[0], /assisted_by_fallback,model_authored_delivery,trace_proof/);
+  assert.match(csv, /fallback-model,assisted,assisted,true,false,"execute\/coder/);
 }
 
 function testRubricCoverageIsScored() {

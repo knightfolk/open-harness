@@ -85,6 +85,55 @@ function estimateUsageForTexts(modelId: string, inputText: string, outputText: s
   };
 }
 
+function buildBenchTraceProof(params: {
+  route?: ReturnType<typeof routeRequest>;
+  modelId: string;
+  providerId: string;
+  modelRequests?: number;
+  toolCalls?: number;
+  validationCount: number;
+  assistedByFallback?: boolean;
+  warning?: string;
+}): benchRuns.BenchTraceProof {
+  const route = params.route;
+  const warnings = [
+    ...(params.warning ? [params.warning] : []),
+    ...(!route ? ['No route decision was recorded.'] : []),
+    ...(params.modelRequests ? [] : ['No model request proof was recorded.']),
+    ...(params.assistedByFallback ? ['Result was assisted by OpenHarness fallback.'] : []),
+  ];
+  const mode = route?.mode || 'none';
+  const role = route?.role || 'unknown';
+  const complexity = route?.complexity || 'unknown';
+  const routeSource = route?.routerData?.source || (route ? 'heuristic' : 'none');
+  const modelRequests = params.modelRequests || 0;
+  const toolCalls = params.toolCalls || 0;
+  const validationChecks = params.validationCount;
+  const summary = [
+    `${mode}/${role}`,
+    routeSource,
+    `${modelRequests} model request${modelRequests === 1 ? '' : 's'}`,
+    `${toolCalls} tool call${toolCalls === 1 ? '' : 's'}`,
+    `${validationChecks} validation check${validationChecks === 1 ? '' : 's'}`,
+    params.assistedByFallback ? 'assisted fallback' : 'model-authored path',
+  ].join(' · ');
+
+  return {
+    mode,
+    role,
+    complexity,
+    routeSource,
+    selectedModel: params.modelId,
+    providerId: params.providerId,
+    modelRequests,
+    toolCalls,
+    validationChecks,
+    assistedByFallback: !!params.assistedByFallback,
+    summary,
+    warnings,
+  };
+}
+
 function serializeUsageInput(messages: any[]): string {
   return JSON.stringify(messages.map((message) => ({
     role: message.role,
@@ -4566,6 +4615,12 @@ app.post('/api/bench/run', async (req, res) => {
           startedAt: new Date().toISOString(),
           completedAt: new Date().toISOString(),
           error: 'No provider for model',
+          traceProof: buildBenchTraceProof({
+            modelId,
+            providerId: 'none',
+            validationCount: 0,
+            warning: 'No provider resolved for model.',
+          }),
         });
         run.completed++;
       }
@@ -4612,6 +4667,12 @@ app.post('/api/bench/run', async (req, res) => {
           startedAt,
           completedAt: new Date().toISOString(),
           error: setupResults.filter((result) => !result.passed).map((result) => result.findings.join('; ') || result.stderr).join('; '),
+          traceProof: buildBenchTraceProof({
+            modelId,
+            providerId: resolved.providerId,
+            validationCount: setupResults.length,
+            warning: 'Setup failed before routing/model execution.',
+          }),
         });
         run.completed++;
         benchRuns.saveBenchRun(run);
@@ -4639,7 +4700,9 @@ app.post('/api/bench/run', async (req, res) => {
       const chunks: string[] = [];
       const toolCallsAccum: Array<{ name: string; status: string; input?: string; output?: string; duration?: number }> = [];
       let stepCount = 0;
+      let modelRequestCount = 0;
       let assistedByFallback = false;
+      let benchRoute: ReturnType<typeof routeRequest> | undefined;
 
       const writer = {
         write: (data: string) => {
@@ -4671,7 +4734,7 @@ app.post('/api/bench/run', async (req, res) => {
         let timeout: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([
           (async () => {
-            const benchRoute = routeRequest(task.prompt, modelId, appConfig.roleAssignments || {});
+            benchRoute = routeRequest(task.prompt, modelId, appConfig.roleAssignments || {});
             if (benchRoute.mode !== 'direct') {
               const { tools: orchestrationApiTools, toolServerMap: orchestrationToolServerMap } = gatherMCPToolsForAPI();
               const taskTrustMode = task.trustMode as TrustMode;
@@ -4698,6 +4761,7 @@ app.post('/api/bench/run', async (req, res) => {
                 signal: timeoutController.signal,
                 onStep: (step) => {
                   stepCount++;
+                  if (step.type === 'model_request') modelRequestCount++;
                   if (step.type === 'tool_call') {
                     toolCallsAccum.push({
                       name: step.name,
@@ -4725,6 +4789,7 @@ app.post('/api/bench/run', async (req, res) => {
               }
               providerUsage = estimateUsageForTexts(modelId, task.prompt, orchResult.finalText);
             } else {
+              modelRequestCount = Math.max(modelRequestCount, 1);
               providerUsage = await streamModel(
                 resolved.chatURL, resolved.apiKey, resolved.providerId,
                 taskSession.messages, writer, uuid(), taskSession,
@@ -4763,6 +4828,16 @@ app.post('/api/bench/run', async (req, res) => {
           startedAt,
           completedAt: new Date().toISOString(),
           error: err.message,
+          traceProof: buildBenchTraceProof({
+            route: benchRoute,
+            modelId,
+            providerId: resolved.providerId,
+            modelRequests: modelRequestCount,
+            toolCalls: toolCallsAccum.length,
+            validationCount: 0,
+            assistedByFallback,
+            warning: err.message,
+          }),
         });
         run.completed++;
         benchRuns.saveBenchRun(run);
@@ -4841,6 +4916,16 @@ app.post('/api/bench/run', async (req, res) => {
         startedAt,
         completedAt: new Date().toISOString(),
         assistedByFallback,
+        traceProof: buildBenchTraceProof({
+          route: benchRoute,
+          modelId,
+          providerId: resolved.providerId,
+          modelRequests: modelRequestCount,
+          toolCalls: toolCallsAccum.length,
+          validationCount: validationResults.length,
+          assistedByFallback,
+          warning: assistedByFallback ? 'OpenHarness fallback assisted this delivery.' : undefined,
+        }),
       });
       run.completed++;
       benchRuns.saveBenchRun(run);

@@ -1638,6 +1638,20 @@ export interface BenchRunResult {
   completedAt: string;
   error?: string;
   assistedByFallback?: boolean;
+  traceProof?: {
+    mode: string;
+    role: string;
+    complexity: string;
+    routeSource: 'heuristic' | 'auto' | 'none';
+    selectedModel: string;
+    providerId: string;
+    modelRequests: number;
+    toolCalls: number;
+    validationChecks: number;
+    assistedByFallback: boolean;
+    summary: string;
+    warnings: string[];
+  };
 }
 
 export interface BenchRun {

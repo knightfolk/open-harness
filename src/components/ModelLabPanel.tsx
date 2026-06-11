@@ -486,6 +486,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                       <th style={thStyle}>Score</th>
                       <th style={thStyle}>Breakdown</th>
                       <th style={thStyle}>Rubric</th>
+                      <th style={thStyle}>Trace</th>
                       <th style={thStyle}>Weakest</th>
                       <th style={thStyle}>Validation</th>
                       <th style={thStyle}>Latency</th>
@@ -507,6 +508,9 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                         </td>
                         <td style={{ ...tdStyle, color: rubricCoverageColor(r.scores.rubricCoverage) }}>
                           {rubricCoverageLabel(r.scores.rubricCoverage)}
+                        </td>
+                        <td style={{ ...tdStyle, color: traceProofColor(r.traceProof) }}>
+                          {traceProofLabel(r.traceProof)}
                         </td>
                         <td style={tdStyle}>{r.scores.breakdown?.weakestSignal?.label ?? '—'}</td>
 	                        <td style={{ ...tdStyle, color: r.validationPassed ? '#22c55e' : '#ef4444' }}>
@@ -941,6 +945,9 @@ function BenchEvidencePanel({ run }: { run: api.BenchRun }) {
               <RubricCoverageList coverage={result.scores.rubricCoverage} />
             </EvidenceBlock>
           )}
+          <EvidenceBlock title="Trace proof">
+            <TraceProofBlock trace={result.traceProof} />
+          </EvidenceBlock>
           <EvidenceBlock title="Validation">
             {result.validationResults.length > 0 ? result.validationResults.map((validation, i) => (
               <div key={i} style={{ marginBottom: 8 }}>
@@ -989,6 +996,28 @@ function RubricCoverageList({ coverage }: { coverage: NonNullable<api.BenchScore
   );
 }
 
+function TraceProofBlock({ trace }: { trace?: api.BenchRunResult['traceProof'] }) {
+  if (!trace) {
+    return <span style={{ color: 'var(--accent-error)', fontWeight: 600 }}>No route trace was recorded.</span>;
+  }
+  return (
+    <div>
+      <div style={{ color: traceProofColor(trace), fontWeight: 600, marginBottom: 4 }}>
+        {trace.summary}
+      </div>
+      <div>Selected: {trace.selectedModel} via {trace.providerId}</div>
+      <div>Route: {trace.mode} / {trace.role} / {trace.complexity} ({trace.routeSource})</div>
+      {trace.warnings.length > 0 && (
+        <div style={{ marginTop: 4 }}>
+          {trace.warnings.slice(0, 5).map((warning, i) => (
+            <div key={i}>- {warning}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EvidenceBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginTop: 8 }}>
@@ -996,6 +1025,18 @@ function EvidenceBlock({ title, children }: { title: string; children: React.Rea
       <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{children}</div>
     </div>
   );
+}
+
+function traceProofLabel(trace?: api.BenchRunResult['traceProof']) {
+  if (!trace) return 'No trace';
+  return `${trace.mode}/${trace.role} · ${trace.modelRequests} req · ${trace.toolCalls} tools`;
+}
+
+function traceProofColor(trace?: api.BenchRunResult['traceProof']) {
+  if (!trace) return 'var(--accent-error)';
+  if (trace.assistedByFallback || trace.warnings.length > 0) return '#f59e0b';
+  if (trace.modelRequests > 0) return 'var(--accent-success)';
+  return 'var(--accent-error)';
 }
 
 function rubricCoverageLabel(coverage?: api.BenchScores['rubricCoverage']) {
