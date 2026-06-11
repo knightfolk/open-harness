@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type ShipCheckStatus = 'pass' | 'fail' | 'warn';
 
@@ -22,6 +23,7 @@ export interface ShipReadinessReport {
 }
 
 const TEXT_EXTENSIONS = new Set(['.html', '.css', '.js', '.mjs', '.json', '.md', '.txt']);
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function check(id: string, label: string, status: ShipCheckStatus, detail: string, evidence: string[] = []): ShipReadinessCheck {
   return { id, label, status, detail, evidence };
@@ -84,6 +86,59 @@ function nodeCheck(path: string): { ok: boolean; error?: string } {
   }
 }
 
+function runBrowserSmoke(projectDir: string): ShipReadinessCheck {
+  const scriptPath = join(REPO_ROOT, 'scripts', 'smoke-standalone-game-browser.mjs');
+  if (!existsSync(scriptPath)) {
+    return check(
+      'browser-smoke',
+      'Browser smoke',
+      'fail',
+      'Browser smoke script is missing, so runtime playability could not be proven.',
+      [scriptPath],
+    );
+  }
+
+  const run = spawnSync(process.execPath, [scriptPath, projectDir, '--json'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    timeout: 70_000,
+  });
+  const output = `${run.stdout || ''}${run.stderr || ''}`.trim();
+  let report: any;
+  try {
+    report = JSON.parse(run.stdout || '{}');
+  } catch {
+    report = null;
+  }
+
+  const failedChecks = Array.isArray(report?.checks)
+    ? report.checks.filter((item: any) => item?.status === 'fail')
+    : [];
+  const passedChecks = Array.isArray(report?.checks)
+    ? report.checks.filter((item: any) => item?.status === 'pass')
+    : [];
+  const evidence = [
+    ...(passedChecks.slice(0, 8).map((item: any) => `PASS ${item.id}: ${item.detail}`)),
+    ...(failedChecks.slice(0, 8).map((item: any) => `FAIL ${item.id}: ${item.detail}`)),
+    ...(report?.screenshotPath ? [`screenshot: ${report.screenshotPath}`] : []),
+  ];
+  if (run.error) evidence.push(run.error.message);
+  if (!report && output) evidence.push(output.slice(0, 1200));
+
+  const passed = run.status === 0 && report?.status === 'pass';
+  return check(
+    'browser-smoke',
+    'Browser smoke',
+    passed ? 'pass' : 'fail',
+    passed
+      ? 'Artifact loaded in a browser, accepted keyboard input, exposed restart/HUD evidence, and produced a screenshot.'
+      : failedChecks.length > 0
+        ? failedChecks.map((item: any) => `${item.id}: ${item.detail}`).join('\n')
+        : 'Browser smoke did not produce passing runtime evidence.',
+    evidence,
+  );
+}
+
 export function runShipReadiness(projectDirInput: string): ShipReadinessReport {
   const projectDir = resolve(projectDirInput);
   const checks: ShipReadinessCheck[] = [];
@@ -135,6 +190,8 @@ export function runShipReadiness(projectDirInput: string): ShipReadinessReport {
         : 'Add a title and viewport meta tag for cleaner human testing.',
       [hasTitle ? 'title' : 'missing title', hasViewport ? 'viewport' : 'missing viewport'],
     ));
+
+    checks.push(runBrowserSmoke(projectDir));
   }
 
   const jsFiles = files.filter((file) => /\.m?js$/i.test(file));
@@ -180,7 +237,7 @@ export function runShipReadiness(projectDirInput: string): ShipReadinessReport {
     ? blockingFailures.map((item) => item.detail)
     : warningCount > 0
       ? checks.filter((item) => item.status === 'warn').map((item) => item.detail)
-      : ['Artifact is ready for a human preview pass. Run a browser smoke test before publishing.'];
+      : ['Artifact has static and browser runtime proof. It is ready for a human preview pass.'];
 
   return {
     projectDir,

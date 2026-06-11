@@ -10,6 +10,11 @@ assert.equal(gameReport.status, 'pass', gameReport.summary);
 assert.equal(gameReport.checks.find((check) => check.id === 'entry-html')?.status, 'pass');
 assert.equal(gameReport.checks.find((check) => check.id === 'local-assets')?.status, 'pass');
 assert.equal(gameReport.checks.find((check) => check.id === 'javascript-syntax')?.status, 'pass');
+assert.equal(gameReport.checks.find((check) => check.id === 'browser-smoke')?.status, 'pass');
+assert.match(
+  gameReport.checks.find((check) => check.id === 'browser-smoke')?.detail || '',
+  /keyboard input/i,
+);
 
 const browserSmoke = spawnSync(process.execPath, ['scripts/smoke-standalone-game-browser.mjs', 'neon-decade-descent', '--json'], {
   cwd: process.cwd(),
@@ -43,6 +48,7 @@ try {
   assert.equal(brokenReport.status, 'fail', 'missing linked assets and syntax errors should block shipping');
   assert.equal(brokenReport.checks.find((check) => check.id === 'local-assets')?.status, 'fail');
   assert.equal(brokenReport.checks.find((check) => check.id === 'javascript-syntax')?.status, 'fail');
+  assert.equal(brokenReport.checks.find((check) => check.id === 'browser-smoke')?.status, 'fail');
 } finally {
   rmSync(fixtureDir, { recursive: true, force: true });
 }
