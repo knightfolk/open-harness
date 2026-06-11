@@ -332,6 +332,64 @@ function testFallbackAssistedRunsDoNotLookModelResolved() {
   assert.match(csv, /fallback-model,assisted,assisted,true,false/);
 }
 
+function testRubricCoverageIsScored() {
+  const validationResults = [{
+    command: 'node scripts/verify-standalone-artifact-fixture.mjs',
+    exitCode: 0,
+    stdout: 'Standalone artifact verification passed.',
+    stderr: '',
+    findings: [],
+    durationMs: 1,
+    passed: true,
+  }];
+  const rubric = [
+    { id: 'complete-artifact', points: 2, description: 'Creates a standalone HTML CSS JS README artifact in the requested folder only' },
+    { id: 'playable-loop', points: 3, description: 'Implements player movement hazards enemies collectibles state restart and progression' },
+    { id: 'era-theme', points: 1.5, description: 'Uses concrete 1980s icons events and items in gameplay' },
+    { id: 'validation-passes', points: 2, description: 'Passes standalone artifact verification' },
+  ];
+  const strong = computeBenchScores({
+    response: [
+      '## Delivered',
+      'Created a standalone HTML CSS JS README artifact.',
+      'The playable loop includes player movement, enemies, hazards, collectibles, state, restart, and progression.',
+      'The 1980s era theme uses arcade, mixtape, VHS, floppy, mall, and space-shuttle events in gameplay.',
+      'Validation passed with the standalone artifact verifier.',
+    ].join('\n'),
+    toolCalls: [{ name: 'write_file', status: 'complete' }],
+    wallMs: 1000,
+    validationResults,
+    stepCount: 3,
+    tokenCount: 500,
+    costEstimate: 0.001,
+    rubric,
+  });
+  assert.ok(strong.rubricCoverage, 'rubric tasks should expose rubric coverage');
+  assert.ok((strong.rubricCoverage?.ratio || 0) >= 0.7, 'strong task-specific output should pass rubric coverage');
+  assert.equal(
+    strong.breakdown.signals.find((signal) => signal.id === 'rubric-coverage')?.passed,
+    true,
+    'rubric coverage should appear as a passing score signal',
+  );
+
+  const generic = computeBenchScores({
+    response: '## Delivered\nValidation passed. The answer is concise and complete enough to inspect.',
+    toolCalls: [{ name: 'write_file', status: 'complete' }],
+    wallMs: 1000,
+    validationResults,
+    stepCount: 3,
+    tokenCount: 500,
+    costEstimate: 0.001,
+    rubric,
+  });
+  assert.ok((generic.rubricCoverage?.ratio || 0) < 0.7, 'generic validated output should not pass rubric coverage');
+  assert.equal(
+    generic.breakdown.signals.find((signal) => signal.id === 'rubric-coverage')?.passed,
+    false,
+    'rubric coverage should fail when task-specific evidence is absent',
+  );
+}
+
 function testUnknownModelPricingIsNotFree() {
   const unknown = estimateCostForRanking('unknown-provider:brand-new-model', 1000, 500);
   assert.equal(unknown.estimated, true, 'unknown model pricing should be marked as estimated');
@@ -440,6 +498,7 @@ testMiniMaxInvokeDelimiterRegression();
 testScoringRejectsBadOutput();
 testBenchRankingUsesSpendAndLatency();
 testFallbackAssistedRunsDoNotLookModelResolved();
+testRubricCoverageIsScored();
 testUnknownModelPricingIsNotFree();
 await testSetupCommandsAreScoredAsValidation();
 testBenchChangedFileValidation();

@@ -1607,6 +1607,17 @@ export interface BenchScores {
   tokenCount: number;
   costEstimate: number;
   assistedByFallback: boolean;
+  rubricCoverage?: {
+    passedPoints: number;
+    totalPoints: number;
+    ratio: number;
+    items: Array<{
+      id: string;
+      points: number;
+      passed: boolean;
+      evidence: string;
+    }>;
+  };
 }
 
 export interface BenchRunResult {

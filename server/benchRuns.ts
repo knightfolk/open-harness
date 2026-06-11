@@ -49,6 +49,19 @@ export interface BenchScores extends EvalScores {
   tokenCount: number;
   costEstimate: number;
   assistedByFallback: boolean;
+  rubricCoverage?: RubricCoverage;
+}
+
+export interface RubricCoverage {
+  passedPoints: number;
+  totalPoints: number;
+  ratio: number;
+  items: Array<{
+    id: string;
+    points: number;
+    passed: boolean;
+    evidence: string;
+  }>;
 }
 
 export interface BenchRun {
@@ -335,6 +348,68 @@ function responseIsTooVerbose(response: string): boolean {
   return response.length > 8000;
 }
 
+function normalizeRubricToken(token: string): string {
+  return token.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function rubricTokens(id: string, description: string): string[] {
+  const stop = new Set([
+    'a', 'an', 'and', 'are', 'as', 'by', 'for', 'in', 'is', 'it', 'of', 'on', 'or',
+    'the', 'to', 'uses', 'with', 'without', 'enough', 'reliably', 'readable',
+  ]);
+  return `${id} ${description}`
+    .split(/[\s/-]+/)
+    .map(normalizeRubricToken)
+    .filter((token) => token.length >= 4 && !stop.has(token));
+}
+
+function computeRubricCoverage(
+  rubric: Array<{ id: string; points: number; description: string }> | undefined,
+  response: string,
+  validationResults: ValidationCommandResult[],
+): RubricCoverage | undefined {
+  if (!rubric || rubric.length === 0) return undefined;
+  const validationPassed = validationResults.length > 0 && validationResults.every((result) => result.passed);
+  const evidenceText = [
+    response,
+    ...validationResults.flatMap((result) => [
+      result.command,
+      result.stdout,
+      result.stderr,
+      ...result.findings,
+    ]),
+  ].join('\n').toLowerCase();
+
+  const items = rubric.map((item) => {
+    if (/validation|passes|verification/.test(item.id) || /passes|verification|validation/.test(item.description)) {
+      return {
+        id: item.id,
+        points: item.points,
+        passed: validationPassed,
+        evidence: validationPassed ? 'validation passed' : 'validation did not pass',
+      };
+    }
+    const tokens = rubricTokens(item.id, item.description);
+    const matches = tokens.filter((token) => evidenceText.includes(token));
+    const threshold = Math.min(3, Math.max(1, Math.ceil(tokens.length * 0.25)));
+    const passed = matches.length >= threshold;
+    return {
+      id: item.id,
+      points: item.points,
+      passed,
+      evidence: matches.slice(0, 6).join(', ') || 'no rubric keywords found',
+    };
+  });
+  const totalPoints = rubric.reduce((sum, item) => sum + item.points, 0);
+  const passedPoints = items.reduce((sum, item) => sum + (item.passed ? item.points : 0), 0);
+  return {
+    passedPoints,
+    totalPoints,
+    ratio: totalPoints > 0 ? passedPoints / totalPoints : 0,
+    items,
+  };
+}
+
 export function computeBenchScores(params: {
   response: string;
   toolCalls: Array<{ name: string; status: string }>;
@@ -344,8 +419,9 @@ export function computeBenchScores(params: {
   tokenCount: number;
   costEstimate: number;
   assistedByFallback?: boolean;
+  rubric?: Array<{ id: string; points: number; description: string }>;
 }): BenchScores {
-  const { response, toolCalls, wallMs, validationResults, stepCount, tokenCount, costEstimate, assistedByFallback = false } = params;
+  const { response, toolCalls, wallMs, validationResults, stepCount, tokenCount, costEstimate, assistedByFallback = false, rubric } = params;
 
   const usedTools = toolCalls.length > 0;
   const answeredUser = response.length > 100;
@@ -358,6 +434,7 @@ export function computeBenchScores(params: {
   const conciseEnough = !responseIsTooVerbose(response);
 
   const validationPassed = validationConfigured && validationResults.every(r => r.passed);
+  const rubricCoverage = computeRubricCoverage(rubric, response, validationResults);
   const validationScore = validationResults.length > 0
     ? (validationResults.filter(r => r.passed).length / validationResults.length) * 2
     : 0; // No validation is not failure, but it cannot prove resolved.
@@ -389,6 +466,16 @@ export function computeBenchScores(params: {
       category: 'runtime',
       passed: false,
       score: 0,
+      maxScore: 1,
+    });
+  }
+  if (rubricCoverage) {
+    signals.push({
+      id: 'rubric-coverage',
+      label: 'Task rubric coverage',
+      category: 'runtime',
+      passed: rubricCoverage.ratio >= 0.7,
+      score: rubricCoverage.ratio,
       maxScore: 1,
     });
   }
@@ -425,6 +512,7 @@ export function computeBenchScores(params: {
     tokenCount,
     costEstimate,
     assistedByFallback,
+    rubricCoverage,
   };
 }
 

@@ -4561,6 +4561,7 @@ app.post('/api/bench/run', async (req, res) => {
           scores: benchRuns.computeBenchScores({
             response: '', toolCalls: [], wallMs: 0,
             validationResults: [], stepCount: 0, tokenCount: 0, costEstimate: 0,
+            rubric: task.rubric,
           }),
           startedAt: new Date().toISOString(),
           completedAt: new Date().toISOString(),
@@ -4592,6 +4593,7 @@ app.post('/api/bench/run', async (req, res) => {
           stepCount: 0,
           tokenCount: usage.tokenCount,
           costEstimate: usage.cost,
+          rubric: task.rubric,
         });
         run.results.push({
           taskId: task.id,
@@ -4756,6 +4758,7 @@ app.post('/api/bench/run', async (req, res) => {
           scores: benchRuns.computeBenchScores({
             response: '', toolCalls: [], wallMs: Date.now() - startMs,
             validationResults: [], stepCount: 0, tokenCount: 0, costEstimate: 0,
+            rubric: task.rubric,
           }),
           startedAt,
           completedAt: new Date().toISOString(),
@@ -4811,6 +4814,7 @@ app.post('/api/bench/run', async (req, res) => {
         tokenCount: usage.tokenCount,
         costEstimate: usage.cost,
         assistedByFallback,
+        rubric: task.rubric,
       });
 
       const validationFailed = !validationResults.every(r => r.passed) && validationResults.length > 0;
