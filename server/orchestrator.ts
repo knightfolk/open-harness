@@ -13,7 +13,8 @@ import { applyPatch } from './patchApply';
 import { runValidation, type ValidationCommandResult } from './benchRuns';
 import { checkCommandPolicy, type TrustMode } from './toolPolicy';
 import { existsSync, statSync } from 'fs';
-import { extname } from 'path';
+import { extname, isAbsolute, join } from 'path';
+import { fileURLToPath } from 'url';
 
 export interface OrchestrationResult {
   /** The final merged text to show the user */
@@ -1224,6 +1225,18 @@ function mergeAgentArtifacts(
   };
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function repoScriptPath(scriptName: string): string {
+  return fileURLToPath(new URL(`../scripts/${scriptName}`, import.meta.url));
+}
+
+function repoRootPath(): string {
+  return fileURLToPath(new URL('..', import.meta.url));
+}
+
 async function createFallbackStandaloneArtifact(
   taskText: string,
   modelId: string,
@@ -1232,6 +1245,7 @@ async function createFallbackStandaloneArtifact(
 ): Promise<BackgroundAgentArtifact> {
   const startedAt = new Date().toISOString();
   const folder = inferArtifactFolder(taskText);
+  const targetDir = isAbsolute(folder) ? folder : join(workingDir, folder);
   const files = buildFallbackGameFiles(folder);
   const notes = [`profile=artifact-fallback model=${modelId} provider=openharness`];
 
@@ -1257,6 +1271,8 @@ async function createFallbackStandaloneArtifact(
       ...files.map((file) => `- ${file.path}`),
       ``,
       `Validation commands:`,
+      `node ${shellQuote(repoScriptPath('verify-standalone-artifact-fixture.mjs'))} ${shellQuote(targetDir)}`,
+      `cd ${shellQuote(repoRootPath())} && node --import tsx ${shellQuote(repoScriptPath('run-ship-readiness.ts'))} ${shellQuote(targetDir)}`,
       `node -e "const fs=require('fs'); for (const file of ['${folder}/index.html','${folder}/styles.css','${folder}/game.js','${folder}/README.md']) { if (!fs.existsSync(file) || fs.statSync(file).size === 0) process.exit(1); }"`,
     ].join('\n'),
     startedAt,
@@ -1433,17 +1449,30 @@ function restart() {
 }
 
 document.addEventListener('keydown', (event) => {
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const keys = {
     ArrowLeft: [-1, 0], a: [-1, 0],
     ArrowRight: [1, 0], d: [1, 0],
     ArrowUp: [0, -1], w: [0, -1],
     ArrowDown: [0, 1], s: [0, 1],
   };
-  const step = keys[event.key];
+  const step = keys[key];
   if (step) move(step[0], step[1]);
-  if (event.key === 'r') restart();
+  if (key === 'r') restart();
 });
 document.getElementById('restart').addEventListener('click', restart);
+window.neonDecadeDescent = {
+  getState() {
+    return {
+      player: { x: player.x, y: player.y, hp: player.hp },
+      score,
+      depth,
+      turn,
+      enemies: enemies.length,
+      items: items.length
+    };
+  }
+};
 restart();
 `;
 

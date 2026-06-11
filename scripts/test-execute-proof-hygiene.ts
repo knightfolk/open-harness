@@ -303,6 +303,8 @@ try {
     assert.match(partialArtifactRetryPrompt, /Missing written CSS file/i);
     assert.match(partialArtifactRetryPrompt, /Missing written README\.md tester handoff/i);
     assert.match(partialResult.finalText, /deterministic fallback scaffold/i);
+    assert.match(partialResult.finalText, /verify-standalone-artifact-fixture\.mjs/i);
+    assert.match(partialResult.finalText, /run-ship-readiness\.ts/i);
     assert.match(readFileSync(join(partialDir, 'partial-game', 'game.js'), 'utf8'), /keydown/);
     assert.match(readFileSync(join(partialDir, 'partial-game', 'README.md'), 'utf8'), /Human testing/i);
   } finally {
