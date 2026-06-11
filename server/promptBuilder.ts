@@ -76,6 +76,12 @@ const ROLE_PROMPTS: Record<string, string> = {
   router: 'You are a task router. Classify the request and respond with a JSON object: {"role": "coder|summarizer|planner|reviewer", "reason": "brief explanation"}',
 };
 
+const OUTPUT_PROOF_RULES = [
+  'Do not claim you changed files, used tools, ran commands, launched an app, or validated output unless tool results or provided evidence prove it.',
+  'When work is not applied and validated, label it as a proposal or next step rather than delivered work.',
+  'For created apps, games, or artifacts, final answers must name the files changed and the exact validation proof or say that validation is still missing.',
+].join(' ');
+
 // ── Main builder ───────────────────────────────────────
 
 /**
@@ -297,8 +303,9 @@ function buildXMLPrompt(
   parts.push('3. Use markdown formatting in responses');
   parts.push('4. Respond in English');
   parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
+  parts.push(`6. ${OUTPUT_PROOF_RULES}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('6. Follow the most recent trusted user instructions precisely');
+    parts.push('7. Follow the most recent trusted user instructions precisely');
   }
   parts.push('</rules>');
 
@@ -342,8 +349,9 @@ function buildStructuredPrompt(
   parts.push('3. Use markdown formatting in responses');
   parts.push('4. Respond in English');
   parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
+  parts.push(`6. ${OUTPUT_PROOF_RULES}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('6. Follow the most recent trusted user instructions precisely');
+    parts.push('7. Follow the most recent trusted user instructions precisely');
   }
 
   if (options.taskDescription) {
@@ -374,7 +382,7 @@ function buildConcisePrompt(
     if (options.projectProfileSummary) parts.push(wrapUntrustedBlock('project context', options.projectProfileSummary));
   }
 
-  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES}`);
+  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES}`);
 
   if (options.taskDescription) {
     parts.push(`Task: ${options.taskDescription}`);
@@ -395,9 +403,9 @@ function buildMinimalPrompt(
   const base = personality || rolePrompt;
   if (options.workingDir) {
     const profile = options.projectProfileSummary ? ` ${wrapUntrustedBlock('project context', options.projectProfileSummary)}` : '';
-    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} Be concise.`;
+    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} Be concise.`;
   }
-  return `${base} ${UNTRUSTED_CONTEXT_RULES}`;
+  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES}`;
 }
 
 // ── Tool adaptation ────────────────────────────────────
