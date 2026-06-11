@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeBenchScores, createBenchRun, exportBenchRunCSV, generateBenchSummary, runSetupCommands, saveBenchRun, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
+import { computeBenchScores, createBenchRun, exportBenchRunCSV, generateBenchSummary, runSetupCommands, saveBenchRun, summarizeValidationFailure, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
 import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
@@ -414,6 +414,56 @@ function testRubricCoverageIsScored() {
   );
 }
 
+function testValidationFailureSummaryUsesCommandOutput() {
+  const failedValidation = [{
+    command: 'node --import tsx scripts/run-ship-readiness.ts test-fixtures/standalone-artifact-eval',
+    exitCode: 1,
+    stdout: [
+      'FAIL: Ship readiness failed with 1 blocker.',
+      '- FAIL Browser smoke: Keyboard input did not produce visible game-state evidence.',
+    ].join('\n'),
+    stderr: '',
+    findings: [],
+    durationMs: 120,
+    passed: false,
+  }];
+
+  assert.match(
+    summarizeValidationFailure(failedValidation),
+    /Ship readiness failed.*Browser smoke|Browser smoke.*Ship readiness failed/,
+    'validation summaries should preserve useful ship-readiness stdout when findings are absent',
+  );
+
+  const response = '## Delivered\n\nValidation failed; inspect the browser smoke output.';
+  const summary = generateBenchSummary([{
+    taskId: 'standalone-1980s-roguelike',
+    taskName: 'Standalone 1980s roguelike artifact',
+    modelId: 'model',
+    providerId: 'provider',
+    status: 'validation-failed',
+    prompt: 'Create a standalone game.',
+    response,
+    responseLength: response.length,
+    toolCalls: [],
+    validationResults: failedValidation,
+    validationPassed: false,
+    wallMs: 1000,
+    scores: computeBenchScores({
+      response,
+      toolCalls: [],
+      wallMs: 1000,
+      validationResults: failedValidation,
+      stepCount: 1,
+      tokenCount: 300,
+      costEstimate: 0.001,
+    }),
+    startedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+  } as any]);
+
+  assert.match(summary.regressionFlags[0]?.reason || '', /Browser smoke/);
+}
+
 function testUnknownModelPricingIsNotFree() {
   const unknown = estimateCostForRanking('unknown-provider:brand-new-model', 1000, 500);
   assert.equal(unknown.estimated, true, 'unknown model pricing should be marked as estimated');
@@ -523,6 +573,7 @@ testScoringRejectsBadOutput();
 testBenchRankingUsesSpendAndLatency();
 testFallbackAssistedRunsDoNotLookModelResolved();
 testRubricCoverageIsScored();
+testValidationFailureSummaryUsesCommandOutput();
 testUnknownModelPricingIsNotFree();
 await testSetupCommandsAreScoredAsValidation();
 testBenchChangedFileValidation();

@@ -19,6 +19,37 @@ export interface ValidationCommandResult {
   passed: boolean;
 }
 
+export function summarizeValidationFailure(results: ValidationCommandResult[]): string {
+  const failed = results.filter(v => !v.passed);
+  const snippets: string[] = [];
+
+  for (const result of failed) {
+    for (const finding of result.findings || []) {
+      snippets.push(finding);
+    }
+
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+    for (const rawLine of output.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (
+        /^(FAIL|ERROR):/i.test(line) ||
+        /^-\s*FAIL\b/i.test(line) ||
+        /ship readiness failed/i.test(line) ||
+        /browser smoke/i.test(line)
+      ) {
+        snippets.push(line);
+      }
+    }
+  }
+
+  const deduped = [...new Set(snippets.map(s => s.length > 240 ? `${s.slice(0, 237)}...` : s))].slice(0, 3);
+  if (deduped.length > 0) return deduped.join('; ');
+
+  const commands = failed.map(v => v.command).filter(Boolean).slice(0, 3);
+  return commands.length > 0 ? commands.join(', ') : 'unknown validation failure';
+}
+
 export interface BenchRunResult {
   taskId: string;
   taskName: string;
@@ -748,13 +779,10 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
   // Flag regressions: tasks that failed validation or had low scores
   for (const r of results) {
     if (!r.validationPassed) {
-      const findings = r.validationResults.flatMap(v => v.findings || []).slice(0, 3);
       summary.regressionFlags.push({
         taskId: r.taskId,
         modelId: r.modelId,
-        reason: findings.length > 0
-          ? `Validation failed: ${findings.join('; ')}`
-          : `Validation failed: ${r.validationResults.filter(v => !v.passed).map(v => v.command).join(', ')}`,
+        reason: `Validation failed: ${summarizeValidationFailure(r.validationResults)}`,
       });
     }
     if (r.scores.overallScore < 3) {

@@ -836,16 +836,37 @@ function PerTaskScoreTable({ run }: { run: api.BenchRun }) {
 }
 
 function firstValidationFinding(result: api.BenchRunResult): string {
-  const finding = result.validationResults.flatMap(v => v.findings || [])[0];
+  const finding = validationFindingSnippets(result.validationResults)[0];
   if (!finding) return '';
   return finding.length > 48 ? `${finding.slice(0, 45)}...` : finding;
+}
+
+function validationFindingSnippets(results: api.ValidationCommandResult[]): string[] {
+  const snippets: string[] = [];
+  for (const validation of results.filter(v => !v.passed || (v.findings || []).length > 0)) {
+    snippets.push(...(validation.findings || []));
+    const output = `${validation.stdout || ''}\n${validation.stderr || ''}`;
+    for (const rawLine of output.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (
+        /^(FAIL|ERROR):/i.test(line) ||
+        /^-\s*FAIL\b/i.test(line) ||
+        /ship readiness failed/i.test(line) ||
+        /browser smoke/i.test(line)
+      ) {
+        snippets.push(line);
+      }
+    }
+  }
+  return [...new Set(snippets)];
 }
 
 function ValidationFindingsPanel({ run }: { run: api.BenchRun }) {
   const failed = run.results
     .map(result => ({
       result,
-      findings: result.validationResults.flatMap(v => v.findings || []),
+      findings: validationFindingSnippets(result.validationResults),
     }))
     .filter(row => !row.result.validationPassed || row.findings.length > 0);
 
