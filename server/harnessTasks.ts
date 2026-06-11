@@ -319,7 +319,10 @@ export function seedFixtures(workingDir: string): void {
       ].join('\n'),
       workingDir,
       setupCommands: ['node scripts/reset-standalone-artifact-fixture.mjs'],
-      verificationCommands: ['node scripts/verify-standalone-artifact-fixture.mjs'],
+      verificationCommands: [
+        'node scripts/verify-standalone-artifact-fixture.mjs',
+        'node --import tsx scripts/run-ship-readiness.ts test-fixtures/standalone-artifact-eval',
+      ],
       expectedChangedFiles: [
         'test-fixtures/standalone-artifact-eval/',
       ],
@@ -335,7 +338,7 @@ export function seedFixtures(workingDir: string): void {
         { id: 'playable-loop', points: 3, description: 'Implements player movement, hazards/enemies, collectibles, state, restart, and win/loss or progression' },
         { id: 'era-theme', points: 1.5, description: 'Uses concrete 1980s icons, events, and items in gameplay, not just labels' },
         { id: 'tester-ready-ui', points: 1.5, description: 'Readable, polished, responsive enough for human quality testing' },
-        { id: 'validation-passes', points: 2, description: 'Passes standalone artifact verification' },
+        { id: 'validation-passes', points: 2, description: 'Passes standalone artifact and ship-readiness verification' },
       ],
       tags: ['coding', 'write', 'fixture', 'game', 'artifact', 'ship-readiness', 'ui', 'code-quality'],
     },

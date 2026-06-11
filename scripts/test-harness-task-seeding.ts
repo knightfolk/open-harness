@@ -24,6 +24,8 @@ try {
         sameId: refreshed.id === first.id,
         timeoutMs: refreshed.timeoutMs,
         prompt: refreshed.prompt,
+        verificationCommands: refreshed.verificationCommands,
+        rubric: refreshed.rubric,
       }));
     `,
   ], {
@@ -39,6 +41,14 @@ try {
   assert.equal(parsed.sameId, true, 'seed refresh should preserve the existing task id');
   assert.equal(parsed.timeoutMs, 360000, 'seed refresh should update changed built-in task metadata');
   assert.match(parsed.prompt, /standalone browser game artifact/i);
+  assert.deepEqual(parsed.verificationCommands, [
+    'node scripts/verify-standalone-artifact-fixture.mjs',
+    'node --import tsx scripts/run-ship-readiness.ts test-fixtures/standalone-artifact-eval',
+  ]);
+  assert.ok(
+    parsed.rubric.some((item: any) => item.id === 'validation-passes' && /ship-readiness/i.test(item.description)),
+    'artifact rubric should require ship-readiness proof',
+  );
 } finally {
   rmSync(tempHome, { recursive: true, force: true });
 }
