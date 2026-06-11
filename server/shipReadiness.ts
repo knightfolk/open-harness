@@ -31,7 +31,14 @@ function walkFiles(dir: string, root = dir): string[] {
   const entries = readdirSync(dir, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
-    if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === 'release') continue;
+    if (
+      entry.name === 'node_modules'
+      || entry.name === '.git'
+      || entry.name === 'dist'
+      || entry.name === 'release'
+      || entry.name === '.openharness-smoke'
+      || entry.name === '.openharness-bench'
+    ) continue;
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) files.push(...walkFiles(fullPath, root));
     else files.push(fullPath.slice(root.length + 1));

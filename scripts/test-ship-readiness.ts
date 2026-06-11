@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -10,6 +10,24 @@ assert.equal(gameReport.status, 'pass', gameReport.summary);
 assert.equal(gameReport.checks.find((check) => check.id === 'entry-html')?.status, 'pass');
 assert.equal(gameReport.checks.find((check) => check.id === 'local-assets')?.status, 'pass');
 assert.equal(gameReport.checks.find((check) => check.id === 'javascript-syntax')?.status, 'pass');
+
+const browserSmoke = spawnSync(process.execPath, ['scripts/smoke-standalone-game-browser.mjs', 'neon-decade-descent', '--json'], {
+  cwd: process.cwd(),
+  encoding: 'utf8',
+  timeout: 60_000,
+});
+assert.equal(browserSmoke.status, 0, `${browserSmoke.stderr}\n${browserSmoke.stdout}`);
+const browserSmokeReport = JSON.parse(browserSmoke.stdout);
+assert.equal(browserSmokeReport.status, 'pass', 'browser smoke should pass for the shippable game artifact');
+assert.equal(
+  browserSmokeReport.checks.find((check: any) => check.id === 'keyboard-input')?.status,
+  'pass',
+  'browser smoke should prove keyboard input/state evidence',
+);
+assert.ok(
+  browserSmokeReport.screenshotPath && existsSync(browserSmokeReport.screenshotPath),
+  'browser smoke should write screenshot evidence',
+);
 
 const fixtureDir = mkdtempSync(join(tmpdir(), 'openharness-ship-readiness-'));
 try {
