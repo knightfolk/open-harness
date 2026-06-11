@@ -1614,7 +1614,7 @@ export interface BenchRunResult {
   taskName: string;
   modelId: string;
   providerId: string;
-  status: 'ok' | 'error' | 'timeout' | 'validation-failed';
+  status: 'ok' | 'assisted' | 'error' | 'timeout' | 'validation-failed';
   prompt: string;
   response: string;
   responseLength: number;

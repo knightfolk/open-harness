@@ -24,7 +24,7 @@ export interface BenchRunResult {
   taskName: string;
   modelId: string;
   providerId: string;
-  status: 'ok' | 'error' | 'timeout' | 'validation-failed';
+  status: 'ok' | 'assisted' | 'error' | 'timeout' | 'validation-failed';
   prompt: string;
   response: string;
   responseLength: number;
@@ -679,6 +679,7 @@ export function exportBenchRunCSV(runId: string): string | null {
 
   const header = [
     'task_id', 'task_name', 'model_id', 'status', 'resolved',
+    'assisted_by_fallback', 'model_authored_delivery',
     'overall_score', 'validation_score', 'validation_passed',
     'wall_ms', 'tool_count', 'step_count', 'token_count', 'cost_estimate',
     'response_length',
@@ -686,6 +687,7 @@ export function exportBenchRunCSV(runId: string): string | null {
 
   const rows = run.results.map(r => [
     r.taskId, `"${r.taskName}"`, r.modelId, r.status, r.scores.resolvedStatus,
+    r.assistedByFallback === true, r.assistedByFallback === true ? false : r.scores.resolvedStatus === 'resolved',
     r.scores.overallScore, r.scores.validationScore, r.validationPassed,
     r.wallMs, r.toolCalls.length, r.scores.stepCount, r.scores.tokenCount,
     r.scores.costEstimate, r.responseLength,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeBenchScores, generateBenchSummary, runSetupCommands, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
+import { computeBenchScores, createBenchRun, exportBenchRunCSV, generateBenchSummary, runSetupCommands, saveBenchRun, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
 import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
@@ -282,7 +282,7 @@ function testFallbackAssistedRunsDoNotLookModelResolved() {
       taskName: 'Task',
       modelId: 'fallback-model',
       providerId: 'provider',
-      status: 'ok',
+      status: 'assisted',
       prompt: 'Prompt',
       response,
       responseLength: response.length,
@@ -299,6 +299,34 @@ function testFallbackAssistedRunsDoNotLookModelResolved() {
   assert.equal(summary.byModel['fallback-model'].resolved, 0, 'assisted fallback should not increase resolved count');
   assert.equal(summary.byModel['fallback-model'].assisted, 1, 'assisted fallback should be counted separately');
   assert.match(summary.bestModelReason || '', /assisted 1\/1/i);
+
+  const run = createBenchRun({
+    name: 'assisted export regression',
+    taskIds: ['task'],
+    modelIds: ['fallback-model'],
+  });
+  run.results.push({
+    taskId: 'task',
+    taskName: 'Task',
+    modelId: 'fallback-model',
+    providerId: 'provider',
+    status: 'assisted',
+    prompt: 'Prompt',
+    response,
+    responseLength: response.length,
+    toolCalls: [{ name: 'write_file', status: 'complete' }],
+    validationResults,
+    validationPassed: true,
+    wallMs: 12_000,
+    scores: assistedScore,
+    startedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    assistedByFallback: true,
+  });
+  saveBenchRun(run);
+  const csv = exportBenchRunCSV(run.id) || '';
+  assert.match(csv.split('\n')[0], /assisted_by_fallback,model_authored_delivery/);
+  assert.match(csv, /fallback-model,assisted,assisted,true,false/);
 }
 
 function testUnknownModelPricingIsNotFree() {

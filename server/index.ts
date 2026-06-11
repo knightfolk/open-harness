@@ -4813,9 +4813,12 @@ app.post('/api/bench/run', async (req, res) => {
         assistedByFallback,
       });
 
-      const status: BenchRunResult['status'] = !validationResults.every(r => r.passed) && validationResults.length > 0
+      const validationFailed = !validationResults.every(r => r.passed) && validationResults.length > 0;
+      const status: BenchRunResult['status'] = validationFailed
         ? 'validation-failed'
-        : 'ok';
+        : assistedByFallback
+          ? 'assisted'
+          : 'ok';
 
       run.results.push({
         taskId: task.id,
