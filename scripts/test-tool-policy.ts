@@ -15,6 +15,7 @@ const tools = [
   { name: 'run_command' },
   { name: 'browser_run_code_unsafe' },
   { name: 'mcp-config-set' },
+  { name: 'mcp-exec' },
 ];
 
 assert.deepEqual(
@@ -58,9 +59,19 @@ assert.equal(
   'workspace-write should not expose MCP gateway mutation tools',
 );
 assert.equal(
+  filterToolsForTrustMode(tools, 'workspace-write').filteredTools?.includes('mcp-exec'),
+  false,
+  'workspace-write should not expose dynamic MCP execution tools',
+);
+assert.equal(
   filterToolsForTrustMode(tools, 'full-local').filteredTools?.includes('browser_run_code_unsafe'),
   true,
   'full-local may expose unsafe browser code execution',
+);
+assert.equal(
+  filterToolsForTrustMode(tools, 'full-local').filteredTools?.includes('mcp-exec'),
+  true,
+  'full-local may expose dynamic MCP execution tools',
 );
 
 assert.equal(isPathWithin('/tmp/project/src/App.tsx', '/tmp/project'), true, 'normal child path should be within workspace');
@@ -129,9 +140,19 @@ assert.equal(
   'workspace-write should reject direct MCP gateway mutation calls',
 );
 assert.equal(
+  checkToolActionPolicy('mcp-exec', { name: 'subagent-security', arguments: {} }, 'workspace-write', '/tmp/project').allowed,
+  false,
+  'workspace-write should reject dynamic MCP execution calls',
+);
+assert.equal(
   checkToolActionPolicy('browser_run_code_unsafe', { code: 'async (page) => page.title()' }, 'full-local', '/tmp/project').allowed,
   true,
   'full-local should allow direct unsafe browser code calls',
+);
+assert.equal(
+  checkToolActionPolicy('mcp-exec', { name: 'subagent-security', arguments: {} }, 'full-local', '/tmp/project').allowed,
+  true,
+  'full-local should allow dynamic MCP execution calls',
 );
 
 console.log('Tool policy tests passed.');

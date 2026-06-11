@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { runOrchestratorPipeline } from '../server/orchestrator';
 import type { StoredConfig } from '../server/config';
 import type { RouteDecision } from '../server/router';
@@ -44,6 +44,8 @@ let artifactContinuationPrompt = '';
 let artifactInitialPrompt = '';
 let nativeToolTempDir = '';
 let nativeToolRequestHadTools = false;
+let partialArtifactTempDir = '';
+let partialArtifactRetryPrompt: string;
 
 try {
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -123,6 +125,21 @@ try {
         'Validation commands:',
         'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'native-game/game.js\', \'utf8\').includes(\'Native moved\')) process.exit(1)"',
       ].join('\n');
+    } else if (
+      fullPrompt.includes('Create a playable browser game in partial-game folder.')
+      && fullPrompt.includes('## Artifact Write Command')
+      && !fullPrompt.includes('## Artifact Creation Retry')
+      && !fullPrompt.includes('Tool results:')
+    ) {
+      content = [
+        `<tool_call>{"name":"write_file","arguments":{"path":"${partialArtifactTempDir}/partial-game/index.html","content":"<!doctype html><title>Partial Game</title><main id=\\"game\\">Partial only</main><script src=\\"game.js\\"></script>"}}</tool_call>`,
+      ].join('\n');
+    } else if (
+      fullPrompt.includes('partial-game')
+      && fullPrompt.includes('## Artifact Creation Retry')
+    ) {
+      partialArtifactRetryPrompt = fullPrompt;
+      content = 'Created partial-game/index.html and the artifact is complete.';
     } else if (fullPrompt.includes('Create the requested artifact') && !fullPrompt.includes('Tool results:')) {
       artifactInitialPrompt = fullPrompt;
       content = [
@@ -218,10 +235,11 @@ try {
             parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
           },
         }],
-        invokeTool: async (toolName, args) => {
+        invokeTool: async (toolName, args, workingDir) => {
           assert.equal(toolName, 'write_file');
-          writeFileSync(String(args.path), String(args.content), 'utf8');
-          return { written: true, path: args.path };
+          const targetPath = isAbsolute(String(args.path)) ? String(args.path) : join(String(workingDir), String(args.path));
+          writeFileSync(targetPath, String(args.content), 'utf8');
+          return { written: true, path: targetPath };
         },
       },
     );
@@ -248,6 +266,48 @@ try {
   } finally {
     rmSync(artifactDir, { recursive: true, force: true });
     artifactTempDir = '';
+  }
+
+  const partialDir = mkdtempSync(join(tmpdir(), 'openharness-partial-artifact-proof-'));
+  partialArtifactTempDir = partialDir;
+  partialArtifactRetryPrompt = '';
+  try {
+    mkdirSync(join(partialDir, 'partial-game'), { recursive: true });
+    const writeConfig: StoredConfig = { ...config, trustMode: 'workspace-write' };
+    const partialResult = await runOrchestratorPipeline(
+      route,
+      'Create a playable browser game in partial-game folder.',
+      writeConfig,
+      partialDir,
+      {
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'write_file',
+            description: 'Write a file',
+            parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+          },
+        }],
+        invokeTool: async (toolName, args, workingDir) => {
+          assert.equal(toolName, 'write_file');
+          const targetPath = isAbsolute(String(args.path)) ? String(args.path) : join(String(workingDir), String(args.path));
+          writeFileSync(targetPath, String(args.content), 'utf8');
+          return { written: true, path: targetPath };
+        },
+      },
+    );
+
+    assert.equal(partialResult.ok, true, `partial model-authored artifact should be rescued to a shippable fallback:\n${partialResult.finalText}`);
+    assert.equal(partialResult.assistedByFallback, true, 'partial model-authored artifact should be marked fallback-assisted');
+    assert.match(partialArtifactRetryPrompt, /Missing written JavaScript file/i);
+    assert.match(partialArtifactRetryPrompt, /Missing written CSS file/i);
+    assert.match(partialArtifactRetryPrompt, /Missing written README\.md tester handoff/i);
+    assert.match(partialResult.finalText, /deterministic fallback scaffold/i);
+    assert.match(readFileSync(join(partialDir, 'partial-game', 'game.js'), 'utf8'), /keydown/);
+    assert.match(readFileSync(join(partialDir, 'partial-game', 'README.md'), 'utf8'), /Human testing/i);
+  } finally {
+    rmSync(partialDir, { recursive: true, force: true });
+    partialArtifactTempDir = '';
   }
 
   const nativeToolDir = mkdtempSync(join(tmpdir(), 'openharness-native-tool-proof-'));

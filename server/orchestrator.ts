@@ -515,16 +515,21 @@ async function runExecutePipeline(
   }
 
   const writeToolAvailable = !!callbacks.tools?.some((tool) => (tool.name || tool.function?.name) === 'write_file');
-  const implementerWroteFiles = !!implArtifact?.notes.some((note) => note.startsWith('write_file:path='));
-  if (artifactCreation && writeToolAvailable && !implementerWroteFiles) {
+  let writtenArtifactFiles = extractWrittenFilesFromAgentNotes(implArtifact?.notes || []);
+  let artifactManifestComplete = !artifactCreation || artifactWritesPassManifest(writtenArtifactFiles, userMessage);
+  if (artifactCreation && writeToolAvailable && !artifactManifestComplete) {
+    const manifestFindings = artifactManifestFindings(writtenArtifactFiles, userMessage);
     const retryPrompt = [
       `## Artifact Creation Retry`,
-      `The previous implementer pass did not create files. Do not inspect more files unless absolutely necessary.`,
+      `The previous implementer pass did not create a complete runnable artifact. Do not inspect more files unless absolutely necessary.`,
       ``,
       `## Task`,
       userMessage,
       ``,
       workingDir ? `Working directory: ${workingDir}` : '',
+      ``,
+      `Current manifest findings:`,
+      ...(manifestFindings.length > 0 ? manifestFindings.map((finding) => `- ${finding}`) : ['- No artifact files were written.']),
       ``,
       `Use write_file now. Emit write_file tool calls only until these files exist in the requested artifact folder:`,
       ...artifactRequiredPaths.map((path) => `- ${path}`),
@@ -558,7 +563,9 @@ async function runExecutePipeline(
           : `Implementer retry error: ${retryArtifact.error}`,
       });
       if (retryArtifact.notes.some((note) => note.startsWith('write_file:path=')) || retryArtifact.response.trim()) {
-        implArtifact = retryArtifact;
+        implArtifact = mergeAgentArtifacts(implArtifact, retryArtifact);
+        writtenArtifactFiles = extractWrittenFilesFromAgentNotes(implArtifact?.notes || []);
+        artifactManifestComplete = artifactWritesPassManifest(writtenArtifactFiles, userMessage);
       }
     } catch (err: any) {
       phases.push({
@@ -576,7 +583,7 @@ async function runExecutePipeline(
     && writeToolAvailable
     && callbacks.invokeTool
     && workingDir
-    && extractWrittenFilesFromAgentNotes(implArtifact?.notes || []).length === 0
+    && !artifactManifestComplete
   ) {
     try {
       const fallbackArtifact = await createFallbackStandaloneArtifact(userMessage, implModelId, workingDir, callbacks.invokeTool);
@@ -1197,6 +1204,26 @@ function extractWrittenFilesFromAgentNotes(notes: string[]): string[] {
   return Array.from(files);
 }
 
+function artifactWritesPassManifest(writtenFiles: string[], taskText: string): boolean {
+  return validateArtifactWrites(writtenFiles, taskText).every((result) => result.passed);
+}
+
+function artifactManifestFindings(writtenFiles: string[], taskText: string): string[] {
+  return validateArtifactWrites(writtenFiles, taskText).flatMap((result) => result.findings);
+}
+
+function mergeAgentArtifacts(
+  previous: BackgroundAgentArtifact | null,
+  next: BackgroundAgentArtifact,
+): BackgroundAgentArtifact {
+  if (!previous) return next;
+  return {
+    ...next,
+    response: [previous.response, next.response].filter((text) => text.trim()).join('\n\n'),
+    notes: [...previous.notes, ...next.notes],
+  };
+}
+
 async function createFallbackStandaloneArtifact(
   taskText: string,
   modelId: string,
@@ -1230,7 +1257,7 @@ async function createFallbackStandaloneArtifact(
       ...files.map((file) => `- ${file.path}`),
       ``,
       `Validation commands:`,
-      `node scripts/verify-standalone-artifact-fixture.mjs`,
+      `node -e "const fs=require('fs'); for (const file of ['${folder}/index.html','${folder}/styles.css','${folder}/game.js','${folder}/README.md']) { if (!fs.existsSync(file) || fs.statSync(file).size === 0) process.exit(1); }"`,
     ].join('\n'),
     startedAt,
     completedAt,

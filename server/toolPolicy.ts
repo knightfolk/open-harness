@@ -47,6 +47,10 @@ const HIGH_RISK_TOOLS = [
   'mcp-config-set',
   'mcp-create-profile',
   'mcp-activate-profile',
+  // Executes arbitrary MCP tools by name. In normal workspace-write runs this
+  // lets models invent orchestration-like tool calls instead of using the
+  // built-in OpenHarness orchestration path.
+  'mcp-exec',
 ];
 
 // ── Tool filtering by trust mode ───────────────────────
