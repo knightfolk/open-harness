@@ -441,6 +441,9 @@ async function runExecutePipeline(
         `<tool_call>{"name":"write_file","arguments":{"path":"${artifactRequiredPaths[0] || 'generated-artifact/index.html'}","content":"complete file contents"}}</tool_call>`,
         ``,
         `After all required files are written, produce a concise final answer with validation commands.`,
+        `For standalone browser artifacts, include these ship gates in that final answer:`,
+        `- node ${shellQuote(repoScriptPath('verify-standalone-artifact-fixture.mjs'))} ${shellQuote(artifactFolder)}`,
+        `- cd ${shellQuote(repoRootPath())} && node --import tsx ${shellQuote(repoScriptPath('run-ship-readiness.ts'))} ${shellQuote(workingDir ? join(workingDir, artifactFolder) : artifactFolder)}`,
         ``,
         `## Task (from user)`,
         userMessage,
@@ -452,7 +455,7 @@ async function runExecutePipeline(
         ``,
         `Create the requested artifact directly in the workspace when write_file is available.`,
         `For a new app/game/site, make its own folder, write complete runnable files, and keep dependencies minimal.`,
-        `After writing files, list exactly which validation commands should be run to verify correctness.`,
+        `After writing files, list exactly which validation commands should be run to verify correctness and browser ship-readiness.`,
         `If write_file is not available, provide complete file contents and exact paths instead of a vague plan.`,
       ].join('\n')
       : [

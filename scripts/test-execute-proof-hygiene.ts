@@ -253,6 +253,8 @@ try {
     assert.match(artifactInitialPrompt, /Your next response must use write_file tool calls/i);
     assert.match(artifactInitialPrompt, /generated-artifact\/index\.html/);
     assert.match(artifactInitialPrompt, /generated-artifact\/game\.js/);
+    assert.match(artifactInitialPrompt, /verify-standalone-artifact-fixture\.mjs/);
+    assert.match(artifactInitialPrompt, /run-ship-readiness\.ts/);
     assert.doesNotMatch(artifactInitialPrompt.slice(0, 400), /## Plan/);
     assert.match(artifactResult.finalText, /## Delivered/);
     assert.match(artifactResult.finalText, /Direct artifact file writes were used/i);
