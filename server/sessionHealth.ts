@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { PersistedSession } from './sessionStore';
@@ -22,6 +22,11 @@ export interface LatestUserOnlyScanOptions {
   now?: number;
   thresholdMs?: number;
   recentFileGraceMs?: number;
+}
+
+export interface LatestUserOnlyRepairResult {
+  repaired: LatestUserOnlySession[];
+  skipped: LatestUserOnlySession[];
 }
 
 function defaultSessionsDir(): string {
@@ -103,4 +108,57 @@ export function scanForLatestUserOnlySessions(options: LatestUserOnlyScanOptions
   }
 
   return flagged.sort((a, b) => new Date(a.lastTimestamp).getTime() - new Date(b.lastTimestamp).getTime());
+}
+
+export function repairLatestUserOnlySessions(options: LatestUserOnlyScanOptions = {}): LatestUserOnlyRepairResult {
+  const sessionsDir = options.sessionsDir || defaultSessionsDir();
+  const flagged = scanForLatestUserOnlySessions(options);
+  const repaired: LatestUserOnlySession[] = [];
+  const skipped: LatestUserOnlySession[] = [];
+
+  for (const item of flagged) {
+    const filePath = join(sessionsDir, `${item.id}.json`);
+    try {
+      const session = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedSession;
+      if (hasCanceledMarker(session)) {
+        skipped.push(item);
+        continue;
+      }
+      const timestamp = new Date().toISOString();
+      const runTrace = {
+        id: `session-repair-${item.id}-${Date.now()}`,
+        sessionId: session.id,
+        userMessageId: session.messages[session.messages.length - 1]?.id || '',
+        requestedModel: 'unknown',
+        effectiveModel: 'unknown',
+        providerId: 'session-health',
+        role: 'worker',
+        status: 'error',
+        startedAt: item.lastTimestamp,
+        completedAt: timestamp,
+        steps: [
+          {
+            id: `step-${Date.now()}`,
+            timestamp,
+            type: 'error',
+            message: 'Recovered stale run: no assistant response was saved after the latest user message.',
+          },
+        ],
+      };
+      session.messages.push({
+        id: `assistant-repair-${Date.now()}`,
+        role: 'assistant',
+        content: 'Run interrupted: OpenHarness recovered this session because no assistant response was saved after your last message. Please retry the request.',
+        timestamp,
+        runTrace,
+      });
+      session.updatedAt = timestamp;
+      writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
+      repaired.push(item);
+    } catch {
+      skipped.push(item);
+    }
+  }
+
+  return { repaired, skipped };
 }

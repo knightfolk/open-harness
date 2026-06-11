@@ -198,6 +198,7 @@ import * as protectedPaths from './protectedPaths';
 import * as processLedger from './processLedger';
 import { filterToolsForTrustMode, checkCommandPolicy, checkToolActionPolicy, isPathAllowed, isPathWithin, isReadPathAllowed, type TrustMode } from './toolPolicy';
 import * as sessionStore from './sessionStore';
+import { repairLatestUserOnlySessions } from './sessionHealth';
 import * as projectMemory from './projectMemory';
 import { getAdapterInfo, discoverLocalProviders, streamWithAdapter } from './providers/registry';
 import type { ProviderChatRequest, ProviderMessage } from './providers/types';
@@ -739,6 +740,13 @@ function trustedWorkspaceFromRequest(req: express.Request): string {
   if (requested && isKnownWorkspacePath(requested)) return resolveWorkspaceCandidate(requested);
 
   return process.cwd();
+}
+
+// Repair stale user-only sessions before loading them into memory so reloads
+// never look like the assistant silently vanished after a failed run.
+const repairedSessions = repairLatestUserOnlySessions();
+if (repairedSessions.repaired.length > 0) {
+  console.warn(`Repaired ${repairedSessions.repaired.length} stale user-only session(s) with visible assistant interruption markers.`);
 }
 
 // Load persisted sessions from disk on startup

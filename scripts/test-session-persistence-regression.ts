@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert';
-import { unlinkSync, utimesSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { saveSession, type PersistedSession } from '../server/sessionStore';
-import { scanForLatestUserOnlySessions } from '../server/sessionHealth';
+import { repairLatestUserOnlySessions, scanForLatestUserOnlySessions } from '../server/sessionHealth';
 
 const SESSIONS_DIR = join(homedir(), '.openharness', 'sessions');
 
@@ -64,8 +64,26 @@ try {
   const canceledFound = flagged.find(f => f.id === canceledSessionId);
   assert.equal(!!canceledFound, false, 'Session with canceled marker should NOT be flagged');
 
+  const repair = repairLatestUserOnlySessions();
+  assert.equal(
+    repair.repaired.some((s) => s.id === testSessionId),
+    true,
+    'Latest-user-only test session should be repaired with a visible assistant marker',
+  );
+  const repairedScan = scanForLatestUserOnlySessions();
+  assert.equal(
+    repairedScan.some((s) => s.id === testSessionId),
+    false,
+    'Repaired session should no longer be flagged as latest-user-only',
+  );
+  const repairedStored = JSON.parse(readFileSync(join(SESSIONS_DIR, `${testSessionId}.json`), 'utf-8'));
+  const repairedLast = repairedStored.messages[repairedStored.messages.length - 1];
+  assert.equal(repairedLast.role, 'assistant', 'Repair marker should be an assistant message');
+  assert.match(repairedLast.content, /Run interrupted/i, 'Repair marker should explain the interrupted run');
+
   console.log('Session persistence regression test passed.');
   console.log(`  Test session correctly flagged as latest-user-only (${Math.round(found!.ageMs / 1000)}s old)`);
+  console.log('  Test session correctly repaired with a visible assistant marker');
   console.log('  Canceled session correctly exempted');
 
   const realFlagged = flagged.filter(
@@ -82,4 +100,42 @@ try {
 } finally {
   try { unlinkSync(join(SESSIONS_DIR, `${testSessionId}.json`)); } catch { /* ignore */ }
   try { unlinkSync(join(SESSIONS_DIR, `${canceledSessionId}.json`)); } catch { /* ignore */ }
+}
+
+const startupRepairDir = mkdtempSync(join(tmpdir(), 'openharness-session-startup-repair-'));
+try {
+  mkdirSync(startupRepairDir, { recursive: true });
+  const staleSessionId = 'startup-repair-session';
+  const staleTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const startupRepairFile = join(startupRepairDir, `${staleSessionId}.json`);
+  writeFileSync(startupRepairFile, JSON.stringify({
+    id: staleSessionId,
+    title: 'Startup repair regression',
+    workingDir: null,
+    createdAt: staleTimestamp,
+    updatedAt: staleTimestamp,
+    messages: [{
+      id: 'user-startup',
+      role: 'user',
+      content: 'This should be repaired before app load.',
+      timestamp: staleTimestamp,
+    }],
+  }, null, 2));
+  const staleMtime = new Date(Date.now() - 5 * 60 * 1000);
+  utimesSync(startupRepairFile, staleMtime, staleMtime);
+
+  const repaired = repairLatestUserOnlySessions({
+    sessionsDir: startupRepairDir,
+    thresholdMs: 2 * 60 * 1000,
+    recentFileGraceMs: 0,
+  });
+  assert.equal(repaired.repaired.length, 1, 'startup repair should repair one stale session');
+  const afterStartupRepair = scanForLatestUserOnlySessions({
+    sessionsDir: startupRepairDir,
+    thresholdMs: 2 * 60 * 1000,
+    recentFileGraceMs: 0,
+  });
+  assert.equal(afterStartupRepair.length, 0, 'startup-repaired temp session should no longer be latest-user-only');
+} finally {
+  rmSync(startupRepairDir, { recursive: true, force: true });
 }
