@@ -42,6 +42,8 @@ const originalFetch = globalThis.fetch;
 let artifactTempDir = '';
 let artifactContinuationPrompt = '';
 let artifactInitialPrompt = '';
+let nativeToolTempDir = '';
+let nativeToolRequestHadTools = false;
 
 try {
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -52,6 +54,75 @@ try {
 
     if (prompt.includes('step-by-step implementation plan')) {
       content = 'Plan: edit src/App.tsx, then run npm run build.';
+    } else if (
+      fullPrompt.includes('Create a playable browser game in native-game folder.')
+      && Array.isArray(body.tools)
+      && body.tools.some((tool: any) => tool.function?.name === 'write_file')
+    ) {
+      nativeToolRequestHadTools = true;
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: '',
+            tool_calls: [
+              {
+                id: 'call-index',
+                type: 'function',
+                function: {
+                  name: 'write_file',
+                  arguments: JSON.stringify({
+                    path: `${nativeToolTempDir}/native-game/index.html`,
+                    content: '<!doctype html><title>Native Game</title><link rel="stylesheet" href="styles.css"><main id="game">Native game</main><script src="game.js"></script>',
+                  }),
+                },
+              },
+              {
+                id: 'call-css',
+                type: 'function',
+                function: {
+                  name: 'write_file',
+                  arguments: JSON.stringify({
+                    path: `${nativeToolTempDir}/native-game/styles.css`,
+                    content: 'body { background: #080808; color: #f5f5f5; font-family: monospace; }',
+                  }),
+                },
+              },
+              {
+                id: 'call-js',
+                type: 'function',
+                function: {
+                  name: 'write_file',
+                  arguments: JSON.stringify({
+                    path: `${nativeToolTempDir}/native-game/game.js`,
+                    content: 'document.addEventListener("keydown", () => { document.getElementById("game").textContent = "Native moved"; });',
+                  }),
+                },
+              },
+              {
+                id: 'call-readme',
+                type: 'function',
+                function: {
+                  name: 'write_file',
+                  arguments: JSON.stringify({
+                    path: `${nativeToolTempDir}/native-game/README.md`,
+                    content: '# Native Game\n\nOpen index.html and press a key to verify movement for human testing.',
+                  }),
+                },
+              },
+            ],
+          },
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } else if (fullPrompt.includes('native-game') && fullPrompt.includes('Only produce the final answer after')) {
+      content = [
+        'Created native-game/index.html, native-game/styles.css, native-game/game.js, and native-game/README.md.',
+        '',
+        'Validation commands:',
+        'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'native-game/game.js\', \'utf8\').includes(\'Native moved\')) process.exit(1)"',
+      ].join('\n');
     } else if (fullPrompt.includes('Create the requested artifact') && !fullPrompt.includes('Tool results:')) {
       artifactInitialPrompt = fullPrompt;
       content = [
@@ -177,6 +248,45 @@ try {
   } finally {
     rmSync(artifactDir, { recursive: true, force: true });
     artifactTempDir = '';
+  }
+
+  const nativeToolDir = mkdtempSync(join(tmpdir(), 'openharness-native-tool-proof-'));
+  nativeToolTempDir = nativeToolDir;
+  try {
+    mkdirSync(join(nativeToolDir, 'native-game'), { recursive: true });
+    const writeConfig: StoredConfig = { ...config, trustMode: 'workspace-write' };
+    const nativeToolResult = await runOrchestratorPipeline(
+      route,
+      'Create a playable browser game in native-game folder.',
+      writeConfig,
+      nativeToolDir,
+      {
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'write_file',
+            description: 'Write a file',
+            parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+          },
+        }],
+        invokeTool: async (toolName, args) => {
+          assert.equal(toolName, 'write_file');
+          writeFileSync(String(args.path), String(args.content), 'utf8');
+          return { written: true, path: args.path };
+        },
+      },
+    );
+
+    assert.equal(nativeToolRequestHadTools, true, 'agent runtime should pass native tool schemas to the provider');
+    assert.equal(nativeToolResult.ok, true, 'native tool-call artifact creation should be ok when write_file runs and validation passes');
+    assert.equal(nativeToolResult.assistedByFallback, false, 'native model-authored artifact writes should not be fallback-assisted');
+    assert.match(nativeToolResult.finalText, /Direct artifact file writes were used/i);
+    assert.doesNotMatch(nativeToolResult.finalText, /deterministic fallback scaffold/i);
+    assert.match(readFileSync(join(nativeToolDir, 'native-game', 'game.js'), 'utf8'), /Native moved/);
+  } finally {
+    rmSync(nativeToolDir, { recursive: true, force: true });
+    nativeToolTempDir = '';
+    nativeToolRequestHadTools = false;
   }
 } finally {
   globalThis.fetch = originalFetch;

@@ -19,7 +19,7 @@ import type { HarnessRunStep } from './runTrace';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
 import { getAdapter } from './providers/registry';
-import type { ProviderMessage } from './providers/types';
+import type { ProviderMessage, ProviderTool } from './providers/types';
 import { isPathWithin } from './toolPolicy';
 
 export interface BackgroundAgentRequest {
@@ -69,6 +69,18 @@ export interface AgentToolDefinition {
     description?: string;
     parameters?: any;
   };
+}
+
+interface AgentToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  source: 'native' | 'markup';
+}
+
+interface AgentModelResponse {
+  text: string;
+  toolCalls: AgentToolCall[];
 }
 
 const DEFAULT_AGENT_TOOLS: AgentToolDefinition[] = [
@@ -140,6 +152,23 @@ function getToolDescription(tool: AgentToolDefinition): string {
 function getToolParameters(tool: AgentToolDefinition): string {
   const properties = tool.inputSchema?.properties || tool.function?.parameters?.properties;
   return properties ? Object.keys(properties).join(', ') : 'none';
+}
+
+function toProviderTools(tools: AgentToolDefinition[]): ProviderTool[] {
+  return tools.map((tool) => {
+    const name = getToolName(tool);
+    return {
+      type: 'function' as const,
+      function: {
+        name,
+        description: getToolDescription(tool),
+        parameters: tool.inputSchema || tool.function?.parameters || {
+          type: 'object',
+          properties: {},
+        },
+      },
+    };
+  }).filter((tool) => tool.function.name);
 }
 
 function normalizeAgentTools(tools?: AgentToolDefinition[]): AgentToolDefinition[] {
@@ -431,7 +460,7 @@ export async function runAgentPhase(
   };
 
   try {
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    const messages: ProviderMessage[] = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: req.prompt },
     ];
@@ -440,19 +469,40 @@ export async function runAgentPhase(
 
     for (let round = 0; round < maxToolRounds; round++) {
       req.onStep?.({ type: 'model_request', round: round + 1, model: modelId });
-      const text = await callAgentModel(provider, modelId, messages, profile.temperature, controller.signal);
+      const modelResponse = await callAgentModel(provider, modelId, messages, profile.temperature, controller.signal, agentTools);
+      const text = modelResponse.text;
       if (text) req.onStep?.({ type: 'model_text', chars: text.length });
       const parsed = parseToolCallMarkup(text, knownToolNames);
-      const calls = parsed.calls.filter((call) => knownToolNames.includes(call.name));
+      const markupCalls = parsed.calls
+        .filter((call) => knownToolNames.includes(call.name))
+        .map((call) => ({
+          id: `markup-${uuid()}`,
+          name: call.name,
+          arguments: call.arguments,
+          source: 'markup' as const,
+        }));
+      const nativeCalls = modelResponse.toolCalls.filter((call) => knownToolNames.includes(call.name));
+      const calls = [...nativeCalls, ...markupCalls];
 
       if (calls.length === 0) {
         artifact.response = stripAgentToolMarkup(text, knownToolNames);
         break;
       }
 
-      messages.push({ role: 'assistant', content: text });
+      const hasNativeCalls = calls.some((call) => call.source === 'native');
+      messages.push(hasNativeCalls
+        ? {
+          role: 'assistant',
+          content: stripAgentToolMarkup(text, knownToolNames) || null,
+          tool_calls: nativeCalls.map((call) => ({
+            id: call.id,
+            type: 'function',
+            function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+          })),
+        }
+        : { role: 'assistant', content: text });
       const toolResults = await Promise.all(calls.map(async (call) => {
-        const toolId = `agent-${uuid()}`;
+        const toolId = call.id || `agent-${uuid()}`;
         req.onStep?.({ type: 'tool_call', id: toolId, name: call.name, input: call.arguments });
         const start = Date.now();
         const output = await invokeAgentTool(call.name, call.arguments, req);
@@ -465,28 +515,47 @@ export async function runAgentPhase(
           durationMs: Date.now() - start,
         });
         notes.push(`tool=${call.name}`);
+        notes.push(`tool_source=${call.source}:${call.name}`);
         const note = summarizeToolNote(call.name, output);
         if (note) notes.push(note);
-        return [
+        const resultText = [
           `### ${call.name}`,
           `Input: ${JSON.stringify(call.arguments)}`,
           `Output:`,
           output,
         ].join('\n');
+        if (call.source === 'native') {
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: call.name,
+            content: output,
+          });
+        }
+        return resultText;
       }));
       const toolResultText = toolResults.join('\n\n');
 
-      messages.push({
-        role: 'user',
-        content: [
-          `Tool results:`,
-          toolResultText,
-          ``,
-          round === maxToolRounds - 1
+      if (!hasNativeCalls) {
+        messages.push({
+          role: 'user',
+          content: [
+            `Tool results:`,
+            toolResultText,
+            ``,
+            round === maxToolRounds - 1
+              ? `Now produce the final answer from the gathered evidence. Do not request more tools.`
+              : (req.toolContinuationInstruction || `Use these results to continue. If you need more context, request one read-only tool call. Otherwise produce the final answer.`),
+          ].join('\n'),
+        });
+      } else {
+        messages.push({
+          role: 'user',
+          content: round === maxToolRounds - 1
             ? `Now produce the final answer from the gathered evidence. Do not request more tools.`
-            : (req.toolContinuationInstruction || `Use these results to continue. If you need more context, request one read-only tool call. Otherwise produce the final answer.`),
-        ].join('\n'),
-      });
+            : (req.toolContinuationInstruction || `Use these tool results to continue. If you need another tool, request it now. Otherwise produce the final answer.`),
+        });
+      }
 
       if (round === maxToolRounds - 1) {
         exhaustedToolRounds = true;
@@ -495,7 +564,7 @@ export async function runAgentPhase(
 
     if (exhaustedToolRounds && !artifact.response.trim()) {
       req.onStep?.({ type: 'model_request', round: maxToolRounds + 1, model: modelId });
-      const finalText = await callAgentModel(provider, modelId, [
+      const finalResponse = await callAgentModel(provider, modelId, [
         ...messages,
         {
           role: 'user',
@@ -505,7 +574,8 @@ export async function runAgentPhase(
             `Produce the final answer now from the evidence already gathered.`,
           ].join('\n'),
         },
-      ], profile.temperature, controller.signal);
+      ], profile.temperature, controller.signal, []);
+      const finalText = finalResponse.text;
       if (finalText) req.onStep?.({ type: 'model_text', chars: finalText.length });
       artifact.response = stripAgentToolMarkup(finalText, knownToolNames);
     }
@@ -560,12 +630,13 @@ export async function runAgentPhase(
 async function callAgentModel(
   provider: { baseURL: string; apiKey: string; providerType: string },
   modelId: string,
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  messages: ProviderMessage[],
   temperature: number,
   signal: AbortSignal,
-): Promise<string> {
+  tools: AgentToolDefinition[] = [],
+): Promise<AgentModelResponse> {
   if (provider.providerType === 'anthropic' || provider.providerType === 'google') {
-    return callNativeAgentModel(provider, modelId, messages, temperature, signal);
+    return callNativeAgentModel(provider, modelId, messages, temperature, signal, tools);
   }
 
   const url = buildChatURL(provider);
@@ -576,16 +647,19 @@ async function callAgentModel(
   }
   const timeoutSignal = AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS);
   const combinedSignal = signal.aborted ? signal : AbortSignal.any([signal, timeoutSignal]);
+  const providerTools = toProviderTools(tools);
+  const body: any = {
+    model: modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId,
+    messages,
+    stream: false,
+    temperature,
+  };
+  if (providerTools.length > 0) body.tools = providerTools;
 
   const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model: modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId,
-      messages,
-      stream: false,
-      temperature,
-    }),
+    body: JSON.stringify(body),
     signal: combinedSignal,
   });
   if (!res.ok) {
@@ -594,17 +668,23 @@ async function callAgentModel(
   }
   const data = await res.json() as any;
   const choice = data.choices?.[0];
-  const text = choice?.message?.content || data.content?.[0]?.text || '';
-  return typeof text === 'string' ? text : JSON.stringify(text);
+  const message = choice?.message || {};
+  const text = message.content || data.content?.[0]?.text || '';
+  const toolCalls = parseNativeToolCalls(message.tool_calls);
+  return {
+    text: typeof text === 'string' ? text : JSON.stringify(text),
+    toolCalls,
+  };
 }
 
 async function callNativeAgentModel(
   provider: { baseURL: string; apiKey: string; providerType: string },
   modelId: string,
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  messages: ProviderMessage[],
   temperature: number,
   signal: AbortSignal,
-): Promise<string> {
+  tools: AgentToolDefinition[] = [],
+): Promise<AgentModelResponse> {
   const adapter = getAdapter({
     id: 'agent-runtime',
     name: 'Agent Runtime Provider',
@@ -619,13 +699,16 @@ async function callNativeAgentModel(
   const combinedSignal = signal.aborted ? signal : AbortSignal.any([signal, timeoutSignal]);
   const bareModelId = modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId;
   let text = '';
+  const toolCalls: AgentToolCall[] = [];
+  const providerTools = toProviderTools(tools);
 
   for await (const event of adapter.streamChat({
     model: bareModelId,
-    messages: messages as ProviderMessage[],
+    messages,
     stream: provider.providerType !== 'google',
     temperature,
     max_tokens: 8192,
+    tools: providerTools.length > 0 ? providerTools : undefined,
   }, {
     baseURL: provider.baseURL,
     apiKey: provider.apiKey,
@@ -633,15 +716,38 @@ async function callNativeAgentModel(
   })) {
     if (event.type === 'text_delta') text += event.text;
     if (event.type === 'tool_call_done' && event.name) {
-      text += `<tool_call>${JSON.stringify({
+      toolCalls.push({
+        id: event.id || `native-${uuid()}`,
         name: event.name,
         arguments: safeParseToolArguments(event.arguments),
-      })}</tool_call>`;
+        source: 'native',
+      });
     }
     if (event.type === 'error') throw new Error(event.error);
   }
 
-  return text;
+  return { text, toolCalls };
+}
+
+function parseNativeToolCalls(rawCalls: any): AgentToolCall[] {
+  if (!Array.isArray(rawCalls)) return [];
+  const calls: AgentToolCall[] = [];
+  for (const raw of rawCalls) {
+    const name = raw?.function?.name || raw?.name;
+    if (typeof name !== 'string' || !name) continue;
+    const args = typeof raw?.function?.arguments === 'string'
+      ? safeParseToolArguments(raw.function.arguments)
+      : raw?.arguments && typeof raw.arguments === 'object'
+        ? raw.arguments
+        : {};
+    calls.push({
+      id: typeof raw?.id === 'string' && raw.id ? raw.id : `native-${uuid()}`,
+      name,
+      arguments: args,
+      source: 'native',
+    });
+  }
+  return calls;
 }
 
 function safeParseToolArguments(raw: string): Record<string, unknown> {

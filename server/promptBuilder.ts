@@ -102,7 +102,7 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
     ? toolsAsText(options.tools)
     : undefined;
   const systemPromptWithTools = toolsDescription
-    ? `${systemPrompt}\n\n${toolsDescription}\n\nWhen the user asks you to use a tool, emit exactly one tool call in this format and nothing else:\n\n\`\`\`\n<tool_call>\n{"name": "<tool_name>", "arguments": { <json-args> }}\n</tool_call>\n\`\`\`\nAfter the tool result arrives, summarize the answer in plain text.`
+    ? `${systemPrompt}\n\n${toolsDescription}\n\nWhen the user asks you to use a tool, emit tool calls in this format and nothing else:\n\n\`\`\`\n<tool_call>\n{"name": "<tool_name>", "arguments": { <json-args> }}\n</tool_call>\n\`\`\`\nUse one tool call at a time unless the task requires a multi-file artifact; for multi-file artifacts, continue emitting the needed file-write tool calls until the artifact is complete. After the tool result arrives, summarize the answer in plain text.`
     : systemPrompt;
 
   // 4. Generation config
