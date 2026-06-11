@@ -52,6 +52,12 @@ export interface AutoRouterConfig {
   candidates: AutoRouterCandidate[];
 }
 
+export interface AutoRouterCandidateDiagnostic {
+  modelId: string;
+  available: boolean;
+  reason?: string;
+}
+
 export interface AutoRouterSignal {
   /** The latest user message text */
   task: string;
@@ -102,6 +108,7 @@ export interface AutoRouterDecisionOptions {
 // ── State ──────────────────────────────────────────────
 
 let autoRouterConfig: AutoRouterConfig | null = null;
+let candidateDiagnostics: AutoRouterCandidateDiagnostic[] = [];
 
 const decisionCache = new Map<string, { decision: AutoRouterDecision; expiresAt: number }>();
 const CACHE_MAX_ENTRIES = 256;
@@ -144,6 +151,24 @@ function normalizeCandidate(candidate: AutoRouterCandidate): AutoRouterCandidate
   return { ...candidate, supportsThinking, card };
 }
 
+function candidateAvailability(config: StoredConfig, candidate: AutoRouterCandidate): AutoRouterCandidateDiagnostic {
+  if (!candidate.modelId) return { modelId: '(missing)', available: false, reason: 'missing modelId' };
+  if (!candidate.card?.trim()) return { modelId: candidate.modelId, available: false, reason: 'missing capability card' };
+
+  const { providerId, bareModelId } = splitModelRef(candidate.modelId);
+  const provider = config.providers.find((p) => !providerId || p.id === providerId);
+  if (!provider) return { modelId: candidate.modelId, available: false, reason: `provider ${providerId || '(any)'} not configured` };
+
+  const hasAuth = provider.type === 'local' || !!provider.apiKey || !!provider.oauth?.accessToken;
+  if (!hasAuth) return { modelId: candidate.modelId, available: false, reason: `provider ${provider.id} has no API key or OAuth token` };
+
+  const model = provider.models.find((m) => m.id === bareModelId);
+  if (!model) return { modelId: candidate.modelId, available: false, reason: `model ${bareModelId} is not configured for provider ${provider.id}` };
+  if (!model.enabled) return { modelId: candidate.modelId, available: false, reason: `model ${bareModelId} is disabled` };
+
+  return { modelId: candidate.modelId, available: true };
+}
+
 // ── Public API ─────────────────────────────────────────
 
 /** Configure the auto-router from StoredConfig. Call on startup and config change. */
@@ -151,15 +176,16 @@ export function configureAutoRouter(config: StoredConfig): void {
   const ar = (config as any).autoRouter as AutoRouterConfig | undefined;
   if (!ar || !ar.enabled || !ar.classifierModel || !ar.candidates || ar.candidates.length === 0) {
     autoRouterConfig = null;
+    candidateDiagnostics = [];
     return;
   }
 
   // Validate: candidates must have modelIds that resolve to a provider
-  const validCandidates = ar.candidates.filter((c) => {
-    if (!c.modelId || !c.card) return false;
-    const resolved = getProviderForModel(config, c.modelId);
-    return resolved !== null;
-  }).map(normalizeCandidate);
+  candidateDiagnostics = ar.candidates.map((c) => candidateAvailability(config, c));
+  const validCandidateIds = new Set(candidateDiagnostics.filter((d) => d.available).map((d) => d.modelId));
+  const validCandidates = ar.candidates
+    .filter((c) => validCandidateIds.has(c.modelId) && getProviderForModel(config, c.modelId) !== null)
+    .map(normalizeCandidate);
 
   if (validCandidates.length === 0) {
     autoRouterConfig = null;
@@ -197,17 +223,29 @@ export function getAutoRouterState(): {
   enabled: boolean;
   classifierModel: string | null;
   threshold: number;
+  configuredCandidateCount: number;
   candidateCount: number;
-  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; contextWindowTokens: number }>;
+  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking: boolean; contextWindowTokens: number }>;
+  unavailableCandidates: AutoRouterCandidateDiagnostic[];
   cacheSize: number;
 } {
   if (!autoRouterConfig) {
-    return { enabled: false, classifierModel: null, threshold: 0.7, candidateCount: 0, candidates: [], cacheSize: 0 };
+    return {
+      enabled: false,
+      classifierModel: null,
+      threshold: 0.7,
+      configuredCandidateCount: candidateDiagnostics.length,
+      candidateCount: 0,
+      candidates: [],
+      unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
+      cacheSize: 0,
+    };
   }
   return {
     enabled: true,
     classifierModel: autoRouterConfig.classifierModel,
     threshold: autoRouterConfig.threshold,
+    configuredCandidateCount: candidateDiagnostics.length || autoRouterConfig.candidates.length,
     candidateCount: autoRouterConfig.candidates.length,
     candidates: autoRouterConfig.candidates.map((c) => ({
       modelId: c.modelId,
@@ -216,6 +254,7 @@ export function getAutoRouterState(): {
       supportsThinking: c.supportsThinking === true,
       contextWindowTokens: candidateContextWindow(c),
     })),
+    unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
     cacheSize: decisionCache.size,
   };
 }
@@ -224,6 +263,52 @@ export function getAutoRouterState(): {
 export function getAvailableCandidates(): AutoRouterCandidate[] {
   if (!autoRouterConfig) return [];
   return autoRouterConfig.candidates;
+}
+
+export async function generateSessionTitleWithClassifier(task: string, config: StoredConfig): Promise<string | null> {
+  const assignedTitleModel = config.roleAssignments?.title;
+  const titleModels = [
+    autoRouterConfig?.classifierModel,
+    assignedTitleModel && assignedTitleModel !== 'Auto' ? assignedTitleModel : undefined,
+  ].filter((model): model is string => Boolean(model));
+  if (titleModels.length === 0 || !task.trim()) return null;
+
+  const systemPrompt = [
+    'You write short, descriptive chat titles for a local AI coding harness.',
+    'Return JSON only.',
+    'Rules:',
+    '- The JSON shape is {"title":"3 to 7 words"}.',
+    '- No markdown or prose outside JSON.',
+    '- Prefer the user intent over exact wording.',
+    '- Keep proper nouns when useful.',
+    '- Never write meta commentary such as "the user wants".',
+  ].join('\n');
+  const userContent = [
+    'Create a concise title JSON object for this first user message.',
+    '',
+    '<message>',
+    task.slice(0, 2000),
+    '</message>',
+  ].join('\n');
+
+  for (const titleModel of [...new Set(titleModels)]) {
+    const classifierResolved = getProviderForModel(config, titleModel);
+    if (!classifierResolved) continue;
+    try {
+      const provider = classifierResolved.provider;
+      const apiModelId = splitModelRef(titleModel).bareModelId;
+      const responseText = provider.type === 'anthropic'
+        ? await callAnthropicClassifier(provider, apiModelId, systemPrompt, userContent, 80, 20_000)
+        : provider.type === 'google'
+          ? await callGoogleClassifier(provider, apiModelId, systemPrompt, userContent, 80, 20_000)
+          : await callOpenAICompatibleClassifier(provider, apiModelId, systemPrompt, userContent, 80, 20_000);
+      const title = sanitizeGeneratedTitle(responseText);
+      if (title) return title;
+    } catch (err) {
+      console.warn('[autoRouter] title classifier call failed:', err);
+    }
+  }
+  return null;
 }
 
 // ── Core routing logic ────────────────────────────────
@@ -362,6 +447,8 @@ async function callOpenAICompatibleClassifier(
   modelId: string,
   systemPrompt: string,
   userContent: string,
+  maxTokens = 600,
+  timeoutMs = 12_000,
 ): Promise<string> {
   const baseURL = provider.baseURL.replace(/\/+$/, '');
   const url = baseURL.includes('/chat/completions')
@@ -372,7 +459,7 @@ async function callOpenAICompatibleClassifier(
     model: modelId,
     stream: false,
     temperature: 0,
-    max_tokens: 600,
+    max_tokens: maxTokens,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userContent },
@@ -391,7 +478,7 @@ async function callOpenAICompatibleClassifier(
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
@@ -409,13 +496,15 @@ async function callAnthropicClassifier(
   modelId: string,
   systemPrompt: string,
   userContent: string,
+  maxTokens = 600,
+  timeoutMs = 12_000,
 ): Promise<string> {
   const baseURL = provider.baseURL.replace(/\/+$/, '');
   const url = baseURL.includes('/v1/messages') ? baseURL : `${baseURL}/v1/messages`;
 
   const payload = {
     model: modelId,
-    max_tokens: 600,
+    max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: 'user', content: userContent }],
   };
@@ -432,7 +521,7 @@ async function callAnthropicClassifier(
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
@@ -453,6 +542,8 @@ async function callGoogleClassifier(
   modelId: string,
   _systemPrompt: string,
   userContent: string,
+  maxTokens = 600,
+  timeoutMs = 12_000,
 ): Promise<string> {
   const baseURL = provider.baseURL.replace(/\/+$/, '');
   const url = `${baseURL}/v1beta/models/${modelId}:generateContent`;
@@ -460,7 +551,7 @@ async function callGoogleClassifier(
   const payload = {
     contents: [{ role: 'user', parts: [{ text: userContent }] }],
     systemInstruction: { parts: [{ text: _systemPrompt }] },
-    generationConfig: { temperature: 0, maxOutputTokens: 600 },
+    generationConfig: { temperature: 0, maxOutputTokens: maxTokens },
   };
 
   const headers: Record<string, string> = {
@@ -474,7 +565,7 @@ async function callGoogleClassifier(
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
@@ -606,6 +697,33 @@ function parseClassifierScores(text: string, candidateIds: string[]): { scores: 
     }
     return null;
   }
+}
+
+function sanitizeGeneratedTitle(text: string): string | null {
+  const titleMatch = text.match(/"title"\s*:\s*"([^"]{4,120})"/i);
+  if (titleMatch) return sanitizeGeneratedTitle(titleMatch[1]);
+
+  const firstLine = text
+    .replace(/```[\s\S]*?```/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .find((line) => !/^<\/?(think|thinking|reasoning|qdom|transitioned)\b[^>]*>$/i.test(line));
+  if (!firstLine) return null;
+
+  const cleaned = firstLine
+    .replace(/<\/?(think|thinking|reasoning|qdom|transitioned)\b[^>]*>/gi, '')
+    .replace(/^["'`*_#\-\s]+|["'`*_\-\s.]+$/g, '')
+    .replace(/^(title|chat title)\s*:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return null;
+  if (/\b(the user wants|the user asks|create a concise title|short descriptive title)\b/i.test(cleaned)) return null;
+
+  const words = cleaned.split(/\s+/).slice(0, 7);
+  const title = words.join(' ').slice(0, 72).trim();
+  if (title.length < 4) return null;
+  return title;
 }
 
 // ── Candidate selection ──────────────────────────────

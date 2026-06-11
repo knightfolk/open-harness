@@ -381,6 +381,63 @@ function bestModelForEffort(enabledModels: any[], effort: ThinkingEffort): any |
     .sort((a, b) => scoreModelForEffort(b, effort) - scoreModelForEffort(a, effort))[0]) || null;
 }
 
+function scoreModelForRole(model: any, roleId: string): number {
+  const card = findModelCatalogCard(model.id, model.providerId);
+  const cost = COST_SCORE[card?.relativeCost || 'mid'] ?? 3;
+  const context = card?.contextWindowTokens || model.contextWindowTokens || 0;
+  const category = card ? modelBestCategory(card) : undefined;
+  const text = [
+    card?.compactDescription,
+    card?.reviewSummary,
+    ...(card?.strengths || []),
+    ...(card?.bestFor || []),
+    ...(card?.avoidFor || []).map((item) => `avoid:${item}`),
+  ].join(' ').toLowerCase();
+  const supportsThinking = card?.supportsThinking || modelSupportsThinking(model.id, model.providerId);
+  const supportsTools = card?.supportsTools ? 12 : 0;
+  const longContext = context >= 200_000 ? 6 : 0;
+  const hugeContext = context >= 1_000_000 ? 8 : 0;
+  const recommendation = isModelRecommended(roleId, model.id) ? 20 : 0;
+  const avoidRole = text.includes(`avoid:${roleId}`) || (
+    roleId === 'planner' && /avoid:[^,]*(planning|strategy)/.test(text)
+  );
+  const avoidPenalty = avoidRole ? -30 : 0;
+
+  const roleFit: Record<string, number> = {
+    planner:
+      (category === 'reasoning' || category === 'long-context' ? 28 : 0) +
+      (/(planning|strategy|architecture|decomposition|analysis|tradeoff)/.test(text) ? 28 : 0) +
+      (supportsThinking ? 14 : 0) + longContext + hugeContext - cost,
+    coder:
+      (category === 'coding' ? 36 : 0) +
+      (/(coding|code|implementation|bug fix|refactor|agentic|tool)/.test(text) ? 30 : 0) +
+      supportsTools + (supportsThinking ? 4 : 0) - cost * 2,
+    reviewer:
+      (category === 'review' || category === 'reasoning' ? 32 : 0) +
+      (/(review|audit|security|correctness|debugging|quality)/.test(text) ? 32 : 0) +
+      (supportsThinking ? 12 : 0) + longContext - cost,
+    reasoner:
+      (category === 'reasoning' || category === 'long-context' ? 34 : 0) +
+      (/(reasoning|analysis|math|debugging|tradeoff|architecture)/.test(text) ? 30 : 0) +
+      (supportsThinking ? 18 : 0) + longContext + hugeContext - cost * 0.5,
+    summarizer:
+      (category === 'worker' || category === 'rag' || category === 'long-context' ? 26 : 0) +
+      (/(summary|summaries|summarization|classification|long context|documents|rag)/.test(text) ? 28 : 0) +
+      longContext + hugeContext - cost * 10 + (supportsThinking ? -6 : 4),
+    worker:
+      (category === 'worker' || category === 'coding' ? 24 : 0) +
+      (/(worker|fast|low-cost|tool|classification|routine|small edits)/.test(text) ? 28 : 0) +
+      supportsTools - cost * 12 + (supportsThinking ? -8 : 6),
+  };
+
+  return (roleFit[roleId] ?? scoreModelForEffort(model, ROLE_DEFAULT_EFFORT[roleId] || 'medium')) + recommendation + avoidPenalty;
+}
+
+function bestModelForRole(enabledModels: any[], roleId: string): any | null {
+  return ([...enabledModels]
+    .sort((a, b) => scoreModelForRole(b, roleId) - scoreModelForRole(a, roleId))[0]) || null;
+}
+
 /* ================================================================== */
 /*  ASSISTANT                                                          */
 /* ================================================================== */
@@ -1409,7 +1466,6 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
 
 
 function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssignRoleModel, onAssignRoleThinking }: any) {
-  const autoDefaultedRef = useRef(false);
   const effortCopy: Record<ThinkingEffort, { summary: string; intent: string }> = {
     low: {
       summary: 'Fast and inexpensive',
@@ -1450,22 +1506,18 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
     THINKING_EFFORTS.map((effort) => [effort.id, bestModelForEffort(enabledModels, effort.id)])
   ) as Record<ThinkingEffort, any | null>;
 
+  const recommendedRoleModels = Object.fromEntries(
+    roleAssignments.map((role: CodingRoleAssignment) => [role.id, bestModelForRole(enabledModels, role.id)])
+  ) as Record<string, any | null>;
+
   const applyRecommendedDefaults = useCallback(() => {
     roleAssignments.forEach((role: CodingRoleAssignment) => {
       const effort = ROLE_DEFAULT_EFFORT[role.id] || 'medium';
       onAssignRoleThinking(role.id, effort);
-      const recommended = recommendedModels[effort];
+      const recommended = recommendedRoleModels[role.id];
       if (recommended) onAssignRoleModel(role.id, recommended.id);
     });
-  }, [onAssignRoleModel, onAssignRoleThinking, recommendedModels, roleAssignments]);
-
-  useEffect(() => {
-    if (autoDefaultedRef.current || enabledModels.length === 0) return;
-    const allRolesAreAuto = roleAssignments.every((role: CodingRoleAssignment) => role.modelId === 'Auto');
-    if (!allRolesAreAuto) return;
-    autoDefaultedRef.current = true;
-    applyRecommendedDefaults();
-  }, [applyRecommendedDefaults, enabledModels.length, roleAssignments]);
+  }, [onAssignRoleModel, onAssignRoleThinking, recommendedRoleModels, roleAssignments]);
 
   return (
     <>
@@ -1473,12 +1525,29 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
       <PaneDesc>Pick how much thinking each kind of work deserves. Use Auto for the model unless you want a specific role override.</PaneDesc>
       <div className="role-recommendation-bar">
         <div>
-          <div className="role-recommendation-title">Recommended setup</div>
-          <div className="role-recommendation-copy">Uses only enabled provider models: Low for quick work, Medium for day-to-day coding, High for review, xHigh for hardest reasoning.</div>
+          <div className="role-recommendation-title">Auto configure from selected plan models</div>
+          <div className="role-recommendation-copy">Uses only models enabled under your configured providers and plan choices, then picks the strongest available fit for each agent role.</div>
         </div>
         <button className="settings-mini-button" onClick={applyRecommendedDefaults} disabled={enabledModels.length === 0}>
-          <Sparkles size={12} /> Apply defaults
+          <Sparkles size={12} /> Auto configure roles
         </button>
+      </div>
+      <div className="role-auto-grid" aria-label="Recommended role models">
+        {roleAssignments.map((role: CodingRoleAssignment) => {
+          const recommended = recommendedRoleModels[role.id];
+          const Icon = roleIconMap[role.id] || Bot;
+          return (
+            <div key={role.id} className="role-auto-card">
+              <span className="role-auto-icon"><Icon size={13} /></span>
+              <span className="role-auto-text">
+                <span className="role-auto-name">{role.name}</span>
+                <span className="role-auto-model">
+                  {recommended ? `${recommended.providerName} - ${recommended.name}` : 'No enabled model'}
+                </span>
+              </span>
+            </div>
+          );
+        })}
       </div>
       <div className="role-effort-list">
         {THINKING_EFFORTS.map((effort) => {

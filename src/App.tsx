@@ -17,7 +17,6 @@ import {
   resolveThemeId,
 } from './theme/builtins';
 import { describeAutoRouterRunStep, latestAutoRouterStep } from './utils/autoRouterTrace';
-import { shortModelName } from './utils/modelDisplay';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -135,89 +134,10 @@ function parsePhaseDetail(detail?: string): { model?: string; status?: SubAgent[
   };
 }
 
-function transientMessageId(assistantId: string, key: string): string {
-  return `${assistantId}:live:${key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'event'}`;
-}
-
-function agentRoleFromLabel(label: string): Message['agentRole'] {
-  const lower = label.toLowerCase();
-  if (lower.includes('review')) return 'reviewer';
-  if (lower.includes('implement') || lower.includes('coder')) return 'coder';
-  if (lower.includes('reason') || lower.includes('synthesis')) return 'reasoner';
-  if (lower.includes('tool')) return 'tool';
-  if (lower.includes('route') || lower.includes('model')) return 'router';
-  return 'planner';
-}
-
-function compactAgentUpdate(step: HarnessRunStep): { idKey: string; name: string; model?: string; role: Message['agentRole']; content: string; status?: Message['status'] } | null {
-  switch (step.type) {
-    case 'auto_router':
-      return {
-        idKey: 'router',
-        name: 'Router',
-        model: step.classifierModel ? shortModelName(step.classifierModel) : undefined,
-        role: 'router',
-        content: `Choosing a model for this request. ${step.reason}`,
-        status: 'streaming',
-      };
-    case 'route':
-      return {
-        idKey: 'router',
-        name: 'Router',
-        model: shortModelName(step.model),
-        role: 'router',
-        content: `Routing this to the ${step.role} role with ${shortModelName(step.model)}.`,
-        status: 'complete',
-      };
-    case 'orchestration':
-      if (!isVisibleOrchestrationPhase(step.label)) return null;
-      return {
-        idKey: `phase-${step.label}`,
-        name: step.label,
-        model: parsePhaseDetail(step.detail).model ? shortModelName(parsePhaseDetail(step.detail).model) : undefined,
-        role: agentRoleFromLabel(step.label),
-        content: step.detail || `Working on ${step.label}.`,
-        status: parsePhaseDetail(step.detail).status === 'complete' ? 'complete' : 'streaming',
-      };
-    case 'model_request':
-      return {
-        idKey: `model-${step.model}`,
-        name: shortModelName(step.model),
-        model: `round ${step.round}`,
-        role: 'reasoner',
-        content: `I’m working on this part now.`,
-        status: 'streaming',
-      };
-    case 'model_text':
-      return {
-        idKey: 'model-output',
-        name: 'Model output',
-        role: 'reasoner',
-        content: `A model returned ${step.chars.toLocaleString()} characters for the team to use.`,
-        status: 'complete',
-      };
-    case 'tool_call':
-      return {
-        idKey: `tool-${step.name}`,
-        name: 'Tool runner',
-        model: step.name,
-        role: 'tool',
-        content: step.durationMs == null
-          ? `I’m using ${step.name}.`
-          : `Finished ${step.name} in ${step.durationMs}ms.`,
-        status: step.durationMs == null ? 'streaming' : 'complete',
-      };
-    case 'model_thinking':
-      return {
-        idKey: step.source === 'router' ? 'router-thinking' : 'model-thinking',
-        name: step.source === 'router' ? 'Router' : 'Model thinking',
-        role: step.source === 'router' ? 'router' : 'reasoner',
-        content: step.preview || `Thinking stream captured (${step.chars.toLocaleString()} chars).`,
-        status: 'streaming',
-      };
-    default:
-      return null;
-  }
+function runStepMeansWork(step: HarnessRunStep): boolean {
+  if (step.type === 'model_request' || step.type === 'model_text' || step.type === 'model_thinking' || step.type === 'prompt_built' || step.type === 'repo_map' || step.type === 'context_pack') return true;
+  if (step.type === 'tool_call') return step.durationMs == null;
+  return false;
 }
 
 const DEFAULT_ROLE_ASSIGNMENTS: CodingRoleAssignment[] = [
@@ -882,6 +802,13 @@ function App() {
     try {
       await api.sendMessage(sessionId, content, {
         onUserMessage: () => {},
+        onSessionTitle: (updatedSessionId, title) => {
+          setSessions((prev) => prev.map((session) =>
+            session.id === updatedSessionId
+              ? { ...session, title, updatedAt: new Date().toISOString() }
+              : session
+          ));
+        },
         onAssistantStart: () => {
           setMessages((prev) => [...prev, {
             id: assistantId,
@@ -899,16 +826,16 @@ function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, content: streamingTextRef.current.get(assistantId) || '', thinkingChars: undefined, thinkingStatus: undefined }
+                ? { ...m, content: streamingTextRef.current.get(assistantId) || '' }
                 : m
             )
           );
         },
-        onThinking: (_id, chars, message) => {
+        onThinking: (_id, chars, message, preview) => {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId && !streamingTextRef.current.get(assistantId)
-                ? { ...m, thinkingChars: chars, thinkingStatus: message }
+              m.id === assistantId
+                ? { ...m, thinkingChars: chars, thinkingStatus: message, thinkingPreview: preview }
                 : m
             )
           );
@@ -919,7 +846,7 @@ function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, content: finalContent, status: 'complete' as const, thinkingChars: undefined, thinkingStatus: undefined }
+                ? { ...m, content: finalContent, status: 'complete' as const, thinkingChars: undefined, thinkingStatus: undefined, thinkingPreview: undefined }
                 : m
             )
           );
@@ -976,28 +903,6 @@ function App() {
         onRunStep: (runId, step) => {
           const stepText = describeRunStep(step);
           if (step.type === 'auto_router') setLastAutoRouterStep(step);
-          const agentUpdate = compactAgentUpdate(step);
-          if (agentUpdate) {
-            const liveId = transientMessageId(assistantId, agentUpdate.idKey);
-            setMessages((prev) => {
-              const nextMessage: Message = {
-                id: liveId,
-                role: 'assistant',
-                content: agentUpdate.content,
-                timestamp: new Date(),
-                status: agentUpdate.status || 'streaming',
-                transient: true,
-                agentName: agentUpdate.name,
-                agentModel: agentUpdate.model,
-                agentRole: agentUpdate.role,
-              };
-              const existing = prev.findIndex((m) => m.id === liveId);
-              if (existing >= 0) {
-                return prev.map((m, i) => (i === existing ? { ...m, ...nextMessage } : m));
-              }
-              return [...prev, nextMessage];
-            });
-          }
           setMessages((prev) => prev.map((m) => {
             if (m.id !== assistantId || !m.runTrace) return m;
             const nextMessage = { ...m, runTrace: { ...m.runTrace, steps: [...m.runTrace.steps, step] } };
@@ -1022,7 +927,7 @@ function App() {
             const phaseId = orchestrationAgentId(runId, step.label);
             setSubAgents((prev) => {
               const existing = prev.find((a) => a.id === phaseId);
-              const nextStatus = phase.status || existing?.status || 'running';
+              const nextStatus = phase.status || existing?.status || 'idle';
               const nextAgent: SubAgent = {
                 ...(existing || {
                   id: phaseId,
@@ -1034,7 +939,11 @@ function App() {
                 model: phase.model || existing?.model || 'Auto',
                 status: nextStatus,
                 task: step.detail || stepText,
-                progress: nextStatus === 'complete' || nextStatus === 'error' ? 100 : Math.min(90, (existing?.progress || 10) + 20),
+                progress: nextStatus === 'complete' || nextStatus === 'error'
+                  ? 100
+                  : nextStatus === 'running'
+                    ? Math.min(90, (existing?.progress || 10) + 20)
+                    : existing?.progress || 0,
                 endTime: nextStatus === 'complete' || nextStatus === 'error' ? new Date() : existing?.endTime,
                 messages: [
                   ...(existing?.messages || []),
@@ -1046,6 +955,21 @@ function App() {
                 ? prev.map((a) => (a.id === phaseId ? nextAgent : a))
                 : [...prev, nextAgent];
             });
+          }
+          if (runStepMeansWork(step)) {
+            let promotedPhase = false;
+            setSubAgents((prev) => prev.map((a) => {
+              if (!a.id.startsWith(`${runId}:phase:`)) return a;
+              if (a.status !== 'idle') return a;
+              if (promotedPhase) return a;
+              promotedPhase = true;
+              return {
+                ...a,
+                status: 'running',
+                task: stepText,
+                progress: Math.max(15, a.progress || 0),
+              };
+            }));
           }
           setSubAgents((prev) => prev.map((a) => a.id === runId ? {
             ...a,
@@ -1071,7 +995,7 @@ function App() {
                 runTrace: run,
               };
             }
-            if (a.id.startsWith(`${run.id}:phase:`) && a.status === 'running') {
+            if (a.id.startsWith(`${run.id}:phase:`) && (a.status === 'running' || a.status === 'idle')) {
               return {
                 ...a,
                 status: run.status === 'error' ? 'error' : 'complete',

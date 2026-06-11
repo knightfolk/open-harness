@@ -176,7 +176,7 @@ const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bwget\b.*\|\s*(ba)?sh/i, reason: 'Piping remote content to shell' },
   { pattern: /\bdd\s+if=/i, reason: 'Low-level disk write' },
   { pattern: /\bmkfs\b/i, reason: 'Filesystem formatting' },
-  { pattern: />\s*\/dev\//i, reason: 'Writing to device files' },
+  { pattern: />\s*\/dev\/(?!null\b)/i, reason: 'Writing to device files' },
   { pattern: /\bkill\s+-9\b/i, reason: 'Force kill signal' },
   { pattern: /\bshutdown\b/i, reason: 'System shutdown' },
   { pattern: /\breboot\b/i, reason: 'System reboot' },

@@ -174,6 +174,7 @@ export function EnvironmentRail({
   const projectName = workingDir ? workingDir.split('/').pop() : 'No project';
 
   const runningCount = subAgents.filter((a) => a.status === 'running').length;
+  const waitingCount = subAgents.filter((a) => a.status === 'idle').length;
   const totalAgents = subAgents.length;
   const hasPendingWork = !clean;
   const hasActiveAgents = runningCount > 0;
@@ -242,7 +243,7 @@ export function EnvironmentRail({
         icon: <Bot size={16} />,
         summary: totalAgents === 0 ? <span className="env-clean">None</span> : (
           <span className="env-change-count">
-            {runningCount} of {totalAgents} running
+            {runningCount} working · {waitingCount} waiting
           </span>
         ),
         body: (
@@ -262,7 +263,7 @@ export function EnvironmentRail({
                 <>
                   {runningCount > 0 && <Loader size={12} className="env-agents-spin" />}
                   <span className="env-change-count">
-                    {runningCount} of {totalAgents} running
+                    {runningCount} working · {waitingCount} waiting
                   </span>
                 </>
               )}
@@ -304,7 +305,7 @@ export function EnvironmentRail({
       },
     };
     return defs;
-  }, [branch, fileCount, additions, deletions, clean, totalAgents, runningCount, trustMode, accessLabel, accessColor, onReviewChanges, onFocusAgents]);
+  }, [branch, fileCount, additions, deletions, clean, totalAgents, runningCount, waitingCount, trustMode, accessLabel, accessColor, onReviewChanges, onFocusAgents]);
 
   return (
     <aside className={`env-rail ${variant === 'panel' ? 'env-rail-panel' : ''} ${variant === 'floating' ? 'env-rail-floating' : ''} ${variant === 'rail' ? 'right-panel-overlay' : ''}`} data-right-panel="visible" aria-label={variant === 'rail' ? 'Right panel' : 'Super panel'}>

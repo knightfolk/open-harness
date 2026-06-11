@@ -9,9 +9,12 @@ interface Props {
 export function RunningAgentsStrip({ agents, onFocus }: Props) {
   if (!agents || agents.length === 0) return null;
   const running = agents.filter((a) => a.status === 'running').length;
+  const waiting = agents.filter((a) => a.status === 'idle').length;
   const total = agents.length;
   const label = running > 0
-    ? `${running} of ${total} agent${total === 1 ? '' : 's'} working…`
+    ? `${running} working · ${waiting} waiting`
+    : waiting > 0
+      ? `${waiting} agent${waiting === 1 ? '' : 's'} waiting`
     : `${total} agent${total === 1 ? '' : 's'} tracked`;
 
   // Show up to three recent agent tasks as quick indicators.

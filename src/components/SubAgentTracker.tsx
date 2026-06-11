@@ -9,7 +9,7 @@ interface Props {
 }
 
 const statusLabels = {
-  idle: 'Idle',
+  idle: 'Waiting',
   running: 'Running',
   complete: 'Complete',
   error: 'Error',
@@ -201,6 +201,7 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
   }
 
   const running = agents.filter((a) => a.status === 'running').length;
+  const waiting = agents.filter((a) => a.status === 'idle').length;
   const completed = agents.filter((a) => a.status === 'complete').length;
   const totalTokens = agents.reduce((sum, a) => sum + (a.tokensUsed || 0), 0);
 
@@ -214,7 +215,8 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
   return (
     <div className="sub-agent-tracker" ref={scrollRef}>
       <div className="sub-agent-summary">
-        <span>{running} running</span>
+        <span>{running} working</span>
+        <span>{waiting} waiting</span>
         <span>{completed} complete</span>
         <span>{formatTokens(totalTokens)} tokens</span>
       </div>
@@ -272,7 +274,9 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
             {isExpanded && (
               <div className="sub-agent-steps">
                 {steps.length === 0 && (
-                  <div className="sub-agent-empty">Waiting for run events…</div>
+                  <div className="sub-agent-empty">
+                    {agent.status === 'idle' ? 'Waiting for this phase to start.' : 'Waiting for run events.'}
+                  </div>
                 )}
                 {steps.map((step, i) => {
                   const Icon = stepIcon(step);

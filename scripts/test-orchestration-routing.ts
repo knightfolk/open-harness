@@ -59,6 +59,29 @@ assert.equal(teamPlan.mode, 'plan', 'team plan requests with compare notes shoul
 assert.equal(teamPlan.role, 'planner', 'team plan requests should use the planner role');
 assert.deepEqual(teamPlan.suggestedModels, ['MiniMax-M3'], 'router suggestions should drop Auto placeholders');
 
+const executeHarnessRegression = routeRequest(
+  [
+    'Run this in Auto mode as an EXECUTE-mode OpenHarness harness and auto-routing regression test.',
+    'Perform a cradle-to-grave test of OpenHarness routing, orchestration, tool safety, streaming/progress, and validation discipline.',
+    'Do not stop at a plan.',
+    'Run:',
+    'npm run lint',
+    'npm run build',
+    'npm run test:hardening',
+    'npx tsx scripts/test-orchestration-routing.ts',
+    'Final Judge: summarize evidence and give PASS/FAIL.',
+  ].join('\n'),
+  'Auto',
+  config.roleAssignments,
+);
+
+assert.equal(executeHarnessRegression.mode, 'execute', 'explicit EXECUTE-mode validation prompts should not route to Planning Room');
+assert.equal(executeHarnessRegression.role, 'coder', 'validation-heavy execute prompts should use the coder role');
+assert.equal(executeHarnessRegression.needsValidation, true, 'execute validation prompts should require validation');
+
+const informationalRunQuestion = routeRequest('how do I run tests for this project?', 'Auto', config.roleAssignments);
+assert.notEqual(informationalRunQuestion.mode, 'execute', 'informational run questions should not launch execute mode');
+
 const compareModels = buildCompareModelSet(teamPlan, config);
 assert.deepEqual(compareModels, ['MiniMax-M3', 'zai:glm-4.6'], 'compare model set should include only distinct resolvable models');
 

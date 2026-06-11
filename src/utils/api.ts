@@ -143,9 +143,10 @@ export interface ToolCallInfo {
 
 export interface StreamCallbacks {
   onUserMessage: (msg: MessageInfo) => void;
+  onSessionTitle?: (sessionId: string, title: string) => void;
   onAssistantStart: (id: string) => void;
   onText: (id: string, text: string) => void;
-  onThinking?: (id: string, chars: number, message?: string) => void;
+  onThinking?: (id: string, chars: number, message?: string, preview?: string) => void;
   onAssistantMessage?: (msg: MessageInfo) => void;
   onToolCall: (toolCall: ToolCallInfo) => void;
   onRunStart?: (run: HarnessRun) => void;
@@ -170,8 +171,10 @@ export interface AutoRouterState {
   enabled: boolean;
   classifierModel: string | null;
   threshold: number;
+  configuredCandidateCount?: number;
   candidateCount: number;
   candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking?: boolean; contextWindowTokens: number }>;
+  unavailableCandidates?: Array<{ modelId: string; available: boolean; reason?: string }>;
   cacheSize: number;
 }
 
@@ -797,9 +800,10 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
         const parsed = JSON.parse(data);
         switch (eventType) {
           case 'user_message': callbacks.onUserMessage(parsed as MessageInfo); break;
+          case 'session_title': callbacks.onSessionTitle?.(parsed.sessionId, parsed.title); break;
           case 'assistant_start': callbacks.onAssistantStart(parsed.id); break;
           case 'text': callbacks.onText(parsed.id, parsed.text); break;
-          case 'thinking': callbacks.onThinking?.(parsed.id, parsed.chars, parsed.message); break;
+          case 'thinking': callbacks.onThinking?.(parsed.id, parsed.chars, parsed.message, parsed.preview); break;
           case 'orchestration_text': callbacks.onText('', parsed.text); break;
           case 'assistant_message': callbacks.onAssistantMessage?.(parsed as MessageInfo); break;
           case 'tool_call': callbacks.onToolCall(parsed as ToolCallInfo); break;

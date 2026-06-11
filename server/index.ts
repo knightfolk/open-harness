@@ -30,7 +30,7 @@ import {
 } from './repoMap';
 import { routeRequest, routeWithAutoRouter } from './router';
 import type { RouteDecision } from './router';
-import { configureAutoRouter, getAutoRouterState, clearRouterCache, getAvailableCandidates, checkRouterHealth } from './autoRouter';
+import { configureAutoRouter, getAutoRouterState, clearRouterCache, getAvailableCandidates, checkRouterHealth, generateSessionTitleWithClassifier } from './autoRouter';
 import { recordRoutingDecision, recordOutcome, getRoutingEvents, getLearningSummary, suggestThresholdAdjustment, getModelSuccessRates } from './routerLearning';
 import { recordUsage, checkBudget, getAllUsageSummaries } from './usageTracker';
 import { orchestrationInstruction, orchestrationTraceSteps, runOrchestratorPipeline } from './orchestrator';
@@ -63,6 +63,34 @@ function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
 
 function sanitizeFilePart(value: string): string {
   return value.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'model';
+}
+
+interface EstimatedModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  tokenCount: number;
+  cost: number;
+}
+
+function estimateUsageForTexts(modelId: string, inputText: string, outputText: string): EstimatedModelUsage {
+  const inputTokens = estimateTokens(inputText);
+  const outputTokens = estimateTokens(outputText);
+  const cost = estimateCost(modelId, inputTokens, outputTokens)?.total ?? 0;
+  return {
+    inputTokens,
+    outputTokens,
+    tokenCount: inputTokens + outputTokens,
+    cost,
+  };
+}
+
+function serializeUsageInput(messages: any[]): string {
+  return JSON.stringify(messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    tool_calls: message.tool_calls,
+    tool_call_id: message.tool_call_id,
+  })));
 }
 
 function redactOutputText(text: string): string {
@@ -2320,12 +2348,12 @@ async function streamTextSSE(res: express.Response, event: string, text: string,
   }
 }
 
-function maybeEmitThinkingSSE(res: express.Response, assistantId: string, chars: number, state: { lastChars: number; lastAt: number }, message = 'Thinking live') {
+function maybeEmitThinkingSSE(res: express.Response, assistantId: string, chars: number, state: { lastChars: number; lastAt: number }, message = 'Thinking live', preview?: string) {
   const now = Date.now();
   if (chars - state.lastChars < 160 && now - state.lastAt < 500) return;
   state.lastChars = chars;
   state.lastAt = now;
-  writeSSE(res, 'thinking', { id: assistantId, chars, message });
+  writeSSE(res, 'thinking', { id: assistantId, chars, message, preview: preview ? compactTracePreview(preview, 220) : undefined });
 }
 
 function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep) {
@@ -2387,17 +2415,36 @@ function persistAssistantRunTrace(
   sessionStore.saveSession(session);
 }
 
+function isOpenHarnessTargetedHarnessRequest(content: string): boolean {
+  return /\bOpenHarness\b/i.test(content)
+    && /\b(auto-?routing|auto-?router|harness|orchestration|test:hardening|test-orchestration-routing|Planning Room)\b/i.test(content);
+}
+
+function openHarnessWorkspaceMismatch(content: string, workingDir: string | null): string | null {
+  if (!isOpenHarnessTargetedHarnessRequest(content)) return null;
+  const expected = '/Users/kevink/Projects/OpenHarness';
+  if (resolve(workingDir || '') === expected || basename(workingDir || '') === 'OpenHarness') return null;
+  const current = workingDir || '(no project folder open)';
+  return [
+    'OpenHarness workspace mismatch.',
+    '',
+    `This prompt targets OpenHarness harness or auto-routing behavior, but the active chat is attached to ${current}.`,
+    `Open / switch to ${expected} and run the prompt in that project before treating the result as an OpenHarness test.`,
+  ].join('\n');
+}
+
 function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
   switch (step.type) {
-    case 'orchestration': return step.label;
+    case 'orchestration': return `Orchestration: ${step.label}`;
     case 'route': return `Routing to ${step.role}`;
-    case 'auto_router': return 'Choosing model';
-    case 'prompt_built': return 'Building prompt';
-    case 'model_request': return `Waiting on ${step.model}`;
+    case 'auto_router': return 'Auto-router is choosing a model';
+    case 'prompt_built': return 'Building the model prompt';
+    case 'model_request': return `Waiting for ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Using ${step.name}` : `Finished ${step.name}`;
-    case 'model_thinking': return step.source === 'router' ? 'Router thinking' : 'Model thinking';
-    case 'repo_map': return 'Mapping repo';
-    case 'context_pack': return 'Preparing context';
+    case 'model_text': return 'Receiving response text';
+    case 'model_thinking': return step.source === 'router' ? 'Router rationale received' : 'Model thinking live';
+    case 'repo_map': return 'Mapping the repository';
+    case 'context_pack': return 'Preparing project context';
     default: return null;
   }
 }
@@ -2409,7 +2456,8 @@ function emitVisibleRunActivity(res: express.Response, assistantId: string, step
   const now = Date.now();
   if (now - state.lastAt < 250 && step.type !== 'model_thinking') return;
   state.lastAt = now;
-  writeSSE(res, 'thinking', { id: assistantId, chars: state.chars, message });
+  const preview = step.type === 'model_thinking' && step.preview ? compactTracePreview(step.preview, 220) : undefined;
+  writeSSE(res, 'thinking', { id: assistantId, chars: state.chars, message, preview });
 }
 
 function compactTracePreview(text: string, max = 240): string {
@@ -2544,7 +2592,8 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   };
   session.messages.push(userMsg);
 
-  if (session.kind !== 'side-chat' && session.messages.filter((m) => m.role === 'user').length === 1) {
+  const shouldGenerateSessionTitle = session.kind !== 'side-chat' && session.messages.filter((m) => m.role === 'user').length === 1;
+  if (shouldGenerateSessionTitle) {
     session.title = content.slice(0, 60);
   }
   session.updatedAt = new Date().toISOString();
@@ -2593,9 +2642,39 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
 
   const assistantId = uuid();
   writeSSE(res, 'user_message', userMsg);
+  if (shouldGenerateSessionTitle) {
+    void generateSessionTitleWithClassifier(content, appConfig).then((title) => {
+      if (!title || title === session.title) return;
+      session.title = title;
+      session.updatedAt = new Date().toISOString();
+      sessionStore.saveSession(session);
+      if (!res.writableEnded) writeSSE(res, 'session_title', { sessionId: session.id, title });
+    });
+  }
   writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
 
   const requestedModel = requestedModelOverride || getActiveModel();
+  const workspaceMismatch = openHarnessWorkspaceMismatch(content, session.workingDir);
+  if (workspaceMismatch) {
+    const guardRun = createHarnessRun({
+      sessionId: session.id,
+      userMessageId: userMsg.id,
+      requestedModel,
+      effectiveModel: requestedModel,
+      providerId: 'local',
+    });
+    guardRun.status = 'error';
+    writeSSE(res, 'run_start', guardRun);
+    emitRunStep(res, guardRun, { type: 'error', message: workspaceMismatch });
+    completeHarnessRun(guardRun, 'error');
+    await streamTextSSE(res, 'text', workspaceMismatch);
+    writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: workspaceMismatch });
+    persistAssistantError(session, assistantId, workspaceMismatch, guardRun);
+    writeSSE(res, 'run_complete', guardRun);
+    streamFinished = true;
+    res.end();
+    return;
+  }
   const routeToolCount = gatherMCPToolsForAPI().tools.length;
   let dirtyGitState = false;
   if (session.workingDir) {
@@ -2999,8 +3078,8 @@ async function parseStreamForContentAndTools(
         const thinkingDelta = delta.reasoning_content || delta.thinking || delta.reasoning;
         if (typeof thinkingDelta === 'string' && thinkingDelta.length > 0) {
           thinking += thinkingDelta;
-          if (streamText && content.length === 0) {
-            maybeEmitThinkingSSE(res, assistantId, thinking.length, thinkingSseState);
+          if (streamText) {
+            maybeEmitThinkingSSE(res, assistantId, thinking.length, thinkingSseState, 'Model thinking live', thinking.slice(-700));
           }
         }
 
@@ -3146,8 +3225,8 @@ async function streamWithNativeAdapter(
           }
         } else if (event.type === 'thinking_delta') {
           roundThinking += event.text;
-          if (isLastRound && roundContent.length === 0) {
-            maybeEmitThinkingSSE(res, assistantId, roundThinking.length, thinkingSseState);
+          if (isLastRound) {
+            maybeEmitThinkingSSE(res, assistantId, roundThinking.length, thinkingSseState, 'Model thinking live', roundThinking.slice(-700));
           }
         } else if (event.type === 'tool_call_done') {
           roundToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
@@ -3282,6 +3361,7 @@ async function streamModel(
   run?: HarnessRun,
   routeOverride?: RouteDecision,
   systemTaskContext?: string,
+  propagateProviderErrors = false,
 ) {
   const providerStartedAt = Date.now();
   // ── Model-aware prompt building ─────────────────────
@@ -3532,6 +3612,7 @@ async function streamModel(
 
       if (!response.ok) {
         const err = await response.text();
+        const message = `${providerId} API error: ${response.status} ${err}`;
         recordRoutingAdherenceEvent({
           kind: 'error',
           phase: 'provider-stream',
@@ -3547,14 +3628,16 @@ async function streamModel(
           promptHash: currentPromptHash,
           timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
           elapsedMs: Date.now() - providerStartedAt,
-          error: `${providerId} API error: ${response.status} ${err}`,
+          error: message,
           statusCode: response.status,
           lastEvent: 'model_request',
           retryable: true,
-          fallbackAttempted: false,
+          fallbackAttempted: propagateProviderErrors,
         });
-        if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: `${providerId} API error: ${response.status} ${err}` }); }
-        res.write('event: error\ndata: ' + JSON.stringify({ error: `${providerId} API error: ${response.status} ${err}` }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'error', message });
+        if (propagateProviderErrors) throw new Error(message);
+        if (run) run.status = 'error';
+        res.write('event: error\ndata: ' + JSON.stringify({ error: message }) + '\n\n');
         persistAssistantError(session, assistantId, `Error: ${providerId} API returned ${response.status}. ${err}`, run);
         return;
       }
@@ -3735,6 +3818,7 @@ async function streamModel(
     session.updatedAt = new Date().toISOString();
 
     sessionStore.saveSession(session);
+    return estimateUsageForTexts(effectiveModel, serializeUsageInput(apiMessages), finalContent);
   } catch (err: any) {
     const errorMessage = err?.message || 'Model request failed';
     recordRoutingAdherenceEvent({
@@ -3757,6 +3841,7 @@ async function streamModel(
       retryable: true,
       fallbackAttempted: false,
     });
+    if (propagateProviderErrors) throw err;
     if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
     res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
     persistAssistantError(session, assistantId, `Error: ${errorMessage}`, run);
@@ -4401,8 +4486,9 @@ app.post('/api/bench/run', async (req, res) => {
         end: () => {},
       } as unknown as express.Response;
 
+      let providerUsage: EstimatedModelUsage | undefined;
       try {
-        await streamModel(
+        providerUsage = await streamModel(
           resolved.chatURL, resolved.apiKey, resolved.providerId,
           taskSession.messages, writer, uuid(), taskSession,
           modelId,
@@ -4451,14 +4537,23 @@ app.post('/api/bench/run', async (req, res) => {
       }
 
       const wallMs = Date.now() - startMs;
+      const usage = providerUsage || estimateUsageForTexts(modelId, task.prompt, response);
+      recordUsage({
+        timestamp: new Date().toISOString(),
+        modelId,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cost: usage.cost,
+        sessionId: taskSession.id,
+      });
       const scores = benchRuns.computeBenchScores({
         response,
         toolCalls: toolCallsAccum,
         wallMs,
         validationResults,
         stepCount,
-        tokenCount: 0, // TODO: extract from run trace
-        costEstimate: 0, // TODO: compute from token count
+        tokenCount: usage.tokenCount,
+        costEstimate: usage.cost,
       });
 
       const status: BenchRunResult['status'] = !validationResults.every(r => r.passed) && validationResults.length > 0
@@ -5314,6 +5409,19 @@ async function streamModelWithFallback(
     }
   }
 
+  const autoDefaultModel = appConfig.autoRouter?.defaultModel;
+  if (autoDefaultModel && autoDefaultModel !== effectiveModel) {
+    const fallbackResolved = resolveProviderForModel(autoDefaultModel);
+    if (fallbackResolved && !seen.has(fallbackResolved.providerId)) {
+      seen.add(fallbackResolved.providerId);
+      providers.push({
+        chatURL: fallbackResolved.chatURL,
+        apiKey: fallbackResolved.apiKey,
+        providerId: fallbackResolved.providerId,
+      });
+    }
+  }
+
   let lastError;
   for (let attempt = 0; attempt < providers.length; attempt++) {
     const p = providers[attempt];
@@ -5327,7 +5435,12 @@ async function streamModelWithFallback(
       res.write("\n");
     }
     try {
-      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, overrideModelId, run, routeOverride, systemTaskContext);
+      const modelForAttempt = p.providerId === primaryResolved?.providerId
+        ? overrideModelId
+        : p.providerId === resolveProviderForModel(appConfig.autoRouter?.defaultModel || '')?.providerId
+          ? appConfig.autoRouter?.defaultModel
+          : overrideModelId;
+      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, modelForAttempt, run, routeOverride, systemTaskContext, true);
       // If here, streaming succeeded
       return;
     } catch (err: any) {

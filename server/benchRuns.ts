@@ -444,7 +444,7 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
       avgScore: Math.round(avgScore * 10) / 10,
       avgValidationScore: Math.round(avgValidationScore * 10) / 10,
       avgLatencyMs: Math.round(avgLatency),
-      avgCost: Math.round(avgCost * 1000) / 1000,
+      avgCost: Math.round(avgCost * 1_000_000) / 1_000_000,
       avgSteps: Math.round(avgSteps * 10) / 10,
       totalRuns,
     };

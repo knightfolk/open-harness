@@ -23,6 +23,7 @@ export interface Message {
   codeBlocks?: CodeBlock[];
   thinkingChars?: number;
   thinkingStatus?: string;
+  thinkingPreview?: string;
   transient?: boolean;
   agentName?: string;
   agentModel?: string;

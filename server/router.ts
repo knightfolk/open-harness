@@ -88,15 +88,30 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   const fileRefs = detectFileReferences(lower);
   const complexitySignals = detectComplexitySignals(content, lower, fileRefs);
   const asksCompare = /\b(compare|versus|vs\.?|which model|model a|model b|judge|evaluate outputs?)\b/.test(intentLower);
-  const asksExecute = /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower);
+  const asksInformationalRunQuestion = /^\s*(?:how|what|where|which)\b[\s\S]{0,120}\brun\b/.test(intentLower);
+  const asksExplicitExecution = !asksInformationalRunQuestion && (
+    /\bexecute[-\s]?mode\b/.test(intentLower)
+    || /\borchestration mode:\s*execute\b/.test(intentLower)
+    || /\bdo not stop at (?:a )?plan\b/.test(intentLower)
+    || /\bdo not only plan\b/.test(intentLower)
+    || /\bcradle-to-grave\b/.test(intentLower)
+    || /\brun\b[\s\S]{0,80}\b(?:npm run|lint|build|test|tests|typecheck|validate|validation|verify|smoke)\b/.test(intentLower)
+    || /\brun\b[\s\S]{0,80}\b(?:check|checks|gate|gates)\b/.test(intentLower)
+    || /\bperform\b[\s\S]{0,80}\b(?:test|tests|validation|verification|checks?)\b/.test(intentLower)
+  );
+  const asksExecute = asksExplicitExecution
+    || /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower);
   const asksPlan = /\b(plan|planning mode|roadmap|design|architect|architecture|strategy|proposal|approach)\b/.test(intentLower);
   const asksTeamPlan = asksPlan
     && /\b(spawn|team|agents?|participants?|planning room|compare notes?|consensus|single plan|guiding document)\b/.test(intentLower);
-  const asksReview = /\b(review|audit|inspect|investigate|analy[sz]e|explain|summar|overview|find bugs|security|vuln|performance)\b/.test(intentLower);
+  const asksEvidenceBasedExplanation = /\b(explain|summar|overview)\b/.test(intentLower)
+    && (fileRefs.length > 0 || /\b(repo|repository|project|codebase|architecture|file|folder|current|this app|this project)\b/.test(intentLower));
+  const asksReview = /\b(review|audit|inspect|investigate|analy[sz]e|find bugs|security|vuln|performance)\b/.test(intentLower)
+    || asksEvidenceBasedExplanation;
   const tinyAmbiguousReview = /^\s*(?:please\s+)?review(?:\s+(?:this|it))?\s*[.!?]?\s*$/.test(lower);
   const asksProjectOverview = /\b(overview|summar|explain|describe)\b[\s\S]{0,80}\b(project|codebase|repo|repository|architecture|components)\b/.test(lower)
     || /\b(project|codebase|repo|repository)\b[\s\S]{0,80}\b(overview|summar|explain|describe|architecture|components)\b/.test(lower);
-  const asksValidation = /\b(test|lint|build|typecheck|validate|verify|smoke)\b/.test(lower);
+  const asksValidation = /\b(tests?|lint|build|typecheck|validate|validation|verification|verify|smoke)\b/.test(lower);
   const simpleQuestion = complexitySignals.hasShortLength
     && complexitySignals.hasNoCodeOrFiles
     && /^(what|why|how|is|are|can|should|tell me|say|summarize in one|hello|hi|hey|please|help|show me|show)/.test(lower)
@@ -106,9 +121,9 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     && !asksValidation;
 
   let mode: OrchestrationMode = 'direct';
-  if (asksTeamPlan) mode = 'plan';
+  if (asksExecute) mode = 'execute';
+  else if (asksTeamPlan) mode = 'plan';
   else if (asksCompare) mode = 'compare';
-  else if (asksExecute) mode = 'execute';
   else if (asksProjectOverview) mode = 'investigate';
   else if (asksPlan) mode = 'plan';
   else if (asksReview && !simpleQuestion) mode = 'investigate';
@@ -118,7 +133,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   else if (mode === 'plan') role = 'planner';
   else if (mode === 'execute') role = asksValidation ? 'coder' : 'planner';
   else if (asksProjectOverview) role = 'summarizer';
-  else if (/\b(review|audit|security|vuln|performance|bugs?)\b/.test(lower)) role = 'reviewer';
+  else if (/\b(review|audit|inspect|investigate|analy[sz]e|find bugs|security|vuln|performance|bugs?)\b/.test(lower)) role = 'reviewer';
   else if (/\b(plan|roadmap|design|architect|strategy)\b/.test(lower)) role = 'planner';
   else if (/\b(summar|overview|explain|describe)\b/.test(lower)) role = 'summarizer';
   else if (/\b(why|reason|trade.?off|pros? and cons?)\b/.test(lower)) role = 'reasoner';

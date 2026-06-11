@@ -261,8 +261,17 @@ function parseMinimaxToolCalls(
     const invokeOpen = buffer.indexOf('<|invoke|="', openIdx);
     if (invokeOpen < 0) break;
     const nameStart = invokeOpen + '<|invoke|="'.length;
-    const nameEnd = buffer.indexOf('">', nameStart);
+    const nameEnd = buffer.indexOf('"', nameStart);
     if (nameEnd < 0) break;
+    const afterName = buffer.slice(nameEnd + 1, nameEnd + 3);
+    const innerStart = afterName === '|>'
+      ? nameEnd + 3
+      : buffer[nameEnd + 1] === '>'
+        ? nameEnd + 2
+        : buffer[nameEnd + 1] === '|'
+          ? nameEnd + 2
+          : -1;
+    if (innerStart < 0) break;
     const rawName = buffer.slice(nameStart, nameEnd);
     const alias = aliasToolName(rawName, known);
     const canonicalName = alias || rawName;
@@ -270,14 +279,17 @@ function parseMinimaxToolCalls(
       cursor = invokeOpen + 1;
       continue;
     }
-    const invokeClose = buffer.indexOf('</invoke>', nameEnd);
-    if (invokeClose < 0) break;
-    const inner = buffer.slice(nameEnd + 2, invokeClose);
+    const closePlain = buffer.indexOf('</invoke>', innerStart);
+    const closePiped = buffer.indexOf('</|invoke|>', innerStart);
+    const invokeClose = [closePlain, closePiped].filter((idx) => idx >= 0).sort((a, b) => a - b)[0];
+    if (invokeClose == null) break;
+    const closeToken = invokeClose === closePiped ? '</|invoke|>' : '</invoke>';
+    const inner = buffer.slice(innerStart, invokeClose);
     // After </invoke> there is usually a closing envelope (either
     // </tool_call> or <|tool_call|>); advance past it so we don't
     // re-match it on the next iteration.
-    const closer = findToolEnvelope(buffer, invokeClose + '</invoke>'.length);
-    const callEnd = closer ? closer.end : invokeClose + '</invoke>'.length;
+    const closer = findToolEnvelope(buffer, invokeClose + closeToken.length);
+    const callEnd = closer ? closer.end : invokeClose + closeToken.length;
     cursor = callEnd;
     if (firstStart < 0) firstStart = openIdx;
     lastEnd = callEnd;

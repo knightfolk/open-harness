@@ -511,6 +511,31 @@
   background: var(--accent-primary-hover);
 }
 
+.new-project-btn {
+  width: auto;
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.new-project-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-secondary);
+  color: var(--text-primary);
+}
+
 /* ========== Main Area ========== */
 .main-area {
   flex: 1;
@@ -814,12 +839,45 @@
 }
 
 .message-thinking-status {
-  display: inline-flex;
-  align-items: center;
-  margin-bottom: 6px;
-  color: var(--text-tertiary);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
   font-size: 12px;
-  font-style: italic;
+}
+
+.message-thinking-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.message-thinking-line svg {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.message-thinking-count {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.message-thinking-preview {
+  color: var(--text-tertiary);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message-wrapper.transient-agent .message-content {
@@ -1316,7 +1374,8 @@
 
 .sub-agent-status-badge.idle {
   background: var(--bg-active);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-secondary);
 }
 
 .sub-agent-status-badge.error {
@@ -3536,6 +3595,50 @@ button:focus-visible {
   font-size: 11px;
   line-height: 1.45;
   color: var(--text-tertiary);
+}
+.role-auto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.role-auto-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.role-auto-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+}
+.role-auto-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.role-auto-name {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.role-auto-model {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 .role-effort-list {
   display: flex;

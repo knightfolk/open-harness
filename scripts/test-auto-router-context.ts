@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { configureAutoRouter, clearRouterCache, routeTask } from '../server/autoRouter';
+import { configureAutoRouter, clearRouterCache, getAutoRouterState, routeTask } from '../server/autoRouter';
 import { getModelConfig } from '../server/modelProfiles';
 import type { StoredConfig } from '../server/config';
 
@@ -58,6 +58,11 @@ const config: StoredConfig = {
 configureAutoRouter(config);
 clearRouterCache();
 
+const configuredState = getAutoRouterState();
+assert.equal(configuredState.configuredCandidateCount, 3, 'router state should report the configured candidate count');
+assert.equal(configuredState.candidateCount, 3, 'all authenticated candidates should be usable');
+assert.deepEqual(configuredState.unavailableCandidates, [], 'usable config should not report dropped candidates');
+
 const smallDecision = await routeTask({
   task: 'Rename a variable in one file.',
   surface: 'orchestrator',
@@ -97,5 +102,40 @@ assert.match(xHighDecision?.reason || '', /xHigh thinking/i, 'router reason shou
 
 assert.equal(getModelConfig('MiniMax-M2.7').contextWindowTokens, 204_800, 'MiniMax M2.7 should not inherit M3 1M context');
 assert.equal(getModelConfig('MiniMax-M3').contextWindowTokens, 1_000_000, 'MiniMax M3 should keep 1M context');
+
+configureAutoRouter({
+  ...config,
+  providers: [
+    ...config.providers,
+    {
+      id: 'missing-auth',
+      name: 'Missing Auth Provider',
+      type: 'openai-compatible',
+      apiKey: '',
+      baseURL: 'https://example.invalid/v1',
+      models: [{ id: 'strong-model', name: 'Strong Model', enabled: true }],
+    },
+  ],
+  autoRouter: {
+    ...config.autoRouter!,
+    candidates: [
+      ...config.autoRouter!.candidates,
+      {
+        modelId: 'missing-auth:strong-model',
+        cost: 0.2,
+        supportsImages: false,
+        card: 'Configured but unavailable because the provider has no credentials.',
+      },
+    ],
+  },
+});
+const diagnosticState = getAutoRouterState();
+assert.equal(diagnosticState.configuredCandidateCount, 4, 'router state should include configured-but-unavailable candidates');
+assert.equal(diagnosticState.candidateCount, 3, 'router should keep unavailable candidates out of routing decisions');
+assert.match(
+  diagnosticState.unavailableCandidates.find((candidate) => candidate.modelId === 'missing-auth:strong-model')?.reason || '',
+  /no API key or OAuth token/i,
+  'router state should explain dropped candidates',
+);
 
 console.log('Auto-router context-limit tests passed.');

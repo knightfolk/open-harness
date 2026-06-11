@@ -131,7 +131,8 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
   const visibleContent = stripThinking(message.content);
   const isStreaming = message.status === 'streaming';
   const isAssistant = message.role === 'assistant';
-  const showThinkingStatus = isAssistant && isStreaming && !visibleContent.trim() && !!message.thinkingChars;
+  const showThinkingStatus = isAssistant && isStreaming && !!message.thinkingChars;
+  const showTypingIndicator = isStreaming && !showThinkingStatus && !visibleContent.trim();
 
   // Compute delight signals for assistant messages
   const confidenceSignals = useMemo(
@@ -169,11 +170,18 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
           <div className="message-content">
             {showThinkingStatus && (
               <div className="message-thinking-status">
-                {message.thinkingStatus || 'Thinking live'} · {message.thinkingChars!.toLocaleString()} chars
+                <div className="message-thinking-line">
+                  <Brain size={13} />
+                  <span>{message.thinkingStatus || 'Thinking live'}</span>
+                  <span className="message-thinking-count">{message.thinkingChars!.toLocaleString()} chars</span>
+                </div>
+                {message.thinkingPreview && (
+                  <div className="message-thinking-preview">{message.thinkingPreview}</div>
+                )}
               </div>
             )}
             <MarkdownContent content={visibleContent} />
-            {isStreaming && (
+            {showTypingIndicator && (
               <div className="typing-indicator">
                 <div className="typing-dot" />
                 <div className="typing-dot" />
@@ -181,7 +189,7 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
               </div>
             )}
           </div>
-          {message.toolCalls && message.toolCalls.length > 0 && (
+          {!isStreaming && message.toolCalls && message.toolCalls.length > 0 && (
             <ToolCallSummary toolCalls={message.toolCalls} />
           )}
 

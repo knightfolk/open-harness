@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Circle,
   Clock,
   FolderOpen,
   Loader,
@@ -234,7 +233,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
   return (
     <>
       {onOpenFolder && (
-        <button className="new-session-btn" onClick={onOpenFolder}>
+        <button className="new-project-btn" onClick={onOpenFolder}>
           <FolderOpen size={15} />
           New Project
         </button>
@@ -290,7 +289,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
           </div>
           {!collapsed && group.sessions.map((session) => {
             const isActive = session.id === activeSessionId;
-            const isRunning = isActive && activeSubAgents.length > 0;
+            const isRunning = isActive && activeSubAgents.some((agent) => agent.status === 'running');
             return (
               <div key={session.id}>
                 <div
@@ -376,7 +375,7 @@ function SubAgentRow({ agent, onFocus }: { agent: SubAgent; onFocus?: () => void
   }[agent.status];
 
   const StatusIcon = {
-    idle: Circle,
+    idle: Clock,
     running: Loader,
     complete: CheckCircle2,
     error: AlertCircle,
@@ -418,6 +417,7 @@ function SubAgentRow({ agent, onFocus }: { agent: SubAgent; onFocus?: () => void
         <div className="sub-agent-detail">
           <div style={{ color: 'var(--text-secondary)', marginBottom: 2 }}>{agent.task}</div>
           <div className="sub-agent-meta-row">
+            <span>{agent.status === 'idle' ? 'waiting' : agent.status === 'running' ? 'working' : agent.status}</span>
             <span>{agent.model}</span>
             {agent.tokensUsed != null && <span>{(agent.tokensUsed / 1000).toFixed(1)}k tok</span>}
             {agent.progress != null && agent.status === 'running' && (

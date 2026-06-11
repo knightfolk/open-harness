@@ -35,6 +35,16 @@ assert.equal(checkCommandPolicy('rm -r dist', 'workspace-write').allowed, false,
 assert.equal(checkCommandPolicy('git reset --hard HEAD', 'workspace-write').allowed, false, 'workspace-write must block destructive git reset');
 assert.equal(checkCommandPolicy('git clean -fdx', 'workspace-write').allowed, false, 'workspace-write must block destructive git clean');
 assert.equal(checkCommandPolicy('git status --short', 'workspace-write').allowed, true, 'workspace-write should allow benign git status');
+assert.equal(
+  checkCommandPolicy('grep -n "pickWeightedChoice" src/game/ai/*.js 2>/dev/null | head -40', 'workspace-write').allowed,
+  true,
+  'workspace-write should allow harmless stderr redirection to /dev/null',
+);
+assert.equal(
+  checkCommandPolicy('printf danger > /dev/disk1', 'workspace-write').allowed,
+  false,
+  'workspace-write must still block writes to real device files',
+);
 assert.equal(checkCommandPolicy('rm -rf dist', 'full-local').allowed, true, 'full-local may allow dangerous commands with warning');
 
 assert.equal(
