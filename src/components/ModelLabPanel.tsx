@@ -485,6 +485,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                       <th style={thStyle}>Status</th>
                       <th style={thStyle}>Score</th>
                       <th style={thStyle}>Breakdown</th>
+                      <th style={thStyle}>Rubric</th>
                       <th style={thStyle}>Weakest</th>
                       <th style={thStyle}>Validation</th>
                       <th style={thStyle}>Latency</th>
@@ -503,6 +504,9 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                         </td>
                         <td style={tdStyle}>
                           <StackedScoreBreakdown breakdown={r.scores.breakdown} compact />
+                        </td>
+                        <td style={{ ...tdStyle, color: rubricCoverageColor(r.scores.rubricCoverage) }}>
+                          {rubricCoverageLabel(r.scores.rubricCoverage)}
                         </td>
                         <td style={tdStyle}>{r.scores.breakdown?.weakestSignal?.label ?? '—'}</td>
 	                        <td style={{ ...tdStyle, color: r.validationPassed ? '#22c55e' : '#ef4444' }}>
@@ -932,6 +936,11 @@ function BenchEvidencePanel({ run }: { run: api.BenchRun }) {
           <EvidenceBlock title="Failed or weak signals">
             <SignalList signals={result.scores.breakdown?.signals || []} />
           </EvidenceBlock>
+          {result.scores.rubricCoverage && (
+            <EvidenceBlock title="Rubric coverage">
+              <RubricCoverageList coverage={result.scores.rubricCoverage} />
+            </EvidenceBlock>
+          )}
           <EvidenceBlock title="Validation">
             {result.validationResults.length > 0 ? result.validationResults.map((validation, i) => (
               <div key={i} style={{ marginBottom: 8 }}>
@@ -960,6 +969,26 @@ function BenchEvidencePanel({ run }: { run: api.BenchRun }) {
   );
 }
 
+function RubricCoverageList({ coverage }: { coverage: NonNullable<api.BenchScores['rubricCoverage']> }) {
+  const sortedItems = [...coverage.items].sort((a, b) => Number(a.passed) - Number(b.passed));
+  return (
+    <div>
+      <div style={{ color: rubricCoverageColor(coverage), fontWeight: 600, marginBottom: 4 }}>
+        {rubricCoverageLabel(coverage)}
+      </div>
+      {sortedItems.map((item) => (
+        <div key={item.id} style={{ marginBottom: 3 }}>
+          <span style={{ color: item.passed ? 'var(--accent-success)' : 'var(--accent-error)', fontWeight: 600 }}>
+            {item.passed ? 'PASS' : 'FAIL'}
+          </span>
+          <span style={{ color: 'var(--text-tertiary)' }}> · {item.id} · {item.points} pt{item.points === 1 ? '' : 's'}</span>
+          {item.evidence && <span> · {item.evidence}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EvidenceBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginTop: 8 }}>
@@ -967,6 +996,24 @@ function EvidenceBlock({ title, children }: { title: string; children: React.Rea
       <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{children}</div>
     </div>
   );
+}
+
+function rubricCoverageLabel(coverage?: api.BenchScores['rubricCoverage']) {
+  if (!coverage || coverage.totalPoints <= 0) return '—';
+  const passed = roundTenth(coverage.passedPoints);
+  const total = roundTenth(coverage.totalPoints);
+  return `${passed}/${total} pts · ${Math.round(coverage.ratio * 100)}%`;
+}
+
+function rubricCoverageColor(coverage?: api.BenchScores['rubricCoverage']) {
+  if (!coverage) return 'var(--text-tertiary)';
+  if (coverage.ratio >= 0.7) return 'var(--accent-success)';
+  if (coverage.ratio >= 0.4) return '#f59e0b';
+  return 'var(--accent-error)';
+}
+
+function roundTenth(value: number) {
+  return Math.round(value * 10) / 10;
 }
 
 function SignalList({ signals }: { signals: api.EvalSignalScore[] }) {
