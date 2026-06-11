@@ -10,12 +10,16 @@ const ui = {
   hp: document.getElementById('hp'),
   signal: document.getElementById('signal'),
   deck: document.getElementById('deck'),
+  threat: document.getElementById('threat'),
   inventory: document.getElementById('inventory'),
   log: document.getElementById('log'),
   overlay: document.getElementById('overlay'),
   overlayTitle: document.getElementById('overlayTitle'),
   overlayText: document.getElementById('overlayText'),
   overlayButton: document.getElementById('overlayButton'),
+  seedForm: document.getElementById('seedForm'),
+  seedInput: document.getElementById('seedInput'),
+  seedReadout: document.getElementById('seedReadout'),
 };
 
 const districts = [
@@ -115,9 +119,18 @@ function keyAt(x, y) {
   return `${x},${y}`;
 }
 
+function roomOverlaps(room, rooms) {
+  return rooms.some((other) =>
+    room.x <= other.x + other.w + 1
+    && room.x + room.w + 1 >= other.x
+    && room.y <= other.y + other.h + 1
+    && room.y + room.h + 1 >= other.y
+  );
+}
+
 class Game {
-  constructor() {
-    this.seed = Date.now() % 1000000;
+  constructor(seed = Date.now() % 1000000) {
+    this.seed = Number(seed) || Date.now() % 1000000;
     this.rng = mulberry32(this.seed);
     this.player = {
       x: 1,
@@ -134,6 +147,7 @@ class Game {
     this.revealRadius = 5;
     this.enemyDelay = 0;
     this.messages = [];
+    this.seen = new Set();
     this.over = false;
     this.win = false;
     this.nextFloor();
@@ -146,6 +160,7 @@ class Game {
     this.items = [];
     this.enemies = [];
     this.events = [];
+    this.seen = new Set();
     this.exit = { x: COLS - 2, y: ROWS - 2, revealed: false };
     this.generateMap();
     this.placeContents();
@@ -154,6 +169,7 @@ class Game {
     this.player.deck = this.floor - 1;
     this.log(`Floor ${this.floor}: ${this.district.name}. Find the Exit Gate.`);
     if (this.floor === 1) this.log('Every move advances the decade. Bump enemies to attack.');
+    this.markVisible();
   }
 
   generateMap() {
@@ -169,22 +185,12 @@ class Game {
       };
       room.x = Math.min(room.x, COLS - room.w - 2);
       room.y = Math.min(room.y, ROWS - room.h - 2);
-      const overlaps = rooms.some((other) =>
-        room.x <= other.x + other.w + 1
-        && room.x + room.w + 1 >= other.x
-        && room.y <= other.y + other.h + 1
-        && room.y + room.h + 1 >= other.y
-      );
-      if (!overlaps) rooms.push(room);
+      if (!roomOverlaps(room, rooms)) rooms.push(room);
     }
 
     while (rooms.length < 5) {
-      const fallback = [
-        { x: 10, y: 2, w: 7, h: 4 },
-        { x: 16, y: 9, w: 6, h: 5 },
-        { x: 3, y: 10, w: 8, h: 4 },
-        { x: 12, y: 6, w: 7, h: 5 },
-      ][rooms.length - 1];
+      const fallback = this.findFallbackRoom(rooms);
+      if (!fallback) break;
       rooms.push(fallback);
     }
     this.rooms = rooms.map((room) => ({ ...room }));
@@ -205,6 +211,30 @@ class Game {
 
     this.exit.x = centers[centers.length - 1].x;
     this.exit.y = centers[centers.length - 1].y;
+  }
+
+  findFallbackRoom(rooms) {
+    const candidates = [];
+    for (let y = 1; y < ROWS - 4; y += 3) {
+      for (let x = 1; x < COLS - 6; x += 4) {
+        const room = {
+          x,
+          y,
+          w: 4 + Math.floor(this.rng() * 4),
+          h: 3 + Math.floor(this.rng() * 3),
+          order: this.rng(),
+        };
+        room.x = Math.min(room.x, COLS - room.w - 2);
+        room.y = Math.min(room.y, ROWS - room.h - 2);
+        candidates.push(room);
+      }
+    }
+
+    candidates.sort((a, b) => a.order - b.order);
+    for (const { order, ...room } of candidates) {
+      if (!roomOverlaps(room, rooms)) return room;
+    }
+    return null;
   }
 
   carveCorridor(a, b) {
@@ -284,8 +314,6 @@ class Game {
       if (enemy.hp <= 0) {
         this.player.signal += 3;
         this.log(`${enemy.name} dissolves into neon dust. +3 Signal.`);
-      } else {
-        this.damagePlayer(enemy.damage, `${enemy.name} counters.`);
       }
       this.afterTurn();
       return;
@@ -295,7 +323,10 @@ class Game {
     this.player.y = ny;
     this.pickupItem();
     this.triggerEvent();
-    this.checkExit();
+    if (this.checkExit()) {
+      render();
+      return;
+    }
     this.afterTurn();
   }
 
@@ -329,16 +360,17 @@ class Game {
   }
 
   checkExit() {
-    if (this.player.x !== this.exit.x || this.player.y !== this.exit.y) return;
+    if (this.player.x !== this.exit.x || this.player.y !== this.exit.y) return false;
     if (this.floor >= FLOORS_TO_WIN) {
       this.win = true;
       this.over = true;
       this.log('You escape the neon time loop.');
       showOverlay('Signal Restored', 'You cleared five floors and turned the decade into a playable legend.');
-      return;
+      return true;
     }
     this.player.signal += 8;
     this.nextFloor();
+    return true;
   }
 
   afterTurn() {
@@ -349,17 +381,20 @@ class Game {
     if (this.enemyDelay > 0) this.enemyDelay -= 1;
     else this.moveEnemies();
     if (this.player.slow > 0) this.player.slow -= 1;
+    this.markVisible();
     render();
   }
 
   moveEnemies() {
     for (const enemy of this.enemies) {
+      if (this.over) break;
       if (enemy.hp <= 0) continue;
       if (this.player.slow > 0 && this.rng() < 0.45) continue;
 
       const distance = Math.abs(enemy.x - this.player.x) + Math.abs(enemy.y - this.player.y);
       if (distance === 1) {
         this.damagePlayer(enemy.damage, `${enemy.name} hits you.`);
+        if (this.over) break;
         continue;
       }
       if (distance > 8) continue;
@@ -402,6 +437,31 @@ class Game {
   inBounds(x, y) {
     return x >= 0 && x < COLS && y >= 0 && y < ROWS;
   }
+
+  markVisible() {
+    for (let y = 0; y < ROWS; y += 1) {
+      for (let x = 0; x < COLS; x += 1) {
+        if (this.canSee(x, y)) this.seen.add(keyAt(x, y));
+      }
+    }
+  }
+
+  canSee(x, y) {
+    const distance = Math.abs(x - this.player.x) + Math.abs(y - this.player.y);
+    if (this.exit.revealed && x === this.exit.x && y === this.exit.y) return true;
+    return distance <= this.revealRadius;
+  }
+
+  hasSeen(x, y) {
+    return this.seen.has(keyAt(x, y));
+  }
+
+  adjacentThreats() {
+    return this.enemies.filter((enemy) =>
+      enemy.hp > 0
+      && Math.abs(enemy.x - this.player.x) + Math.abs(enemy.y - this.player.y) === 1
+    );
+  }
 }
 
 let game = new Game();
@@ -419,13 +479,23 @@ function drawGlyph(x, y, glyph, color, size = 18) {
   ctx.fillText(glyph, x * TILE + TILE / 2, y * TILE + TILE / 2 + 1);
 }
 
+function drawEnemy(enemy) {
+  drawGlyph(enemy.x, enemy.y, enemy.glyph, enemy.color, 20);
+  ctx.fillStyle = '#05060a';
+  ctx.fillRect(enemy.x * TILE + TILE - 14, enemy.y * TILE + 2, 12, 10);
+  ctx.fillStyle = '#f7fbff';
+  ctx.font = '700 8px "IBM Plex Mono", Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(enemy.hp), enemy.x * TILE + TILE - 8, enemy.y * TILE + 7);
+}
+
 function isVisible(x, y) {
-  const distance = Math.abs(x - game.player.x) + Math.abs(y - game.player.y);
-  if (game.exit.revealed && x === game.exit.x && y === game.exit.y) return true;
-  return distance <= game.revealRadius;
+  return game.canSee(x, y);
 }
 
 function render() {
+  game.markVisible();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#07090e';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -433,7 +503,13 @@ function render() {
   for (let y = 0; y < ROWS; y += 1) {
     for (let x = 0; x < COLS; x += 1) {
       if (!isVisible(x, y)) {
-        drawRect(x, y, '#05060a');
+        if (game.hasSeen(x, y)) {
+          drawRect(x, y, game.map[y][x] === '#' ? '#111722' : '#0b111a');
+          ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+          ctx.strokeRect(x * TILE, y * TILE, TILE, TILE);
+        } else {
+          drawRect(x, y, '#05060a');
+        }
         continue;
       }
       drawRect(x, y, game.map[y][x] === '#' ? game.district.wall : game.district.floor);
@@ -456,7 +532,7 @@ function render() {
   }
 
   for (const enemy of game.enemies) {
-    if (enemy.hp > 0 && isVisible(enemy.x, enemy.y)) drawGlyph(enemy.x, enemy.y, enemy.glyph, enemy.color, 20);
+    if (enemy.hp > 0 && isVisible(enemy.x, enemy.y)) drawEnemy(enemy);
   }
 
   drawRect(game.player.x, game.player.y, '#f7fbff');
@@ -469,7 +545,10 @@ function updateHud() {
   ui.floor.textContent = `Floor ${game.floor}`;
   ui.hp.textContent = `HP ${game.player.hp}/${game.player.maxHp}`;
   ui.signal.textContent = `Signal ${game.player.signal}`;
-  ui.deck.textContent = `Deck ${game.player.deck}`;
+  ui.deck.textContent = `Depth ${game.player.deck}`;
+  ui.threat.textContent = `Threat ${game.adjacentThreats().length}`;
+  ui.seedInput.value = String(game.seed);
+  ui.seedReadout.textContent = `Seed ${game.seed}`;
 
   const inventoryEntries = Object.entries(game.player.inventory)
     .filter(([, count]) => count > 0)
@@ -479,6 +558,7 @@ function updateHud() {
     });
   if (game.player.shield > 0) inventoryEntries.push(`<li>Shielded hits × ${game.player.shield}</li>`);
   if (game.player.slow > 0) inventoryEntries.push(`<li>Cassette slow turns × ${game.player.slow}</li>`);
+  for (const enemy of game.adjacentThreats()) inventoryEntries.push(`<li>Adjacent threat: ${enemy.name} HP ${enemy.hp}</li>`);
   ui.inventory.innerHTML = inventoryEntries.length > 0 ? inventoryEntries.join('') : '<li>Empty pockets, loud sneakers.</li>';
   ui.log.innerHTML = game.messages.map((message) => `<li>${message}</li>`).join('');
 }
@@ -489,9 +569,9 @@ function showOverlay(title, text) {
   ui.overlay.classList.remove('hidden');
 }
 
-function restart() {
+function restart(seed) {
   ui.overlay.classList.add('hidden');
-  game = new Game();
+  game = new Game(seed);
   render();
 }
 
@@ -532,6 +612,10 @@ for (const button of document.querySelectorAll('[data-move]')) {
 
 document.querySelector('[data-wait]').addEventListener('click', () => game.waitTurn());
 ui.overlayButton.addEventListener('click', restart);
+ui.seedForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  restart(ui.seedInput.value);
+});
 window.neonDecadeDescent = {
   getState() {
     return {
@@ -543,13 +627,32 @@ window.neonDecadeDescent = {
         hp: game.player.hp,
         signal: game.player.signal,
       },
+      seed: game.seed,
+      exit: { ...game.exit },
       enemiesRemaining: game.enemies.filter((enemy) => enemy.hp > 0).length,
+      enemies: game.enemies.map((enemy) => ({
+        name: enemy.name,
+        x: enemy.x,
+        y: enemy.y,
+        hp: enemy.hp,
+        damage: enemy.damage,
+      })),
       itemsRemaining: game.items.length,
+      items: game.items.map((item) => ({ id: item.id, name: item.name, x: item.x, y: item.y })),
       eventsRemaining: game.events.filter((event) => !event.used).length,
       rooms: game.rooms,
+      seenTiles: game.seen.size,
+      adjacentThreats: game.adjacentThreats().map((enemy) => ({ name: enemy.name, hp: enemy.hp })),
       over: game.over,
       win: game.win,
     };
+  },
+  restart,
+  move(dx, dy) {
+    game.tryMove(dx, dy);
+  },
+  wait() {
+    game.waitTurn();
   },
 };
 render();

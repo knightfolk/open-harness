@@ -19,7 +19,8 @@
             <span id="floor">Floor 1</span>
             <span id="hp">HP 10</span>
             <span id="signal">Signal 0</span>
-            <span id="deck">Deck 0</span>
+            <span id="deck">Depth 0</span>
+            <span id="threat">Threat 0</span>
           </div>
         </header>
 
@@ -49,6 +50,12 @@
                 <kbd>.</kbd><span>wait one turn</span>
                 <kbd>R</kbd><span>restart</span>
               </div>
+              <form class="seed-controls" id="seedForm">
+                <label for="seedInput">Seed</label>
+                <input id="seedInput" name="seed" inputmode="numeric" autocomplete="off" />
+                <button type="submit">Replay</button>
+              </form>
+              <p class="seed-readout" id="seedReadout">Seed 0</p>
               <div class="touch-controls" aria-label="Touch controls">
                 <button type="button" data-move="0,-1">↑</button>
                 <button type="button" data-move="-1,0">←</button>
@@ -63,8 +70,8 @@
               <div class="legend">
                 <span><b>@</b> You</span>
                 <span><b>EXIT</b> Gate</span>
-                <span><b>♫ ¢ ▣</b> Items</span>
-                <span><b>$ ▲ ▥</b> Events</span>
+                <span><b>♫ ¢ ▣ ◒ ▤ ▭</b> Items</span>
+                <span><b>$ ▲ ▥ ≋ ?</b> Events</span>
                 <span><b>G M B S K</b> Enemies</span>
               </div>
             </section>

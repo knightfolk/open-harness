@@ -1,0 +1,39 @@
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #080812;
+  color: #f8f8ff;
+  font-family: "Courier New", monospace;
+}
+.shell {
+  width: min(94vw, 760px);
+  display: grid;
+  gap: 12px;
+}
+h1 {
+  margin: 0 0 8px;
+  color: #00f5ff;
+}
+.hud {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.hud span, #log, button {
+  border: 1px solid #ff3df2;
+  background: #121226;
+  padding: 8px;
+}
+canvas {
+  width: min(94vw, 512px);
+  aspect-ratio: 1;
+  border: 2px solid #ffff66;
+  background: #050509;
+}
+button {
+  color: #080812;
+  background: #66ff99;
+  font-weight: 700;
+}

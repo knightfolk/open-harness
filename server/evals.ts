@@ -226,6 +226,41 @@ function roundScore(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+function startsWithPreamble(response: string): boolean {
+  return /^\s*(?:i have enough|let me|i need to|i will|now i|the user wants|we need to|i'll|i’m|i am going to)\b/i.test(response);
+}
+
+function hasSubstantiveShape(response: string): boolean {
+  const trimmed = response.trim();
+  if (trimmed.length < 120) return false;
+  if (startsWithPreamble(trimmed)) return false;
+  if (/^(?:summary|findings|recommendation|answer|plan|verdict|result|implementation|next steps|#|\*|-|\d+\.)/i.test(trimmed)) return true;
+  return /(?:\n#{1,3}\s+\S|\n[-*]\s+\S|\n\d+\.\s+\S)/.test(trimmed);
+}
+
+function responseIsTooVerbose(response: string): boolean {
+  return response.length > 8000;
+}
+
+export function validatePromptResult(
+  prompt: PromptCase,
+  result: { response: string; toolCalls: Array<{ name: string; status: string }> },
+): boolean {
+  const response = result.response.trim();
+  if (!hasSubstantiveShape(response)) return false;
+  if (responseIsTooVerbose(response)) return false;
+
+  const expected = (prompt.expectedBehavior || '').toLowerCase();
+  const toolNames = result.toolCalls.map((tool) => tool.name);
+  const expectsInspection = /\b(read|inspect|examine|look at|investigate)\b/.test(expected);
+  if (expectsInspection && !toolNames.some((name) => name === 'read_file' || name === 'list_directory')) return false;
+
+  const expectsCommand = /\b(run|build|git|status|diff)\b/.test(expected);
+  if (expectsCommand && !toolNames.some((name) => name === 'exec_command')) return false;
+
+  return true;
+}
+
 export function buildScoreBreakdown(signals: EvalSignalScore[]): EvalScoreBreakdown {
   const structural = signals.filter(s => s.category === 'structural').reduce((sum, s) => sum + s.score, 0);
   const runtime = signals.filter(s => s.category === 'runtime').reduce((sum, s) => sum + s.score, 0);
@@ -258,6 +293,9 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
   const referencedRealFiles = toolNames.some(n => n === 'read_file' || n === 'list_directory');
   const avoidedHallucinatedPaths = !response.includes('file not found') && !response.includes('no such file');
   const producedSummary = response.includes('summary') || response.includes('conclusion') || response.includes('in summary') || response.includes('key findings') || response.includes('here are') || response.length > 300;
+  const noPreamble = !startsWithPreamble(result.response);
+  const substantiveShape = hasSubstantiveShape(result.response);
+  const conciseEnough = !responseIsTooVerbose(result.response);
 
   // Calculate overall score (0-10)
   let score = 0;
@@ -275,7 +313,7 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
   // Validation scoring (if validation results are available)
   const validationPassed = (result as any).validationPassed !== undefined
     ? (result as any).validationPassed
-    : true; // Default to true if no validation was run
+    : false; // No validation cannot prove quality.
   const validationScore = validationPassed ? 2 : 0;
   const breakdown = buildScoreBreakdown([
     { id: 'answered-user', label: 'Answered user', category: 'structural', passed: answeredUser, score: answeredUser ? 2 : 0, maxScore: 2 },
@@ -286,7 +324,15 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
     { id: 'summary', label: 'Produced summary', category: 'style', passed: producedSummary, score: producedSummary ? 1 : 0, maxScore: 1 },
     { id: 'latency', label: 'Responsive latency', category: 'style', passed: result.wallMs < 30000, score: result.wallMs < 10000 ? 0.7 : result.wallMs < 30000 ? 0.4 : 0, maxScore: 0.7 },
     { id: 'tool-efficiency', label: 'Tool efficiency', category: 'style', passed: toolCalls.length >= 1 && toolCalls.length <= 10, score: toolCalls.length >= 1 && toolCalls.length <= 10 ? 0.3 : 0, maxScore: 0.3 },
+    { id: 'no-preamble', label: 'No preamble leakage', category: 'style', passed: noPreamble, score: noPreamble ? 0.5 : 0, maxScore: 0.5 },
+    { id: 'answer-shape', label: 'Human-facing answer shape', category: 'style', passed: substantiveShape, score: substantiveShape ? 0.5 : 0, maxScore: 0.5 },
+    { id: 'bounded-length', label: 'Bounded output length', category: 'style', passed: conciseEnough, score: conciseEnough ? 0.5 : 0, maxScore: 0.5 },
   ]);
+  let overallScore = Math.min(10, breakdown.total || Math.round((score + validationScore) * 10) / 10);
+  if ((result as any).validationPassed === undefined || !validationPassed) overallScore = Math.min(overallScore, 6.5);
+  if (!noPreamble) overallScore = Math.min(overallScore, 5.5);
+  if (!substantiveShape) overallScore = Math.min(overallScore, 6.5);
+  if (!conciseEnough) overallScore = Math.min(overallScore, 8);
 
   return {
     usedTools,
@@ -298,7 +344,7 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
     toolCount: toolCalls.length,
     validationPassed,
     validationScore: roundScore(validationScore),
-    overallScore: Math.min(10, breakdown.total || Math.round((score + validationScore) * 10) / 10),
+    overallScore,
     breakdown,
   };
 }

@@ -35,6 +35,7 @@ export interface MarkupParseResult {
 
 const XML_TAG_PATTERN = /<([A-Za-z_][A-Za-z0-9_]*)([^>]*)>([\s\S]*?)<\/\1>/g;
 const CHILD_TAG_PATTERN = /<([A-Za-z_][A-Za-z0-9_]*)([^>]*)>([\s\S]*?)<\/\1>/g;
+const ATTR_TOOL_CALL_PATTERN = /<tool_call\b([^>]*)>([\s\S]*?)<\/tool_call>/gi;
 
 // Match a tool-call envelope opener or closer. We accept any of:
 //   <tool_call>    <|tool_call|>    <|tool_call_begin|>    <|tool_call_end|>
@@ -68,6 +69,29 @@ export function parseToolCallMarkup(
     calls.push({
       name: canonical,
       arguments: normalizeToolArguments(canonical, { ...parseAttributes(attrs), ...parseToolArguments(inner) }),
+      consumed: m.index + full.length,
+    });
+    consumed.push({ start: m.index, end: m.index + full.length });
+  }
+
+  // 2) Attribute-style `<tool_call name="read_file"><path>...</path></tool_call>`.
+  //    MiniMax sometimes emits this hybrid of the generic envelope and
+  //    XML child-argument style.
+  ATTR_TOOL_CALL_PATTERN.lastIndex = 0;
+  while ((m = ATTR_TOOL_CALL_PATTERN.exec(buffer)) !== null) {
+    const [full, attrs, inner] = m;
+    const attrArgs = parseAttributes(attrs);
+    const rawName = attrArgs.name || attrArgs.tool || attrArgs.tool_name;
+    if (typeof rawName !== 'string' || !rawName) continue;
+    const alias = aliasToolName(rawName, known);
+    const canonical = alias || rawName;
+    if (!known.has(canonical)) continue;
+    delete attrArgs.name;
+    delete attrArgs.tool;
+    delete attrArgs.tool_name;
+    calls.push({
+      name: canonical,
+      arguments: normalizeToolArguments(canonical, { ...attrArgs, ...parseToolArguments(inner) }),
       consumed: m.index + full.length,
     });
     consumed.push({ start: m.index, end: m.index + full.length });
@@ -224,7 +248,7 @@ function safeParseJson(s: string): any {
 
 function extractNameAndArgs(obj: any): { name: string; arguments: Record<string, unknown> } | null {
   if (!obj || typeof obj !== 'object') return null;
-  const name = obj.name || obj.function?.name || obj.tool_name;
+  const name = obj.name || obj.function?.name || obj.tool_name || obj.tool;
   if (typeof name !== 'string' || !name) return null;
   const rawArgs = obj.arguments ?? obj.parameters ?? obj.args;
   let parsedArgs: Record<string, unknown> = {};

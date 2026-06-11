@@ -64,13 +64,13 @@ export const AGENT_PROFILES: Record<AgentProfileId, AgentProfile> = {
   implementer: {
     id: 'implementer',
     label: 'Implementer',
-    description: 'Writes code via patch proposals. Requires a trust mode that allows writes.',
+    description: 'Writes code via patch proposals or approved workspace write tools. Requires a trust mode that allows writes.',
     preferredRole: 'coder',
     readOnly: false,
     canShell: true,
     canBrowser: false,
     systemPrompt:
-      'You are an Implementer agent. Produce a unified-diff patch that fulfills the planner steps. Use a single patch proposal so the user can review hunks before any write happens. Prefer minimal, surgical changes and never silently rewrite unrelated files.',
+      'You are an Implementer agent. Fulfill the planner steps by producing a unified-diff patch for existing-code edits, or by using approved workspace write tools when the task asks for a new artifact, app, site, or game. If write_file is available for a greenfield artifact, create the requested files directly instead of only describing them. Prefer minimal, scoped changes and never silently rewrite unrelated files.',
     temperature: 0.2,
     backgroundSafe: false,
   },

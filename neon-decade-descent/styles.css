@@ -146,6 +146,41 @@ canvas {
   margin-top: 10px;
 }
 
+.seed-controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.seed-controls label,
+.seed-readout {
+  color: #c9d4e2;
+  font-size: 0.78rem;
+}
+
+.seed-controls input {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #0b111a;
+  color: #f7fbff;
+  padding: 8px;
+  font: inherit;
+}
+
+.seed-controls button {
+  border: 1px solid rgba(56, 216, 255, 0.35);
+  background: #111b26;
+  color: #ffffff;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.seed-readout {
+  margin-top: 8px;
+}
+
 .touch-controls {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -276,5 +311,9 @@ kbd {
   .status-strip span {
     min-width: 0;
     flex: 1;
+  }
+
+  .seed-controls {
+    grid-template-columns: 1fr;
   }
 }

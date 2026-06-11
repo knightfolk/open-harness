@@ -2,9 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
 import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync } from 'fs';
-import { join, basename, extname, resolve, parse as parsePath } from 'path';
+import { join, basename, dirname, extname, isAbsolute, resolve, parse as parsePath } from 'path';
 import { execFileSync, spawn } from 'child_process';
-import { randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef, getConfigPath } from './config';
 import type { StoredMCPServer, StoredProvider } from './config';
@@ -54,6 +54,7 @@ import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
 import type { PersistedSession } from './sessionStore';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
+import { runShipReadiness } from './shipReadiness';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -1807,6 +1808,19 @@ app.get('/api/browser/health', (req, res) => {
   }
 });
 
+app.get('/api/ship/readiness', (req, res) => {
+  const dir = String(req.query.dir || '');
+  const validation = validateSessionWorkingDir(dir);
+  if (!validation.ok) return res.status(validation.status).json({ error: validation.error });
+  const workspace = ensureWorkspaceReadAllowed(validation.dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  try {
+    res.json(runShipReadiness(workspace.dir));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Ship readiness failed' });
+  }
+});
+
 // ── Patch Apply Route (hardened) ───────────────────────
 //
 // Requires a `workingDir` in the body and refuses any file path that
@@ -1895,6 +1909,33 @@ function ensureLocalMutationAllowed(): { ok: true } | { ok: false; status: numbe
     return { ok: false, status: 403, error: `Write operations not allowed in ${trustMode} mode` };
   }
   return { ok: true };
+}
+
+function getChangedFileSnapshot(dir: string): string[] {
+  try {
+    const status = git.getStatus(dir);
+    const paths = Array.from(new Set([
+      ...status.staged.map((file) => file.path),
+      ...status.unstaged.map((file) => file.path),
+      ...status.untracked,
+    ]));
+    return paths.map((file) => `${file}\t${getChangedFileSignature(dir, file)}`);
+  } catch {
+    return [];
+  }
+}
+
+function getChangedFileSignature(dir: string, file: string): string {
+  try {
+    const fullPath = resolve(dir, file);
+    const stat = statSync(fullPath);
+    if (!stat.isFile()) return `non-file:${stat.mtimeMs}:${stat.size}`;
+    const hash = createHash('sha256');
+    hash.update(readFileSync(fullPath));
+    return hash.digest('hex');
+  } catch {
+    return 'missing';
+  }
 }
 
 function ensureLocalMutationWithControl(req: express.Request): { ok: true } | { ok: false; status: number; error: string } {
@@ -2918,6 +2959,23 @@ function gatherMCPToolsForAPI(): { tools: any[]; toolServerMap: Record<string, s
   tools.push({
     type: 'function',
     function: {
+      name: 'write_file',
+      description: 'Create or replace a text file inside the current workspace. Use for greenfield artifacts and generated files.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Absolute file path to write' },
+          content: { type: 'string', description: 'Complete file content' },
+        },
+        required: ['path', 'content'],
+      },
+    },
+  });
+  toolServerMap['write_file'] = '__builtin__';
+
+  tools.push({
+    type: 'function',
+    function: {
       name: 'exec_command',
       description: 'Execute a shell command and return stdout/stderr. Use for running git, grep, wc, find, etc. 30s timeout, 1MB max output.',
       parameters: {
@@ -2957,6 +3015,37 @@ function gatherMCPToolsForAPI(): { tools: any[]; toolServerMap: Record<string, s
   return { tools, toolServerMap };
 }
 
+function normalizeBuiltInToolArgs(toolName: string, args: Record<string, any>): Record<string, any> {
+  let normalized = args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
+  const wrapped = normalized.input;
+  if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) {
+    normalized = { ...wrapped, ...normalized };
+    delete normalized.input;
+  } else if (typeof wrapped === 'string') {
+    try {
+      const parsed = JSON.parse(wrapped);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        normalized = { ...parsed, ...normalized };
+        delete normalized.input;
+      }
+    } catch {
+      if (toolName === 'exec_command' && !normalized.command) normalized.command = wrapped;
+    }
+  }
+
+  if ((toolName === 'list_directory' || toolName === 'read_file') && !normalized.path) {
+    normalized.path = normalized.argument || normalized.file || normalized.filePath;
+  }
+  if (toolName === 'write_file') {
+    normalized.path = normalized.path || normalized.file || normalized.filePath || normalized.filename;
+    normalized.content = normalized.content ?? normalized.text ?? normalized.body;
+  }
+  if (toolName === 'exec_command') {
+    normalized.command = normalized.command || normalized.cmd;
+  }
+  return normalized;
+}
+
 async function invokeMCPTool(
   toolName: string,
   args: Record<string, any>,
@@ -2964,11 +3053,13 @@ async function invokeMCPTool(
   workingDir?: string,
   run?: HarnessRun,
   res?: express.Response,
+  trustModeOverride?: TrustMode,
 ): Promise<any> {
   const serverId = toolServerMap[toolName];
   if (!serverId) throw new Error('No server for tool: ' + toolName);
-  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
-  const toolPolicy = checkToolActionPolicy(toolName, args, trustMode, workingDir || process.cwd());
+  const normalizedArgs = serverId === '__builtin__' ? normalizeBuiltInToolArgs(toolName, args) : args;
+  const trustMode = trustModeOverride || (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const toolPolicy = checkToolActionPolicy(toolName, normalizedArgs, trustMode, workingDir || process.cwd());
   if (!toolPolicy.allowed) {
     const reason = toolPolicy.reason || 'Tool call not allowed by trust mode';
     const trustMessage = `Trust policy denied tool '${toolName}': ${reason}`;
@@ -2981,7 +3072,7 @@ async function invokeMCPTool(
   if (serverId === '__builtin__') {
     switch (toolName) {
       case 'list_directory': {
-        const dir = args.path as string;
+        const dir = normalizedArgs.path as string;
         if (!dir || !existsSync(dir)) return { error: 'Invalid path' };
         try {
           const stat = statSync(dir);
@@ -3001,7 +3092,7 @@ async function invokeMCPTool(
         } catch (err: any) { return { error: err.message }; }
       }
       case 'read_file': {
-        const filePath = args.path as string;
+        const filePath = normalizedArgs.path as string;
         if (!filePath || !existsSync(filePath)) return { error: 'Invalid path' };
         try {
           const stat = statSync(filePath);
@@ -3010,9 +3101,24 @@ async function invokeMCPTool(
           return { path: filePath, content: redactOutputText(readFileSync(filePath, 'utf-8')), size: stat.size };
         } catch (err: any) { return { error: err.message }; }
       }
+      case 'write_file': {
+        const requestedPath = normalizedArgs.path as string;
+        const content = normalizedArgs.content as string;
+        const baseDir = workingDir || process.cwd();
+        const filePath = requestedPath && isAbsolute(requestedPath)
+          ? requestedPath
+          : resolve(baseDir, requestedPath || '');
+        if (!filePath?.trim()) return { error: 'Missing path' };
+        if (typeof content !== 'string') return { error: 'Missing content' };
+        try {
+          mkdirSync(dirname(filePath), { recursive: true });
+          writeFileSync(filePath, content, 'utf8');
+          return { requestedPath, path: filePath, bytes: Buffer.byteLength(content, 'utf8'), written: true };
+        } catch (err: any) { return { error: err.message }; }
+      }
       case 'exec_command': {
-        const command = args.command as string;
-        const requestedCwd = args.cwd as string | undefined;
+        const command = normalizedArgs.command as string;
+        const requestedCwd = normalizedArgs.cwd as string | undefined;
         const baseCwd = workingDir || process.cwd();
         const cwd = requestedCwd && isPathWithin(requestedCwd, baseCwd) ? requestedCwd : baseCwd;
         if (!command?.trim()) return { error: 'No command' };
@@ -4442,6 +4548,7 @@ app.post('/api/bench/run', async (req, res) => {
       for (const cmd of task.setupCommands) {
         await runShellCommand(cmd, taskDir, 30_000);
       }
+      const changedFilesBeforeRun = getChangedFileSnapshot(taskDir);
 
       // Create a temporary session for this task run
       const taskSession: SessionRow = {
@@ -4488,11 +4595,80 @@ app.post('/api/bench/run', async (req, res) => {
 
       let providerUsage: EstimatedModelUsage | undefined;
       try {
-        providerUsage = await streamModel(
-          resolved.chatURL, resolved.apiKey, resolved.providerId,
-          taskSession.messages, writer, uuid(), taskSession,
-          modelId,
-        );
+        const taskTimeoutMs = task.timeoutMs || 120_000;
+        const timeoutController = new AbortController();
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          (async () => {
+            const benchRoute = routeRequest(task.prompt, modelId, appConfig.roleAssignments || {});
+            if (benchRoute.mode !== 'direct') {
+              const { tools: orchestrationApiTools, toolServerMap: orchestrationToolServerMap } = gatherMCPToolsForAPI();
+              const taskTrustMode = task.trustMode as TrustMode;
+              const orchestrationToolPolicy = filterToolsForTrustMode(orchestrationApiTools, taskTrustMode);
+              const orchestrationTools = orchestrationApiTools.filter((t: any) =>
+                orchestrationToolPolicy.filteredTools?.includes(t.function?.name || t.name)
+              );
+              const benchConfig: typeof appConfig = {
+                ...appConfig,
+                activeModel: modelId,
+                trustMode: taskTrustMode,
+                roleAssignments: {
+                  ...appConfig.roleAssignments,
+                  planner: modelId,
+                  coder: modelId,
+                  reviewer: modelId,
+                  worker: modelId,
+                  reasoner: modelId,
+                  summarizer: modelId,
+                },
+              };
+              const orchResult = await runOrchestratorPipeline(benchRoute, task.prompt, benchConfig, taskDir, {
+                tools: orchestrationTools,
+                signal: timeoutController.signal,
+                onStep: (step) => {
+                  stepCount++;
+                  if (step.type === 'tool_call') {
+                    toolCallsAccum.push({
+                      name: step.name,
+                      status: step.outputPreview ? 'complete' : 'running',
+                      input: typeof step.input === 'string' ? step.input : JSON.stringify(step.input ?? {}),
+                      output: step.outputPreview,
+                      duration: step.durationMs,
+                    });
+                  }
+                },
+                invokeTool: (toolName, args, workingDir) => invokeMCPTool(
+                  toolName,
+                  args as Record<string, any>,
+                  orchestrationToolServerMap,
+                  workingDir,
+                  undefined,
+                  undefined,
+                  taskTrustMode,
+                ),
+              });
+              chunks.push(orchResult.finalText);
+              if (!orchResult.ok) {
+                toolCallsAccum.push({ name: 'orchestrator', status: 'error', output: orchResult.error });
+              }
+              providerUsage = estimateUsageForTexts(modelId, task.prompt, orchResult.finalText);
+            } else {
+              providerUsage = await streamModel(
+                resolved.chatURL, resolved.apiKey, resolved.providerId,
+                taskSession.messages, writer, uuid(), taskSession,
+                modelId,
+              );
+            }
+          })(),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => {
+              timeoutController.abort();
+              reject(new Error(`Task timed out after ${taskTimeoutMs}ms`));
+            }, taskTimeoutMs);
+          }),
+        ]).finally(() => {
+          if (timeout) clearTimeout(timeout);
+        });
       } catch (err: any) {
         run.results.push({
           taskId: task.id,
@@ -4535,6 +4711,12 @@ app.post('/api/bench/run', async (req, res) => {
           OPENHARNESS_BENCH_TASK: task.name,
         });
       }
+      validationResults.push(...benchRuns.validateChangedFiles({
+        before: changedFilesBeforeRun,
+        after: getChangedFileSnapshot(taskDir),
+        expectedChangedFiles: task.expectedChangedFiles,
+        forbiddenChangedFiles: task.forbiddenChangedFiles,
+      }));
 
       const wallMs = Date.now() - startMs;
       const usage = providerUsage || estimateUsageForTexts(modelId, task.prompt, response);
@@ -4696,8 +4878,9 @@ app.post('/api/evals/run', async (req, res) => {
       });
 
       const startMs = Date.now();
+      let providerUsage: EstimatedModelUsage | undefined;
       try {
-        await streamModel(
+        providerUsage = await streamModel(
           resolved.chatURL, resolved.apiKey, resolved.providerId,
           testSession.messages, writer, uuid(), testSession,
           modelId,
@@ -4710,7 +4893,18 @@ app.post('/api/evals/run', async (req, res) => {
 
       const response = redactOutputText(chunks.join(''));
       const wallMs = Date.now() - startMs;
-      const scores = evals.scoreResult({ response, toolCalls, wallMs, workingDir: targetDir });
+      const compactToolCalls = toolCalls.map(tc => ({ name: tc.name, status: tc.status }));
+      const validationPassed = evals.validatePromptResult(p, { response, toolCalls: compactToolCalls });
+      const usage = providerUsage || estimateUsageForTexts(modelId, p.prompt, response);
+      recordUsage({
+        timestamp: new Date().toISOString(),
+        modelId,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cost: usage.cost,
+        sessionId: testSession.id,
+      });
+      const scores = evals.scoreResult({ response, toolCalls: compactToolCalls, wallMs, workingDir: targetDir, validationPassed } as any);
 
       report.results.push({
         modelId,
@@ -4719,8 +4913,8 @@ app.post('/api/evals/run', async (req, res) => {
         status: 'ok',
         response,
         responseLength: response.length,
-        toolCallCount: toolCalls.length,
-        toolCalls: toolCalls.map(tc => ({ name: tc.name, status: tc.status })),
+        toolCallCount: compactToolCalls.length,
+        toolCalls: compactToolCalls,
         wallMs,
         scores,
       });

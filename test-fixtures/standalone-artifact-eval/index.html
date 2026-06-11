@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Neon Decade Descent</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <h1>Neon Decade Descent</h1>
+      <div class="hud">
+        <span id="hp">HP 12</span>
+        <span id="score">Score 0</span>
+        <span id="depth">Depth 1</span>
+        <span id="turn">Turn 0</span>
+      </div>
+    </header>
+    <canvas id="game" width="512" height="512" aria-label="roguelike grid"></canvas>
+    <section id="log" aria-live="polite">Find mixtapes, dodge VHS sentries, reach the arcade exit.</section>
+    <button id="restart" type="button">Restart</button>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>

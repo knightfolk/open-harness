@@ -88,14 +88,17 @@ export interface BenchSummary {
     resolved: number;
     unresolved: number;
     partial: number;
+    resolvedRate: number;
     avgScore: number;
     avgValidationScore: number;
     avgLatencyMs: number;
     avgCost: number;
+    valueScore: number;
     avgSteps: number;
     totalRuns: number;
   }>;
   bestModel: string;
+  bestModelReason?: string;
   regressionFlags: Array<{ taskId: string; modelId: string; reason: string }>;
 }
 
@@ -195,6 +198,96 @@ function extractValidationFindings(output: string): string[] {
   return findings.slice(0, 20);
 }
 
+function normalizeChangedPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/g, '');
+}
+
+function parseChangedFileEntry(entry: string): { path: string; signature: string } {
+  const [path, signature = ''] = entry.split('\t');
+  return {
+    path: normalizeChangedPath(path),
+    signature,
+  };
+}
+
+function changedPathMatches(changedPath: string, pattern: string): boolean {
+  const normalizedPath = normalizeChangedPath(changedPath);
+  const normalizedPattern = normalizeChangedPath(pattern);
+  if (!normalizedPattern) return false;
+  if (normalizedPattern.endsWith('/')) {
+    return normalizedPath.startsWith(normalizedPattern);
+  }
+  return normalizedPath === normalizedPattern || normalizedPath.startsWith(`${normalizedPattern}/`);
+}
+
+export function validateChangedFiles(params: {
+  before: string[];
+  after: string[];
+  expectedChangedFiles?: string[];
+  forbiddenChangedFiles?: string[];
+}): ValidationCommandResult[] {
+  const before = new Map(params.before.map((entry) => {
+    const parsed = parseChangedFileEntry(entry);
+    return [parsed.path, parsed.signature] as const;
+  }));
+  const changedDuringRun = params.after
+    .map(parseChangedFileEntry)
+    .filter(({ path, signature }) => {
+      if (!path) return false;
+      if (!before.has(path)) return true;
+      const beforeSignature = before.get(path) || '';
+      return !!signature && signature !== beforeSignature;
+    })
+    .map(({ path }) => path);
+  const expected = (params.expectedChangedFiles || []).map(normalizeChangedPath).filter(Boolean);
+  const forbidden = (params.forbiddenChangedFiles || []).map(normalizeChangedPath).filter(Boolean);
+  const results: ValidationCommandResult[] = [];
+
+  if (expected.length > 0) {
+    const missing = expected.filter((pattern) => !changedDuringRun.some((path) => changedPathMatches(path, pattern)));
+    results.push({
+      command: 'openharness changed-files expected',
+      exitCode: missing.length === 0 ? 0 : 1,
+      stdout: changedDuringRun.join('\n'),
+      stderr: missing.length > 0 ? missing.map((path) => `- Expected change not observed: ${path}`).join('\n') : '',
+      findings: missing.map((path) => `Expected change not observed: ${path}`),
+      durationMs: 0,
+      passed: missing.length === 0,
+    });
+  }
+
+  if (forbidden.length > 0) {
+    const touched = changedDuringRun.filter((path) => forbidden.some((pattern) => changedPathMatches(path, pattern)));
+    results.push({
+      command: 'openharness changed-files forbidden',
+      exitCode: touched.length === 0 ? 0 : 1,
+      stdout: changedDuringRun.join('\n'),
+      stderr: touched.length > 0 ? touched.map((path) => `- Forbidden change observed: ${path}`).join('\n') : '',
+      findings: touched.map((path) => `Forbidden change observed: ${path}`),
+      durationMs: 0,
+      passed: touched.length === 0,
+    });
+  }
+
+  return results;
+}
+
+function startsWithPreamble(response: string): boolean {
+  return /^\s*(?:i have enough|let me|i need to|i will|now i|the user wants|we need to|i'll|i’m|i am going to)\b/i.test(response);
+}
+
+function hasSubstantiveShape(response: string): boolean {
+  const trimmed = response.trim();
+  if (trimmed.length < 120) return false;
+  if (startsWithPreamble(trimmed)) return false;
+  if (/^(?:summary|findings|recommendation|answer|plan|verdict|result|implementation|next steps|#|\*|-|\d+\.)/i.test(trimmed)) return true;
+  return /(?:\n#{1,3}\s+\S|\n[-*]\s+\S|\n\d+\.\s+\S)/.test(trimmed);
+}
+
+function responseIsTooVerbose(response: string): boolean {
+  return response.length > 8000;
+}
+
 export function computeBenchScores(params: {
   response: string;
   toolCalls: Array<{ name: string; status: string }>;
@@ -211,16 +304,23 @@ export function computeBenchScores(params: {
   const referencedRealFiles = toolCalls.some(tc => tc.name === 'read_file' || tc.name === 'list_directory');
   const avoidedHallucinatedPaths = !response.toLowerCase().includes('file not found');
   const producedSummary = response.length > 300;
+  const validationConfigured = validationResults.length > 0;
+  const noPreamble = !startsWithPreamble(response);
+  const substantiveShape = hasSubstantiveShape(response);
+  const conciseEnough = !responseIsTooVerbose(response);
 
-  const validationPassed = validationResults.length === 0 || validationResults.every(r => r.passed);
+  const validationPassed = validationConfigured && validationResults.every(r => r.passed);
   const validationScore = validationResults.length > 0
     ? (validationResults.filter(r => r.passed).length / validationResults.length) * 2
-    : 1; // No validation commands = neutral runtime signal
+    : 0; // No validation is not failure, but it cannot prove resolved.
   const toolRuntimeScore = usedTools ? 1.5 : 0;
   const styleScore =
     (producedSummary ? 0.8 : 0) +
     (wallMs < 30_000 ? 0.5 : 0) +
-    (toolCalls.length >= 1 && toolCalls.length <= 15 ? 0.2 : 0);
+    (toolCalls.length >= 1 && toolCalls.length <= 15 ? 0.2 : 0) +
+    (noPreamble ? 0.5 : 0) +
+    (substantiveShape ? 0.5 : 0) +
+    (conciseEnough ? 0.5 : 0);
   const breakdown = buildScoreBreakdown([
     { id: 'answered-user', label: 'Answered user', category: 'structural', passed: answeredUser, score: answeredUser ? 2 : 0, maxScore: 2 },
     { id: 'real-files', label: 'Referenced real files', category: 'structural', passed: referencedRealFiles, score: referencedRealFiles ? 1.5 : 0, maxScore: 1.5 },
@@ -230,14 +330,21 @@ export function computeBenchScores(params: {
     { id: 'summary', label: 'Produced summary', category: 'style', passed: producedSummary, score: producedSummary ? 0.8 : 0, maxScore: 0.8 },
     { id: 'latency', label: 'Responsive latency', category: 'style', passed: wallMs < 30_000, score: wallMs < 30_000 ? 0.5 : 0, maxScore: 0.5 },
     { id: 'tool-efficiency', label: 'Tool efficiency', category: 'style', passed: toolCalls.length >= 1 && toolCalls.length <= 15, score: toolCalls.length >= 1 && toolCalls.length <= 15 ? 0.2 : 0, maxScore: 0.2 },
+    { id: 'no-preamble', label: 'No preamble leakage', category: 'style', passed: noPreamble, score: noPreamble ? 0.5 : 0, maxScore: 0.5 },
+    { id: 'answer-shape', label: 'Human-facing answer shape', category: 'style', passed: substantiveShape, score: substantiveShape ? 0.5 : 0, maxScore: 0.5 },
+    { id: 'bounded-length', label: 'Bounded output length', category: 'style', passed: conciseEnough, score: conciseEnough ? 0.5 : 0, maxScore: 0.5 },
   ]);
 
-  const overallScore = Math.min(10, breakdown.total);
+  let overallScore = Math.min(10, breakdown.total);
+  if (!validationConfigured) overallScore = Math.min(overallScore, 6.5);
+  if (!noPreamble) overallScore = Math.min(overallScore, 5.5);
+  if (!substantiveShape) overallScore = Math.min(overallScore, 6.5);
+  if (!conciseEnough) overallScore = Math.min(overallScore, 8);
 
   // Resolved status
   let resolvedStatus: BenchScores['resolvedStatus'] = 'unresolved';
-  if (validationPassed && answeredUser && usedTools) resolvedStatus = 'resolved';
-  else if (answeredUser) resolvedStatus = 'partial';
+  if (validationPassed && answeredUser && usedTools && substantiveShape && noPreamble) resolvedStatus = 'resolved';
+  else if (answeredUser && substantiveShape && noPreamble) resolvedStatus = 'partial';
 
   return {
     usedTools,
@@ -426,7 +533,8 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
   };
 
   let bestModel = '';
-  let bestResolvedRate = -1;
+  let bestComposite = -Infinity;
+  let bestReason = '';
 
   for (const [modelId, data] of Object.entries(byModel)) {
     const totalRuns = data.scores.length;
@@ -436,26 +544,38 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
     const avgLatency = data.latencies.reduce((a, b) => a + b, 0) / (totalRuns || 1);
     const avgCost = data.costs.reduce((a, b) => a + b, 0) / (totalRuns || 1);
     const avgSteps = data.steps.reduce((a, b) => a + b, 0) / (totalRuns || 1);
+    const costPenalty = Math.log10(1 + avgCost * 100_000) * 0.35;
+    const latencyPenalty = Math.max(0, avgLatency - 30_000) / 120_000;
+    const composite = (resolvedRate * 5)
+      + (avgScore / 10 * 2)
+      + (avgValidationScore / 2 * 2)
+      - costPenalty
+      - latencyPenalty;
+    const roundedValueScore = Math.round(composite * 1000) / 1000;
 
     summary.byModel[modelId] = {
       resolved: data.resolved,
       unresolved: data.unresolved,
       partial: data.partial,
+      resolvedRate: Math.round(resolvedRate * 1000) / 1000,
       avgScore: Math.round(avgScore * 10) / 10,
       avgValidationScore: Math.round(avgValidationScore * 10) / 10,
       avgLatencyMs: Math.round(avgLatency),
       avgCost: Math.round(avgCost * 1_000_000) / 1_000_000,
+      valueScore: roundedValueScore,
       avgSteps: Math.round(avgSteps * 10) / 10,
       totalRuns,
     };
 
-    if (resolvedRate > bestResolvedRate) {
-      bestResolvedRate = resolvedRate;
+    if (composite > bestComposite) {
+      bestComposite = composite;
       bestModel = modelId;
+      bestReason = `Best composite: resolved ${(resolvedRate * 100).toFixed(0)}%, score ${avgScore.toFixed(1)}/10, validation ${avgValidationScore.toFixed(1)}/2, cost $${avgCost.toFixed(6)}, latency ${Math.round(avgLatency)}ms.`;
     }
   }
 
   summary.bestModel = bestModel;
+  summary.bestModelReason = bestReason;
 
   // Flag regressions: tasks that failed validation or had low scores
   for (const r of results) {

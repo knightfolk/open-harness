@@ -23,6 +23,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const [activeBenchId, setActiveBenchId] = useState<string | null>(null);
   const [tab, setTab] = useState<'configure' | 'results' | 'history' | 'tasks' | 'bench'>('configure');
   const [loading, setLoading] = useState(true);
+  const [diagnostic, setDiagnostic] = useState<{ tone: 'error' | 'warning' | 'info'; title: string; detail: string } | null>(null);
 
   // Load data
   useEffect(() => {
@@ -42,6 +43,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
         setBenchRuns(b);
       } catch (err) {
         console.error('Failed to load Model Lab data:', err);
+        setDiagnostic({
+          tone: 'error',
+          title: 'Model Lab data did not load',
+          detail: err instanceof Error ? err.message : 'The prompt and run lists could not be loaded.',
+        });
       } finally {
         setLoading(false);
       }
@@ -55,12 +61,27 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       try {
         const report = await api.getEvalReport(activeRunId);
         setSelectedReport(report);
-        if (report.status === 'complete') {
+        if (report.status === 'complete' || report.status === 'error') {
           setRunning(false);
           setActiveRunId(null);
           setReports(await api.getEvalReports());
+          if (report.status === 'error') {
+            setDiagnostic({
+              tone: 'error',
+              title: 'Eval run stopped with an error',
+              detail: `${report.completed}/${report.total} runs completed. Open the result rows below for model output and scoring evidence.`,
+            });
+          }
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        setRunning(false);
+        setActiveRunId(null);
+        setDiagnostic({
+          tone: 'error',
+          title: 'Eval run could not be refreshed',
+          detail: err instanceof Error ? err.message : 'The active eval report could not be loaded.',
+        });
+      }
     }, 2000);
     return () => clearInterval(interval);
   }, [activeRunId]);
@@ -72,12 +93,27 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       try {
         const run = await api.getBenchRun(activeBenchId);
         setSelectedBenchRun(run);
-        if (run.status === 'complete') {
+        if (run.status === 'complete' || run.status === 'error') {
           setRunning(false);
           setActiveBenchId(null);
           setBenchRuns(await api.getBenchRuns());
+          if (run.status === 'error') {
+            setDiagnostic({
+              tone: 'error',
+              title: 'Bench run stopped with an error',
+              detail: `${run.completed}/${run.total} tasks completed. Inspect the result evidence below before trusting model rankings.`,
+            });
+          }
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        setRunning(false);
+        setActiveBenchId(null);
+        setDiagnostic({
+          tone: 'error',
+          title: 'Bench run could not be refreshed',
+          detail: err instanceof Error ? err.message : 'The active bench run could not be loaded.',
+        });
+      }
     }, 2000);
     return () => clearInterval(interval);
   }, [activeBenchId]);
@@ -121,6 +157,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const handleRun = useCallback(async () => {
     if (selectedPromptIds.size === 0 || selectedModelIds.size === 0) return;
     setRunning(true);
+    setDiagnostic(null);
     setTab('results');
     try {
       const result = await api.runEval({
@@ -134,6 +171,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       setSelectedReport(report);
     } catch (err) {
       console.error('Eval run failed:', err);
+      setDiagnostic({
+        tone: 'error',
+        title: 'Eval run failed to start',
+        detail: err instanceof Error ? err.message : 'The eval request failed before a report was created.',
+      });
       setRunning(false);
     }
   }, [selectedPromptIds, selectedModelIds, runName, workingDir]);
@@ -141,6 +183,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const handleBenchRun = useCallback(async () => {
     if (selectedTaskIds.size === 0 || selectedModelIds.size === 0) return;
     setRunning(true);
+    setDiagnostic(null);
     setTab('bench');
     try {
       const result = await api.runBench({
@@ -154,6 +197,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       setSelectedBenchRun(run);
     } catch (err) {
       console.error('Bench run failed:', err);
+      setDiagnostic({
+        tone: 'error',
+        title: 'Bench run failed to start',
+        detail: err instanceof Error ? err.message : 'The bench request failed before a run was created.',
+      });
       setRunning(false);
     }
   }, [selectedTaskIds, selectedModelIds, runName, workingDir]);
@@ -165,6 +213,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       setSuites(await api.getTaskSuites());
     } catch (err) {
       console.error('Failed to seed tasks:', err);
+      setDiagnostic({
+        tone: 'error',
+        title: 'Could not seed tasks',
+        detail: err instanceof Error ? err.message : 'Built-in harness tasks could not be created.',
+      });
     }
   }, [workingDir]);
 
@@ -213,6 +266,10 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {diagnostic && (
+          <ModelLabDiagnostic diagnostic={diagnostic} onDismiss={() => setDiagnostic(null)} />
+        )}
+
         {/* ── Eval Configure Tab ── */}
         {tab === 'configure' && (
           <div style={{ padding: 10 }}>
@@ -349,15 +406,13 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                     {selectedBenchRun.name}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                    {selectedBenchRun.status === 'running'
-                      ? `Running... ${selectedBenchRun.completed}/${selectedBenchRun.total}`
-                      : `${selectedBenchRun.completed} tasks completed`}
+                    {runProgressLabel(selectedBenchRun.status, selectedBenchRun.completed, selectedBenchRun.total, 'tasks')}
                     {selectedBenchRun.completedAt && ` · ${new Date(selectedBenchRun.completedAt).toLocaleTimeString()}`}
                   </div>
-                  {selectedBenchRun.status === 'running' && (
+                  {(selectedBenchRun.status === 'running' || selectedBenchRun.status === 'error') && (
                     <div style={{ height: 3, background: 'var(--bg-tertiary)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
                       <div style={{
-                        height: '100%', background: 'var(--accent-primary)', borderRadius: 2,
+                        height: '100%', background: selectedBenchRun.status === 'error' ? 'var(--accent-error)' : 'var(--accent-primary)', borderRadius: 2,
                         width: `${selectedBenchRun.total > 0 ? (selectedBenchRun.completed / selectedBenchRun.total * 100) : 0}%`,
                         transition: 'width 0.5s ease',
                       }} />
@@ -390,6 +445,14 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                           <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
                             Score: {data.avgScore}/10 · Validation: {data.avgValidationScore}/2 · Latency: {(data.avgLatencyMs / 1000).toFixed(1)}s
                           </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                            Value: {data.valueScore} · Resolved: {Math.round(data.resolvedRate * 100)}% · Cost: ${data.avgCost.toFixed(6)}
+                          </div>
+                          {modelId === selectedBenchRun.summary?.bestModel && selectedBenchRun.summary?.bestModelReason && (
+                            <div style={{ fontSize: 10, color: 'var(--accent-primary)', marginTop: 4 }}>
+                              {selectedBenchRun.summary.bestModelReason}
+                            </div>
+                          )}
                           <StackedScoreBreakdown breakdown={averageBreakdown(selectedBenchRun.results.filter(r => r.modelId === modelId))} />
                         </div>
                       ))}
@@ -452,6 +515,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                   </tbody>
 	                </table>
 	                <ValidationFindingsPanel run={selectedBenchRun} />
+	                <BenchEvidencePanel run={selectedBenchRun} />
 	              </>
 	            )}
           </div>
@@ -469,15 +533,13 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{selectedReport.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                    {selectedReport.status === 'running'
-                      ? `Running... ${selectedReport.completed}/${selectedReport.total}`
-                      : `${selectedReport.completed} runs`}
+                    {runProgressLabel(selectedReport.status, selectedReport.completed, selectedReport.total, 'runs')}
                     {selectedReport.completedAt && ` · ${new Date(selectedReport.completedAt).toLocaleTimeString()}`}
                   </div>
-                  {selectedReport.status === 'running' && (
+                  {(selectedReport.status === 'running' || selectedReport.status === 'error') && (
                     <div style={{ height: 3, background: 'var(--bg-tertiary)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
                       <div style={{
-                        height: '100%', background: 'var(--accent-primary)', borderRadius: 2,
+                        height: '100%', background: selectedReport.status === 'error' ? 'var(--accent-error)' : 'var(--accent-primary)', borderRadius: 2,
                         width: `${selectedReport.total > 0 ? (selectedReport.completed / selectedReport.total * 100) : 0}%`,
                         transition: 'width 0.5s ease',
                       }} />
@@ -548,6 +610,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                     ))}
                   </tbody>
                 </table>
+                <EvalEvidencePanel report={selectedReport} />
               </>
             )}
           </div>
@@ -566,8 +629,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
                   <span style={{
                     fontSize: 9, padding: '1px 6px', borderRadius: 3,
-                    background: r.status === 'complete' ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
-                    color: r.status === 'complete' ? 'var(--accent-success)' : 'var(--accent-warning)',
+                    background: statusPillColors(r.status).background,
+                    color: statusPillColors(r.status).color,
                   }}>{r.status}</span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
@@ -586,8 +649,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
                   <span style={{
                     fontSize: 9, padding: '1px 6px', borderRadius: 3,
-                    background: r.status === 'complete' ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
-                    color: r.status === 'complete' ? 'var(--accent-success)' : 'var(--accent-warning)',
+                    background: statusPillColors(r.status).background,
+                    color: statusPillColors(r.status).color,
                   }}>{r.status}</span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
@@ -603,6 +666,42 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 }
 
 // ── Shared sub-components ──────────────────────────────
+
+function ModelLabDiagnostic({ diagnostic, onDismiss }: {
+  diagnostic: { tone: 'error' | 'warning' | 'info'; title: string; detail: string };
+  onDismiss: () => void;
+}) {
+  const color = diagnostic.tone === 'error'
+    ? 'var(--accent-error)'
+    : diagnostic.tone === 'warning'
+      ? 'var(--accent-warning)'
+      : 'var(--accent-primary)';
+  return (
+    <div style={{
+      margin: 10,
+      padding: 10,
+      borderRadius: 6,
+      border: `1px solid ${color}`,
+      background: 'var(--bg-secondary)',
+      color: 'var(--text-secondary)',
+      fontSize: 11,
+    }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ color, fontWeight: 700, marginBottom: 3 }}>{diagnostic.title}</div>
+          <div style={{ color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{diagnostic.detail}</div>
+        </div>
+        <button onClick={onDismiss} style={{ ...linkBtnStyle, color: 'var(--text-tertiary)' }}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
+
+function runProgressLabel(status: string, completed: number, total: number, unit: string): string {
+  if (status === 'running') return `Running... ${completed}/${total}`;
+  if (status === 'error') return `Error after ${completed}/${total} ${unit}`;
+  return `${completed} ${unit} completed`;
+}
 
 function averageBreakdown(results: Array<{ scores: api.EvalScores }>): api.EvalScoreBreakdown {
   const count = results.length || 1;
@@ -764,6 +863,134 @@ function ValidationFindingsPanel({ run }: { run: api.BenchRun }) {
   );
 }
 
+function EvalEvidencePanel({ report }: { report: api.EvalReport }) {
+  if (report.results.length === 0) return null;
+  const sorted = [...report.results].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'error' ? -1 : 1;
+    return a.scores.overallScore - b.scores.overallScore;
+  });
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={sectionLabelStyle}>Inspectable output evidence</div>
+      {sorted.slice(0, 12).map((result, index) => (
+        <details key={`${result.modelId}-${result.promptId}-${index}`} style={evidenceDetailsStyle}>
+          <summary style={evidenceSummaryStyle}>
+            <span style={{ color: result.status === 'ok' ? 'var(--text-primary)' : 'var(--accent-error)', fontWeight: 600 }}>
+              {result.promptName}
+            </span>
+            <span>{result.modelId}</span>
+            <span style={{ color: scoreColor(result.scores.overallScore) }}>{result.scores.overallScore}/10</span>
+            <span style={{ color: result.status === 'ok' ? 'var(--accent-success)' : 'var(--accent-error)' }}>{result.status}</span>
+          </summary>
+          <EvidenceBlock title="Failed or weak signals">
+            <SignalList signals={result.scores.breakdown?.signals || []} />
+          </EvidenceBlock>
+          <EvidenceBlock title="Tool calls">
+            {result.toolCalls.length > 0 ? result.toolCalls.map((tool, i) => (
+              <div key={i}>{tool.name} · {tool.status}</div>
+            )) : <span>No tool calls recorded.</span>}
+          </EvidenceBlock>
+          <EvidenceBlock title="Response">
+            <pre style={evidencePreStyle}>{trimEvidence(result.response || '(empty response)', 1800)}</pre>
+          </EvidenceBlock>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function BenchEvidencePanel({ run }: { run: api.BenchRun }) {
+  if (run.results.length === 0) return null;
+  const sorted = [...run.results].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'ok' ? 1 : -1;
+    return a.scores.overallScore - b.scores.overallScore;
+  });
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={sectionLabelStyle}>Inspectable bench evidence</div>
+      {sorted.slice(0, 12).map((result, index) => (
+        <details key={`${result.taskId}-${result.modelId}-${index}`} style={evidenceDetailsStyle}>
+          <summary style={evidenceSummaryStyle}>
+            <span style={{ color: result.status === 'ok' ? 'var(--text-primary)' : 'var(--accent-error)', fontWeight: 600 }}>
+              {result.taskName}
+            </span>
+            <span>{result.modelId}</span>
+            <span style={{ color: resolvedColor(result.scores.resolvedStatus) }}>{result.scores.resolvedStatus}</span>
+            <span style={{ color: scoreColor(result.scores.overallScore) }}>{result.scores.overallScore}/10</span>
+          </summary>
+          {result.error && (
+            <EvidenceBlock title="Run error">
+              <pre style={evidencePreStyle}>{trimEvidence(result.error, 1200)}</pre>
+            </EvidenceBlock>
+          )}
+          <EvidenceBlock title="Prompt">
+            <pre style={evidencePreStyle}>{trimEvidence(result.prompt, 1400)}</pre>
+          </EvidenceBlock>
+          <EvidenceBlock title="Failed or weak signals">
+            <SignalList signals={result.scores.breakdown?.signals || []} />
+          </EvidenceBlock>
+          <EvidenceBlock title="Validation">
+            {result.validationResults.length > 0 ? result.validationResults.map((validation, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <div style={{ color: validation.passed ? 'var(--accent-success)' : 'var(--accent-error)', fontWeight: 600 }}>
+                  {validation.passed ? 'PASS' : 'FAIL'} · {validation.command}
+                </div>
+                {validation.findings.length > 0 && (
+                  <div style={{ marginTop: 3 }}>
+                    {validation.findings.slice(0, 4).map((finding, findingIndex) => (
+                      <div key={findingIndex}>- {finding}</div>
+                    ))}
+                  </div>
+                )}
+                {(validation.stdout || validation.stderr) && (
+                  <pre style={evidencePreStyle}>{trimEvidence([validation.stdout, validation.stderr].filter(Boolean).join('\n'), 1200)}</pre>
+                )}
+              </div>
+            )) : <span>No validation results recorded.</span>}
+          </EvidenceBlock>
+          <EvidenceBlock title="Response">
+            <pre style={evidencePreStyle}>{trimEvidence(result.response || '(empty response)', 1800)}</pre>
+          </EvidenceBlock>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function EvidenceBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: 3 }}>{title}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{children}</div>
+    </div>
+  );
+}
+
+function SignalList({ signals }: { signals: api.EvalSignalScore[] }) {
+  const weak = signals
+    .filter((signal) => !signal.passed || signal.score < signal.maxScore)
+    .sort((a, b) => (a.score / a.maxScore) - (b.score / b.maxScore))
+    .slice(0, 8);
+  if (weak.length === 0) return <span>No weak signals recorded.</span>;
+  return (
+    <>
+      {weak.map((signal) => (
+        <div key={signal.id} style={{ color: signal.passed ? 'var(--text-tertiary)' : 'var(--accent-error)' }}>
+          {signal.label}: {signal.score}/{signal.maxScore}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function trimEvidence(text: string, max: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 40).trimEnd()}\n\n... truncated ${trimmed.length - max + 40} chars`;
+}
+
 function formatSigned(n: number): string {
   return `${n >= 0 ? '+' : ''}${n}`;
 }
@@ -822,6 +1049,12 @@ function resolvedColor(status: string): string {
   return '#ef4444';
 }
 
+function statusPillColors(status: string): { background: string; color: string } {
+  if (status === 'complete') return { background: 'rgba(34,197,94,0.15)', color: 'var(--accent-success)' };
+  if (status === 'error') return { background: 'rgba(239,68,68,0.15)', color: 'var(--accent-error)' };
+  return { background: 'rgba(245,158,11,0.15)', color: 'var(--accent-warning)' };
+}
+
 const labelStyle: React.CSSProperties = {
   fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5,
 };
@@ -868,4 +1101,36 @@ const thStyle: React.CSSProperties = {
 
 const tdStyle: React.CSSProperties = {
   padding: '4px 6px', color: 'var(--text-secondary)',
+};
+
+const evidenceDetailsStyle: React.CSSProperties = {
+  marginBottom: 6,
+  padding: '7px 8px',
+  borderRadius: 6,
+  border: '1px solid var(--border-primary)',
+  background: 'var(--bg-secondary)',
+};
+
+const evidenceSummaryStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr) auto auto',
+  gap: 8,
+  alignItems: 'center',
+  cursor: 'pointer',
+  color: 'var(--text-tertiary)',
+  fontSize: 10,
+};
+
+const evidencePreStyle: React.CSSProperties = {
+  margin: '4px 0 0',
+  padding: 8,
+  maxHeight: 220,
+  overflow: 'auto',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+  borderRadius: 4,
+  background: 'var(--bg-primary)',
+  border: '1px solid var(--border-primary)',
+  color: 'var(--text-secondary)',
+  fontSize: 10,
 };

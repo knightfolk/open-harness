@@ -1642,10 +1642,12 @@ export interface BenchRun {
   summary?: {
     byModel: Record<string, {
       resolved: number; unresolved: number; partial: number;
+      resolvedRate: number;
       avgScore: number; avgValidationScore: number;
-      avgLatencyMs: number; avgCost: number; avgSteps: number; totalRuns: number;
+      avgLatencyMs: number; avgCost: number; valueScore: number; avgSteps: number; totalRuns: number;
     }>;
     bestModel: string;
+    bestModelReason?: string;
     regressionFlags: Array<{ taskId: string; modelId: string; reason: string }>;
   };
   previousDelta?: {
@@ -1699,6 +1701,28 @@ export async function exportBenchRun(id: string, format: 'json' | 'csv' = 'json'
   const res = await fetch(`${API_BASE}/api/bench/runs/${id}/export?format=${format}`);
   if (!res.ok) throw new Error(`Export failed: ${res.status}`);
   return res.text();
+}
+
+export interface ShipReadinessReport {
+  projectDir: string;
+  generatedAt: string;
+  status: 'pass' | 'fail';
+  summary: string;
+  checks: Array<{
+    id: string;
+    label: string;
+    status: 'pass' | 'fail' | 'warn';
+    detail: string;
+    evidence: string[];
+  }>;
+  recommendedNextSteps: string[];
+}
+
+export async function getShipReadiness(dir: string): Promise<ShipReadinessReport> {
+  const params = new URLSearchParams({ dir });
+  const res = await fetch(`${API_BASE}/api/ship/readiness?${params.toString()}`);
+  if (!res.ok) throw new Error(`Ship readiness failed: ${res.status}`);
+  return res.json();
 }
 
 // ── Milestone 12 — Checkpoints / Worktrees / Safety ──

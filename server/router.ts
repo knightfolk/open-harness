@@ -89,6 +89,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   const complexitySignals = detectComplexitySignals(content, lower, fileRefs);
   const asksCompare = /\b(compare|versus|vs\.?|which model|model a|model b|judge|evaluate outputs?)\b/.test(intentLower);
   const asksInformationalRunQuestion = /^\s*(?:how|what|where|which)\b[\s\S]{0,120}\brun\b/.test(intentLower);
+  const asksInformationalCreationQuestion = /\b(?:how|what|where|which|explain|describe)\b[\s\S]{0,120}\b(?:build|make|create|scaffold|prototype|generate)\b/.test(intentLower);
   const asksExplicitExecution = !asksInformationalRunQuestion && (
     /\bexecute[-\s]?mode\b/.test(intentLower)
     || /\borchestration mode:\s*execute\b/.test(intentLower)
@@ -99,7 +100,12 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     || /\brun\b[\s\S]{0,80}\b(?:check|checks|gate|gates)\b/.test(intentLower)
     || /\bperform\b[\s\S]{0,80}\b(?:test|tests|validation|verification|checks?)\b/.test(intentLower)
   );
+  const asksCreateArtifact = !asksInformationalCreationQuestion && (
+    /\b(?:build|make|create|scaffold|prototype|generate)\b[\s\S]{0,80}\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact)\b/.test(intentLower)
+    || /\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact)\b[\s\S]{0,80}\b(?:build|made|created|scaffolded|prototyped|generated)\b/.test(intentLower)
+  );
   const asksExecute = asksExplicitExecution
+    || asksCreateArtifact
     || /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower);
   const asksPlan = /\b(plan|planning mode|roadmap|design|architect|architecture|strategy|proposal|approach)\b/.test(intentLower);
   const asksTeamPlan = asksPlan
@@ -131,7 +137,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   let role: HarnessRole = 'coder';
   if (mode === 'compare') role = 'reviewer';
   else if (mode === 'plan') role = 'planner';
-  else if (mode === 'execute') role = asksValidation ? 'coder' : 'planner';
+  else if (mode === 'execute') role = asksValidation || asksCreateArtifact ? 'coder' : 'planner';
   else if (asksProjectOverview) role = 'summarizer';
   else if (/\b(review|audit|inspect|investigate|analy[sz]e|find bugs|security|vuln|performance|bugs?)\b/.test(lower)) role = 'reviewer';
   else if (/\b(plan|roadmap|design|architect|strategy)\b/.test(lower)) role = 'planner';
@@ -215,7 +221,7 @@ export async function routeWithAutoRouter(
         forceCostStrategy: roleThinking === 'medium'
           ? route.complexity === 'simple'
             ? 'cheapest'
-            : route.complexity === 'deep' && route.mode !== 'investigate'
+            : route.complexity === 'deep' && (route.mode !== 'investigate' || route.role === 'reviewer')
               ? 'strongest'
               : undefined
           : undefined,
