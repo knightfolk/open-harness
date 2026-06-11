@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync } from 'fs';
-import { join, dirname, posix } from 'path';
+import { join, dirname, posix, resolve } from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
-const evalDir = join(root, 'test-fixtures', 'standalone-artifact-eval');
+const args = process.argv.slice(2);
+const targetArg = args.find((arg) => !arg.startsWith('--'));
+const evalDir = targetArg ? resolve(targetArg) : join(root, 'test-fixtures', 'standalone-artifact-eval');
 const failures = [];
 
 function fail(message) {

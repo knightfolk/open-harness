@@ -47,9 +47,9 @@ try {
   rmSync(fixtureDir, { recursive: true, force: true });
 }
 
-const standaloneFixtureDir = join(process.cwd(), 'test-fixtures', 'standalone-artifact-eval');
-function runStandaloneVerifier() {
-  return spawnSync(process.execPath, ['scripts/verify-standalone-artifact-fixture.mjs'], {
+const standaloneFixtureDir = mkdtempSync(join(tmpdir(), 'openharness-standalone-artifact-'));
+function runStandaloneVerifier(targetDir: string) {
+  return spawnSync(process.execPath, ['scripts/verify-standalone-artifact-fixture.mjs', targetDir], {
     cwd: process.cwd(),
     encoding: 'utf8',
     timeout: 30_000,
@@ -68,7 +68,7 @@ try {
     'Tester controls objective expected verify movement restart arcade VHS cassette neon.',
     'This file intentionally contains many words but the JavaScript does not implement the game loop.',
   ].join('\n'));
-  const keywordOnly = runStandaloneVerifier();
+  const keywordOnly = runStandaloneVerifier(standaloneFixtureDir);
   assert.notEqual(keywordOnly.status, 0, 'keyword-only artifact should not pass standalone verifier');
   assert.match(`${keywordOnly.stderr}${keywordOnly.stdout}`, /JavaScript must wire real player input|JavaScript must own player state/);
 
@@ -101,11 +101,10 @@ try {
     '',
     'Tester objective: verify that the page loads, visible HP and score appear, keyboard input changes state, enemies and items are represented in code, the neon arcade theme is obvious, and replay behavior is present. Expected result: the artifact is ready for a human to judge balance and readability rather than basic functionality.',
   ].join('\n'));
-  const playable = runStandaloneVerifier();
+  const playable = runStandaloneVerifier(standaloneFixtureDir);
   assert.equal(playable.status, 0, `${playable.stderr}\n${playable.stdout}`);
 } finally {
   rmSync(standaloneFixtureDir, { recursive: true, force: true });
-  mkdirSync(standaloneFixtureDir, { recursive: true });
 }
 
 console.log('ship readiness checks passed.');
