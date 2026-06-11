@@ -40,6 +40,7 @@ const route: RouteDecision = {
 
 const originalFetch = globalThis.fetch;
 let artifactTempDir = '';
+let artifactContinuationPrompt = '';
 
 try {
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -58,6 +59,7 @@ try {
         `<tool_call>{"name":"write_file","arguments":{"path":"${artifactTempDir}/neon-game/README.md","content":"# Playable Demo\\n\\nOpen index.html and press a key to verify movement for human testing."}}</tool_call>`,
       ].join('\n');
     } else if (fullPrompt.includes('Tool results:') && fullPrompt.includes('write_file')) {
+      artifactContinuationPrompt = fullPrompt;
       content = [
         'Created neon-game/index.html.',
         '',
@@ -158,6 +160,8 @@ try {
     assert.match(artifactResult.finalText, /Workspace write tool used by implementer/i);
     assert.match(artifactResult.finalText, /openharness artifact manifest check/i);
     assert.match(artifactResult.finalText, /Validation passed: node -e/i);
+    assert.match(artifactContinuationPrompt, /request more write_file tool calls/i);
+    assert.doesNotMatch(artifactContinuationPrompt, /request one read-only tool call/i);
     assert.match(readFileSync(join(artifactDir, 'neon-game', 'index.html'), 'utf8'), /Playable demo/);
     assert.match(readFileSync(join(artifactDir, 'neon-game', 'game.js'), 'utf8'), /keydown/);
   } finally {

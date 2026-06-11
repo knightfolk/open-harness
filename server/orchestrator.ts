@@ -443,6 +443,14 @@ async function runExecutePipeline(
   let implArtifact: BackgroundAgentArtifact | null = null;
   const implModelId = implModel;
   let fallbackArtifactUsed = false;
+  const artifactContinuationInstruction = artifactCreation
+    ? [
+      `Use these tool results to continue artifact creation.`,
+      `If any required artifact file is still missing or incomplete, request more write_file tool calls now.`,
+      `Do not switch to read-only tools unless a write_file error proves you need to inspect the workspace.`,
+      `Only produce the final answer after index.html, a JavaScript game/app file, styles.css, and README.md have all been written.`,
+    ].join(' ')
+    : undefined;
   try {
     implArtifact = await runAgentPhase(config, {
       profileId: implProfile,
@@ -454,6 +462,7 @@ async function runExecutePipeline(
       tools: callbacks.tools,
       invokeTool: callbacks.invokeTool,
       maxToolRounds: artifactCreation ? 6 : undefined,
+      toolContinuationInstruction: artifactContinuationInstruction,
     });
     phases.push({
       label: 'implementer',
@@ -509,6 +518,7 @@ async function runExecutePipeline(
         tools: callbacks.tools,
         invokeTool: callbacks.invokeTool,
         maxToolRounds: 6,
+        toolContinuationInstruction: artifactContinuationInstruction,
       });
       phases.push({
         label: 'implementer-retry',

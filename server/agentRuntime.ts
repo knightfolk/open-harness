@@ -32,6 +32,7 @@ export interface BackgroundAgentRequest {
   tools?: AgentToolDefinition[];
   invokeTool?: (toolName: string, args: Record<string, unknown>, workingDir?: string) => Promise<unknown>;
   maxToolRounds?: number;
+  toolContinuationInstruction?: string;
 }
 
 export interface BackgroundAgentArtifact {
@@ -483,7 +484,7 @@ export async function runAgentPhase(
           ``,
           round === maxToolRounds - 1
             ? `Now produce the final answer from the gathered evidence. Do not request more tools.`
-            : `Use these results to continue. If you need more context, request one read-only tool call. Otherwise produce the final answer.`,
+            : (req.toolContinuationInstruction || `Use these results to continue. If you need more context, request one read-only tool call. Otherwise produce the final answer.`),
         ].join('\n'),
       });
 
