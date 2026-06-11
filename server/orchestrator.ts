@@ -416,23 +416,53 @@ async function runExecutePipeline(
   // Phase 2: Implementer — produce code changes from the plan
   const implProfile = 'implementer';
   const implModel = resolveAgentModel(config, implProfile, route, plannerModel || config.activeModel || '');
+  const artifactFolder = artifactCreation ? inferArtifactFolder(userMessage) : '';
+  const artifactRequiredPaths = artifactCreation
+    ? [
+      `${artifactFolder}/index.html`,
+      `${artifactFolder}/game.js`,
+      `${artifactFolder}/styles.css`,
+      `${artifactFolder}/README.md`,
+    ]
+    : [];
   const implPrompt = [
-    `## Plan`,
-    plannerArtifact?.response || '(plan generation failed — proceed directly)',
-    '',
-    `## Task (from user)`,
-    userMessage,
-    '',
-    workingDir ? `Working directory: ${workingDir}` : '',
-    '',
     artifactCreation
       ? [
+        `## Artifact Write Command`,
+        `Your next response must use write_file tool calls to create the requested artifact files.`,
+        `Do not return a plan, analysis, markdown-only answer, or review before writing files.`,
+        `Write complete runnable file contents, not placeholders.`,
+        ``,
+        `Required write_file paths:`,
+        ...artifactRequiredPaths.map((path) => `- ${path}`),
+        ``,
+        `Use this exact tool-call shape for each file:`,
+        `<tool_call>{"name":"write_file","arguments":{"path":"${artifactRequiredPaths[0] || 'generated-artifact/index.html'}","content":"complete file contents"}}</tool_call>`,
+        ``,
+        `After all required files are written, produce a concise final answer with validation commands.`,
+        ``,
+        `## Task (from user)`,
+        userMessage,
+        ``,
+        workingDir ? `Working directory: ${workingDir}` : '',
+        ``,
+        `## Planner Notes (advisory only)`,
+        plannerArtifact?.response || '(plan generation failed — proceed directly)',
+        ``,
         `Create the requested artifact directly in the workspace when write_file is available.`,
         `For a new app/game/site, make its own folder, write complete runnable files, and keep dependencies minimal.`,
         `After writing files, list exactly which validation commands should be run to verify correctness.`,
         `If write_file is not available, provide complete file contents and exact paths instead of a vague plan.`,
       ].join('\n')
       : [
+        `## Plan`,
+        plannerArtifact?.response || '(plan generation failed — proceed directly)',
+        '',
+        `## Task (from user)`,
+        userMessage,
+        '',
+        workingDir ? `Working directory: ${workingDir}` : '',
+        '',
         `Implement the plan above. Produce a unified-diff patch for each file change.`,
         `Prefer minimal, surgical edits. After the patch, list exactly which validation`,
         `commands should be run to verify correctness.`,
@@ -497,13 +527,10 @@ async function runExecutePipeline(
       workingDir ? `Working directory: ${workingDir}` : '',
       ``,
       `Use write_file now. Emit write_file tool calls only until these files exist in the requested artifact folder:`,
-      `- index.html`,
-      `- game.js or app.js`,
-      `- styles.css`,
-      `- README.md`,
+      ...artifactRequiredPaths.map((path) => `- ${path}`),
       ``,
       `Every write_file call must use this exact shape:`,
-      `<tool_call>{"name":"write_file","arguments":{"path":"test-fixtures/standalone-artifact-eval/index.html","content":"complete file contents"}}</tool_call>`,
+      `<tool_call>{"name":"write_file","arguments":{"path":"${artifactRequiredPaths[0] || 'generated-artifact/index.html'}","content":"complete file contents"}}</tool_call>`,
       ``,
       `After writing all files, produce a concise final answer with validation commands. Do not return a plan, review, or explanation instead of writing files.`,
     ].filter(Boolean).join('\n');
@@ -1216,7 +1243,9 @@ async function createFallbackStandaloneArtifact(
 function inferArtifactFolder(taskText: string): string {
   const match = /\b(?:inside|in|under|within)\s+([A-Za-z0-9._/-]+)(?:[\s.]|$)/i.exec(taskText);
   const folder = match?.[1]?.replace(/[.]+$/g, '');
-  return folder && !/\.(?:html|js|css|md)$/i.test(folder) ? folder : 'generated-artifact';
+  if (!folder || /\.(?:html|js|css|md)$/i.test(folder)) return 'generated-artifact';
+  if (/^(?:a|an|the|this|that|its|own|new|folder|directory|project)$/i.test(folder)) return 'generated-artifact';
+  return folder;
 }
 
 function buildFallbackGameFiles(folder: string): Array<{ path: string; content: string }> {

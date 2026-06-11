@@ -41,6 +41,7 @@ const route: RouteDecision = {
 const originalFetch = globalThis.fetch;
 let artifactTempDir = '';
 let artifactContinuationPrompt = '';
+let artifactInitialPrompt = '';
 
 try {
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -52,6 +53,7 @@ try {
     if (prompt.includes('step-by-step implementation plan')) {
       content = 'Plan: edit src/App.tsx, then run npm run build.';
     } else if (fullPrompt.includes('Create the requested artifact') && !fullPrompt.includes('Tool results:')) {
+      artifactInitialPrompt = fullPrompt;
       content = [
         `<tool_call>{"name":"write_file","arguments":{"path":"${artifactTempDir}/neon-game/index.html","content":"<!doctype html><title>Playable demo</title><link rel=\\"stylesheet\\" href=\\"styles.css\\"><main id=\\"game\\">Playable demo</main><script src=\\"game.js\\"></script>"}}</tool_call>`,
         `<tool_call>{"name":"write_file","arguments":{"path":"${artifactTempDir}/neon-game/styles.css","content":"body { background: #111; color: #0ff; font-family: monospace; }"}}</tool_call>`,
@@ -155,6 +157,14 @@ try {
 
     assert.equal(artifactResult.ok, true, 'workspace-write artifact creation should be ok when write_file runs and validation passes');
     assert.equal(artifactResult.assistedByFallback, false, 'model-authored artifact writes should not be marked fallback-assisted');
+    assert.ok(
+      artifactInitialPrompt.indexOf('## Artifact Write Command') < artifactInitialPrompt.indexOf('## Planner Notes'),
+      'artifact implementer prompt should put write command before planner notes',
+    );
+    assert.match(artifactInitialPrompt, /Your next response must use write_file tool calls/i);
+    assert.match(artifactInitialPrompt, /generated-artifact\/index\.html/);
+    assert.match(artifactInitialPrompt, /generated-artifact\/game\.js/);
+    assert.doesNotMatch(artifactInitialPrompt.slice(0, 400), /## Plan/);
     assert.match(artifactResult.finalText, /## Delivered/);
     assert.match(artifactResult.finalText, /Direct artifact file writes were used/i);
     assert.match(artifactResult.finalText, /Workspace write tool used by implementer/i);
