@@ -1657,7 +1657,7 @@ function extractUnifiedDiff(text: string): string {
   return lines.slice(start, end === -1 ? undefined : end).join('\n').trim();
 }
 
-function extractValidationCommands(text: string): string[] {
+export function extractValidationCommands(text: string): string[] {
   const lines = text.split('\n');
   const start = lines.findIndex((line) => /^#+\s*validation commands?\b|^validation commands?:/i.test(line.trim()));
   const candidates = start === -1 ? lines : lines.slice(start + 1);
@@ -1668,7 +1668,7 @@ function extractValidationCommands(text: string): string[] {
       if (commands.length > 0) break;
       continue;
     }
-    if (/^(?:npm|pnpm|yarn|bun|npx|node|tsx|python|pytest|cargo|go|swift|xcodebuild)\b/.test(line)) {
+    if (/^(?:(?:cd\s+\S+(?:\s+&&\s+)?)?(?:npm|pnpm|yarn|bun|npx|node|tsx|python|pytest|cargo|go|swift|xcodebuild))\b/.test(line)) {
       commands.push(line);
       continue;
     }

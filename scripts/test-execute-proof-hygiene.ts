@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { runOrchestratorPipeline } from '../server/orchestrator';
+import { extractValidationCommands, runOrchestratorPipeline } from '../server/orchestrator';
 import type { StoredConfig } from '../server/config';
 import type { RouteDecision } from '../server/router';
 
@@ -37,6 +37,16 @@ const route: RouteDecision = {
   suggestedModels: [],
   reason: 'test execute proof hygiene',
 };
+
+const shipGateCommands = extractValidationCommands([
+  'Validation commands:',
+  'node /repo/scripts/verify-standalone-artifact-fixture.mjs game',
+  'cd /repo && node --import tsx /repo/scripts/run-ship-readiness.ts /tmp/game',
+].join('\n'));
+assert.deepEqual(shipGateCommands, [
+  'node /repo/scripts/verify-standalone-artifact-fixture.mjs game',
+  'cd /repo && node --import tsx /repo/scripts/run-ship-readiness.ts /tmp/game',
+], 'validation extraction should preserve cd-prefixed ship-readiness commands');
 
 const originalFetch = globalThis.fetch;
 let artifactTempDir = '';
