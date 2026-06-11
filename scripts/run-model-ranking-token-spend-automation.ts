@@ -1,6 +1,6 @@
 import { computeBenchScores, createBenchRun, generateBenchSummary, saveBenchRun, type BenchRunResult, type ValidationCommandResult } from '../server/benchRuns';
 import { estimateTokens } from '../server/contextManager';
-import { estimateCost } from '../server/modelProfiles';
+import { estimateCostForRanking } from '../server/modelProfiles';
 import { recordRoutingDecision, recordOutcome, getLearningSummary } from '../server/routerLearning';
 import { recordUsage, getUsageSummary } from '../server/usageTracker';
 
@@ -122,7 +122,7 @@ function responseFor(model: SyntheticModel, task: SyntheticTask, status: 'resolv
 function usageFor(modelId: string, prompt: string, response: string) {
   const inputTokens = estimateTokens(prompt);
   const outputTokens = estimateTokens(response);
-  const cost = estimateCost(modelId, inputTokens, outputTokens)?.total ?? 0;
+  const cost = estimateCostForRanking(modelId, inputTokens, outputTokens).total;
   return { inputTokens, outputTokens, cost, tokenCount: inputTokens + outputTokens };
 }
 

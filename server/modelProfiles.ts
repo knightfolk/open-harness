@@ -457,6 +457,8 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   'grok-3': { input: 3.00, output: 15.00 },
 };
 
+const FALLBACK_MODEL_PRICING = { input: 1.00, output: 4.00 };
+
 /** Estimate cost in USD for a given model and token usage. Returns null if model has no pricing. */
 export function estimateCost(modelId: string, inputTokens: number, outputTokens: number): { inputCost: number; outputCost: number; total: number } | null {
   const bareId = modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId;
@@ -465,6 +467,15 @@ export function estimateCost(modelId: string, inputTokens: number, outputTokens:
   const inputCost = (inputTokens / 1_000_000) * pricing.input;
   const outputCost = (outputTokens / 1_000_000) * pricing.output;
   return { inputCost, outputCost, total: inputCost + outputCost };
+}
+
+/** Estimate cost with a conservative fallback so unknown models are not ranked as free. */
+export function estimateCostForRanking(modelId: string, inputTokens: number, outputTokens: number): { inputCost: number; outputCost: number; total: number; estimated: boolean } {
+  const known = estimateCost(modelId, inputTokens, outputTokens);
+  if (known) return { ...known, estimated: false };
+  const inputCost = (inputTokens / 1_000_000) * FALLBACK_MODEL_PRICING.input;
+  const outputCost = (outputTokens / 1_000_000) * FALLBACK_MODEL_PRICING.output;
+  return { inputCost, outputCost, total: inputCost + outputCost, estimated: true };
 }
 
 /** Get ordered model family recommendations for a given agent role. */

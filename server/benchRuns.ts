@@ -187,6 +187,23 @@ export function runValidation(
   })));
 }
 
+export async function runSetupCommands(
+  commands: string[],
+  workingDir: string,
+  env: Record<string, string> = {},
+): Promise<ValidationCommandResult[]> {
+  const results = await runValidation(commands, workingDir, env);
+  return results.map((result) => ({
+    ...result,
+    command: `setup: ${result.command}`,
+    findings: result.passed
+      ? result.findings
+      : result.findings.length > 0
+        ? result.findings
+        : [`Setup command failed with exit code ${result.exitCode}`],
+  }));
+}
+
 function extractValidationFindings(output: string): string[] {
   const findings: string[] = [];
   for (const line of output.split('\n')) {

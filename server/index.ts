@@ -13,7 +13,7 @@ import { mcpManager, parseStdioEndpoint } from './mcp';
 import { checkDockerReadiness } from './dockerReadiness';
 import { dockerDesktopEnv } from './dockerDesktopEnv';
 import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAllCuratedServers } from './curatedMcp';
-import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost } from './modelProfiles';
+import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost, estimateCostForRanking } from './modelProfiles';
 import { buildContextWindow, estimateTokens } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
 import { formatProjectProfileForPrompt, getProjectProfile } from './projectProfile';
@@ -76,7 +76,7 @@ interface EstimatedModelUsage {
 function estimateUsageForTexts(modelId: string, inputText: string, outputText: string): EstimatedModelUsage {
   const inputTokens = estimateTokens(inputText);
   const outputTokens = estimateTokens(outputText);
-  const cost = estimateCost(modelId, inputTokens, outputTokens)?.total ?? 0;
+  const cost = estimateCostForRanking(modelId, inputTokens, outputTokens).total;
   return {
     inputTokens,
     outputTokens,
@@ -4544,9 +4544,44 @@ app.post('/api/bench/run', async (req, res) => {
       const startMs = Date.now();
       const startedAt = new Date().toISOString();
 
-      // Run setup commands
-      for (const cmd of task.setupCommands) {
-        await runShellCommand(cmd, taskDir, 30_000);
+      const setupResults = task.setupCommands.length > 0
+        ? await benchRuns.runSetupCommands(task.setupCommands, taskDir)
+        : [];
+      const setupPassed = setupResults.every((result) => result.passed);
+      if (!setupPassed) {
+        const wallMs = Date.now() - startMs;
+        const response = 'Setup failed before model execution.';
+        const usage = estimateUsageForTexts(modelId, task.prompt, response);
+        const scores = benchRuns.computeBenchScores({
+          response,
+          toolCalls: [],
+          wallMs,
+          validationResults: setupResults,
+          stepCount: 0,
+          tokenCount: usage.tokenCount,
+          costEstimate: usage.cost,
+        });
+        run.results.push({
+          taskId: task.id,
+          taskName: task.name,
+          modelId,
+          providerId: resolved.providerId,
+          status: 'validation-failed',
+          prompt: task.prompt,
+          response,
+          responseLength: response.length,
+          toolCalls: [],
+          validationResults: setupResults,
+          validationPassed: false,
+          wallMs,
+          scores,
+          startedAt,
+          completedAt: new Date().toISOString(),
+          error: setupResults.filter((result) => !result.passed).map((result) => result.findings.join('; ') || result.stderr).join('; '),
+        });
+        run.completed++;
+        benchRuns.saveBenchRun(run);
+        continue;
       }
       const changedFilesBeforeRun = getChangedFileSnapshot(taskDir);
 
@@ -4703,7 +4738,7 @@ app.post('/api/bench/run', async (req, res) => {
       writeFileSync(responsePath, response, 'utf-8');
 
       // Run verification commands
-      let validationResults: benchRuns.ValidationCommandResult[] = [];
+      let validationResults: benchRuns.ValidationCommandResult[] = [...setupResults];
       if (task.verificationCommands.length > 0) {
         validationResults = await benchRuns.runValidation(task.verificationCommands, taskDir, {
           OPENHARNESS_BENCH_RESPONSE: responsePath,

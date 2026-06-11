@@ -32,6 +32,23 @@ async function waitForPort(port, label, timeout = 15000) {
   return false;
 }
 
+const serverAlreadyRunning = await checkPort(SERVER_PORT);
+const viteAlreadyRunning = await checkPort(VITE_PORT);
+
+if (serverAlreadyRunning && viteAlreadyRunning) {
+  console.log(`OpenHarness already appears to be running on ports ${SERVER_PORT} and ${VITE_PORT}; not launching duplicate processes.`);
+  process.exit(0);
+}
+
+if (serverAlreadyRunning || viteAlreadyRunning) {
+  const occupied = [
+    serverAlreadyRunning ? SERVER_PORT : null,
+    viteAlreadyRunning ? VITE_PORT : null,
+  ].filter(Boolean).join(', ');
+  console.error(`OpenHarness cannot start cleanly because port(s) ${occupied} are already in use. Stop the stale process and run npm run start again.`);
+  process.exit(1);
+}
+
 // Start server
 const server = spawn('npx', ['tsx', 'server/index.ts'], {
   cwd: root,
@@ -42,7 +59,7 @@ server.stdout.on('data', d => process.stdout.write('[server] ' + d));
 server.stderr.on('data', d => process.stderr.write('[server:err] ' + d));
 
 // Start Vite
-const vite = spawn('npx', ['vite', '--port', String(VITE_PORT), '--host'], {
+const vite = spawn('npx', ['vite', '--port', String(VITE_PORT), '--host', '127.0.0.1', '--strictPort'], {
   cwd: root,
   stdio: 'pipe',
   env: { ...process.env },

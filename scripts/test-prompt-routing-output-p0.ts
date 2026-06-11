@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { computeBenchScores, generateBenchSummary, validateChangedFiles } from '../server/benchRuns';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { computeBenchScores, generateBenchSummary, runSetupCommands, validateChangedFiles } from '../server/benchRuns';
+import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
@@ -222,6 +226,46 @@ function testBenchRankingUsesSpendAndLatency() {
   assert.match(summary.bestModelReason || '', /cost/i);
 }
 
+function testUnknownModelPricingIsNotFree() {
+  const unknown = estimateCostForRanking('unknown-provider:brand-new-model', 1000, 500);
+  assert.equal(unknown.estimated, true, 'unknown model pricing should be marked as estimated');
+  assert.ok(unknown.total > 0, 'unknown model pricing should use a conservative non-zero fallback');
+
+  const known = estimateCostForRanking('minimax:MiniMax-M3', 1000, 500);
+  assert.equal(known.estimated, false, 'known model pricing should not be marked estimated');
+  assert.ok(known.total > 0, 'known model pricing should still compute spend');
+}
+
+async function testSetupCommandsAreScoredAsValidation() {
+  const dir = mkdtempSync(join(tmpdir(), 'openharness-setup-gate-'));
+  try {
+    const results = await runSetupCommands([
+      'printf setup-ok',
+      "printf '%s\\n' '- setup exploded' >&2; exit 7",
+    ], dir);
+
+    assert.equal(results.length, 2, 'setup gate should return one validation result per command');
+    assert.equal(results[0].passed, true, 'passing setup command should pass');
+    assert.equal(results[1].passed, false, 'failing setup command should fail');
+    assert.match(results[1].command, /^setup: /, 'setup result should be labeled separately from normal validation');
+    assert.match(results[1].findings.join('\n'), /setup exploded/, 'setup failure output should become a visible finding');
+
+    const score = computeBenchScores({
+      response: 'Setup failed before model execution.',
+      toolCalls: [],
+      wallMs: 100,
+      validationResults: results,
+      stepCount: 0,
+      tokenCount: 10,
+      costEstimate: 0.00001,
+    });
+    assert.equal(score.validationPassed, false, 'failed setup should fail validation scoring');
+    assert.notEqual(score.resolvedStatus, 'resolved', 'failed setup must not be resolved');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function testBenchChangedFileValidation() {
   const pass = validateChangedFiles({
     before: ['README.md'],
@@ -272,6 +316,8 @@ testCreationPromptRouting();
 testMiniMaxInvokeDelimiterRegression();
 testScoringRejectsBadOutput();
 testBenchRankingUsesSpendAndLatency();
+testUnknownModelPricingIsNotFree();
+await testSetupCommandsAreScoredAsValidation();
 testBenchChangedFileValidation();
 
 console.log('prompt/routing/output P0 regression checks passed');
