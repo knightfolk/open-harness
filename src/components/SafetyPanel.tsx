@@ -254,6 +254,7 @@ function WorktreesTab({ dir }: { dir: string }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [validatingId, setValidatingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -293,6 +294,23 @@ function WorktreesTab({ dir }: { dir: string }) {
       await refresh();
     } catch (err: any) {
       setMessage({ kind: 'error', text: err.message });
+    }
+  };
+
+  const validate = async (id: string) => {
+    setMessage(null);
+    setValidatingId(id);
+    try {
+      const res = await api.validateWorktree(dir, id);
+      setMessage({
+        kind: res.passed ? 'ok' : 'error',
+        text: `${res.passed ? 'Validation passed' : 'Validation failed'} in worktree: ${res.results.map((result) => `${result.command} (${result.exitCode})`).join(', ')}`,
+      });
+      await refresh();
+    } catch (err: any) {
+      setMessage({ kind: 'error', text: err.message });
+    } finally {
+      setValidatingId(null);
     }
   };
 
@@ -385,6 +403,10 @@ function WorktreesTab({ dir }: { dir: string }) {
                 <div className="safety-item-actions">
                   <button className="btn btn-ghost btn-small" onClick={() => showDiff(wt.id)} title="Show diff vs base">
                     {expanded === wt.id ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                  <button className="btn btn-ghost btn-small" onClick={() => validate(wt.id)} disabled={validatingId === wt.id} title="Run project validation commands inside this worktree">
+                    {validatingId === wt.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle2 size={12} />}
+                    Validate
                   </button>
                   <button className="btn btn-secondary btn-small" onClick={() => promote(wt.id)} title="Merge worktree branch into its base">
                     <Play size={12} /> Promote

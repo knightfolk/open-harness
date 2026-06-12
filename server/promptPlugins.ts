@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'fs';
-import { join, resolve } from 'path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { basename, join, resolve } from 'path';
 import { homedir } from 'os';
 import { redactSecrets } from './sectionRedaction';
 
@@ -37,6 +37,13 @@ export interface PromptPluginRegistry {
   packs: Array<{ id: string; name: string; pluginIds: string[]; pluginCount: number; trust: PromptPluginTrust; sources: string[] }>;
 }
 
+export interface ImportPromptSkillResult {
+  ok: boolean;
+  manifestPath?: string;
+  plugin?: PromptPluginSummary;
+  error?: string;
+}
+
 const TRUST_ORDER: Record<PromptPluginTrust, number> = {
   trusted: 0,
   'review-required': 1,
@@ -49,6 +56,27 @@ function pluginRoots(projectDir?: string): Array<{ location: PromptPluginSummary
   roots.push({ location: 'user', path: join(homedir(), '.openharness', 'prompt-plugins') });
   roots.push({ location: 'imported', path: join(homedir(), '.openharness', 'imported-prompt-plugins') });
   return roots;
+}
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'imported-skill';
+}
+
+function titleFromSkill(text: string, fallback: string): string {
+  const heading = /^#\s+(.+?)\s*$/m.exec(text);
+  return (heading?.[1] || fallback).replace(/^skill:\s*/i, '').trim().slice(0, 120) || fallback;
+}
+
+function descriptionFromSkill(text: string): string {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith('---'));
+  return (lines[0] || 'Imported skill prompt instructions.').slice(0, 500);
 }
 
 function findManifestFiles(root: string): string[] {
@@ -132,6 +160,62 @@ export function ensurePromptPluginRoots(projectDir?: string): void {
   for (const root of pluginRoots(projectDir)) {
     if (!existsSync(root.path)) mkdirSync(root.path, { recursive: true });
   }
+}
+
+export function importSkillAsPromptPlugin(projectDir: string, sourcePath: string): ImportPromptSkillResult {
+  const resolvedSource = resolve(sourcePath);
+  if (!existsSync(resolvedSource)) return { ok: false, error: 'Source path does not exist' };
+  const stat = statSync(resolvedSource);
+  const skillPath = stat.isDirectory() ? join(resolvedSource, 'SKILL.md') : resolvedSource;
+  if (!existsSync(skillPath)) return { ok: false, error: 'No SKILL.md found at source path' };
+  const skillText = readFileSync(skillPath, 'utf-8').slice(0, 80_000);
+  if (!skillText.trim()) return { ok: false, error: 'Skill file is empty' };
+
+  ensurePromptPluginRoots(projectDir);
+  const root = pluginRoots(projectDir).find((entry) => entry.location === 'project')!;
+  const title = titleFromSkill(skillText, basename(stat.isDirectory() ? resolvedSource : skillPath));
+  const id = `imported.${slugify(title)}`;
+  const manifest = {
+    schemaVersion: '0.1.0',
+    id,
+    name: title,
+    version: '0.1.0',
+    description: descriptionFromSkill(skillText),
+    author: { name: 'Imported skill' },
+    license: 'unknown',
+    provenance: {
+      source: 'imported-other',
+      trust: 'review-required',
+      importedFrom: resolvedSource,
+    },
+    targets: {
+      roles: ['coder', 'planner', 'reviewer'],
+      routeModes: ['plan', 'investigate', 'execute'],
+    },
+    renderers: [{
+      id: 'default',
+      format: 'markdown',
+      template: '{{sections}}',
+      sectionOrder: ['imported-skill'],
+    }],
+    sections: [{
+      id: 'imported-skill',
+      title: 'Imported Skill Instructions',
+      placement: 'append-task',
+      priority: 200,
+      content: skillText,
+    }],
+    evals: [],
+    safety: {
+      permissions: {},
+      untrustedContextPolicy: 'wrap-and-label',
+      canOverrideProjectInstructions: false,
+    },
+  };
+  const manifestPath = join(root.path, `${id}.prompt-plugin.json`);
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  const plugin = summarizeManifest(manifest, manifestPath, 'project');
+  return { ok: true, manifestPath, plugin };
 }
 
 export function listPromptPlugins(projectDir?: string): PromptPluginRegistry {

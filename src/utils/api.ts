@@ -1141,6 +1141,34 @@ export interface ServerHealthInfo {
   latencyMs: number;
 }
 
+export interface DeepBrowserArtifact {
+  url: string;
+  status: number;
+  latencyMs: number;
+  contentType: string;
+  contentLength: number;
+  title?: string;
+  bodyTextPreview: string;
+  a11yNodes: Array<{ tag: string; label: string; role?: string }>;
+  scriptSources: string[];
+  stylesheetSources: string[];
+  screenshotBase64?: string;
+  screenshotPath?: string;
+  errors: Array<{ type: 'error' | 'warning'; message: string; source?: string; line?: number }>;
+  capturedAt: string;
+  domStructure?: {
+    ids: string[];
+    classNames: string[];
+    headings: Array<{ level: number; text: string }>;
+    interactiveElements: Array<{ tag: string; text: string; selector: string }>;
+    forms: Array<{ action: string; method: string; inputs: Array<{ name: string; type: string; placeholder: string }> }>;
+    images: Array<{ src: string; alt: string }>;
+    links: Array<{ href: string; text: string }>;
+    metaDescription?: string;
+  };
+  resourceHealth?: Array<{ url: string; status: number; ok: boolean }>;
+}
+
 export async function captureBrowserPreview(url: string): Promise<BrowserPreviewInfo> {
   const res = await fetch(`${API_BASE}/api/browser/preview`, {
     method: 'POST',
@@ -1148,6 +1176,16 @@ export async function captureBrowserPreview(url: string): Promise<BrowserPreview
     body: JSON.stringify({ url }),
   });
   if (!res.ok) throw new Error(`Preview failed: ${res.status}`);
+  return res.json();
+}
+
+export async function captureDeepBrowser(url: string): Promise<DeepBrowserArtifact> {
+  const res = await fetch(`${API_BASE}/api/browser/deep`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error(`Deep capture failed: ${res.status}`);
   return res.json();
 }
 
@@ -1499,6 +1537,18 @@ export async function getEvalReport(id: string): Promise<EvalReport> {
   return res.json();
 }
 
+export async function downloadEvalRecommendationReport(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/evals/reports/${encodeURIComponent(id)}/recommendation-report`);
+  if (!res.ok) throw new Error(`Failed to export recommendation report: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `eval-recommendations-${id}.md`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function runEval(params: {
   name?: string;
   promptIds: string[];
@@ -1559,6 +1609,17 @@ export async function ensurePromptPluginRoots(workingDir?: string | null): Promi
   });
   if (!res.ok) throw new Error(`Failed to prepare prompt plugin folders: ${res.status}`);
   return res.json();
+}
+
+export async function importSkillPromptPlugin(workingDir: string, sourcePath: string): Promise<{ ok: boolean; manifestPath?: string; plugin?: PromptPluginSummary; registry: PromptPluginRegistry }> {
+  const res = await fetch(`${API_BASE}/api/prompt-plugins/import-skill`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workingDir, sourcePath }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Import failed: ${res.status}`);
+  return body;
 }
 
 export async function downloadRunDebugBundle(runId: string): Promise<void> {
@@ -1996,6 +2057,19 @@ export async function promoteWorktree(dir: string, id: string, opts: { targetBra
     body: JSON.stringify({ dir, ...opts }),
   });
   if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function validateWorktree(dir: string, id: string, commands?: string[]): Promise<{ worktree: Worktree; results: ValidationCommandResult[]; passed: boolean }> {
+  const res = await fetch(`${API_BASE}/api/worktrees/${id}/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, commands }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.error || `Validate worktree failed: ${res.status}`);
+  }
   return res.json();
 }
 

@@ -468,6 +468,65 @@ export function getLatestEvalRecommendations(): EvalRecommendation[] {
   }));
 }
 
+function markdownEscape(text: string): string {
+  return text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+export function exportEvalRecommendationMarkdown(reportId: string): string | null {
+  const report = loadReport(reportId) || activeRuns.get(reportId) || null;
+  if (!report) return null;
+  const summary = report.summary || generateSummary(report.results);
+  const lines: string[] = [];
+  lines.push(`# Eval Recommendation Report: ${report.name}`);
+  lines.push('');
+  lines.push(`- Report ID: \`${report.id}\``);
+  lines.push(`- Status: ${report.status}`);
+  lines.push(`- Created: ${report.createdAt}`);
+  if (report.completedAt) lines.push(`- Completed: ${report.completedAt}`);
+  lines.push(`- Runs: ${report.completed}/${report.total}`);
+  lines.push(`- Best model: ${summary.bestModel || 'n/a'}`);
+  lines.push('');
+
+  lines.push('## Role Recommendations');
+  lines.push('');
+  if (summary.recommendations.length === 0) {
+    lines.push('No recommendations were generated.');
+  } else {
+    lines.push('| Role | Model | Reason |');
+    lines.push('| --- | --- | --- |');
+    for (const rec of summary.recommendations) {
+      lines.push(`| ${markdownEscape(rec.role)} | ${markdownEscape(rec.modelId)} | ${markdownEscape(rec.reason)} |`);
+    }
+  }
+  lines.push('');
+
+  lines.push('## Model Summary');
+  lines.push('');
+  lines.push('| Model | Avg score | Avg latency | Avg tools | Runs |');
+  lines.push('| --- | ---: | ---: | ---: | ---: |');
+  for (const [modelId, model] of Object.entries(summary.byModel)) {
+    lines.push(`| ${markdownEscape(modelId)} | ${model.avgScore}/10 | ${(model.avgLatencyMs / 1000).toFixed(1)}s | ${model.avgToolCount} | ${model.totalRuns} |`);
+  }
+  lines.push('');
+
+  lines.push('## Weakest Signals');
+  lines.push('');
+  lines.push('| Model | Prompt | Score | Weakest signal | Validation | Status |');
+  lines.push('| --- | --- | ---: | --- | --- | --- |');
+  for (const result of report.results) {
+    const weakest = result.scores.breakdown?.weakestSignal?.label || 'n/a';
+    lines.push(`| ${markdownEscape(result.modelId)} | ${markdownEscape(result.promptName)} | ${result.scores.overallScore}/10 | ${markdownEscape(weakest)} | ${result.scores.validationPassed ? 'pass' : 'fail'} | ${result.status} |`);
+  }
+  lines.push('');
+
+  lines.push('## Validation Notes');
+  lines.push('');
+  const validationPasses = report.results.filter((result) => result.scores.validationPassed).length;
+  lines.push(`- Validation passes: ${validationPasses}/${report.results.length}`);
+  lines.push('- Treat recommendations as manual suggestions until a human applies them to role assignments or router candidates.');
+  return lines.join('\n');
+}
+
 // ── Summary Generation ─────────────────────────────────
 
 export function generateSummary(results: EvalResult[]): EvalSummary {

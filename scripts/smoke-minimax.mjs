@@ -28,6 +28,7 @@ import { join } from 'node:path';
 
 const BASE = process.env.OPENHARNESS_BASE || `http://localhost:${process.env.OPENHARNESS_PORT || 3001}`;
 const MODEL = process.env.OPENHARNESS_MODEL || 'MiniMax-M3';
+const WORKING_DIR = process.env.OPENHARNESS_WORKING_DIR || process.cwd();
 const PROMPT = 'Reply with exactly: PONG. No other text, no markdown, no code blocks.';
 const TIMEOUT_MS = Number(process.env.OPENHARNESS_TIMEOUT_MS || 60_000);
 
@@ -87,7 +88,8 @@ async function main() {
     if (existsSync(configPath)) {
       const onDisk = JSON.parse(readFileSync(configPath, 'utf-8'));
       const diskProvider = onDisk.providers?.find((p) => p.id === minimax.id);
-      log(!!diskProvider?.apiKey, 'config.json has raw key on disk', diskProvider?.apiKey ? `${diskProvider.apiKey.length} chars` : 'missing');
+      const envHydrated = Boolean(process.env.MINIMAX_API_KEY || process.env.ZENCODER_MINIMAX_API_KEY);
+      log(!!diskProvider?.apiKey || envHydrated, 'MiniMax credential source available', diskProvider?.apiKey ? 'config file' : envHydrated ? 'environment' : 'missing');
     }
   } catch (err) {
     log(false, 'config.json readable', err.message);
@@ -114,7 +116,7 @@ async function main() {
       body: JSON.stringify({
         prompt: PROMPT,
         modelId: MODEL,
-        workingDir: homedir(),
+        workingDir: WORKING_DIR,
         testId: `smoke-minimax-${Date.now()}`,
       }),
     });

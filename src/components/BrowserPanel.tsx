@@ -10,13 +10,16 @@ interface Props {
 export function BrowserPanel({ onAskAboutScreenshot }: Props) {
   const [url, setUrl] = useState('localhost:5173');
   const [preview, setPreview] = useState<api.BrowserPreviewInfo | null>(null);
+  const [deepArtifact, setDeepArtifact] = useState<api.DeepBrowserArtifact | null>(null);
   const [health, setHealth] = useState<api.ServerHealthInfo | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deepLoading, setDeepLoading] = useState(false);
   const [checking, setChecking] = useState(false);
 
   const handlePreview = useCallback(async () => {
     setLoading(true);
     setPreview(null);
+    setDeepArtifact(null);
     try {
       const result = await api.captureBrowserPreview(url);
       setPreview(result);
@@ -29,6 +32,41 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
       });
     } finally {
       setLoading(false);
+    }
+  }, [url]);
+
+  const handleDeepCapture = useCallback(async () => {
+    setDeepLoading(true);
+    setDeepArtifact(null);
+    try {
+      const result = await api.captureDeepBrowser(url);
+      setDeepArtifact(result);
+      if (result.screenshotBase64) {
+        setPreview({
+          url: result.url,
+          screenshotPath: result.screenshotPath || '',
+          screenshotBase64: result.screenshotBase64,
+          title: result.title,
+          timestamp: result.capturedAt,
+          errors: result.errors,
+        });
+      }
+    } catch (err: any) {
+      setDeepArtifact({
+        url,
+        status: 0,
+        latencyMs: 0,
+        contentType: '',
+        contentLength: 0,
+        bodyTextPreview: '',
+        a11yNodes: [],
+        scriptSources: [],
+        stylesheetSources: [],
+        errors: [{ type: 'error', message: err.message || 'Deep capture failed' }],
+        capturedAt: new Date().toISOString(),
+      });
+    } finally {
+      setDeepLoading(false);
     }
   }, [url]);
 
@@ -88,6 +126,16 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
           }}
         >
           {loading ? '...' : 'Preview'}
+        </button>
+        <button
+          onClick={handleDeepCapture}
+          disabled={deepLoading}
+          style={{
+            background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-primary)',
+            borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer',
+          }}
+        >
+          {deepLoading ? '...' : 'Deep'}
         </button>
       </div>
 
@@ -185,15 +233,56 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
             </button>
           )}
           <button
-            onClick={handleHealthCheck}
+            onClick={handleDeepCapture}
             style={{
               background: 'none', border: '1px solid var(--border-primary)',
               borderRadius: 3, padding: '2px 8px', fontSize: 10,
               cursor: 'pointer', color: 'var(--text-tertiary)',
             }}
           >
-            Smoke check
+            Deep capture
           </button>
+        </div>
+      )}
+
+      {deepArtifact && (
+        <div style={{
+          padding: '8px 10px',
+          background: 'var(--bg-secondary)',
+          borderTop: '1px solid var(--border-primary)',
+          fontSize: 11,
+          color: 'var(--text-secondary)',
+          maxHeight: 180,
+          overflow: 'auto',
+        }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ color: deepArtifact.status >= 200 && deepArtifact.status < 400 ? 'var(--accent-success)' : 'var(--accent-error)' }}>
+              HTTP {deepArtifact.status || 'n/a'}
+            </span>
+            <span>{deepArtifact.latencyMs}ms</span>
+            <span>{deepArtifact.domStructure?.interactiveElements.length || 0} interactive</span>
+            <span>{deepArtifact.resourceHealth?.filter((entry) => !entry.ok).length || 0} resource failures</span>
+            <span>{deepArtifact.errors.length} issue{deepArtifact.errors.length === 1 ? '' : 's'}</span>
+          </div>
+          {deepArtifact.domStructure?.headings.length ? (
+            <div style={{ marginBottom: 6 }}>
+              {deepArtifact.domStructure.headings.slice(0, 4).map((heading, index) => (
+                <div key={`${heading.level}:${heading.text}:${index}`} style={{ color: 'var(--text-tertiary)' }}>
+                  H{heading.level} {heading.text}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {deepArtifact.bodyTextPreview && (
+            <div style={{ color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+              {deepArtifact.bodyTextPreview.slice(0, 360)}
+            </div>
+          )}
+          {deepArtifact.errors.slice(0, 4).map((err, index) => (
+            <div key={`${err.type}:${index}`} style={{ marginTop: 4, color: err.type === 'error' ? 'var(--accent-error)' : 'var(--accent-warning)' }}>
+              {err.type}: {err.message}
+            </div>
+          ))}
         </div>
       )}
     </div>

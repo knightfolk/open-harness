@@ -1375,9 +1375,12 @@ Definition of done:
 
 - [x] Eval scores include validation pass/fail.
 - [x] Status bar receives and displays the actual enabled tool count.
-- [ ] MiniMax provider path passes a live smoke test.
-- [ ] Provider smoke result is recorded in the roadmap or release notes.
+- [x] MiniMax provider path passes a live smoke test.
+- [x] Provider smoke result is recorded in the roadmap or release notes.
 - [x] Lint/build pass.
+
+Smoke result:
+- 2026-06-12: `npm run smoke:minimax` passed against `MiniMax-M3` after env-hydrated provider credentials were loaded by the server. The streamed `/api/test/run` response returned exactly `PONG`.
 
 ## Assignment 3 — Agent Bench MVP
 

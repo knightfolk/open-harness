@@ -243,6 +243,17 @@ export function ModelLabPanel({ workingDir, models }: Props) {
     }
   }, [workingDir]);
 
+  const handleImportPromptSkill = useCallback(async (sourcePath: string) => {
+    if (!workingDir) throw new Error('Open a project before importing a skill.');
+    const result = await api.importSkillPromptPlugin(workingDir, sourcePath);
+    setPromptPlugins(result.registry);
+    setDiagnostic({
+      tone: 'info',
+      title: 'Skill imported as prompt pack',
+      detail: result.manifestPath || 'The imported prompt plugin manifest is ready for review.',
+    });
+  }, [workingDir]);
+
   const handleSelectReport = useCallback(async (id: string) => {
     try {
       const report = await api.getEvalReport(id);
@@ -258,6 +269,19 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       setTab('bench');
     } catch { /* ignore */ }
   }, []);
+
+  const handleExportEvalReport = useCallback(async () => {
+    if (!selectedReport) return;
+    try {
+      await api.downloadEvalRecommendationReport(selectedReport.id);
+    } catch (err) {
+      setDiagnostic({
+        tone: 'error',
+        title: 'Could not export recommendation report',
+        detail: err instanceof Error ? err.message : 'The eval recommendation report could not be downloaded.',
+      });
+    }
+  }, [selectedReport]);
 
   const categories = [...new Set(prompts.map(p => p.category))];
 
@@ -431,7 +455,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 
         {/* ── Prompt Packs Tab ── */}
         {tab === 'packs' && (
-          <PromptPacksTab registry={promptPlugins} onPrepare={handlePreparePromptPluginRoots} />
+          <PromptPacksTab registry={promptPlugins} onPrepare={handlePreparePromptPluginRoots} onImportSkill={handleImportPromptSkill} />
         )}
 
         {/* ── Bench Results Tab ── */}
@@ -582,7 +606,10 @@ export function ModelLabPanel({ workingDir, models }: Props) {
             ) : (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{selectedReport.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{selectedReport.name}</div>
+                    <button onClick={handleExportEvalReport} style={smallBtnStyle}>Export report</button>
+                  </div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
                     {runProgressLabel(selectedReport.status, selectedReport.completed, selectedReport.total, 'runs')}
                     {selectedReport.completedAt && ` · ${new Date(selectedReport.completedAt).toLocaleTimeString()}`}
@@ -1147,13 +1174,30 @@ function formatSigned(n: number): string {
   return `${n >= 0 ? '+' : ''}${n}`;
 }
 
-function PromptPacksTab({ registry, onPrepare }: {
+function PromptPacksTab({ registry, onPrepare, onImportSkill }: {
   registry: api.PromptPluginRegistry | null;
   onPrepare: () => void;
+  onImportSkill: (sourcePath: string) => Promise<void>;
 }) {
+  const [sourcePath, setSourcePath] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const plugins = registry?.plugins || [];
   const packs = registry?.packs || [];
   const roots = registry?.roots || [];
+  const importSkill = async () => {
+    if (!sourcePath.trim()) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      await onImportSkill(sourcePath.trim());
+      setSourcePath('');
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
   return (
     <div style={{ padding: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1177,6 +1221,23 @@ function PromptPacksTab({ registry, onPrepare }: {
             <span style={{ color: 'var(--text-tertiary)', fontFamily: 'SF Mono, Menlo, Consolas, monospace', wordBreak: 'break-all' }}>{root.path}</span>
           </div>
         ))}
+      </div>
+
+      <div style={{ marginBottom: 12, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
+        <div style={sectionLabelStyle}>Import skill</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={sourcePath}
+            onChange={(event) => setSourcePath(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && importSkill()}
+            placeholder="/path/to/skill-folder or /path/to/SKILL.md"
+            style={inputStyle}
+          />
+          <button onClick={importSkill} disabled={importing || !sourcePath.trim()} style={smallBtnStyle}>
+            {importing ? 'Importing...' : 'Import'}
+          </button>
+        </div>
+        {importError && <div style={{ marginTop: 6, fontSize: 10, color: 'var(--accent-error)' }}>{importError}</div>}
       </div>
 
       {packs.length > 0 && (

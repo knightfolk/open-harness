@@ -53,7 +53,7 @@ import { parseToolCallMarkup, MarkupScrubber, type MarkupParseResult } from './t
 import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
-import { ensurePromptPluginRoots, listPromptPlugins } from './promptPlugins';
+import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins } from './promptPlugins';
 import type { PersistedSession } from './sessionStore';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
@@ -4938,6 +4938,14 @@ app.get('/api/evals/reports/:id', (req, res) => {
   res.json(report);
 });
 
+app.get('/api/evals/reports/:id/recommendation-report', (req, res) => {
+  const markdown = evals.exportEvalRecommendationMarkdown(req.params.id);
+  if (!markdown) return res.status(404).json({ error: 'Report not found' });
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="eval-recommendations-${req.params.id}.md"`);
+  res.send(markdown);
+});
+
 app.get('/api/evals/recommendations', (_req, res) => {
   res.json(evals.getLatestEvalRecommendations());
 });
@@ -4955,6 +4963,18 @@ app.post('/api/prompt-plugins/ensure-roots', (req, res) => {
   if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
   ensurePromptPluginRoots(targetWorkspace.dir);
   res.json(listPromptPlugins(targetWorkspace.dir));
+});
+
+app.post('/api/prompt-plugins/import-skill', (req, res) => {
+  const workingDir = typeof req.body?.workingDir === 'string' ? req.body.workingDir : undefined;
+  const sourcePath = typeof req.body?.sourcePath === 'string' ? req.body.sourcePath : '';
+  if (!workingDir) return res.status(400).json({ error: 'workingDir is required' });
+  if (!sourcePath.trim()) return res.status(400).json({ error: 'sourcePath is required' });
+  const targetWorkspace = ensureKnownWorkspace(workingDir);
+  if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+  const result = importSkillAsPromptPlugin(targetWorkspace.dir, sourcePath);
+  if (!result.ok) return res.status(400).json(result);
+  res.status(201).json({ ...result, registry: listPromptPlugins(targetWorkspace.dir) });
 });
 
 app.get('/api/sessions/:sessionId/messages/:messageId/debug-bundle', (req, res) => {
@@ -5247,6 +5267,44 @@ app.post('/api/worktrees/:id/promote', (req, res) => {
     res.json(worktrees.promoteWorktree(workspace.dir, req.params.id, { targetBranch, force }));
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/worktrees/:id/validate', async (req, res) => {
+  const { dir, commands } = req.body as { dir: string; commands?: string[] };
+  if (!dir) return res.status(400).json({ error: 'dir is required' });
+  const workspace = ensureWorkspaceMutationAllowed(dir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
+  const wt = worktrees.getWorktreeStatus(workspace.dir, req.params.id);
+  if (!wt) return res.status(404).json({ error: 'Worktree not found' });
+  if (!existsSync(wt.path)) return res.status(404).json({ error: 'Worktree path no longer exists' });
+
+  let validationCommands = (commands || []).filter((command) => typeof command === 'string' && command.trim().length > 0);
+  if (validationCommands.length === 0) {
+    try {
+      const profile = getProjectProfile(wt.path);
+      validationCommands = [
+        profile.validation.lint,
+        profile.validation.typecheck,
+        profile.validation.build,
+      ].filter((command): command is string => Boolean(command));
+    } catch {
+      validationCommands = [];
+    }
+  }
+  if (validationCommands.length === 0) {
+    return res.status(400).json({ error: 'No validation commands configured for this worktree' });
+  }
+
+  try {
+    const results = await benchRuns.runValidation(validationCommands, wt.path);
+    res.json({
+      worktree: worktrees.refreshWorktreeState(wt),
+      results,
+      passed: results.length > 0 && results.every((result) => result.passed),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Worktree validation failed' });
   }
 });
 
@@ -5556,13 +5614,13 @@ app.post('/api/browser/deep', async (req, res) => {
     if (artifact.bodyTextPreview && !artifact.domStructure) {
       try {
         // Re-fetch to get full HTML for structure analysis
-        const htmlRes = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        const htmlRes = await fetch(artifact.url, { signal: AbortSignal.timeout(5000) });
         if (htmlRes.ok) {
           const buf = await htmlRes.arrayBuffer();
           const html = new TextDecoder('utf-8').decode(buf.slice(0, 2 * 1024 * 1024));
           artifact.domStructure = analyzeDomStructure(html);
           try {
-            artifact.resourceHealth = await checkResourceHealth(html, url);
+          artifact.resourceHealth = await checkResourceHealth(html, artifact.url);
           } catch {}
         }
       } catch {

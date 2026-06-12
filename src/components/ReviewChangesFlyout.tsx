@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, GitPullRequestArrow, CheckCircle2, GitCommit, FileText, Layers, Shield, ChevronRight, RefreshCw } from 'lucide-react';
 import * as api from '../utils/api';
+import { PatchReviewPanel } from './PatchReviewPanel';
 
 /* ── Types ─────────────────────────────────── */
 type Tab = 'summary' | 'files' | 'patches' | 'validate' | 'commit';
@@ -65,20 +66,27 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
   const [committed, setCommitted] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileDiff, setFileDiff] = useState<api.GitDiffInfo | null>(null);
+  const [proposalCount, setProposalCount] = useState(0);
+  const [activeProposalCount, setActiveProposalCount] = useState(0);
+  const [commitMessage, setCommitMessage] = useState('');
 
   const refresh = useCallback(async () => {
     if (!workingDir) return;
     setLoading(true);
     setError(null);
     try {
-      const [gitStatus, gitDiffs, profile] = await Promise.all([
+      const [gitStatus, gitDiffs, profile, proposals] = await Promise.all([
         api.getGitStatus(workingDir),
         api.getGitDiff(workingDir),
         api.getProjectProfile(workingDir).catch(() => null),
+        api.listPatchProposals().catch(() => []),
       ]);
       setStatus(gitStatus);
       setDiffs(gitDiffs);
       setProjectProfile(profile);
+      const projectProposals = proposals.filter((proposal) => proposal.workingDir === workingDir);
+      setProposalCount(projectProposals.length);
+      setActiveProposalCount(projectProposals.filter((proposal) => proposal.status === 'open').length);
     } catch (err: any) {
       setError(err.message || 'Failed to load git data');
     } finally {
@@ -98,7 +106,7 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
   const totalDeletions = allChanges.reduce((s, f) => s + f.deletions, 0);
 
   const filesReviewed = allChanges.length > 0;
-  const patchesCreated = false; // TODO: detect from PatchReviewPanel state
+  const patchesCreated = proposalCount > 0;
   const commitMade = committed;
   const validationCommands = [
     { id: 'lint', command: projectProfile?.validation.lint || 'npm run lint' },
@@ -192,7 +200,7 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'summary', label: 'Summary', icon: <Layers size={14} /> },
     { id: 'files', label: 'Files', icon: <FileText size={14} /> },
-    { id: 'patches', label: 'Patches', icon: <GitPullRequestArrow size={14} /> },
+    { id: 'patches', label: activeProposalCount > 0 ? `Patches (${activeProposalCount})` : 'Patches', icon: <GitPullRequestArrow size={14} /> },
     { id: 'validate', label: 'Validate', icon: <Shield size={14} /> },
     { id: 'commit', label: 'Commit', icon: <GitCommit size={14} /> },
   ];
@@ -415,11 +423,7 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                 <span className="review-flyout-panel-title">Patch Proposals</span>
               </div>
               <div style={{ flex: 1, overflow: 'auto' }}>
-                {/* Mount existing PatchReviewPanel inline when available */}
-                <div className="review-flyout-empty">
-                  <GitPullRequestArrow size={24} style={{ opacity: 0.5 }} />
-                  <span>Use "Propose patch" from the Files tab to create a proposal</span>
-                </div>
+                <PatchReviewPanel workingDir={workingDir} sessionId={null} />
               </div>
             </div>
           )}
@@ -524,6 +528,8 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                     className="commit-input"
                     rows={3}
                     placeholder="Describe what changed and why..."
+                    value={commitMessage}
+                    onChange={(event) => setCommitMessage(event.target.value)}
                   />
                 </div>
                 <div className="commit-section">
@@ -547,9 +553,14 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                     onClick={async () => {
                       if (!workingDir) return;
                       try {
-                        const msg = 'Changes';
+                        const msg = commitMessage.trim();
+                        if (!msg) {
+                          setError('Commit message is required');
+                          return;
+                        }
                         await api.gitCommit(workingDir, msg);
                         setCommitted(true);
+                        setCommitMessage('');
                         await refresh();
                       } catch { /* ignore */ }
                     }}

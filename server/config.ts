@@ -194,13 +194,13 @@ export function loadConfig(): StoredConfig {
     const raw = readFileSync(CONFIG_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as StoredConfig;
     // Merge with defaults for forward-compat
-    const normalizedProviders = repairProviderAliasCredentials((parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
+    const normalizedProviders = hydrateProviderEnvCredentials(repairProviderAliasCredentials((parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
       ...provider,
       apiKey: typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '',
       accessMode: (provider.accessMode === 'subscription' ? 'subscription' : 'api-key') as StoredProvider['accessMode'],
       planId: typeof provider.planId === 'string' && provider.planId ? provider.planId : undefined,
       oauth: normalizeProviderOAuth((provider as any).oauth),
-    })));
+    }))));
     const normalizedFavoriteModels = Array.isArray(parsed.favoriteModels)
       ? [...new Set(parsed.favoriteModels.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
       : [];
@@ -404,6 +404,35 @@ export function repairProviderAliasCredentials(providers: StoredProvider[]): Sto
       oauth: provider.oauth || credentialSource?.oauth,
       models: provider.models.length > 0 ? provider.models : Array.from(allModels.values()),
     };
+  });
+}
+
+function providerEnvKeys(provider: StoredProvider): string[] {
+  const normalizedId = provider.id.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  const normalizedName = provider.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  const keys = [
+    `${normalizedId}_API_KEY`,
+    `${normalizedName}_API_KEY`,
+    `OPENHARNESS_${normalizedId}_API_KEY`,
+  ];
+  if (/minimax/i.test(`${provider.id} ${provider.name}`)) {
+    keys.push('MINIMAX_API_KEY', 'ZENCODER_MINIMAX_API_KEY');
+  }
+  if (/(z[-_ ]?ai|zhipu|glm)/i.test(`${provider.id} ${provider.name}`)) {
+    keys.push('ZAI_API_KEY', 'ZENCODER_ZAI_API_KEY');
+  }
+  if (/opencode/i.test(`${provider.id} ${provider.name}`)) {
+    keys.push('OPENCODE_API_KEY', 'ZENCODER_OPENCODE_GO_API_KEY');
+  }
+  return Array.from(new Set(keys));
+}
+
+function hydrateProviderEnvCredentials(providers: StoredProvider[]): StoredProvider[] {
+  return providers.map((provider) => {
+    if (provider.apiKey || provider.type === 'local') return provider;
+    const envKey = providerEnvKeys(provider).find((key) => process.env[key]?.trim());
+    if (!envKey) return provider;
+    return { ...provider, apiKey: process.env[envKey]!.trim() };
   });
 }
 
