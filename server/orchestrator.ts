@@ -1699,7 +1699,10 @@ function executeProof(
   if (validationResults.length > 0) {
     for (const result of validationResults) {
       lines.push(`- Validation ${result.passed ? 'passed' : 'failed'}: ${result.command}`);
-      if (!result.passed) {
+      if (result.passed) {
+        const successDetail = summarizeValidationSuccess(result);
+        if (successDetail) lines.push(`- Proof detail: ${successDetail}`);
+      } else {
         lines.push(`- Failure detail: ${summarizeValidationFailure([result])}`);
       }
     }
@@ -1716,6 +1719,26 @@ function executeProof(
     writeToolUsed,
     summary: lines.join('\n'),
   };
+}
+
+function summarizeValidationSuccess(result: ValidationCommandResult): string {
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const snippets: string[] = [];
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (
+      /^PASS:/i.test(line) ||
+      /^-\s*PASS\b/i.test(line) ||
+      /ship readiness passed/i.test(line) ||
+      /standalone artifact verification passed/i.test(line) ||
+      /browser smoke/i.test(line)
+    ) {
+      snippets.push(line);
+    }
+  }
+  const deduped = [...new Set(snippets.map((line) => line.length > 200 ? `${line.slice(0, 197)}...` : line))].slice(0, 2);
+  return deduped.join('; ');
 }
 
 function extractUnifiedDiff(text: string): string {

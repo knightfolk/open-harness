@@ -222,6 +222,18 @@ try {
         'Validation commands:',
         'node -e "console.error(\'- Browser smoke: missing visible HUD after keyboard input\'); process.exit(1)"',
       ].join('\n');
+    } else if (prompt.includes('Produce a unified-diff patch') && fullPrompt.includes('Force a passing validation detail.')) {
+      content = [
+        'diff --git a/src/App.tsx b/src/App.tsx',
+        '--- a/src/App.tsx',
+        '+++ b/src/App.tsx',
+        '@@ -1 +1 @@',
+        '-export default function App() { return null; }',
+        '+export default function App() { return <main>Validated demo</main>; }',
+        '',
+        'Validation commands:',
+        'node -e "console.log(\'PASS: Ship readiness passed with browser smoke evidence.\')"',
+      ].join('\n');
     } else if (prompt.includes('Produce a unified-diff patch')) {
       content = [
         'diff --git a/src/App.tsx b/src/App.tsx',
@@ -299,6 +311,25 @@ try {
     assert.match(failedResult.finalText, /Failure detail: Browser smoke: missing visible HUD after keyboard input/i);
   } finally {
     rmSync(failingValidationDir, { recursive: true, force: true });
+  }
+
+  const passingValidationDir = mkdtempSync(join(tmpdir(), 'openharness-execute-success-detail-'));
+  try {
+    mkdirSync(join(passingValidationDir, 'src'), { recursive: true });
+    writeFileSync(join(passingValidationDir, 'src', 'App.tsx'), 'export default function App() { return null; }\n');
+
+    const writeConfig: StoredConfig = { ...config, trustMode: 'workspace-write' };
+    const passedResult = await runOrchestratorPipeline(
+      route,
+      'Force a passing validation detail.',
+      writeConfig,
+      passingValidationDir,
+    );
+
+    assert.equal(passedResult.ok, true, 'passing validation should still be delivered');
+    assert.match(passedResult.finalText, /Proof detail: PASS: Ship readiness passed with browser smoke evidence/i);
+  } finally {
+    rmSync(passingValidationDir, { recursive: true, force: true });
   }
 
   const artifactDir = mkdtempSync(join(tmpdir(), 'openharness-artifact-proof-'));
