@@ -6,6 +6,7 @@ import { v4 as uuid } from 'uuid';
 
 import { buildScoreBreakdown, type EvalScores, type EvalScoreBreakdown } from './evals';
 import { redactSecrets } from './sectionRedaction';
+import { resolveShell } from './shell';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -197,7 +198,7 @@ export function runValidation(
 
   return Promise.all(commands.map(cmd => new Promise<ValidationCommandResult>((resolve) => {
     const start = Date.now();
-    const child = spawn('/bin/zsh', ['-lc', cmd], { cwd: workingDir, env: { ...process.env, ...env } });
+    const child = spawn(resolveShell(), ['-lc', cmd], { cwd: workingDir, env: { ...process.env, ...env } });
     let stdout = '';
     let stderr = '';
     const limit = 512 * 1024;

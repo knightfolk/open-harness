@@ -1,5 +1,6 @@
 // ── Types ──────────────────────────────────────────────
 import { isAbsolute, relative, resolve } from 'path';
+import { existsSync, realpathSync } from 'fs';
 
 
 export type TrustMode =
@@ -112,14 +113,15 @@ function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {
 export function isPathWithin(candidate: string, workspace: string): boolean {
   if (typeof candidate !== 'string' || typeof workspace !== 'string') return false;
   if (candidate.length === 0 || workspace.length === 0) return false;
-  const resolvedWorkspace = resolve(workspace);
+  const resolvedWorkspace = realpathExistingAncestor(resolve(workspace));
   // Resolve the candidate: absolute paths are taken as-is, relative
   // paths are resolved against the workspace. Then we compare the
   // resolved candidates via `relative` so the result is a `..`-less
   // path iff the candidate is inside the workspace.
-  const resolvedCandidate = isAbsolute(candidate)
+  const rawCandidate = isAbsolute(candidate)
     ? resolve(candidate)
     : resolve(resolvedWorkspace, candidate);
+  const resolvedCandidate = realpathExistingAncestor(rawCandidate);
   if (resolvedCandidate === resolvedWorkspace) return true;
   const rel = relative(resolvedWorkspace, resolvedCandidate);
   // `relative` returns a path that begins with `..` for any candidate
@@ -129,6 +131,25 @@ export function isPathWithin(candidate: string, workspace: string): boolean {
     return false;
   }
   return true;
+}
+
+function realpathExistingAncestor(path: string): string {
+  let current = path;
+  const missingParts: string[] = [];
+
+  while (!existsSync(current)) {
+    const parent = resolve(current, '..');
+    if (parent === current) return resolve(path);
+    missingParts.unshift(current.slice(parent.length + 1));
+    current = parent;
+  }
+
+  try {
+    const base = realpathSync(current);
+    return missingParts.reduce((acc, part) => resolve(acc, part), base);
+  } catch {
+    return resolve(path);
+  }
 }
 
 export function isPathAllowed(filePath: string, trustMode: TrustMode, workingDir?: string): ToolPolicyResult {

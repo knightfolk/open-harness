@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Eye, EyeOff, ChevronDown, ChevronRight, AlertTriangle, Cpu, Wrench, MessageSquare, Zap, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, ChevronDown, ChevronRight, AlertTriangle, Cpu, Wrench, MessageSquare, Zap, ShieldCheck, Download } from 'lucide-react';
 import type { HarnessRun, HarnessRunStep } from '../types';
 import * as api from '../utils/api';
 import { ROUTING_FEEDBACK_GUIDANCE, autoRouterDecisionLabel, autoRouterStepTraceText, candidateScoresUnavailableLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
@@ -12,6 +12,7 @@ export function PromptMicroscope({ runTrace }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [redactionOn, setRedactionOn] = useState(true);
   const [estimates, setEstimates] = useState<api.SectionEstimate[] | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
 
   const sections = useMemo(() => {
     if (!runTrace) return [];
@@ -77,6 +78,17 @@ export function PromptMicroscope({ runTrace }: Props) {
     // We use the cached estimate's redacted text; if no estimate yet, just return the raw text.
     return text;
   }, [redactionOn]);
+
+  const handleExportDebugBundle = useCallback(async () => {
+    if (!runTrace) return;
+    try {
+      await api.downloadRunDebugBundle(runTrace.id);
+      setExportStatus('Exported');
+      window.setTimeout(() => setExportStatus(null), 2000);
+    } catch (err) {
+      setExportStatus(err instanceof Error ? err.message : 'Export failed');
+    }
+  }, [runTrace]);
 
   if (!runTrace) return null;
 
@@ -414,6 +426,13 @@ export function PromptMicroscope({ runTrace }: Props) {
           {/* Run metadata */}
           <div className="pm-section">
             <div className="pm-section-body pm-meta">
+              <div className="pm-row">
+                <span className="pm-key">Debug bundle</span>
+                <button className="pm-action-btn" onClick={handleExportDebugBundle} title="Export run replay and support data">
+                  <Download size={12} />
+                  <span>{exportStatus || 'Export'}</span>
+                </button>
+              </div>
               <div className="pm-row">
                 <span className="pm-key">Run ID</span>
                 <span className="pm-value pm-mono">{runTrace.id.slice(0, 8)}</span>

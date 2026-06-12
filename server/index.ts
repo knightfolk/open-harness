@@ -12,6 +12,7 @@ import { testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager, parseStdioEndpoint } from './mcp';
 import { checkDockerReadiness } from './dockerReadiness';
 import { dockerDesktopEnv } from './dockerDesktopEnv';
+import { resolveShell } from './shell';
 import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAllCuratedServers } from './curatedMcp';
 import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost, estimateCostForRanking } from './modelProfiles';
 import { buildContextWindow, estimateTokens } from './contextManager';
@@ -52,6 +53,7 @@ import { parseToolCallMarkup, MarkupScrubber, type MarkupParseResult } from './t
 import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
+import { ensurePromptPluginRoots, listPromptPlugins } from './promptPlugins';
 import type { PersistedSession } from './sessionStore';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
@@ -231,7 +233,7 @@ const allowedOrigins = new Set([
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-    return callback(new Error('Origin not allowed'));
+    return callback(null, false);
   },
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -376,7 +378,7 @@ function getPersonality(): string {
 
 function runShellCommand(command: string, cwd: string, timeoutMs = 30000): Promise<{ output: string; exitCode: number }> {
   return new Promise((resolve) => {
-    const child = spawn('/bin/zsh', ['-lc', command], { cwd });
+    const child = spawn(resolveShell(), ['-lc', command], { cwd });
     let output = '';
     const limit = 1024 * 1024;
     const append = (chunk: Buffer) => {
@@ -2448,6 +2450,59 @@ function persistAssistantRunTrace(
   sessionStore.saveSession(session);
 }
 
+function buildRunDebugBundle(sessionId: string, messageId: string) {
+  const session = sessionStore.loadSession(sessionId);
+  if (!session) return null;
+  const message = session.messages.find((item) => item.id === messageId);
+  if (!message?.runTrace) return null;
+  const run = message.runTrace as HarnessRun;
+  const steps: HarnessRunStep[] = run.steps || [];
+  const promptStep = steps.find((step): step is Extract<HarnessRunStep, { type: 'prompt_built' }> => step.type === 'prompt_built');
+  const routeSteps = steps.filter((step) => step.type === 'route' || step.type === 'auto_router');
+  const errors = steps.filter((step): step is Extract<HarnessRunStep, { type: 'error' }> => step.type === 'error');
+  const artifacts = steps
+    .filter((step): step is Extract<HarnessRunStep, { type: 'artifact' }> => step.type === 'artifact')
+    .map((step) => step.artifact);
+  const modelOutputs = steps.filter((step) => step.type === 'model_text' || step.type === 'model_thinking' || step.type === 'final_answer');
+
+  return {
+    schemaVersion: '0.1.0',
+    exportedAt: new Date().toISOString(),
+    session: {
+      id: session.id,
+      title: session.title,
+      workingDir: session.workingDir,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: session.messages.length,
+    },
+    message: {
+      id: message.id,
+      role: message.role,
+      timestamp: message.timestamp,
+      contentPreview: message.content.slice(0, 4000),
+    },
+    run,
+    replay: {
+      promptAssembly: promptStep?.assembly || null,
+      routeDecision: routeSteps,
+      modelOutputs,
+      artifacts,
+      errors,
+      retryable: errors.some((error) => /timeout|rate|network|abort/i.test(error.message)),
+    },
+  };
+}
+
+function buildRunDebugBundleByRunId(runId: string) {
+  for (const session of sessionStore.loadAllSessions()) {
+    const message = session.messages.find((item) => item.runTrace?.id === runId);
+    if (!message) continue;
+    return buildRunDebugBundle(session.id, message.id);
+  }
+  return null;
+}
+
 function isOpenHarnessTargetedHarnessRequest(content: string): boolean {
   return /\bOpenHarness\b/i.test(content)
     && /\b(auto-?routing|auto-?router|harness|orchestration|test:hardening|test-orchestration-routing|Planning Room)\b/i.test(content);
@@ -2814,7 +2869,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   // Keep this path active even if model resolution is unclear because
   // routing and orchestration still provide deterministic behavior.
   if (route.mode !== 'direct') {
-    if (run) emitVisibleStep({
+    emitVisibleStep({
       type: 'route',
       role: route.role,
       model: effectiveModel,
@@ -2878,18 +2933,19 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       // Write full response
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: finalText });
 
-      if (run) emitRunStep(res, run, { type: 'final_answer', chars: finalText.length });
+      emitRunStep(res, run, { type: 'final_answer', chars: finalText.length });
       if (!orchResult.ok) run.status = 'error';
       persistAssistantMessage(session, assistantId, finalText, run);
     } catch (err: any) {
       console.error('[orchestrator] pipeline error:', err);
       const orchErrorContent = `Orchestration failed: ${err?.message || err}`;
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: orchErrorContent });
-      if (run) { run.status = 'error'; emitVisibleStep({ type: 'error', message: err?.message || 'Orchestration failed' }); }
+      run.status = 'error';
+      emitVisibleStep({ type: 'error', message: err?.message || 'Orchestration failed' });
       persistAssistantError(session, assistantId, orchErrorContent, run);
     }
   } else if (!resolved) {
-    await streamLocalFallback(content, res, assistantId, session, run);
+    streamNoProviderConfigured(res, assistantId, session, run);
   } else {
     writeSSE(res, 'thinking', { id: assistantId, chars: 24, message: `Waiting on ${effectiveModel}` });
     await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel, sideChatPromptContext);
@@ -3957,46 +4013,17 @@ async function streamModel(
   }
 }
 
-// ── Local fallback ─────────────────────────────────────
-async function streamLocalFallback(content: string, res: express.Response, assistantId: string, session: SessionRow, run?: HarnessRun) {
-  const responses = [
-    `I'll help you with that. Let me analyze your request:\n\n> ${content.slice(0, 100)}\n\nHere's my approach:\n\n1. Break down the problem\n2. Identify key components\n3. Implement a solution\n\n\`\`\`typescript\nconst result = await analyze(content);\nconsole.log(result);\n\`\`\``,
-    `Good question! Let me work on this.\n\n**Analysis:**\n\n- A modular approach for flexibility\n- Simple, testable implementation\n- Document key decisions\n\n\`\`\`bash\n$ npm run analyze\n\n✓ Found 3 relevant modules\n✓ No conflicts detected\n\`\`\``,
-    `Let me look into this right away.\n\n1. **Explore** the current codebase\n2. **Design** the solution\n3. **Implement** changes\n4. **Test** everything\n\n\`\`\`tsx\nconst Component = () => {\n  const [state, setState] = useState(initial);\n  return <Layout>{content}</Layout>;\n};\n\`\`\``,
-  ];
-
-  const response = responses[Math.floor(Math.random() * responses.length)];
+// ── No-provider handling ───────────────────────────────
+function streamNoProviderConfigured(res: express.Response, assistantId: string, session: SessionRow, run?: HarnessRun) {
+  const message = 'No provider is configured for the selected model. Open Settings > Providers, add a provider, then try again.';
   if (run) {
-    emitRunStep(res, run, { type: 'route', role: 'coder', model: run.effectiveModel, reason: 'No configured provider; local fallback' });
-    emitRunStep(res, run, { type: 'prompt_built', promptPreview: content.slice(0, 500), toolCount: 1 });
+    run.status = 'error';
+    emitRunStep(res, run, { type: 'error', message });
   }
-  const words = response.split(' ');
-
-  const fallbackToolId = uuid();
-  res.write(`event: tool_call\ndata: ${JSON.stringify({ id: fallbackToolId, name: 'exec_command', status: 'running', input: 'echo "analyzing..."' })}\n\n`);
-  if (run) emitRunStep(res, run, { type: 'tool_call', id: fallbackToolId, name: 'exec_command', input: 'echo "analyzing..."' });
-  await sleep(300);
-  res.write(`event: tool_call\ndata: ${JSON.stringify({ id: fallbackToolId, name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete', duration: 1200 })}\n\n`);
-  if (run) emitRunStep(res, run, { type: 'tool_call', id: fallbackToolId, name: 'exec_command', input: 'npm run analyze', outputPreview: '✓ Analysis complete', durationMs: 1200 });
-
-  for (let i = 0; i < words.length; i++) {
-    res.write(`event: text\ndata: ${JSON.stringify({ id: assistantId, text: i > 0 ? ' ' + words[i] : words[i] })}\n\n`);
-    await sleep(20 + Math.random() * 40);
-  }
-
-  if (run) emitRunStep(res, run, { type: 'final_answer', chars: response.length });
-  session.messages.push({
-    id: assistantId, role: 'assistant', content: response,
-    timestamp: new Date().toISOString(),
-    toolCalls: [{ id: fallbackToolId, name: 'exec_command', status: 'complete', input: 'npm run analyze', output: '✓ Analysis complete', duration: 1200 }],
-    runTrace: run,
-  });
-  session.updatedAt = new Date().toISOString();
-  sessionStore.saveSession(session);
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  writeSSE(res, 'text', { id: assistantId, text: message });
+  writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: message });
+  writeSSE(res, 'error', { error: message });
+  persistAssistantError(session, assistantId, message, run);
 }
 
 // ── Test Harness ──────────────────────────────────────
@@ -4913,6 +4940,35 @@ app.get('/api/evals/reports/:id', (req, res) => {
 
 app.get('/api/evals/recommendations', (_req, res) => {
   res.json(evals.getLatestEvalRecommendations());
+});
+
+app.get('/api/prompt-plugins', (req, res) => {
+  const workingDir = typeof req.query.workingDir === 'string' ? req.query.workingDir : undefined;
+  const targetWorkspace = workingDir ? ensureKnownWorkspace(workingDir) : { ok: true as const, dir: undefined };
+  if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+  res.json(listPromptPlugins(targetWorkspace.dir));
+});
+
+app.post('/api/prompt-plugins/ensure-roots', (req, res) => {
+  const workingDir = typeof req.body?.workingDir === 'string' ? req.body.workingDir : undefined;
+  const targetWorkspace = workingDir ? ensureKnownWorkspace(workingDir) : { ok: true as const, dir: undefined };
+  if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+  ensurePromptPluginRoots(targetWorkspace.dir);
+  res.json(listPromptPlugins(targetWorkspace.dir));
+});
+
+app.get('/api/sessions/:sessionId/messages/:messageId/debug-bundle', (req, res) => {
+  const bundle = buildRunDebugBundle(req.params.sessionId, req.params.messageId);
+  if (!bundle) return res.status(404).json({ error: 'Run debug bundle not found' });
+  res.setHeader('Content-Disposition', `attachment; filename="openharness-run-${bundle.run.id}.json"`);
+  res.json(bundle);
+});
+
+app.get('/api/runs/:runId/debug-bundle', (req, res) => {
+  const bundle = buildRunDebugBundleByRunId(req.params.runId);
+  if (!bundle) return res.status(404).json({ error: 'Run debug bundle not found' });
+  res.setHeader('Content-Disposition', `attachment; filename="openharness-run-${bundle.run.id}.json"`);
+  res.json(bundle);
 });
 
 app.post('/api/evals/run', async (req, res) => {

@@ -1520,6 +1520,59 @@ export async function getEvalRecommendations(): Promise<EvalRecommendation[]> {
   return res.json();
 }
 
+export interface PromptPluginSummary {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  source: string;
+  trust: 'trusted' | 'review-required' | 'blocked';
+  location: 'project' | 'user' | 'imported';
+  path: string;
+  targets: { roles: string[]; routeModes: string[]; modelFamilies: string[]; modelIds: string[] };
+  sections: Array<{ id: string; title: string; placement: string; priority: number }>;
+  evals: Array<{ id: string; minimumScore: number }>;
+  packs: Array<{ id: string; name: string; pluginIds: string[] }>;
+  safety: { canOverrideProjectInstructions: boolean; untrustedContextPolicy: string };
+  status: 'ready' | 'blocked' | 'invalid';
+  issues: string[];
+}
+
+export interface PromptPluginRegistry {
+  roots: Array<{ location: PromptPluginSummary['location']; path: string; exists: boolean }>;
+  plugins: PromptPluginSummary[];
+  packs: Array<{ id: string; name: string; pluginIds: string[]; pluginCount: number; trust: PromptPluginSummary['trust']; sources: string[] }>;
+}
+
+export async function getPromptPlugins(workingDir?: string | null): Promise<PromptPluginRegistry> {
+  const query = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : '';
+  const res = await fetch(`${API_BASE}/api/prompt-plugins${query}`);
+  if (!res.ok) throw new Error(`Failed to get prompt plugins: ${res.status}`);
+  return res.json();
+}
+
+export async function ensurePromptPluginRoots(workingDir?: string | null): Promise<PromptPluginRegistry> {
+  const res = await fetch(`${API_BASE}/api/prompt-plugins/ensure-roots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workingDir: workingDir || undefined }),
+  });
+  if (!res.ok) throw new Error(`Failed to prepare prompt plugin folders: ${res.status}`);
+  return res.json();
+}
+
+export async function downloadRunDebugBundle(runId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/debug-bundle`);
+  if (!res.ok) throw new Error(`Failed to export debug bundle: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `openharness-run-${runId}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Project Memory APIs ───────────────────────────────
 
 export interface ProjectMemoryInfo {

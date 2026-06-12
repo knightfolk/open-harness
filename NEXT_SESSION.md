@@ -15,7 +15,7 @@ Use `docs/PROMPT_ROUTING_OUTPUT_ROADMAP.md` as the next roadmap for refining pro
 
 ## Latest Completed Slice — 2026-06-12
 
-Commit to check first: this session should include output-style visibility work after `1a9d04b Add output contracts for routed responses`.
+Commit to check first: this session should include Phase 5-8 prompt/routing/output work after `1a9d04b Add output contracts for routed responses`.
 
 Completed Phase 4 items:
 - Output style contracts from `server/promptBuilder.ts` are now structured metadata (`outputStyle`) on prompt assembly and `prompt_built` trace steps.
@@ -23,17 +23,27 @@ Completed Phase 4 items:
 - The artifact drawer detects markdown `Evidence`, `Sources`, `Sources Used`, and `Evidence Used` sections as collapsed evidence artifacts.
 - Focused regressions cover output-style trace metadata and investigation/review response normalization.
 
-Still open before Phase 5 or eval-feedback-loop work:
-- Add explicit user-selectable output style controls only if the product wants styles beyond route/role-derived defaults.
-- Make review/investigation sources fully structured objects instead of markdown-section extraction.
-- Tighten orchestration normalization for execute reports and direct answers with focused tests.
-- Consider stream-cleaning refinements for legitimate first-person direct answers, especially non-reasoning models.
+Phase 4 remaining items are now closed enough to move into Phase 5 or eval-feedback-loop work:
+- Output style controls remain deferred unless the product needs styles beyond route/role-derived defaults.
+- Review/investigation sources are emitted as structured run-trace artifacts, with markdown-section extraction kept as a compatibility fallback.
+- Execute reports, investigation/review answers, compare summaries, and direct answers have focused normalization regressions.
+- Stream cleaning preserves legitimate first-person direct answers while still stripping internal planning preamble.
+
+Completed Phase 5-8 slice:
+- Phase 5: chat-attached structured artifacts, Prompt Microscope run inspector, Model Lab eval/bench tables, and run debug-bundle export are wired as native presentation surfaces.
+- Phase 6: eval score breakdowns, validation proof, weakest-signal reporting, persisted recommendations, auto-router recommendation annotation, and bench/Planning Room baseline comparison are available.
+- Phase 7: read-only prompt plugin registry scans project/user/imported manifests, displays prompt packs in Model Lab, and flags trust/provenance/safety/issues before anything affects routing.
+- Phase 8: routing-adherence events, atomic session saves, shell fallback resolution, explicit no-provider errors, and persisted run debug bundles improve recovery and supportability.
+
+Still intentionally deferred:
+- Save-as-prompt-plugin from a Planning Room artifact, OpenCode/Codex skill importer conversion, verified signatures, exact provider cost accounting, and full in-app rerun/replay.
 
 ## Current Runtime Status
 - ✅ **Server**: Running on `http://127.0.0.1:3001` (via `screen -S oh-server`)
 - ✅ **Frontend**: Running on `http://127.0.0.1:5173` (via `screen -S oh-vite`)
 - ✅ `GET /api/providers` — returns MiniMax provider
 - ✅ `GET /api/router/state` — auto-router enabled with 2 candidates, threshold 0.7
+- ✅ `GET /api/prompt-plugins` — returns read-only prompt plugin registry data
 - ✅ `GET /` on server returns Express 404, which is expected because no root API route is defined
 
 ### Restart if killed

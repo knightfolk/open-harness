@@ -12,6 +12,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const [tasks, setTasks] = useState<api.HarnessTask[]>([]);
   const [, setSuites] = useState<api.TaskSuite[]>([]);
   const [benchRuns, setBenchRuns] = useState<api.BenchRunSummary[]>([]);
+  const [promptPlugins, setPromptPlugins] = useState<api.PromptPluginRegistry | null>(null);
   const [selectedReport, setSelectedReport] = useState<api.EvalReport | null>(null);
   const [selectedBenchRun, setSelectedBenchRun] = useState<api.BenchRun | null>(null);
   const [selectedPromptIds, setSelectedPromptIds] = useState<Set<string>>(new Set());
@@ -22,7 +23,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const [running, setRunning] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeBenchId, setActiveBenchId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'configure' | 'results' | 'history' | 'tasks' | 'bench'>('configure');
+  const [tab, setTab] = useState<'configure' | 'results' | 'history' | 'tasks' | 'bench' | 'packs'>('configure');
   const [loading, setLoading] = useState(true);
   const [diagnostic, setDiagnostic] = useState<{ tone: 'error' | 'warning' | 'info'; title: string; detail: string } | null>(null);
 
@@ -30,18 +31,20 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   useEffect(() => {
     (async () => {
       try {
-        const [p, r, t, s, b] = await Promise.all([
+        const [p, r, t, s, b, plugins] = await Promise.all([
           api.getEvalPrompts(),
           api.getEvalReports(),
           api.getTasks().catch(() => []),
           api.getTaskSuites().catch(() => []),
           api.getBenchRuns().catch(() => []),
+          api.getPromptPlugins(workingDir).catch(() => null),
         ]);
         setPrompts(p);
         setReports(r);
         setTasks(t);
         setSuites(s);
         setBenchRuns(b);
+        setPromptPlugins(plugins);
       } catch (err) {
         console.error('Failed to load Model Lab data:', err);
         setDiagnostic({
@@ -53,7 +56,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [workingDir]);
 
   // Poll active eval run
   useEffect(() => {
@@ -223,6 +226,23 @@ export function ModelLabPanel({ workingDir, models }: Props) {
     }
   }, [workingDir]);
 
+  const handlePreparePromptPluginRoots = useCallback(async () => {
+    try {
+      setPromptPlugins(await api.ensurePromptPluginRoots(workingDir));
+      setDiagnostic({
+        tone: 'info',
+        title: 'Prompt pack folders are ready',
+        detail: 'OpenHarness will inspect project, user, and imported prompt plugin manifests from those folders.',
+      });
+    } catch (err) {
+      setDiagnostic({
+        tone: 'error',
+        title: 'Could not prepare prompt pack folders',
+        detail: err instanceof Error ? err.message : 'The prompt plugin folders could not be created.',
+      });
+    }
+  }, [workingDir]);
+
   const handleSelectReport = useCallback(async (id: string) => {
     try {
       const report = await api.getEvalReport(id);
@@ -263,6 +283,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
         <button onClick={() => setTab('configure')} style={tabBtnStyle(tab === 'configure')}>Eval</button>
         <button onClick={() => setTab('tasks')} style={tabBtnStyle(tab === 'tasks')}>Tasks</button>
         <button onClick={() => setTab('bench')} style={tabBtnStyle(tab === 'bench')}>Bench</button>
+        <button onClick={() => setTab('packs')} style={tabBtnStyle(tab === 'packs')}>Packs</button>
         <button onClick={() => setTab('results')} style={tabBtnStyle(tab === 'results')}>Results</button>
         <button onClick={() => setTab('history')} style={tabBtnStyle(tab === 'history')}>History</button>
       </div>
@@ -406,6 +427,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
               </>
             )}
           </div>
+        )}
+
+        {/* ── Prompt Packs Tab ── */}
+        {tab === 'packs' && (
+          <PromptPacksTab registry={promptPlugins} onPrepare={handlePreparePromptPluginRoots} />
         )}
 
         {/* ── Bench Results Tab ── */}
@@ -1121,6 +1147,118 @@ function formatSigned(n: number): string {
   return `${n >= 0 ? '+' : ''}${n}`;
 }
 
+function PromptPacksTab({ registry, onPrepare }: {
+  registry: api.PromptPluginRegistry | null;
+  onPrepare: () => void;
+}) {
+  const plugins = registry?.plugins || [];
+  const packs = registry?.packs || [];
+  const roots = registry?.roots || [];
+  return (
+    <div style={{ padding: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Prompt Packs</div>
+          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+            Read-only manifests for route, model, and output-contract experiments.
+          </div>
+        </div>
+        <button onClick={onPrepare} style={smallBtnStyle}>Prepare folders</button>
+      </div>
+
+      <div style={{ marginBottom: 12, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
+        <div style={sectionLabelStyle}>Registry roots</div>
+        {roots.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>No registry roots loaded.</div>
+        ) : roots.map((root) => (
+          <div key={root.path} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 10 }}>
+            <span style={{ color: root.exists ? 'var(--accent-success)' : 'var(--text-tertiary)', width: 54 }}>{root.exists ? 'Ready' : 'Missing'}</span>
+            <span style={{ color: 'var(--text-secondary)', width: 54, textTransform: 'capitalize' }}>{root.location}</span>
+            <span style={{ color: 'var(--text-tertiary)', fontFamily: 'SF Mono, Menlo, Consolas, monospace', wordBreak: 'break-all' }}>{root.path}</span>
+          </div>
+        ))}
+      </div>
+
+      {packs.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={sectionLabelStyle}>Packs</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6 }}>
+            {packs.map((pack) => (
+              <div key={pack.id} style={{ padding: 8, border: '1px solid var(--border-primary)', borderRadius: 6, background: 'var(--bg-secondary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{pack.name}</span>
+                  <TrustPill trust={pack.trust} />
+                </div>
+                <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)' }}>
+                  {pack.pluginCount} manifest{pack.pluginCount === 1 ? '' : 's'} · {pack.pluginIds.length} plugin id{pack.pluginIds.length === 1 ? '' : 's'}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)' }}>
+                  {pack.sources.join(', ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={sectionLabelStyle}>Manifests ({plugins.length})</div>
+      {plugins.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>
+          No prompt plugin manifests found.
+        </div>
+      ) : plugins.map((plugin) => (
+        <div key={`${plugin.location}:${plugin.id}:${plugin.path}`} style={{ marginBottom: 8, padding: 8, border: '1px solid var(--border-primary)', borderRadius: 6, background: 'var(--bg-secondary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {plugin.name} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>v{plugin.version}</span>
+              </div>
+              <div style={{ marginTop: 2, fontSize: 10, color: 'var(--text-tertiary)' }}>{plugin.description || plugin.id}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <TrustPill trust={plugin.trust} />
+              <StatusPill status={plugin.status} />
+            </div>
+          </div>
+          <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {[...plugin.targets.roles, ...plugin.targets.routeModes, ...plugin.targets.modelFamilies, ...plugin.targets.modelIds].slice(0, 10).map((target) => (
+              <span key={target} style={tagStyle}>{target}</span>
+            ))}
+            {plugin.sections.length > 0 && <span style={tagStyle}>{plugin.sections.length} section{plugin.sections.length === 1 ? '' : 's'}</span>}
+            {plugin.evals.length > 0 && <span style={tagStyle}>{plugin.evals.length} eval{plugin.evals.length === 1 ? '' : 's'}</span>}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'SF Mono, Menlo, Consolas, monospace', wordBreak: 'break-all' }}>
+            {plugin.path}
+          </div>
+          {plugin.issues.length > 0 && (
+            <div style={{ marginTop: 6, fontSize: 10, color: 'var(--accent-error)' }}>
+              {plugin.issues.slice(0, 4).join(' · ')}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TrustPill({ trust }: { trust: api.PromptPluginSummary['trust'] }) {
+  const colors = trust === 'trusted'
+    ? { background: 'rgba(34,197,94,0.14)', color: 'var(--accent-success)' }
+    : trust === 'blocked'
+      ? { background: 'rgba(239,68,68,0.14)', color: 'var(--accent-error)' }
+      : { background: 'rgba(245,158,11,0.14)', color: 'var(--accent-warning)' };
+  return <span style={{ ...pillStyle, ...colors }}>{trust}</span>;
+}
+
+function StatusPill({ status }: { status: api.PromptPluginSummary['status'] }) {
+  const colors = status === 'ready'
+    ? { background: 'rgba(34,197,94,0.14)', color: 'var(--accent-success)' }
+    : status === 'blocked'
+      ? { background: 'rgba(239,68,68,0.14)', color: 'var(--accent-error)' }
+      : { background: 'rgba(245,158,11,0.14)', color: 'var(--accent-warning)' };
+  return <span style={{ ...pillStyle, ...colors }}>{status}</span>;
+}
+
 function ModelSelection({ models, selected, onToggle, onSelectAll }: {
   models: Array<{ id: string; name: string }>;
   selected: Set<string>;
@@ -1200,6 +1338,25 @@ const linkBtnStyle: React.CSSProperties = {
 const smallBtnStyle: React.CSSProperties = {
   background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
   borderRadius: 4, padding: '4px 10px', fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer',
+};
+
+const pillStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  minHeight: 18,
+  padding: '1px 5px',
+  borderRadius: 4,
+  fontSize: 9,
+  fontWeight: 600,
+  whiteSpace: 'nowrap',
+};
+
+const tagStyle: React.CSSProperties = {
+  fontSize: 9,
+  padding: '1px 5px',
+  borderRadius: 4,
+  background: 'var(--bg-tertiary)',
+  color: 'var(--text-tertiary)',
 };
 
 const sectionLabelStyle: React.CSSProperties = {

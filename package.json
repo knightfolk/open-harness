@@ -36,7 +36,7 @@
     "smoke:minimax": "node scripts/smoke-minimax.mjs",
     "test:webbridge-runtime-regression": "tsx scripts/test-webbridge-runtime-regression.ts",
     "server": "dotenv -- tsx server/index.ts",
-    "dev:all": "dotenv -- tsx server/index.ts & vite --port 5173",
+    "dev:all": "node scripts/start.mjs",
     "electron": "electron .",
     "start": "node scripts/start.mjs",
     "pack": "npm run build && electron-builder --dir",

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, renameSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { redactSecrets } from './sectionRedaction';
@@ -60,7 +60,10 @@ function sessionPath(id: string): string {
 
 export function saveSession(session: PersistedSession): void {
   ensureDir();
-  writeFileSync(sessionPath(session.id), JSON.stringify(redactPersistedValue(session), null, 2), 'utf-8');
+  const target = sessionPath(session.id);
+  const tmp = join(SESSIONS_DIR, `.${session.id}.${process.pid}.${Date.now()}.tmp`);
+  writeFileSync(tmp, JSON.stringify(redactPersistedValue(session), null, 2), 'utf-8');
+  renameSync(tmp, target);
 }
 
 // ── Load ───────────────────────────────────────────────

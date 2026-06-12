@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { v4 as uuid } from 'uuid';
 import { redactSecrets } from './sectionRedaction';
+import { resolveShell } from './shell';
 
 export interface TerminalSession {
   id: string;
@@ -90,7 +91,7 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
   const entries = history.get(opts.sessionId);
   if (entries) entries.push(entry);
 
-  const child = spawn('/bin/zsh', ['-lc', opts.command], { cwd });
+  const child = spawn(resolveShell(), ['-lc', opts.command], { cwd });
   let output = '';
   const startTime = Date.now();
 

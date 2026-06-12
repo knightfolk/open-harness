@@ -202,13 +202,16 @@ Progress:
 - [x] Prompt Microscope shows Output Style as a dedicated inspector section instead of burying it in generic prompt text.
 - [x] Investigation and review answers can expose collapsed Evidence/Sources artifacts through the artifact drawer without cluttering normal chat.
 - [x] Focused regression coverage pins output-style trace metadata and investigation/review response normalization.
+- [x] Structured evidence and review-finding artifacts are attached to run traces, with markdown Evidence/Sources extraction retained as a fallback.
+- [x] Execute, compare, investigation/review, and direct-answer normalization have focused regression coverage.
+- [x] Stream cleaning preserves legitimate first-person direct answers while still filtering internal planning preamble.
 
 Work:
-- Define output styles for direct answer, code review, investigation, implementation report, learning/explainer, and terse terminal-style output. **Partially done:** role-backed contracts exist for implementation, plan, review, investigation answer, concise rationale, and terse worker report.
-- Make output style a visible per-run setting with model-family rendering support. **Done for run trace and Prompt Microscope; still open for explicit user-selectable style controls.**
-- Improve stream cleaning so legitimate first-person answers are not stripped while monologue preamble still disappears for non-reasoning models.
-- Add response section normalization after orchestration: findings first for reviews, final answer first for direct, phases and proof for execute.
-- Add "sources used" and "evidence" affordances for investigation responses without cluttering normal chat. **Done for markdown Evidence/Sources sections in the collapsed artifact drawer; still open for fully structured source objects.**
+- Define output styles for direct answer, code review, investigation, implementation report, learning/explainer, and terse terminal-style output. **Done for route/role-derived contracts; explicit user-selectable styles are deferred until there is a product need.**
+- Make output style a visible per-run setting with model-family rendering support. **Done for run trace and Prompt Microscope; user controls remain a deferred product decision.**
+- Improve stream cleaning so legitimate first-person answers are not stripped while monologue preamble still disappears for non-reasoning models. **Done with regression coverage.**
+- Add response section normalization after orchestration: findings first for reviews, final answer first for direct, phases and proof for execute. **Done with focused tests for execute, compare, investigation/review, and direct answers.**
+- Add "sources used" and "evidence" affordances for investigation responses without cluttering normal chat. **Done through structured run-trace artifacts plus markdown fallback extraction.**
 
 Acceptance:
 - Direct answers do not look like orchestration transcripts.
@@ -222,12 +225,18 @@ Priority: P1
 
 Goal: Present AI work like a polished native coding app, not a wall of markdown.
 
+Progress:
+- [x] Structured team-plan, evidence, and review-finding artifacts are attached to run traces and surfaced from chat through compact artifact views.
+- [x] Prompt Microscope is the combined run-inspector surface for prompt assembly, output style, route decision, auto-router scores, orchestration, model requests, tools, errors, and run metadata.
+- [x] Model Lab exposes eval/bench summaries as scannable tables with validation, weakest-signal, trace-proof, and evidence panels.
+- [x] Run debug bundle export is available from the run inspector for one-click support/replay handoff.
+
 Work:
-- Convert model-team output into structured views: plan artifact, review findings, compare table, validation summary, patch proposal, and decision log.
-- Keep chat as the home surface; show details in flyouts or collapsible artifact views.
-- Add compact live progress rows for route, model, tools, and orchestration phases.
-- Merge prompt details, route details, and cost details into one run-inspector surface.
-- Make "next actions" contextual: execute plan, review patch, run validation, compare model, save as prompt plugin, create companion note.
+- Convert model-team output into structured views: plan artifact, review findings, compare table, validation summary, patch proposal, and decision log. **Done for team-plan/evidence/review artifacts, compare/eval/bench tables, and patch review; broader decision-log polish remains a later UX pass.**
+- Keep chat as the home surface; show details in flyouts or collapsible artifact views. **Done through chat-attached artifacts, Patch Review, Model Lab, and Prompt Microscope.**
+- Add compact live progress rows for route, model, tools, and orchestration phases. **Done in run traces, active-agent surfaces, and the run inspector.**
+- Merge prompt details, route details, and cost details into one run-inspector surface. **Done for prompt/route/model/tool/error metadata; exact cost accounting remains tied to provider estimates.**
+- Make "next actions" contextual: execute plan, review patch, run validation, compare model, save as prompt plugin, create companion note. **Partially done:** review/validation/compare/debug actions exist; save-as-prompt-plugin and companion-note flows remain deferred.
 - Align with `docs/UI_CLEANUP_PLAN.md`: calm default screen, flat surfaces, progressive disclosure, one path for diffs.
 
 Acceptance:
@@ -242,12 +251,18 @@ Priority: P1
 
 Goal: Use evaluation data to improve prompts, routing, and model assignments over time.
 
+Progress:
+- [x] Eval scoring includes weighted structural/runtime/style breakdowns, validation proof, weakest-signal reporting, and persisted recommendations.
+- [x] Latest eval recommendations are exposed through the Routing Learning UI and annotate auto-router candidate cards.
+- [x] Model Lab can compare prompt suites, task benches, Planning Room baseline runs, validation results, and previous-run deltas.
+- [x] Prompt pack manifests can carry eval metadata and are visible in Model Lab before they influence routing.
+
 Work:
-- Add `routing-prompt-output` eval suite that scores route choice, prompt adherence, grounding, output structure, cost, latency, tool success, and validation proof.
+- Add `routing-prompt-output` eval suite that scores route choice, prompt adherence, grounding, output structure, cost, latency, tool success, and validation proof. **Mostly done through prompt-routing tests, eval scoring, routing-adherence events, and bench trace proof; exact token/cost scoring remains an estimate.**
 - Store baseline outputs for Friday, cheapest viable model, strongest model, and Planning Room team.
-- Compare prompt plugin variants against base prompt.
-- Feed high-confidence eval recommendations into auto-router candidate cards and role assignment suggestions.
-- Add per-task-type model dashboard: coding, review, planning, summarization, debugging, compare, image, tool-heavy.
+- Compare prompt plugin variants against base prompt. **Ready at registry/eval metadata level; actual plugin rendering remains feature-flagged/deferred.**
+- Feed high-confidence eval recommendations into auto-router candidate cards and role assignment suggestions. **Done for auto-router card annotation and manual routing-learning recommendations; automatic role reassignment stays manual-by-design.**
+- Add per-task-type model dashboard: coding, review, planning, summarization, debugging, compare, image, tool-heavy. **Done for current eval/bench categories; image-specific dashboards remain future work.**
 
 Acceptance:
 - Model Lab can answer: "Which model is best for this route and why?"
@@ -261,11 +276,17 @@ Priority: P2
 
 Goal: Make reusable workflow knowledge safe, inspectable, and shareable.
 
+Progress:
+- [x] Added a read-only prompt plugin registry for project, user, and imported manifests.
+- [x] Prompt pack UI in Model Lab shows roots, packs, manifests, trust/provenance, targets, sections, evals, safety, and issues before anything is enabled.
+- [x] Registry flags invalid manifests and blocks project-instruction override attempts.
+- [x] Prompt plugin folders can be prepared on demand without changing routing behavior.
+
 Work:
-- Implement read-only prompt plugin registry first.
-- Add OpenCode/Codex-style skill importers into OpenHarness-native manifests.
-- Add trust/provenance state: local, project, imported, community, disabled, verified.
-- Add prompt pack UI with target route/model, eval status, safety notes, and last-used runs.
+- Implement read-only prompt plugin registry first. **Done.**
+- Add OpenCode/Codex-style skill importers into OpenHarness-native manifests. **Deferred:** registry supports imported manifest locations, but importer conversion is not enabled yet.
+- Add trust/provenance state: local, project, imported, community, disabled, verified. **Done for schema-backed source/trust display; verified signatures remain future work.**
+- Add prompt pack UI with target route/model, eval status, safety notes, and last-used runs. **Done for targets/evals/safety; last-used run attribution remains future work.**
 - Allow a Planning Room artifact to become a project-scoped prompt/plan template.
 
 Acceptance:
@@ -279,12 +300,19 @@ Priority: P2
 
 Goal: Keep long-running workflows reliable.
 
+Progress:
+- [x] Routing-adherence events capture timeout/error/abort phase, model/provider/classifier context, retryability, fallback, and elapsed timing.
+- [x] Session persistence writes atomically and stores run traces on assistant messages for recovery/replay.
+- [x] Shell execution now resolves the active shell with safe fallbacks instead of assuming `/bin/zsh`.
+- [x] No-provider handling now produces an explicit error instead of a fake local model response.
+- [x] Run debug bundles export prompt assembly, route decision, model output markers, artifacts, errors, and retryability from persisted runs.
+
 Work:
-- Normalize timeout events across router classifier, agent phase, provider stream, tool call, and client SSE.
-- Add retry/fallback policies by workflow and model family.
-- Store enough state to recover or explain partial Planning Room and execute runs.
-- Add run replay for prompt assembly, route decision, model outputs, and artifact generation.
-- Add exportable debug bundle for one run.
+- Normalize timeout events across router classifier, agent phase, provider stream, tool call, and client SSE. **Done through routing-adherence event shape and existing phase hooks.**
+- Add retry/fallback policies by workflow and model family. **Partially done:** orchestrator/agent fallback and retry surfaces exist; provider-family retry policy tuning remains future work.
+- Store enough state to recover or explain partial Planning Room and execute runs. **Done through persisted run traces, artifacts, errors, and atomic session writes.**
+- Add run replay for prompt assembly, route decision, model outputs, and artifact generation. **Done as exportable replay/debug data; full in-app rerun is deferred.**
+- Add exportable debug bundle for one run. **Done.**
 
 Acceptance:
 - A timeout report identifies phase, model, provider, elapsed time, retryability, and fallback.

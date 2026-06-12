@@ -6148,6 +6148,25 @@ button:focus-visible {
   word-break: break-word;
 }
 
+.pm-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-primary);
+  border-radius: 5px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pm-action-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
 .pm-mono {
   font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
   font-size: 11px;
