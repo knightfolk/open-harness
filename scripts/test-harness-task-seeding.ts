@@ -41,6 +41,8 @@ try {
   assert.equal(parsed.sameId, true, 'seed refresh should preserve the existing task id');
   assert.equal(parsed.timeoutMs, 360000, 'seed refresh should update changed built-in task metadata');
   assert.match(parsed.prompt, /standalone browser game artifact/i);
+  assert.match(parsed.prompt, /no remote\/CDN src or href assets/i);
+  assert.match(parsed.prompt, /no data: or blob: payloads/i);
   assert.deepEqual(parsed.verificationCommands, [
     'node scripts/verify-standalone-artifact-fixture.mjs',
     'node --import tsx scripts/run-ship-readiness.ts test-fixtures/standalone-artifact-eval',
@@ -48,6 +50,10 @@ try {
   assert.ok(
     parsed.rubric.some((item: any) => item.id === 'validation-passes' && /ship-readiness/i.test(item.description)),
     'artifact rubric should require ship-readiness proof',
+  );
+  assert.ok(
+    parsed.rubric.some((item: any) => item.id === 'self-contained-assets' && /remote CDN data URI or blob URI/i.test(item.description)),
+    'artifact rubric should require self-contained inspectable assets',
   );
 } finally {
   rmSync(tempHome, { recursive: true, force: true });
