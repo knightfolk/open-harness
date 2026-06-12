@@ -446,6 +446,7 @@ try {
     assert.match(artifactResult.finalText, /## Delivered/);
     assert.match(artifactResult.finalText, /Direct artifact file writes were used/i);
     assert.match(artifactResult.finalText, /Workspace write tool used by implementer/i);
+    assert.match(artifactResult.finalText, new RegExp(`Artifact directory: ${artifactDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/neon-game`));
     assert.match(artifactResult.finalText, /openharness artifact manifest check/i);
     assert.match(artifactResult.finalText, /verify-standalone-artifact-fixture\.mjs/i);
     assert.match(artifactResult.finalText, /run-ship-readiness\.ts/i);

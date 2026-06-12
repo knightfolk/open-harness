@@ -13,7 +13,7 @@ import { applyPatch } from './patchApply';
 import { runValidation, summarizeValidationFailure, type ValidationCommandResult } from './benchRuns';
 import { checkCommandPolicy, type TrustMode } from './toolPolicy';
 import { existsSync, statSync } from 'fs';
-import { dirname, extname, isAbsolute, join } from 'path';
+import { dirname, extname, isAbsolute, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
 
 export interface OrchestrationResult {
@@ -1724,6 +1724,10 @@ function executeProof(
     lines.push(writeToolUsed
       ? `- Files written: ${normalizedAppliedFiles.join(', ')}`
       : `- Patch applied to: ${normalizedAppliedFiles.join(', ')}`);
+    if (writeToolUsed) {
+      const artifactDirs = artifactDirectoriesFromWrittenFiles(normalizedAppliedFiles);
+      if (artifactDirs.length > 0) lines.push(`- Artifact ${artifactDirs.length === 1 ? 'directory' : 'directories'}: ${artifactDirs.join(', ')}`);
+    }
   }
   else if (attemptedApply) lines.push('- Patch apply ran, but no changed files were reported.');
 
@@ -1750,6 +1754,16 @@ function executeProof(
     writeToolUsed,
     summary: lines.join('\n'),
   };
+}
+
+function artifactDirectoriesFromWrittenFiles(files: string[]): string[] {
+  const dirs = new Set<string>();
+  for (const file of files) {
+    if (/(^|[/\\])index\.html$/i.test(file)) {
+      dirs.add(normalize(dirname(file)));
+    }
+  }
+  return [...dirs];
 }
 
 function summarizeValidationSuccess(result: ValidationCommandResult): string {
