@@ -412,6 +412,8 @@ function testRubricCoverageIsScored() {
     false,
     'rubric coverage should fail when task-specific evidence is absent',
   );
+  assert.notEqual(generic.resolvedStatus, 'resolved', 'generic validated rubric tasks should not be marked resolved');
+  assert.ok(generic.overallScore <= 6.5, `generic rubric miss should cap score, got ${generic.overallScore}`);
 }
 
 function testValidationFailureSummaryUsesCommandOutput() {

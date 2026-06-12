@@ -533,12 +533,14 @@ export function computeBenchScores(params: {
   if (!noPreamble) overallScore = Math.min(overallScore, 5.5);
   if (!substantiveShape) overallScore = Math.min(overallScore, 6.5);
   if (!conciseEnough) overallScore = Math.min(overallScore, 8);
+  if (rubricCoverage && rubricCoverage.ratio < 0.7) overallScore = Math.min(overallScore, 6.5);
   if (assistedByFallback) overallScore = Math.min(overallScore, 7);
 
   // Resolved status
   let resolvedStatus: BenchScores['resolvedStatus'] = 'unresolved';
-  if (assistedByFallback && validationPassed && answeredUser && substantiveShape && noPreamble) resolvedStatus = 'assisted';
-  else if (validationPassed && answeredUser && usedTools && substantiveShape && noPreamble) resolvedStatus = 'resolved';
+  const rubricPassed = !rubricCoverage || rubricCoverage.ratio >= 0.7;
+  if (assistedByFallback && validationPassed && answeredUser && substantiveShape && noPreamble && rubricPassed) resolvedStatus = 'assisted';
+  else if (validationPassed && answeredUser && usedTools && substantiveShape && noPreamble && rubricPassed) resolvedStatus = 'resolved';
   else if (answeredUser && substantiveShape && noPreamble) resolvedStatus = 'partial';
 
   return {
