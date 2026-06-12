@@ -616,12 +616,81 @@ async function runExecutePipeline(
     }
   }
 
-  const executionProof = await tryApplyAndValidateExecute(implArtifact?.response || '', config, workingDir, {
+  let executionProof = await tryApplyAndValidateExecute(implArtifact?.response || '', config, workingDir, {
     artifactCreation,
     writeToolUsed: !!implArtifact?.notes.some((note) => note === 'tool=write_file' || note === 'tool=create_file'),
     writtenFiles: extractWrittenFilesFromAgentNotes(implArtifact?.notes || []),
     taskText: userMessage,
   });
+
+  if (
+    artifactCreation
+    && writeToolAvailable
+    && callbacks.invokeTool
+    && workingDir
+    && !fallbackArtifactUsed
+    && executionProof.validationResults.some((result) => !result.passed)
+  ) {
+    const repairPrompt = [
+      `## Artifact Validation Repair`,
+      `The artifact files were written, but validation did not pass. Use the failure evidence below to fix the artifact now.`,
+      ``,
+      `## Task`,
+      userMessage,
+      ``,
+      workingDir ? `Working directory: ${workingDir}` : '',
+      ``,
+      `Failed validation evidence:`,
+      `- ${summarizeValidationFailure(executionProof.validationResults)}`,
+      ``,
+      `Use write_file to update only the files needed to make validation pass. Do not return a plan.`,
+      `Required artifact files are still:`,
+      ...artifactRequiredPaths.map((path) => `- ${path}`),
+      ``,
+      `After writing repairs, produce a concise final answer with validation commands, including browser ship-readiness when this is a standalone browser artifact.`,
+    ].filter(Boolean).join('\n');
+    try {
+      const repairArtifact = await runAgentPhase(config, {
+        profileId: implProfile,
+        prompt: repairPrompt,
+        modelId: implModelId,
+        workingDir,
+        signal: callbacks.signal,
+        onStep: callbacks.onStep,
+        tools: callbacks.tools,
+        invokeTool: callbacks.invokeTool,
+        maxToolRounds: 6,
+        toolContinuationInstruction: artifactContinuationInstruction,
+      });
+      phases.push({
+        label: 'validation-repair',
+        modelId: implModelId,
+        durationMs: repairArtifact.durationMs,
+        status: repairArtifact.status === 'complete' ? 'complete' : 'error',
+        artifact: repairArtifact,
+        summary: repairArtifact.status === 'complete'
+          ? repairArtifact.response.slice(0, 200)
+          : `Validation repair error: ${repairArtifact.error}`,
+      });
+      if (repairArtifact.notes.some((note) => note.startsWith('write_file:path=')) || repairArtifact.response.trim()) {
+        implArtifact = mergeAgentArtifacts(implArtifact, repairArtifact);
+        executionProof = await tryApplyAndValidateExecute(implArtifact?.response || '', config, workingDir, {
+          artifactCreation,
+          writeToolUsed: !!implArtifact?.notes.some((note) => note === 'tool=write_file' || note === 'tool=create_file'),
+          writtenFiles: extractWrittenFilesFromAgentNotes(implArtifact?.notes || []),
+          taskText: userMessage,
+        });
+      }
+    } catch (err: any) {
+      phases.push({
+        label: 'validation-repair',
+        modelId: implModelId,
+        durationMs: 0,
+        status: 'error',
+        summary: `Validation repair failed: ${err?.message || err}`,
+      });
+    }
+  }
 
   // Phase 3: Reviewer — review the implementation
   const reviewProfile = 'reviewer';
@@ -1662,7 +1731,13 @@ function extractUnifiedDiff(text: string): string {
 
 export function extractValidationCommands(text: string): string[] {
   const lines = text.split('\n');
-  const start = lines.findIndex((line) => /^#+\s*validation commands?\b|^validation commands?:/i.test(line.trim()));
+  let start = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (/^#+\s*validation commands?\b|^validation commands?:/i.test(lines[index].trim())) {
+      start = index;
+      break;
+    }
+  }
   const candidates = start === -1 ? lines : lines.slice(start + 1);
   const commands: string[] = [];
   for (const raw of candidates) {

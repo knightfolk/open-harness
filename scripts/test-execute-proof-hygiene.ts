@@ -56,6 +56,8 @@ let nativeToolTempDir = '';
 let nativeToolRequestHadTools = false;
 let partialArtifactTempDir = '';
 let partialArtifactRetryPrompt: string;
+let repairArtifactTempDir = '';
+let repairArtifactPrompt: string;
 
 try {
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -150,6 +152,48 @@ try {
     ) {
       partialArtifactRetryPrompt = fullPrompt;
       content = 'Created partial-game/index.html and the artifact is complete.';
+    } else if (
+      fullPrompt.includes('Create a playable browser game in repair-game folder.')
+      && fullPrompt.includes('## Artifact Write Command')
+      && !fullPrompt.includes('Tool results:')
+    ) {
+      content = [
+        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/index.html","content":"<!doctype html><title>Repair Game</title><link rel=\\"stylesheet\\" href=\\"styles.css\\"><main id=\\"game\\">Repair game</main><script src=\\"game.js\\"></script>"}}</tool_call>`,
+        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/styles.css","content":"body { background: #111; color: #0ff; font-family: monospace; }"}}</tool_call>`,
+        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/game.js","content":"document.getElementById('game').textContent = 'Broken state';"}}</tool_call>`,
+        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/README.md","content":"# Repair Game\\n\\nOpen index.html and use the keyboard for human testing."}}</tool_call>`,
+      ].join('\n');
+    } else if (
+      fullPrompt.includes('repair-game')
+      && fullPrompt.includes('Tool results:')
+      && !fullPrompt.includes('## Artifact Validation Repair')
+    ) {
+      content = [
+        'Created repair-game/index.html, repair-game/styles.css, repair-game/game.js, and repair-game/README.md.',
+        '',
+        'Validation commands:',
+        'node -e "console.error(\'- Browser smoke: missing visible HUD after keyboard input\'); process.exit(1)"',
+      ].join('\n');
+    } else if (
+      fullPrompt.includes('repair-game')
+      && fullPrompt.includes('## Artifact Validation Repair')
+      && !fullPrompt.includes('Tool results:')
+    ) {
+      repairArtifactPrompt = fullPrompt;
+      content = [
+        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/game.js","content":"document.addEventListener('keydown', () => { document.getElementById('game').textContent = 'Repaired moved'; });"}}</tool_call>`,
+      ].join('\n');
+    } else if (
+      fullPrompt.includes('repair-game')
+      && fullPrompt.includes('## Artifact Validation Repair')
+      && fullPrompt.includes('Tool results:')
+    ) {
+      content = [
+        'Repaired repair-game/game.js.',
+        '',
+        'Validation commands:',
+        'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'repair-game/game.js\', \'utf8\').includes(\'Repaired moved\')) process.exit(1)"',
+      ].join('\n');
     } else if (fullPrompt.includes('Create the requested artifact') && !fullPrompt.includes('Tool results:')) {
       artifactInitialPrompt = fullPrompt;
       content = [
@@ -309,6 +353,46 @@ try {
   } finally {
     rmSync(artifactDir, { recursive: true, force: true });
     artifactTempDir = '';
+  }
+
+  const repairDir = mkdtempSync(join(tmpdir(), 'openharness-artifact-validation-repair-'));
+  repairArtifactTempDir = repairDir;
+  repairArtifactPrompt = '';
+  try {
+    mkdirSync(join(repairDir, 'repair-game'), { recursive: true });
+    const writeConfig: StoredConfig = { ...config, trustMode: 'workspace-write' };
+    const repairedResult = await runOrchestratorPipeline(
+      route,
+      'Create a playable browser game in repair-game folder.',
+      writeConfig,
+      repairDir,
+      {
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'write_file',
+            description: 'Write a file',
+            parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+          },
+        }],
+        invokeTool: async (toolName, args, workingDir) => {
+          assert.equal(toolName, 'write_file');
+          const targetPath = isAbsolute(String(args.path)) ? String(args.path) : join(String(workingDir), String(args.path));
+          writeFileSync(targetPath, String(args.content), 'utf8');
+          return { written: true, path: targetPath };
+        },
+      },
+    );
+
+    assert.equal(repairedResult.ok, true, `validation repair should recover a complete but failing artifact:\n${repairedResult.finalText}`);
+    assert.equal(repairedResult.assistedByFallback, false, 'validation repair should preserve model-authored status');
+    assert.match(repairArtifactPrompt, /Artifact Validation Repair/);
+    assert.match(repairArtifactPrompt, /Browser smoke: missing visible HUD after keyboard input/i);
+    assert.match(repairedResult.finalText, /Validation passed: node -e/);
+    assert.match(readFileSync(join(repairDir, 'repair-game', 'game.js'), 'utf8'), /Repaired moved/);
+  } finally {
+    rmSync(repairDir, { recursive: true, force: true });
+    repairArtifactTempDir = '';
   }
 
   const partialDir = mkdtempSync(join(tmpdir(), 'openharness-partial-artifact-proof-'));
