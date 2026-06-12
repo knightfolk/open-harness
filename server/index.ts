@@ -55,6 +55,7 @@ import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } f
 import type { PersistedSession } from './sessionStore';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
+import { filterMonologue, StreamCleaner, stripThinkingTags } from './streamCleaner';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -291,109 +292,6 @@ let appConfig = loadConfig();
 configureAutoRouter(appConfig);  // Initialize auto-router from config
 
 
-
-// ── Thinking tag stripping ─────────────────────────────
-const THINKING_TAG_PATTERNS: RegExp[] = [
-  /<think\b[^>]*>[\s\S]*?<\/think>/gi,
-  /<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi,
-  /<reasoning\b[^>]*>[\s\S]*?<\/reasoning>/gi,
-  /<QDom\b[^>]*>[\s\S]*?<\/QDom>/gi,
-  /<transitioned\b[^>]*>[\s\S]*?<\/transitioned>/gi,
-  /<think\b[^>]*>[\s\S]*$/gi,
-  /<thinking\b[^>]*>[\s\S]*$/gi,
-  /<reasoning\b[^>]*>[\s\S]*$/gi,
-  /<QDom\b[^>]*>[\s\S]*$/gi,
-  /<transitioned\b[^>]*>[\s\S]*$/gi,
-];
-
-function stripThinkingTags(text: string): string {
-  let cleaned = text;
-  for (const pattern of THINKING_TAG_PATTERNS) {
-    cleaned = cleaned.replace(pattern, '');
-  }
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
-  return cleaned.trimStart();
-}
-
-// ── Streaming-aware thinking tag stripper ────────────────
-// Tags like <transitioned>...</transitioned> can span multiple streaming chunks.
-// Per-chunk regex misses them. This class accumulates raw text, applies
-// stripThinkingTags to the full buffer, and returns only newly-cleaned content.
-
-/**
- * Combined streaming cleaner: strips thinking/reasoning tags AND
- * filters monologue preamble in a single pass through the stream.
- * Merges the former StreamingTagStripper + MonologueBuffer into one class.
- */
-class StreamCleaner {
-  private raw = '';
-  private emitted = 0;
-  private monologueBuffer = '';
-  private monologueFlushed = false;
-  private readonly maxMonologueBuffer = 1500;
-
-  feed(chunk: string): string | null {
-    this.raw += chunk;
-    const tagCleaned = stripThinkingTags(this.raw);
-    const tagNewContent = tagCleaned.length > this.emitted ? tagCleaned.slice(this.emitted) : null;
-    if (tagNewContent !== null) this.emitted = tagCleaned.length;
-    const input = tagNewContent;
-    if (!input || input.length === 0) return null;
-    if (this.monologueFlushed) return input;
-    this.monologueBuffer += input;
-    const lines = this.monologueBuffer.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
-        this.monologueFlushed = true;
-        const beforeAnswer = lines.slice(0, i).join('\n');
-        const monoLines = beforeAnswer.split('\n').filter((l: string) => l.trim());
-        const allMono = monoLines.every((l: string) => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
-        this.monologueBuffer = '';
-        if (allMono) return lines.slice(i).join('\n');
-        return beforeAnswer + lines.slice(i).join('\n');
-      }
-    }
-    if (this.monologueBuffer.length > this.maxMonologueBuffer) {
-      this.monologueFlushed = true;
-      const out = stripThinkingTags(this.monologueBuffer);
-      this.monologueBuffer = '';
-      return out;
-    }
-    return null;
-  }
-
-  flush(): string {
-    const tagRest = stripThinkingTags(this.raw).slice(this.emitted) || '';
-    this.emitted = stripThinkingTags(this.raw).length;
-    const monoRest = this.monologueFlushed ? '' : stripThinkingTags(this.monologueBuffer);
-    this.monologueBuffer = '';
-    this.monologueFlushed = true;
-    const combined = tagRest + monoRest;
-    return combined || '';
-  }
-}
-
-// ── Monologue stripping (standalone, used outside streaming too) ──
-const MONOLOGUE_PATTERNS = /^(The user (wants|asked|is asking)|Let me |I need to |I should |I'll start|I will now|Now I (have|need|will)|First,? I|I'm going to|I should |To (do|answer|complete) this)/i;
-
-function filterMonologue(text: string): string {
-  if (!text || !text.trim()) return text;
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    if (!MONOLOGUE_PATTERNS.test(line) && line.length > 10) {
-      if (i === 0) return text;
-      const before = lines.slice(0, i).filter(l => l.trim());
-      const allMonologue = before.every(l => MONOLOGUE_PATTERNS.test(l.trim()) || l.trim().length < 15);
-      if (allMonologue) return lines.slice(i).join('\n');
-      return text;
-    }
-  }
-  return text;
-}
 
 // ── Tool dedup tracking ────────────────────────────────
 interface ToolCallTracker {

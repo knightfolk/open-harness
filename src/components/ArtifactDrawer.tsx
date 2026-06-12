@@ -82,6 +82,25 @@ function extractArtifacts(message: Message): Artifact[] {
     });
   }
 
+  const structuredEvidence = message.runTrace?.steps
+    .filter((step): step is Extract<NonNullable<Message['runTrace']>['steps'][number], { type: 'artifact' }> => step.type === 'artifact')
+    .map((step) => step.artifact)
+    .filter((artifact) => artifact.type === 'evidence') || [];
+  for (const artifact of structuredEvidence) {
+    const body = artifact.data.items
+      .map((item) => {
+        const line = item.line ? `:${item.line}` : '';
+        return `- ${item.source}${line} - ${item.claim}`;
+      })
+      .join('\n');
+    artifacts.push({
+      id: `artifact-${idx++}`,
+      type: 'evidence',
+      label: artifact.title,
+      content: body || artifact.summary,
+    });
+  }
+
   // Extract file references from content
   const fileRegex = /(?:^|\s)(`[/\w.-]+\.\w+`)/gm;
   const fileRefs = new Set<string>();

@@ -930,55 +930,22 @@ async function runExecutePipeline(
 
   const proof = buildExecuteProofSummary(implArtifact?.response || '', executionProof);
 
-  // Merge results
-  const parts: string[] = [];
   const phasesComplete = phases.every((p) => p.status === 'complete');
   const deliveryProven = proof.filesChanged && proof.validationRan;
   const ok = deliveryProven && (phasesComplete || fallbackArtifactUsed);
 
-  parts.push(deliveryProven
-    ? `## Delivered`
-    : `## Orchestration: Execute Mode`);
-  parts.push(``);
-  parts.push(`### Delivery Status`);
-  parts.push(proof.summary);
-  parts.push(``);
-  if (fallbackArtifactUsed) {
-    parts.push(`### Assistance`);
-    parts.push(`OpenHarness generated a deterministic fallback scaffold because the selected model did not create artifact files after the initial pass and retry. Treat this as human-test-ready output, not full model-authored delivery.`);
-    parts.push(``);
-  }
-
-  // Planner output
-  if (plannerArtifact?.response) {
-    parts.push(`### Plan`);
-    parts.push(plannerArtifact.response);
-    parts.push(``);
-  }
-
-  // Implementer output
-  if (implArtifact?.response) {
-    parts.push(`### Implementation`);
-    parts.push(implArtifact.response);
-    parts.push(``);
-  }
-
-  // Reviewer output
-  if (reviewArtifact?.response) {
-    parts.push(`### Review`);
-    parts.push(reviewArtifact.response);
-    parts.push(``);
-  }
-
-  parts.push(`---`);
-  parts.push(`*Orchestration complete — ${deliveryProven
-    ? fallbackArtifactUsed
-      ? 'fallback-assisted files changed and validation ran'
-      : 'files changed and validation ran'
-    : 'proposal only; no applied-and-validated proof yet'}*`);
+  const finalText = normalizeExecuteFinalOutput({
+    proofSummary: proof.summary,
+    deliveryProven,
+    fallbackArtifactUsed,
+    phasesComplete,
+    plannerText: plannerArtifact?.response || '',
+    implementationText: implArtifact?.response || '',
+    reviewText: reviewArtifact?.response || '',
+  });
 
   return {
-    finalText: parts.join('\n'),
+    finalText,
     phases,
     ok,
     error: ok ? undefined : 'Execute mode did not produce applied-and-validated proof',
@@ -1116,12 +1083,80 @@ async function runInvestigatePipeline(
     synthesisOk && synthesisArtifact ? synthesisArtifact.response : explorerResponse,
     !synthesisOk,
   );
+  const evidenceArtifact = buildEvidenceArtifact(userMessage, explorerResponse, text);
 
   return {
     finalText: text,
     phases,
     ok: synthesisOk,
+    artifacts: evidenceArtifact ? [evidenceArtifact] : undefined,
   };
+}
+
+export function normalizeExecuteFinalOutput(args: {
+  proofSummary: string;
+  deliveryProven: boolean;
+  fallbackArtifactUsed?: boolean;
+  phasesComplete: boolean;
+  plannerText?: string;
+  implementationText?: string;
+  reviewText?: string;
+}): string {
+  const sections: string[] = [];
+  const residualRisk = buildExecuteResidualRisk(args);
+
+  sections.push(args.deliveryProven ? '## Delivered' : '## Orchestration: Execute Mode');
+  sections.push('');
+  sections.push('### Delivery Status');
+  sections.push(args.deliveryProven ? 'Delivered with applied-and-validated proof.' : 'Proposal only; applied-and-validated proof is still missing.');
+  sections.push('');
+  sections.push('### Changed Files and Proof');
+  sections.push(args.proofSummary.trim() || '- No proof details were captured.');
+  sections.push('');
+  if (args.fallbackArtifactUsed) {
+    sections.push('### Assistance');
+    sections.push('OpenHarness generated a deterministic fallback scaffold because the selected model did not create artifact files after the initial pass and retry. Treat this as human-test-ready output, not full model-authored delivery.');
+    sections.push('');
+  }
+  if (args.plannerText?.trim()) {
+    sections.push('### Plan');
+    sections.push(args.plannerText.trim());
+    sections.push('');
+  }
+  if (args.implementationText?.trim()) {
+    sections.push('### Implementation');
+    sections.push(args.implementationText.trim());
+    sections.push('');
+  }
+  sections.push('### Review');
+  sections.push(args.reviewText?.trim() || 'Review did not produce a usable result.');
+  sections.push('');
+  sections.push('### Residual Risk');
+  sections.push(residualRisk.map((line) => `- ${line}`).join('\n'));
+  sections.push('');
+  sections.push('---');
+  sections.push(`*Orchestration complete - ${args.deliveryProven
+    ? args.fallbackArtifactUsed
+      ? 'fallback-assisted files changed and validation ran'
+      : 'files changed and validation ran'
+    : 'proposal only; no applied-and-validated proof yet'}*`);
+
+  return sections.join('\n');
+}
+
+function buildExecuteResidualRisk(args: {
+  deliveryProven: boolean;
+  fallbackArtifactUsed?: boolean;
+  phasesComplete: boolean;
+  reviewText?: string;
+}): string[] {
+  const risk: string[] = [];
+  if (!args.deliveryProven) risk.push('No applied-and-validated proof was captured, so the result should not be treated as shipped.');
+  if (!args.phasesComplete) risk.push('One or more orchestration phases failed or returned incomplete output.');
+  if (args.fallbackArtifactUsed) risk.push('Delivery was fallback-assisted, so model-authored implementation quality is unproven.');
+  if (!args.reviewText?.trim()) risk.push('Reviewer output was missing.');
+  if (risk.length === 0) risk.push('No additional residual risk was detected beyond normal human review.');
+  return risk;
 }
 
 export function normalizeInvestigationFinalOutput(route: RouteDecision, text: string, usedExplorerFallback = false): string {
@@ -1141,6 +1176,56 @@ export function normalizeInvestigationFinalOutput(route: RouteDecision, text: st
     ? '\n\n### Residual Risk\n- Final synthesis failed, so this answer uses explorer evidence directly.'
     : '';
   return `${heading}\n\n${trimmed}${fallbackNote}`;
+}
+
+export function buildEvidenceArtifact(task: string, explorerText: string, finalText: string): WorkProductArtifact | null {
+  const items = extractEvidenceItems(`${explorerText}\n${finalText}`);
+  if (items.length === 0) return null;
+  return {
+    id: `evidence-${Date.now().toString(36)}-${simpleHash(task + explorerText + finalText)}`,
+    type: 'evidence',
+    title: 'Investigation Evidence',
+    createdAt: new Date().toISOString(),
+    summary: `${items.length} structured source${items.length === 1 ? '' : 's'} captured`,
+    data: {
+      items,
+      rawMarkdown: finalText,
+    },
+  };
+}
+
+function extractEvidenceItems(text: string): Array<{ source: string; line?: number; claim: string }> {
+  const items: Array<{ source: string; line?: number; claim: string }> = [];
+  const seen = new Set<string>();
+  const patterns = [
+    /(?:^|\s)(?<source>(?:\/[\w .-]+)+\.\w+|(?:[\w.-]+\/)+[\w.-]+\.\w+)(?::(?<line>\d+))?\s*(?:[-–:]\s*)?(?<claim>[^\n]{12,220})?/gm,
+    /`(?<source>(?:\/[\w .-]+)+\.\w+|(?:[\w.-]+\/)+[\w.-]+\.\w+)(?::(?<line>\d+))?`\s*(?:[-–:]\s*)?(?<claim>[^\n]{12,220})?/gm,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const source = match.groups?.source?.trim();
+      if (!source || source.startsWith('http')) continue;
+      const line = match.groups?.line ? Number(match.groups.line) : undefined;
+      const claim = (match.groups?.claim || lineForMatch(text, match.index)).replace(/\s+/g, ' ').trim();
+      const key = `${source}:${line || ''}:${claim}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        source,
+        line,
+        claim: claim || 'Referenced as supporting evidence.',
+      });
+      if (items.length >= 12) return items;
+    }
+  }
+  return items;
+}
+
+function lineForMatch(text: string, index: number): string {
+  const start = text.lastIndexOf('\n', index) + 1;
+  const end = text.indexOf('\n', index);
+  return text.slice(start, end === -1 ? undefined : end).replace(/^[-*]\s*/, '').trim();
 }
 
 // ── Pipeline: Compare ─────────────────────────────────

@@ -9,6 +9,8 @@ import { ArtifactDrawer } from './ArtifactDrawer';
 import { analyzeConfidence, deriveNextActions } from '../utils/runSignals';
 import { MarkdownContent } from './MarkdownContent';
 
+type TeamPlanArtifact = Extract<WorkProductArtifact, { type: 'team_plan' }>;
+
 function looksLikeUnifiedDiff(text: string): boolean {
   if (!text) return false;
   if (/^diff --git /m.test(text)) return true;
@@ -127,11 +129,15 @@ function ToolCallSummary({ toolCalls }: { toolCalls: ToolCall[] }) {
   );
 }
 
-function latestTeamPlanArtifact(message: Message): WorkProductArtifact | null {
+function isTeamPlanArtifact(artifact: WorkProductArtifact): artifact is TeamPlanArtifact {
+  return artifact.type === 'team_plan';
+}
+
+function latestTeamPlanArtifact(message: Message): TeamPlanArtifact | null {
   const artifacts = message.runTrace?.steps
     .filter((step): step is Extract<NonNullable<Message['runTrace']>['steps'][number], { type: 'artifact' }> => step.type === 'artifact')
     .map((step) => step.artifact)
-    .filter((artifact) => artifact.type === 'team_plan') || [];
+    .filter(isTeamPlanArtifact) || [];
   return artifacts.at(-1) || null;
 }
 
@@ -142,7 +148,7 @@ function summarizeList(items: string[], limit: number): string[] {
     .slice(0, limit);
 }
 
-function executionPromptFromTeamPlan(artifact: WorkProductArtifact): string {
+function executionPromptFromTeamPlan(artifact: TeamPlanArtifact): string {
   return [
     'Execute this Planning Room team plan.',
     '',
@@ -156,7 +162,7 @@ function executionPromptFromTeamPlan(artifact: WorkProductArtifact): string {
   ].join('\n');
 }
 
-function revisionPromptFromTeamPlan(artifact: WorkProductArtifact): string {
+function revisionPromptFromTeamPlan(artifact: TeamPlanArtifact): string {
   return [
     'Revise this Planning Room team plan.',
     '',
@@ -170,7 +176,7 @@ function revisionPromptFromTeamPlan(artifact: WorkProductArtifact): string {
   ].join('\n');
 }
 
-function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: WorkProductArtifact; onPromote?: (prompt: string) => void }) {
+function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtifact; onPromote?: (prompt: string) => void }) {
   const participants = artifact.data.participants;
   const completedParticipants = participants.filter((participant) => participant.status === 'complete').length;
   const phases = summarizeList(artifact.data.executionPhases, 4);

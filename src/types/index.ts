@@ -111,7 +111,19 @@ export interface TeamPlanArtifactData {
   rawMarkdown: string;
 }
 
-export interface WorkProductArtifact {
+export interface EvidenceItem {
+  source: string;
+  line?: number;
+  claim: string;
+}
+
+export interface EvidenceArtifactData {
+  items: EvidenceItem[];
+  rawMarkdown: string;
+}
+
+export type WorkProductArtifact =
+  | {
   id: string;
   type: 'team_plan';
   title: string;
@@ -119,6 +131,14 @@ export interface WorkProductArtifact {
   summary: string;
   data: TeamPlanArtifactData;
 }
+  | {
+  id: string;
+  type: 'evidence';
+  title: string;
+  createdAt: string;
+  summary: string;
+  data: EvidenceArtifactData;
+};
 
 export type HarnessRunStep =
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }

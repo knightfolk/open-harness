@@ -7,7 +7,8 @@ import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
-import { normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { buildEvidenceArtifact, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { filterMonologue, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
 
 function testPromptAssemblyMetadata() {
@@ -691,6 +692,73 @@ function testInvestigationOutputNormalization() {
   assert.match(fallbackSummary, /Final synthesis failed, so this answer uses explorer evidence directly/i, 'explorer fallback should disclose residual risk');
 }
 
+function testExecuteOutputNormalization() {
+  const shipped = normalizeExecuteFinalOutput({
+    deliveryProven: true,
+    phasesComplete: true,
+    proofSummary: [
+      '- Direct artifact file writes were used.',
+      '- OpenHarness validation gates ran successfully.',
+      '- Applied-and-validated proof is available for human testing.',
+    ].join('\n'),
+    plannerText: 'Inspect the target files, then make the smallest change.',
+    implementationText: 'Changed src/components/ArtifactDrawer.tsx.',
+    reviewText: 'No blockers found.',
+  });
+
+  assert.match(shipped, /^## Delivered/m, 'proven execute output should lead with delivered status');
+  assert.match(shipped, /### Delivery Status\nDelivered with applied-and-validated proof\./m);
+  assert.match(shipped, /### Changed Files and Proof\n- Direct artifact file writes were used\./m);
+  assert.match(shipped, /### Review\nNo blockers found\./m);
+  assert.match(shipped, /### Residual Risk\n- No additional residual risk was detected beyond normal human review\./m);
+
+  const proposal = normalizeExecuteFinalOutput({
+    deliveryProven: false,
+    phasesComplete: false,
+    proofSummary: '- No unified-diff patch proposal was detected.\n- No concrete validation command was detected.',
+    implementationText: 'Here is a proposal.',
+    reviewText: '',
+  });
+  assert.match(proposal, /^## Orchestration: Execute Mode/m, 'unproven execute output should not claim delivery');
+  assert.match(proposal, /Proposal only; applied-and-validated proof is still missing\./);
+  assert.match(proposal, /No applied-and-validated proof was captured/);
+  assert.match(proposal, /Reviewer output was missing/);
+}
+
+function testEvidenceArtifactExtraction() {
+  const artifact = buildEvidenceArtifact(
+    'review authentication',
+    '- server/index.ts:3700 shows monologue gating.\n- `src/components/ArtifactDrawer.tsx:41` extracts artifacts.',
+    '## Findings\n\nserver/orchestrator.ts:1127 normalizes investigation output.',
+  );
+  assert.ok(artifact, 'investigation should produce structured evidence when source references are present');
+  assert.equal(artifact?.type, 'evidence');
+  assert.ok(artifact?.data.items.some((item) => item.source === 'server/index.ts' && item.line === 3700));
+  assert.ok(artifact?.data.items.some((item) => item.source === 'src/components/ArtifactDrawer.tsx' && item.line === 41));
+}
+
+function testStreamCleanerFirstPersonHandling() {
+  assert.equal(
+    filterMonologue('I need a little more context before I can answer that safely.'),
+    'I need a little more context before I can answer that safely.',
+    'legitimate first-person direct answers should survive monologue filtering',
+  );
+  assert.equal(
+    filterMonologue('I need to inspect the files first.\nThe route is direct because the prompt is a simple question.'),
+    'The route is direct because the prompt is a simple question.',
+    'internal planning preamble should still be stripped',
+  );
+
+  const cleaner = new StreamCleaner();
+  assert.equal(cleaner.feed('I need to inspect the files first.\n'), null);
+  assert.equal(cleaner.feed('The answer is ready.'), 'The answer is ready.');
+  assert.equal(cleaner.flush(), '');
+
+  const directCleaner = new StreamCleaner();
+  assert.equal(directCleaner.feed('I need a little more context before answering.'), 'I need a little more context before answering.');
+  assert.equal(directCleaner.flush(), '');
+}
+
 testPromptAssemblyMetadata();
 testOutputStyleRunTraceMetadata();
 testBoundedReviewRouting();
@@ -709,5 +777,8 @@ await testArtifactValidationFailuresBecomeFindings();
 testOrchestrationProofFailureBlocksResolvedStatus();
 testBenchChangedFileValidation();
 testInvestigationOutputNormalization();
+testExecuteOutputNormalization();
+testEvidenceArtifactExtraction();
+testStreamCleanerFirstPersonHandling();
 
 console.log('prompt/routing/output P0 regression checks passed');
