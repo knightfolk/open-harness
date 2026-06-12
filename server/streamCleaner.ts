@@ -47,6 +47,39 @@ export function filterMonologue(text: string): string {
   return text;
 }
 
+function stripLeadingProcessSection(text: string): string {
+  const lines = text.split('\n');
+  const firstHeadingIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstHeadingIndex === -1) return text;
+
+  const firstHeading = lines[firstHeadingIndex].trim();
+  if (!/^#{1,4}\s*(?:analysis|approach|plan|reasoning|thought process)\b/i.test(firstHeading)) {
+    return text;
+  }
+
+  for (let i = firstHeadingIndex + 1; i < lines.length; i += 1) {
+    if (/^#{1,4}\s*(?:answer|final answer|result|summary|recommendation|verdict)\b/i.test(lines[i].trim())) {
+      return lines.slice(i).join('\n').trimStart();
+    }
+  }
+
+  return text;
+}
+
+/**
+ * Normalize direct single-model answers after streaming cleanup.
+ * This keeps route/role-derived output styles as the source of truth while
+ * removing transcript labels and leading process sections that make direct
+ * answers feel like orchestration logs.
+ */
+export function normalizeDirectAnswer(text: string): string {
+  let cleaned = filterMonologue(stripThinkingTags(text || '')).trimStart();
+  cleaned = cleaned.replace(/^(?:assistant|final answer|answer)\s*:\s*/i, '');
+  cleaned = stripLeadingProcessSection(cleaned);
+  cleaned = cleaned.replace(/^#{1,4}\s*(?:answer|final answer)\s*\n+/i, '');
+  return cleaned.trimStart();
+}
+
 /**
  * Combined streaming cleaner: strips thinking/reasoning tags and filters
  * internal planning preamble without dropping ordinary first-person answers.

@@ -8,7 +8,7 @@ import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
 import { buildEvidenceArtifact, buildReviewFindingsArtifact, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
-import { filterMonologue, StreamCleaner } from '../server/streamCleaner';
+import { filterMonologue, normalizeDirectAnswer, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
 
 function testPromptAssemblyMetadata() {
@@ -796,6 +796,38 @@ function testStreamCleanerFirstPersonHandling() {
   assert.equal(directCleaner.flush(), '');
 }
 
+function testDirectAnswerNormalization() {
+  assert.equal(
+    normalizeDirectAnswer('Final Answer: A token budget is the amount of context reserved for a model request.'),
+    'A token budget is the amount of context reserved for a model request.',
+    'direct answers should drop transcript-style final-answer labels',
+  );
+
+  assert.equal(
+    normalizeDirectAnswer([
+      '## Analysis',
+      'I should inspect the prompt first.',
+      '',
+      '## Answer',
+      'Use route-derived output styles by default; add user controls only when a real product need appears.',
+    ].join('\n')),
+    'Use route-derived output styles by default; add user controls only when a real product need appears.',
+    'direct answers should remove leading process sections when an answer section exists',
+  );
+
+  assert.equal(
+    normalizeDirectAnswer('I need a little more context before I can answer that safely.'),
+    'I need a little more context before I can answer that safely.',
+    'legitimate first-person direct answers should survive direct-answer normalization',
+  );
+
+  assert.equal(
+    normalizeDirectAnswer('The user wants me to explain routing.\nRouting has two layers: workflow first, then model selection.'),
+    'Routing has two layers: workflow first, then model selection.',
+    'direct-answer normalization should still remove internal user-intent preamble',
+  );
+}
+
 testPromptAssemblyMetadata();
 testOutputStyleRunTraceMetadata();
 testBoundedReviewRouting();
@@ -818,5 +850,6 @@ testExecuteOutputNormalization();
 testEvidenceArtifactExtraction();
 testReviewFindingsArtifactExtraction();
 testStreamCleanerFirstPersonHandling();
+testDirectAnswerNormalization();
 
 console.log('prompt/routing/output P0 regression checks passed');

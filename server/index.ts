@@ -55,7 +55,7 @@ import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } f
 import type { PersistedSession } from './sessionStore';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
-import { filterMonologue, StreamCleaner, stripThinkingTags } from './streamCleaner';
+import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './streamCleaner';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -3355,7 +3355,7 @@ async function streamWithNativeAdapter(
 
       // Direct answer (no tool calls) → done.
       if (roundToolCalls.length === 0) {
-        finalContent = filterMonologue(stripThinkingTags(roundContent));
+        finalContent = normalizeDirectAnswer(roundContent);
         if (!isLastRound && finalContent.trim()) {
           // Was a tool round but the model skipped straight to text — emit now.
           res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: finalContent }) + '\n\n');
@@ -3428,7 +3428,7 @@ async function streamWithNativeAdapter(
 
     if (run) emitRunStep(res, run, { type: 'model_text', chars: finalContent.length });
 
-    let cleaned = filterMonologue(stripThinkingTags(finalContent));
+    let cleaned = normalizeDirectAnswer(finalContent);
     if (!cleaned.trim()) {
       cleaned = '(The model returned an empty response. Try rephrasing or check provider logs.)';
       res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: cleaned }) + '\n\n');
@@ -3767,7 +3767,7 @@ async function streamModel(
       // No tool calls → model gave a direct answer (or final round completed)
       if (toolCalls.length === 0) {
         const contentForDisplay = stripToolCallMarkup(content, knownToolNames);
-        finalContent = filterMonologue(stripThinkingTags(contentForDisplay));
+        finalContent = normalizeDirectAnswer(contentForDisplay);
         // If this was a suppressed round, the text wasn't streamed — emit it now
         if (!isLastRound && finalContent.trim()) {
           const cleaned = finalContent;
@@ -3878,7 +3878,7 @@ async function streamModel(
             source: 'provider',
           });
           if (forcedResult.content.trim()) {
-            finalContent = filterMonologue(stripThinkingTags(forcedResult.content));
+            finalContent = normalizeDirectAnswer(forcedResult.content);
           }
         }
       } catch (forcedErr: any) {
@@ -3913,12 +3913,13 @@ async function streamModel(
     }
 
     // Save the final assistant message
+    finalContent = normalizeDirectAnswer(finalContent);
     if (run) emitRunStep(res, run, { type: 'final_answer', chars: finalContent.length });
 
     session.messages.push({
       id: assistantId,
       role: 'assistant',
-      content: filterMonologue(stripThinkingTags(finalContent)),
+      content: finalContent,
       timestamp: new Date().toISOString(),
       toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
       runTrace: run,
