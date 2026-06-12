@@ -114,6 +114,41 @@ try {
   mkdirSync(standaloneFixtureDir, { recursive: true });
   writeFileSync(join(standaloneFixtureDir, 'index.html'), [
     '<!doctype html>',
+    '<html><head><title>Remote Neon Descent</title><meta name="viewport" content="width=device-width">',
+    '<link rel="stylesheet" href="styles.css">',
+    '<script src="https://cdn.example.com/game-engine.js"></script>',
+    '<script src="data:text/javascript,console.log(1)"></script></head>',
+    '<body><main id="game"><span id="hp">HP 10</span><span id="score">Score 0</span><span id="depth">Depth 1</span></main>',
+    '<script src="game.js"></script></body></html>',
+  ].join('\n'));
+  writeFileSync(join(standaloneFixtureDir, 'styles.css'), 'body { background: #050505; color: #00ffff; display: grid; font-family: monospace; } canvas { border: 1px solid #ff00ff; }');
+  writeFileSync(join(standaloneFixtureDir, 'game.js'), [
+    'const player = { x: 1, y: 1, hp: 10 };',
+    'const enemies = [{ x: 3, y: 2, hp: 2, name: "VHS Sentry" }];',
+    'const items = [{ x: 2, y: 2, name: "mixtape powerup" }];',
+    'let score = 0;',
+    'function render() { document.getElementById("score").textContent = `Score ${score}`; document.getElementById("hp").textContent = `HP ${player.hp}`; }',
+    'function restart() { player.x = 1; player.y = 1; player.hp = 10; score = 0; render(); }',
+    'document.addEventListener("keydown", (event) => { if (event.key === "ArrowRight" || event.key === "d") player.x += 1; score += 1; render(); });',
+    'render();',
+  ].join('\n'));
+  writeFileSync(join(standaloneFixtureDir, 'README.md'), [
+    '# Remote Neon Descent',
+    '',
+    'Remote Neon Descent is a standalone 1980s roguelike test artifact about an arcade mall dungeon with VHS sentries, mixtape powerups, grid movement, score, HP, depth, and replay.',
+    '',
+    'Controls: open index.html, use ArrowRight or WASD-style keyboard input to move the player, and use restart to reset a run. Tester objective: verify that direct-open behavior needs no remote runtime or embedded bundle.',
+    '',
+    'Expected result: this fixture should fail because tester-ready standalone artifacts must keep assets as inspectable local files.',
+  ].join('\n'));
+  const remoteOrEmbedded = runStandaloneVerifier(standaloneFixtureDir);
+  assert.notEqual(remoteOrEmbedded.status, 0, 'remote or embedded assets should not pass standalone verifier');
+  assert.match(`${remoteOrEmbedded.stderr}${remoteOrEmbedded.stdout}`, /remote or embedded asset/i);
+
+  rmSync(standaloneFixtureDir, { recursive: true, force: true });
+  mkdirSync(standaloneFixtureDir, { recursive: true });
+  writeFileSync(join(standaloneFixtureDir, 'index.html'), [
+    '<!doctype html>',
     '<html><head><title>Neon Descent</title><meta name="viewport" content="width=device-width">',
     '<link rel="stylesheet" href="styles.css"></head>',
     '<body><main id="game"><span id="hp">HP 10</span><span id="score">Score 0</span><span id="depth">Depth 1</span></main>',

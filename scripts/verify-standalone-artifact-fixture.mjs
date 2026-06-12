@@ -67,8 +67,19 @@ function localRefsFromHtml(html, attr) {
   const pattern = new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'gi');
   for (const match of html.matchAll(pattern)) {
     const ref = match[1];
-    if (!ref || /^(?:https?:|data:|#)/i.test(ref)) continue;
+    if (!ref || /^(?:(?:https?:)?\/\/|data:|blob:|#)/i.test(ref)) continue;
     refs.push(ref.replace(/^\.\//, ''));
+  }
+  return refs;
+}
+
+function blockedStandaloneRefsFromHtml(html) {
+  const refs = [];
+  const pattern = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+  for (const match of html.matchAll(pattern)) {
+    const ref = match[1].trim();
+    if (!ref || /^data:,$/i.test(ref)) continue;
+    if (/^(?:(?:https?:)?\/\/|data:|blob:)/i.test(ref)) refs.push(ref);
   }
   return refs;
 }
@@ -85,7 +96,14 @@ const linkedCss = htmlFiles.flatMap((file) => {
   const html = readFileSync(join(evalDir, file), 'utf8');
   return localRefsFromHtml(html, 'href').filter((ref) => /\.css$/i.test(ref));
 });
+const blockedStandaloneRefs = htmlFiles.flatMap((file) => {
+  const html = readFileSync(join(evalDir, file), 'utf8');
+  return blockedStandaloneRefsFromHtml(html);
+});
 
+if (blockedStandaloneRefs.length > 0) {
+  fail(`HTML uses remote or embedded asset references: ${blockedStandaloneRefs.join(', ')}`);
+}
 if (linkedJs.length === 0) fail('HTML entry does not link a local JavaScript file.');
 if (linkedCss.length === 0) fail('HTML entry does not link a local CSS file.');
 for (const ref of [...linkedJs, ...linkedCss]) {
