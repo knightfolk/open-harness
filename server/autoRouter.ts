@@ -33,6 +33,8 @@ export interface AutoRouterCandidate {
   supportsImages: boolean;
   /** Whether this model exposes native thinking/reasoning output */
   supportsThinking?: boolean;
+  /** Native/tool-call reliability for tool-heavy agent work. Defaults from model family profile. */
+  toolCallQuality?: 'excellent' | 'good' | 'basic' | 'none';
   /** Short capability description the classifier reads to score this model */
   card: string;
 }
@@ -77,6 +79,8 @@ export interface AutoRouterSignal {
   dirtyGitState?: boolean;
   /** User-visible thinking effort hint */
   thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Whether the task likely depends on reliable multi-tool / shell / file workflows. */
+  requiresStrongToolUse?: boolean;
 }
 
 export interface AutoRouterDecision {
@@ -101,6 +105,8 @@ export interface AutoRouterDecision {
 export interface AutoRouterDecisionOptions {
   /** Force a deterministic cost-aware fallback mode, bypassing classification. */
   forceCostStrategy?: 'cheapest' | 'strongest';
+  /** Names the deterministic policy when classification is intentionally skipped. */
+  forceCostReason?: 'cheap-direct' | 'escalated';
   /** User-visible thinking effort hint used to bias Auto routing. */
   thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
 }
@@ -145,10 +151,14 @@ function normalizeCandidate(candidate: AutoRouterCandidate): AutoRouterCandidate
   const supportsThinking = typeof candidate.supportsThinking === 'boolean'
     ? candidate.supportsThinking
     : isReasoningModel(candidate.modelId);
+  const profile = getModelConfig(candidate.modelId);
+  const toolCallQuality = candidate.toolCallQuality || profile.toolCallQuality;
   const baseCard = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
   const thinkingLine = `Native thinking: ${supportsThinking ? 'yes' : 'no'}.`;
-  const card = /native thinking:/i.test(baseCard) ? baseCard : `${baseCard} ${thinkingLine}`;
-  return { ...candidate, supportsThinking, card };
+  const toolLine = `Tool quality: ${toolCallQuality}.`;
+  const withThinking = /native thinking:/i.test(baseCard) ? baseCard : `${baseCard} ${thinkingLine}`;
+  const card = /tool quality:/i.test(withThinking) ? withThinking : `${withThinking} ${toolLine}`;
+  return { ...candidate, supportsThinking, toolCallQuality, card };
 }
 
 function candidateAvailability(config: StoredConfig, candidate: AutoRouterCandidate): AutoRouterCandidateDiagnostic {
@@ -225,7 +235,7 @@ export function getAutoRouterState(): {
   threshold: number;
   configuredCandidateCount: number;
   candidateCount: number;
-  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking: boolean; contextWindowTokens: number }>;
+  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking: boolean; toolCallQuality: string; contextWindowTokens: number }>;
   unavailableCandidates: AutoRouterCandidateDiagnostic[];
   cacheSize: number;
 } {
@@ -252,6 +262,7 @@ export function getAutoRouterState(): {
       cost: c.cost,
       supportsImages: c.supportsImages,
       supportsThinking: c.supportsThinking === true,
+      toolCallQuality: c.toolCallQuality || candidateToolCallQuality(c),
       contextWindowTokens: candidateContextWindow(c),
     })),
     unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
@@ -343,7 +354,7 @@ export async function routeTask(
 
   const tierStrategy = options.forceCostStrategy || costStrategyForThinkingEffort(options.thinkingEffort);
   if (tierStrategy) {
-    return pickByCost(candidates, tierStrategy, signal.hasImages, signal.estimatedInputTokens, autoRouterConfig);
+    return pickByCost(candidates, tierStrategy, signal.hasImages, signal.estimatedInputTokens, signal.requiresStrongToolUse === true, autoRouterConfig, options.forceCostReason);
   }
 
   // Check cache
@@ -381,6 +392,7 @@ export async function routeTask(
       autoRouterConfig.threshold,
       signal.hasImages,
       signal.estimatedInputTokens,
+      signal.requiresStrongToolUse === true,
       autoRouterConfig.defaultModel,
       classifierResult.reasoning,
     );
@@ -613,6 +625,7 @@ function buildClassifierSystemPrompt(candidates: AutoRouterCandidate[]): string 
     const card = c.card.trim() || 'General-purpose model. No capability card provided.';
     lines.push(`- modelId: ${c.modelId}`);
     lines.push(`  images: ${c.supportsImages ? 'yes' : 'no'}`);
+    lines.push(`  tool_quality: ${c.toolCallQuality || candidateToolCallQuality(c)}`);
     lines.push(`  context_window_tokens: ${candidateContextWindow(c)}`);
     lines.push(`  capability: ${card}`);
   }
@@ -641,6 +654,7 @@ function buildClassifierUserContent(signal: AutoRouterSignal, candidates: AutoRo
     `  images_present: ${signal.hasImages ? 'yes' : 'no'}`,
     `  user_turns: ${signal.turns}`,
     `  tools_available: ${signal.toolCount}`,
+    `  strong_tool_use_required: ${signal.requiresStrongToolUse ? 'yes' : 'no'}`,
     `  estimated_input_tokens: ${signal.estimatedInputTokens}`,
     '  note: Score models near 0.0 when the estimated input cannot fit their context window.',
     '  current_task: |',
@@ -734,6 +748,7 @@ function pickCandidate(
   threshold: number,
   hasImages: boolean,
   estimatedInputTokens: number,
+  requiresStrongToolUse: boolean,
   defaultModel: string,
   classifierRationale?: string,
 ): AutoRouterDecision {
@@ -745,6 +760,9 @@ function pickCandidate(
       score = 0;
     }
     if (!candidateFitsContext(c, estimatedInputTokens)) {
+      score = 0;
+    }
+    if (requiresStrongToolUse && !candidateHasStrongToolUse(c)) {
       score = 0;
     }
     return { candidate: c, score };
@@ -801,13 +819,19 @@ function pickByCost(
   strategy: 'cheapest' | 'strongest' | 'premium',
   hasImages: boolean,
   estimatedInputTokens: number,
+  requiresStrongToolUse: boolean,
   config: AutoRouterConfig,
+  policyReason?: 'cheap-direct' | 'escalated',
 ): AutoRouterDecision {
   const imageSafeCandidates = hasImages
     ? candidates.filter((c) => c.supportsImages)
     : candidates;
-  const contextSafeCandidates = imageSafeCandidates.filter((c) => candidateFitsContext(c, estimatedInputTokens));
-  const usableCandidates = contextSafeCandidates.length > 0 ? contextSafeCandidates : imageSafeCandidates;
+  const toolSafeCandidates = requiresStrongToolUse
+    ? imageSafeCandidates.filter(candidateHasStrongToolUse)
+    : imageSafeCandidates;
+  const capabilitySafeCandidates = toolSafeCandidates.length > 0 ? toolSafeCandidates : imageSafeCandidates;
+  const contextSafeCandidates = capabilitySafeCandidates.filter((c) => candidateFitsContext(c, estimatedInputTokens));
+  const usableCandidates = contextSafeCandidates.length > 0 ? contextSafeCandidates : capabilitySafeCandidates;
 
   if (usableCandidates.length === 0) {
     return fallbackDecision(candidates, config, `No viable candidates for image/context strategy ${strategy}`);
@@ -824,21 +848,32 @@ function pickByCost(
   ));
 
   const selected = ordered[0];
-  const skippedForContext = imageSafeCandidates.length - contextSafeCandidates.length;
+  const skippedForContext = capabilitySafeCandidates.length - contextSafeCandidates.length;
+  const skippedForTools = requiresStrongToolUse ? imageSafeCandidates.length - toolSafeCandidates.length : 0;
   const contextReason = skippedForContext > 0
     ? ` Skipped ${skippedForContext} candidate(s) that could not fit ~${estimatedInputTokens} input tokens.`
     : '';
+  const toolReason = skippedForTools > 0 && toolSafeCandidates.length > 0
+    ? ` Skipped ${skippedForTools} candidate(s) without strong tool-call quality.`
+    : requiresStrongToolUse && toolSafeCandidates.length === 0
+      ? ' No strong tool-call candidate was available; used strongest viable candidate.'
+      : '';
   const premiumFallback = strategy === 'premium' && preferredCandidates.length === 0
     ? ' No native-thinking candidate was available; used strongest viable candidate.'
     : '';
   const thinkingFallback = strategy === 'strongest' && preferredCandidates.length === 0
     ? ' No native-thinking candidate was available; used strongest viable candidate.'
     : '';
-  const reason = (strategy === 'cheapest'
-    ? 'Low thinking selected; using cheapest viable candidate.'
-    : strategy === 'premium'
-      ? 'xHigh thinking selected; using strongest native-thinking candidate when available.'
-      : 'High thinking selected; using strongest native-thinking candidate when available.') + premiumFallback + thinkingFallback + contextReason;
+  const baseReason = policyReason === 'cheap-direct'
+    ? 'Cheap-direct policy selected; using cheapest viable candidate.'
+    : policyReason === 'escalated'
+      ? 'Escalation policy selected; using strongest native-thinking candidate when available.'
+      : strategy === 'cheapest'
+        ? 'Low thinking selected; using cheapest viable candidate.'
+        : strategy === 'premium'
+          ? 'xHigh thinking selected; using strongest native-thinking candidate when available.'
+          : 'High thinking selected; using strongest native-thinking candidate when available.';
+  const reason = baseReason + premiumFallback + thinkingFallback + toolReason + contextReason;
   const scores = Object.fromEntries(candidates.map((c) => [c.modelId, c.modelId === selected.modelId ? 1.0 : 0]));
   return {
     modelId: selected.modelId,
@@ -847,7 +882,7 @@ function pickByCost(
     scores,
     cached: false,
     fallback: false,
-    classifierModel: config.classifierModel,
+    classifierModel: null,
   };
 }
 
@@ -917,6 +952,7 @@ export function buildRouterSignal(
     artifactCount?: number;
     dirtyGitState?: boolean;
     thinkingEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+    requiresStrongToolUse?: boolean;
   } = {},
 ): AutoRouterSignal {
   return {
@@ -929,6 +965,7 @@ export function buildRouterSignal(
     artifactCount: options.artifactCount,
     dirtyGitState: options.dirtyGitState,
     thinkingEffort: options.thinkingEffort,
+    requiresStrongToolUse: options.requiresStrongToolUse,
   };
 }
 
@@ -944,6 +981,15 @@ function candidateFitsContext(candidate: AutoRouterCandidate, estimatedInputToke
   const outputReserve = Math.min(ROUTER_OUTPUT_RESERVE_TOKENS, config.recommendedMaxTokens);
   const safetyMargin = Math.ceil(contextWindow * 0.05);
   return estimatedInputTokens + outputReserve + safetyMargin <= contextWindow;
+}
+
+function candidateToolCallQuality(candidate: AutoRouterCandidate): 'excellent' | 'good' | 'basic' | 'none' {
+  return candidate.toolCallQuality || getModelConfig(candidate.modelId).toolCallQuality;
+}
+
+function candidateHasStrongToolUse(candidate: AutoRouterCandidate): boolean {
+  const quality = candidateToolCallQuality(candidate);
+  return quality === 'excellent' || quality === 'good';
 }
 
 /**

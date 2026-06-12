@@ -64,6 +64,7 @@ export interface PromptAssemblyTrace {
 export interface RoutingStageTrace {
   heuristic?: { mode: string; role: string; complexity: string };
   policy?: string;
+  modelSelectionPolicy?: 'cheap-direct' | 'classifier' | 'escalated';
   signal?: {
     hasImages: boolean;
     turns: number;
@@ -72,6 +73,7 @@ export interface RoutingStageTrace {
     artifactCount?: number;
     dirtyGitState?: boolean;
     thinkingEffort?: string;
+    requiresStrongToolUse?: boolean;
   };
 }
 

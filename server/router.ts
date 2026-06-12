@@ -5,6 +5,7 @@ import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
 
 export type OrchestrationMode = 'direct' | 'plan' | 'investigate' | 'execute' | 'compare';
 export type Complexity = 'simple' | 'medium' | 'deep';
+export type ModelSelectionPolicy = 'cheap-direct' | 'classifier' | 'escalated';
 
 export interface RouteDecision {
   mode: OrchestrationMode;
@@ -20,6 +21,7 @@ export interface RouteDecision {
     heuristicRole?: HarnessRole;
     heuristicComplexity?: Complexity;
     policy?: string;
+    modelSelectionPolicy?: ModelSelectionPolicy;
     signal?: {
       hasImages: boolean;
       turns: number;
@@ -28,6 +30,7 @@ export interface RouteDecision {
       artifactCount?: number;
       dirtyGitState?: boolean;
       thinkingEffort?: string;
+      requiresStrongToolUse?: boolean;
     };
     candidateScores?: Record<string, number>;
     score?: number;
@@ -51,6 +54,7 @@ export interface RouteSignalOptions {
 const FILE_REFERENCE_RE = /\b(?:[\w-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|py|java|go|rs|cpp|c|cs|rb|swift|kt|php|html|css|scss|less|md|json|yml|yaml|toml|sh|bash|mjs|cjs|sql|txt|lock)\b/g;
 const CODE_BLOCK_RE = /```[\s\S]*?```/;
 const ARTIFACT_NOUN_RE = /\b(?:game|app|application|site|website|tool|demo|prototype|project|artifact|clone|platformer|roguelike|rogue.?like|rpg|shooter|puzzle|arcade|metroidvania|tower defense|flappy|runner|brawler|strategy|simulator|sim)\b/;
+const STRONG_TOOL_USE_RE = /\b(?:tool-?heavy|multi-?tool|use (?:the )?(?:tools|mcp|browser|terminal|shell)|mcp|browser\s+screenshot|screenshot|terminal|shell|commands?|run\s+(?:tests?|lint|build|typecheck|validation|smoke|npm|pnpm|yarn|bun)|validate|validation|verify|verification|current diff|git diff|inspect\s+(?:the\s+)?(?:repo|repository|codebase|files?|project))\b/;
 
 function detectFileReferences(text: string): string[] {
   const refs = new Set<string>();
@@ -193,12 +197,25 @@ export async function routeWithAutoRouter(
     || config.roleThinking?.[route.role]
     || config.thinkingEffort
     || 'medium';
+  const requiresStrongToolUse = route.needsTools
+    && route.complexity !== 'simple'
+    && STRONG_TOOL_USE_RE.test(content.toLowerCase());
+  const modelSelectionPolicy: ModelSelectionPolicy = route.complexity === 'simple'
+    ? 'cheap-direct'
+    : route.complexity === 'deep' || requiresStrongToolUse
+      ? 'escalated'
+      : 'classifier';
   route.routerData = {
     source: 'heuristic',
     heuristicMode: route.mode,
     heuristicRole: route.role,
     heuristicComplexity: route.complexity,
-    policy: route.complexity === 'simple' ? 'bounded-simple' : route.complexity === 'deep' ? 'deep-capability' : 'classifier-eligible',
+    policy: modelSelectionPolicy === 'cheap-direct'
+      ? 'workflow routed heuristically; model selection uses cheapest viable candidate without classifier'
+      : modelSelectionPolicy === 'escalated'
+        ? 'workflow routed heuristically; model selection escalates to strongest suitable candidate'
+        : 'workflow routed heuristically; model selection is classifier-eligible',
+    modelSelectionPolicy,
   };
 
   // If auto-router is enabled, use it for model selection
@@ -214,19 +231,23 @@ export async function routeWithAutoRouter(
         artifactCount: options.artifactCount,
         dirtyGitState: options.dirtyGitState,
         thinkingEffort: roleThinking,
+        requiresStrongToolUse,
       },
     );
     const routerStart = Date.now();
     try {
+      const forcedCostStrategy = modelSelectionPolicy === 'cheap-direct'
+        ? 'cheapest'
+        : modelSelectionPolicy === 'escalated'
+          ? 'strongest'
+          : undefined;
+      const forcedCostReason = modelSelectionPolicy === 'cheap-direct' || modelSelectionPolicy === 'escalated'
+        ? modelSelectionPolicy
+        : undefined;
       const decision = await routeTask(signal, config, {
-        forceCostStrategy: roleThinking === 'medium'
-          ? route.complexity === 'simple'
-            ? 'cheapest'
-            : route.complexity === 'deep' && (route.mode !== 'investigate' || route.role === 'reviewer')
-              ? 'strongest'
-              : undefined
-          : undefined,
-        thinkingEffort: roleThinking,
+        forceCostStrategy: forcedCostStrategy,
+        forceCostReason: forcedCostReason,
+        thinkingEffort: forcedCostStrategy ? roleThinking : undefined,
       });
     if (decision) {
       const isFallback = decision.fallback || decision.score === 0;
@@ -238,11 +259,12 @@ export async function routeWithAutoRouter(
         heuristicMode: route.mode,
         heuristicRole: route.role,
         heuristicComplexity: route.complexity,
-        policy: route.complexity === 'simple'
-          ? 'simple task: deterministic cheapest viable model; classifier skipped'
-          : route.complexity === 'deep' && route.mode !== 'investigate'
-            ? 'deep non-investigation task: strongest suitable model'
-            : 'medium or review task: classifier/cost-aware selection',
+        policy: modelSelectionPolicy === 'cheap-direct'
+          ? 'cheap-direct: simple low-risk task; selected cheapest viable candidate and skipped classifier'
+          : modelSelectionPolicy === 'escalated'
+            ? 'escalated: deep/high-risk task; selected strongest suitable candidate and skipped classifier'
+            : 'classifier: medium task; classifier scored candidates before cost-aware selection',
+        modelSelectionPolicy,
         signal: {
           hasImages: signal.hasImages,
           turns: signal.turns,
@@ -251,6 +273,7 @@ export async function routeWithAutoRouter(
           artifactCount: signal.artifactCount,
           dirtyGitState: signal.dirtyGitState,
           thinkingEffort: signal.thinkingEffort,
+          requiresStrongToolUse: signal.requiresStrongToolUse,
         },
         candidateScores: decision.scores,
         score: decision.score,

@@ -36,8 +36,10 @@ export function sortedCandidateScores(scores?: Record<string, number>, limit?: n
   return typeof limit === 'number' ? entries.slice(0, limit) : entries;
 }
 
-export function autoRouterDecisionLabel(input: { fallback?: boolean; cached?: boolean }): string {
+export function autoRouterDecisionLabel(input: { fallback?: boolean; cached?: boolean; modelSelectionPolicy?: string }): string {
   if (input.fallback) return 'Default fallback';
+  if (input.modelSelectionPolicy === 'cheap-direct') return 'Cheap direct selection';
+  if (input.modelSelectionPolicy === 'escalated') return 'Escalated selection';
   return input.cached ? 'Cached classifier decision' : 'Classifier decision';
 }
 
@@ -57,8 +59,12 @@ export function formatAutoRouterStepTitle(step: AutoRouterStep): string {
 
 export function formatAutoRouterStepDetail(step: AutoRouterStep): string {
   const parts = [
-    autoRouterDecisionLabel({ fallback: step.fallback, cached: step.cached }),
-    step.classifierModel ? `classifier: ${step.classifierModel}` : 'classifier: unavailable',
+    autoRouterDecisionLabel({
+      fallback: step.fallback,
+      cached: step.cached,
+      modelSelectionPolicy: step.stages?.modelSelectionPolicy,
+    }),
+    step.classifierModel ? `classifier: ${step.classifierModel}` : 'classifier: skipped',
   ];
   if (step.cached) parts.push('cached');
   return `${parts.join(' · ')}\n${step.reason}\n${ROUTING_FEEDBACK_GUIDANCE}`;
@@ -75,10 +81,14 @@ export function autoRouterStepTraceText(step: AutoRouterStep): string {
   const scores = sortedCandidateScores(step.candidateScores);
   return [
     `Selected model: ${step.modelId}`,
-    `Decision: ${autoRouterDecisionLabel({ fallback: step.fallback, cached: step.cached })}`,
+    `Decision: ${autoRouterDecisionLabel({
+      fallback: step.fallback,
+      cached: step.cached,
+      modelSelectionPolicy: step.stages?.modelSelectionPolicy,
+    })}`,
     `Score: ${step.score.toFixed(2)}`,
     `Reason: ${step.reason}`,
-    `Classifier: ${step.classifierModel || 'unavailable'}`,
+    `Classifier: ${step.classifierModel || 'skipped'}`,
     scores.length > 0
       ? `Candidate scores:\n${scores.map(([model, score]) => `${model}: ${score.toFixed(2)}`).join('\n')}`
       : `Candidate scores: ${candidateScoresUnavailableLabel({ fallback: step.fallback })}`,

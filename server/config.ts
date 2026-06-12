@@ -78,6 +78,8 @@ export interface AutoRouterCandidateConfig {
   supportsImages: boolean;
   /** Whether this model exposes native thinking/reasoning output */
   supportsThinking?: boolean;
+  /** Optional override for native/tool-call reliability. Defaults from model family profile. */
+  toolCallQuality?: 'excellent' | 'good' | 'basic' | 'none';
   /** Short capability description for the classifier */
   card: string;
 }

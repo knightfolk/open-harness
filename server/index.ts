@@ -2881,6 +2881,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
           complexity: rd.heuristicComplexity || route.complexity,
         },
         policy: rd.policy,
+        modelSelectionPolicy: rd.modelSelectionPolicy,
         signal: rd.signal,
       },
     });
@@ -2925,6 +2926,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
           complexity: route.routerData.heuristicComplexity || route.complexity,
         },
         policy: route.routerData.policy,
+        modelSelectionPolicy: route.routerData.modelSelectionPolicy,
         signal: route.routerData.signal,
       } : undefined,
     });
@@ -3608,6 +3610,7 @@ async function streamModel(
           complexity: route.routerData.heuristicComplexity || route.complexity,
         },
         policy: route.routerData.policy,
+        modelSelectionPolicy: route.routerData.modelSelectionPolicy,
         signal: route.routerData.signal,
       } : undefined,
     });
