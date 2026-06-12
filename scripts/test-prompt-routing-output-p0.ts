@@ -7,7 +7,7 @@ import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
-import { buildEvidenceArtifact, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { buildEvidenceArtifact, buildReviewFindingsArtifact, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
 import { filterMonologue, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
 
@@ -737,6 +737,31 @@ function testEvidenceArtifactExtraction() {
   assert.ok(artifact?.data.items.some((item) => item.source === 'src/components/ArtifactDrawer.tsx' && item.line === 41));
 }
 
+function testReviewFindingsArtifactExtraction() {
+  const artifact = buildReviewFindingsArtifact(
+    'review authentication',
+    [
+      '## Findings',
+      '',
+      '- P2 server/auth.ts:22 accepts empty tokens.',
+      '  Evidence: The guard returns true when token is an empty string.',
+      '  Action: Reject blank tokens before session lookup.',
+      '',
+      '- P0 src/session.ts:9 stores secrets in localStorage.',
+      '  Evidence: The API key is written directly to localStorage.',
+      '  Action: Move secret handling to the server process.',
+    ].join('\n'),
+  );
+
+  assert.ok(artifact, 'review output should produce structured findings when severity metadata is present');
+  assert.equal(artifact?.type, 'review_findings');
+  assert.equal(artifact?.data.findings.length, 2);
+  assert.equal(artifact?.data.findings[0].severity, 'P0', 'findings should be severity ordered');
+  assert.equal(artifact?.data.findings[0].source, 'src/session.ts');
+  assert.equal(artifact?.data.findings[0].line, 9);
+  assert.match(artifact?.data.findings[0].action || '', /server process/i);
+}
+
 function testStreamCleanerFirstPersonHandling() {
   assert.equal(
     filterMonologue('I need a little more context before I can answer that safely.'),
@@ -779,6 +804,7 @@ testBenchChangedFileValidation();
 testInvestigationOutputNormalization();
 testExecuteOutputNormalization();
 testEvidenceArtifactExtraction();
+testReviewFindingsArtifactExtraction();
 testStreamCleanerFirstPersonHandling();
 
 console.log('prompt/routing/output P0 regression checks passed');

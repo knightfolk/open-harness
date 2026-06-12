@@ -863,9 +863,10 @@ async function runExecutePipeline(
     userMessage,
     '',
     `Review the implementation above. For each issue, specify:`,
-    `- The file and line`,
-    `- Severity: blocker, warning, nit, or suggestion`,
-    `- A one-line suggested fix`,
+    `- Severity: P0, P1, P2, P3, blocker, warning, nit, or suggestion`,
+    `- File and line in the form path/to/file.ts:123 when known`,
+    `- Evidence from the implementation or validation proof`,
+    `- Action: a one-line suggested fix`,
     ``,
     `Only approve behavior that is supported by the implementation text or apply/validation proof.`,
     `If evidence is incomplete, say what is unverified instead of assuming success.`,
@@ -943,6 +944,7 @@ async function runExecutePipeline(
     implementationText: implArtifact?.response || '',
     reviewText: reviewArtifact?.response || '',
   });
+  const reviewFindingsArtifact = buildReviewFindingsArtifact(userMessage, reviewArtifact?.response || finalText);
 
   return {
     finalText,
@@ -950,6 +952,7 @@ async function runExecutePipeline(
     ok,
     error: ok ? undefined : 'Execute mode did not produce applied-and-validated proof',
     assistedByFallback: fallbackArtifactUsed,
+    artifacts: reviewFindingsArtifact ? [reviewFindingsArtifact] : undefined,
   };
 }
 
@@ -1041,7 +1044,7 @@ async function runInvestigatePipeline(
     `Do not dump raw file inventory. Cite only the file paths needed to support findings.`,
     `Preserve evidence boundaries: do not promote explorer assumptions into facts, and label any unsupported claim as unverified.`,
     route.role === 'reviewer'
-      ? `For audits or reviews, lead with findings ordered by severity, then give a practical path forward.`
+      ? `For audits or reviews, lead with findings ordered by severity. For each finding include severity, file:line when known, evidence, and action.`
       : `For investigations, answer the user's question directly and summarize evidence.`
   ].filter(Boolean).join('\n');
 
@@ -1084,12 +1087,16 @@ async function runInvestigatePipeline(
     !synthesisOk,
   );
   const evidenceArtifact = buildEvidenceArtifact(userMessage, explorerResponse, text);
+  const reviewFindingsArtifact = route.role === 'reviewer'
+    ? buildReviewFindingsArtifact(userMessage, text)
+    : null;
+  const artifacts = [reviewFindingsArtifact, evidenceArtifact].filter(Boolean) as WorkProductArtifact[];
 
   return {
     finalText: text,
     phases,
     ok: synthesisOk,
-    artifacts: evidenceArtifact ? [evidenceArtifact] : undefined,
+    artifacts: artifacts.length > 0 ? artifacts : undefined,
   };
 }
 
@@ -1192,6 +1199,142 @@ export function buildEvidenceArtifact(task: string, explorerText: string, finalT
       rawMarkdown: finalText,
     },
   };
+}
+
+export function buildReviewFindingsArtifact(task: string, reviewText: string): WorkProductArtifact | null {
+  const findings = extractReviewFindings(reviewText);
+  if (findings.length === 0) return null;
+  const topSeverity = findings[0]?.severity || 'unknown';
+  return {
+    id: `review-findings-${Date.now().toString(36)}-${simpleHash(task + reviewText)}`,
+    type: 'review_findings',
+    title: 'Review Findings',
+    createdAt: new Date().toISOString(),
+    summary: `${findings.length} structured finding${findings.length === 1 ? '' : 's'} captured; top severity ${topSeverity}`,
+    data: {
+      findings,
+      rawMarkdown: reviewText,
+    },
+  };
+}
+
+function extractReviewFindings(text: string): Array<{
+  severity: 'P0' | 'P1' | 'P2' | 'P3' | 'blocker' | 'warning' | 'nit' | 'suggestion' | 'unknown';
+  source?: string;
+  line?: number;
+  title: string;
+  evidence: string;
+  action?: string;
+}> {
+  const blocks = splitReviewFindingBlocks(text);
+  const findings = blocks
+    .map(parseReviewFindingBlock)
+    .filter((finding): finding is NonNullable<ReturnType<typeof parseReviewFindingBlock>> => !!finding);
+  return findings
+    .sort((a, b) => reviewSeverityRank(a.severity) - reviewSeverityRank(b.severity))
+    .slice(0, 20);
+}
+
+function splitReviewFindingBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const lines = text.split('\n');
+  let current: string[] = [];
+  const startsFinding = (line: string) => /^\s*(?:[-*]\s*)?(?:\d+[).]\s*)?(?:\[(?:P[0-3]|blocker|warning|nit|suggestion)\]|(?:P[0-3]|blocker|warning|nit|suggestion)\b)/i.test(line)
+    || /^\s*#{2,4}\s*(?:\[(?:P[0-3]|blocker|warning|nit|suggestion)\]|(?:P[0-3]|blocker|warning|nit|suggestion)\b)/i.test(line);
+
+  for (const line of lines) {
+    if (startsFinding(line) && current.length > 0) {
+      blocks.push(current.join('\n').trim());
+      current = [line];
+    } else if (startsFinding(line) || current.length > 0) {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) blocks.push(current.join('\n').trim());
+  return blocks.length > 0 ? blocks : [text.trim()].filter(Boolean);
+}
+
+function parseReviewFindingBlock(block: string): {
+  severity: 'P0' | 'P1' | 'P2' | 'P3' | 'blocker' | 'warning' | 'nit' | 'suggestion' | 'unknown';
+  source?: string;
+  line?: number;
+  title: string;
+  evidence: string;
+  action?: string;
+} | null {
+  const severity = normalizeReviewSeverity(block.match(/\b(P[0-3]|blocker|warning|nit|suggestion)\b/i)?.[1]);
+  if (severity === 'unknown') return null;
+
+  const location = block.match(/(?<source>(?:\/[\w .-]+)+\.\w+|(?:[\w.-]+\/)+[\w.-]+\.\w+)(?::(?<line>\d+))?/);
+  const title = extractReviewTitle(block, severity);
+  const evidence = extractLabeledReviewField(block, ['evidence', 'impact', 'why'])
+    || firstUsefulReviewLine(block, severity)
+    || title;
+  const action = extractLabeledReviewField(block, ['action', 'fix', 'suggested fix', 'recommendation']);
+
+  return {
+    severity,
+    source: location?.groups?.source,
+    line: location?.groups?.line ? Number(location.groups.line) : undefined,
+    title,
+    evidence: evidence.replace(/\s+/g, ' ').trim(),
+    action: action ? action.replace(/\s+/g, ' ').trim() : undefined,
+  };
+}
+
+function normalizeReviewSeverity(value: string | undefined): 'P0' | 'P1' | 'P2' | 'P3' | 'blocker' | 'warning' | 'nit' | 'suggestion' | 'unknown' {
+  if (!value) return 'unknown';
+  const normalized = value.toLowerCase();
+  if (/^p[0-3]$/.test(normalized)) return normalized.toUpperCase() as 'P0' | 'P1' | 'P2' | 'P3';
+  if (['blocker', 'warning', 'nit', 'suggestion'].includes(normalized)) {
+    return normalized as 'blocker' | 'warning' | 'nit' | 'suggestion';
+  }
+  return 'unknown';
+}
+
+function extractReviewTitle(block: string, severity: string): string {
+  const firstLine = block.split('\n').map((line) => line.trim()).find(Boolean) || 'Review finding';
+  const withoutMarkdown = firstLine
+    .replace(/^#{2,4}\s*/, '')
+    .replace(/^[-*]\s*/, '')
+    .replace(/^\d+[).]\s*/, '')
+    .replace(new RegExp(`^\\[?${severity}\\]?\\s*[:\\]-]?\\s*`, 'i'), '')
+    .trim();
+  return withoutMarkdown || firstUsefulReviewLine(block, severity) || 'Review finding';
+}
+
+function extractLabeledReviewField(block: string, labels: string[]): string {
+  const escaped = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const pattern = new RegExp(`^\\s*(?:[-*]\\s*)?(?:${escaped})\\s*:\\s*(.+)$`, 'im');
+  return block.match(pattern)?.[1]?.trim() || '';
+}
+
+function firstUsefulReviewLine(block: string, severity: string): string {
+  return block
+    .split('\n')
+    .map((line) => line.trim())
+    .map((line) => line.replace(/^[-*]\s*/, '').replace(new RegExp(`^\\[?${severity}\\]?\\s*[:\\]-]?\\s*`, 'i'), '').trim())
+    .find((line) => line && !/^(?:file|line|severity|action|fix|suggested fix)\s*:/i.test(line)) || '';
+}
+
+function reviewSeverityRank(severity: string): number {
+  switch (severity) {
+    case 'P0':
+    case 'blocker':
+      return 0;
+    case 'P1':
+      return 1;
+    case 'P2':
+    case 'warning':
+      return 2;
+    case 'P3':
+    case 'nit':
+      return 3;
+    case 'suggestion':
+      return 4;
+    default:
+      return 5;
+  }
 }
 
 function extractEvidenceItems(text: string): Array<{ source: string; line?: number; claim: string }> {

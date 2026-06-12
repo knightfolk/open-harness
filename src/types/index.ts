@@ -122,6 +122,20 @@ export interface EvidenceArtifactData {
   rawMarkdown: string;
 }
 
+export interface ReviewFindingItem {
+  severity: 'P0' | 'P1' | 'P2' | 'P3' | 'blocker' | 'warning' | 'nit' | 'suggestion' | 'unknown';
+  source?: string;
+  line?: number;
+  title: string;
+  evidence: string;
+  action?: string;
+}
+
+export interface ReviewFindingsArtifactData {
+  findings: ReviewFindingItem[];
+  rawMarkdown: string;
+}
+
 export type WorkProductArtifact =
   | {
   id: string;
@@ -138,6 +152,14 @@ export type WorkProductArtifact =
   createdAt: string;
   summary: string;
   data: EvidenceArtifactData;
+}
+  | {
+  id: string;
+  type: 'review_findings';
+  title: string;
+  createdAt: string;
+  summary: string;
+  data: ReviewFindingsArtifactData;
 };
 
 export type HarnessRunStep =

@@ -4,7 +4,7 @@ import type { Message } from '../types';
 
 interface Artifact {
   id: string;
-  type: 'code' | 'diff' | 'command' | 'plan' | 'evidence' | 'file-ref';
+  type: 'code' | 'diff' | 'command' | 'plan' | 'evidence' | 'review-findings' | 'file-ref';
   label: string;
   content: string;
   lang?: string;
@@ -101,6 +101,26 @@ function extractArtifacts(message: Message): Artifact[] {
     });
   }
 
+  const structuredFindings = message.runTrace?.steps
+    .filter((step): step is Extract<NonNullable<Message['runTrace']>['steps'][number], { type: 'artifact' }> => step.type === 'artifact')
+    .map((step) => step.artifact)
+    .filter((artifact) => artifact.type === 'review_findings') || [];
+  for (const artifact of structuredFindings) {
+    const body = artifact.data.findings
+      .map((finding) => {
+        const location = finding.source ? ` ${finding.source}${finding.line ? `:${finding.line}` : ''}` : '';
+        const action = finding.action ? `\n  Action: ${finding.action}` : '';
+        return `- ${finding.severity}${location} - ${finding.title}\n  Evidence: ${finding.evidence}${action}`;
+      })
+      .join('\n');
+    artifacts.push({
+      id: `artifact-${idx++}`,
+      type: 'review-findings',
+      label: artifact.title,
+      content: body || artifact.summary,
+    });
+  }
+
   // Extract file references from content
   const fileRegex = /(?:^|\s)(`[/\w.-]+\.\w+`)/gm;
   const fileRefs = new Set<string>();
@@ -140,6 +160,7 @@ export function ArtifactDrawer({ message }: Props) {
   const commands = artifacts.filter(a => a.type === 'command');
   const plans = artifacts.filter(a => a.type === 'plan');
   const evidence = artifacts.filter(a => a.type === 'evidence');
+  const reviewFindings = artifacts.filter(a => a.type === 'review-findings');
   const fileRefs = artifacts.filter(a => a.type === 'file-ref');
 
   const iconForType = (type: Artifact['type']) => {
@@ -149,6 +170,7 @@ export function ArtifactDrawer({ message }: Props) {
       case 'command': return <Terminal size={12} />;
       case 'plan': return <FileText size={12} />;
       case 'evidence': return <Search size={12} />;
+      case 'review-findings': return <Search size={12} />;
       case 'file-ref': return <FileCode size={12} />;
     }
   };
@@ -172,6 +194,7 @@ export function ArtifactDrawer({ message }: Props) {
               diffs.length > 0 && `${diffs.length} diff${diffs.length > 1 ? 's' : ''}`,
               commands.length > 0 && `${commands.length} cmd${commands.length > 1 ? 's' : ''}`,
               plans.length > 0 && `${plans.length} plan${plans.length > 1 ? 's' : ''}`,
+              reviewFindings.length > 0 && `${reviewFindings.length} findings`,
               evidence.length > 0 && `${evidence.length} evidence`,
               fileRefs.length > 0 && `${fileRefs.length} file${fileRefs.length > 1 ? 's' : ''}`,
             ].filter(Boolean).join(', ')}

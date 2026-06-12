@@ -86,6 +86,8 @@ When Auto-Router selects an orchestration mode, OpenHarness now fills the main c
 
 The durable assistant message still stores only the final answer. Reasoning-capable providers may also emit live thinking progress before answer text begins; that indicator clears when final answer text starts streaming.
 
+Review and investigation runs can also attach structured artifacts to the final answer. Evidence and review findings stay collapsed by default, while file, line, severity, evidence, and suggested action metadata remain available for inspection in the artifact drawer when the model output includes those signals.
+
 ## Architecture
 
 ```text
