@@ -89,6 +89,43 @@ const GROUNDING_RULES = [
   'Do not invent APIs, files, settings, test results, dates, prices, or external facts; verify them with available tools or state that they are unverified.',
 ].join(' ');
 
+const OUTPUT_STYLE_CONTRACTS: Record<string, string> = {
+  coder: [
+    'Output contract: lead with what changed or what answer is ready.',
+    'For implementation work, include changed files, validation proof, and remaining risk.',
+    'If no files were changed or validation did not run, say that plainly before next steps.',
+  ].join(' '),
+  planner: [
+    'Output contract: produce an actionable plan, not implementation.',
+    'Include recommendation, success criteria, ordered phases, risks, validation, and open questions.',
+    'For Planning Room work, preserve participant deltas and final decisions.',
+  ].join(' '),
+  reviewer: [
+    'Output contract: findings first, ordered by severity.',
+    'Each finding should name impact, evidence, and a concrete fix; include file and line when known.',
+    'If no issues are found, say that first and then list residual risk or test gaps.',
+  ].join(' '),
+  summarizer: [
+    'Output contract: answer first, then the smallest useful evidence summary.',
+    'Use observed facts from files or tool results for project claims and label assumptions.',
+    'Avoid raw inventories unless the user asked for them.',
+  ].join(' '),
+  reasoner: [
+    'Output contract: give the conclusion first, then a concise rationale and tradeoffs.',
+    'Do not expose hidden reasoning or planning monologue.',
+    'Separate evidence-backed claims from assumptions.',
+  ].join(' '),
+  worker: [
+    'Output contract: report the completed action or blocker directly.',
+    'Include only the proof needed to trust the result.',
+    'Keep the answer short unless the task failed.',
+  ].join(' '),
+};
+
+function outputContractForRole(role: string): string {
+  return OUTPUT_STYLE_CONTRACTS[role] || OUTPUT_STYLE_CONTRACTS.coder;
+}
+
 // ── Main builder ───────────────────────────────────────
 
 /**
@@ -133,7 +170,7 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
     : config.family === 'gemini'
       ? 'gemini-systemInstruction'
       : 'system-message';
-  const assembly = buildPromptAssembly(config, options, systemPrompt, toolsDescription, systemPromptWithTools, target);
+  const assembly = buildPromptAssembly(config, options, toolsDescription, systemPromptWithTools, target);
 
   return {
     systemPrompt: systemPromptWithTools,
@@ -163,7 +200,6 @@ function estimatePromptTokens(text: string | undefined): number {
 function buildPromptAssembly(
   config: ModelPromptConfig,
   options: BuildPromptOptions,
-  systemPrompt: string,
   toolsDescription: string | undefined,
   finalPrompt: string,
   target: PromptAssembly['target'],
@@ -171,6 +207,7 @@ function buildPromptAssembly(
   const role = options.role || config.defaultRole || 'coder';
   const rolePrompt = ROLE_PROMPTS[role] || ROLE_PROMPTS.coder;
   const personality = normalizePersonality(options.personality);
+  const outputContract = outputContractForRole(role);
   const sections: PromptAssemblySection[] = [
     {
       id: 'identity',
@@ -246,11 +283,11 @@ function buildPromptAssembly(
       id: 'output-style',
       label: 'Output style',
       source: 'promptBuilder',
-      tokenEstimate: estimatePromptTokens(systemPrompt),
+      tokenEstimate: estimatePromptTokens(outputContract),
       included: true,
-      reason: 'Role, formatting, and response rules are emitted as the system prompt.',
+      reason: 'Role-specific final-answer contract is emitted with the system prompt.',
       redacted: false,
-      preview: systemPrompt.slice(0, 500),
+      preview: outputContract,
     },
   ];
 
@@ -270,18 +307,19 @@ function buildSystemPrompt(config: ModelPromptConfig, options: BuildPromptOption
   const role = options.role || config.defaultRole || 'coder';
   const rolePrompt = ROLE_PROMPTS[role] || ROLE_PROMPTS['coder'];
   const personality = normalizePersonality(options.personality);
+  const outputContract = outputContractForRole(role);
 
   switch (config.systemPromptStyle) {
     case 'xml-tagged':
-      return buildXMLPrompt(config, rolePrompt, personality, options);
+      return buildXMLPrompt(config, rolePrompt, personality, outputContract, options);
     case 'structured':
-      return buildStructuredPrompt(config, rolePrompt, personality, options);
+      return buildStructuredPrompt(config, rolePrompt, personality, outputContract, options);
     case 'concise':
-      return buildConcisePrompt(config, rolePrompt, personality, options);
+      return buildConcisePrompt(config, rolePrompt, personality, outputContract, options);
     case 'minimal':
-      return buildMinimalPrompt(rolePrompt, personality, options);
+      return buildMinimalPrompt(rolePrompt, personality, outputContract, options);
     default:
-      return buildStructuredPrompt(config, rolePrompt, personality, options);
+      return buildStructuredPrompt(config, rolePrompt, personality, outputContract, options);
   }
 }
 
@@ -296,6 +334,7 @@ function buildXMLPrompt(
   config: ModelPromptConfig,
   rolePrompt: string,
   personality: string | undefined,
+  outputContract: string,
   options: BuildPromptOptions,
 ): string {
   const parts: string[] = [];
@@ -322,8 +361,9 @@ function buildXMLPrompt(
   parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
   parts.push(`6. ${OUTPUT_PROOF_RULES}`);
   parts.push(`7. ${GROUNDING_RULES}`);
+  parts.push(`8. ${outputContract}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('8. Follow the most recent trusted user instructions precisely');
+    parts.push('9. Follow the most recent trusted user instructions precisely');
   }
   parts.push('</rules>');
 
@@ -346,6 +386,7 @@ function buildStructuredPrompt(
   config: ModelPromptConfig,
   rolePrompt: string,
   personality: string | undefined,
+  outputContract: string,
   options: BuildPromptOptions,
 ): string {
   const parts: string[] = [];
@@ -369,8 +410,9 @@ function buildStructuredPrompt(
   parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
   parts.push(`6. ${OUTPUT_PROOF_RULES}`);
   parts.push(`7. ${GROUNDING_RULES}`);
+  parts.push(`8. ${outputContract}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('8. Follow the most recent trusted user instructions precisely');
+    parts.push('9. Follow the most recent trusted user instructions precisely');
   }
 
   if (options.taskDescription) {
@@ -391,6 +433,7 @@ function buildConcisePrompt(
   config: ModelPromptConfig,
   rolePrompt: string,
   personality: string | undefined,
+  outputContract: string,
   options: BuildPromptOptions,
 ): string {
   const parts: string[] = [];
@@ -401,7 +444,7 @@ function buildConcisePrompt(
     if (options.projectProfileSummary) parts.push(wrapUntrustedBlock('project context', options.projectProfileSummary));
   }
 
-  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES}`);
+  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract}`);
 
   if (options.taskDescription) {
     parts.push(`Task: ${options.taskDescription}`);
@@ -417,14 +460,15 @@ function buildConcisePrompt(
 function buildMinimalPrompt(
   rolePrompt: string,
   personality: string | undefined,
+  outputContract: string,
   options: BuildPromptOptions,
 ): string {
   const base = personality || rolePrompt;
   if (options.workingDir) {
     const profile = options.projectProfileSummary ? ` ${wrapUntrustedBlock('project context', options.projectProfileSummary)}` : '';
-    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} Be concise.`;
+    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} Be concise.`;
   }
-  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES}`;
+  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract}`;
 }
 
 // ── Tool adaptation ────────────────────────────────────

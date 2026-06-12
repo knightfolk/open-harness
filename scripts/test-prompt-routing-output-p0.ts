@@ -7,6 +7,7 @@ import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
+import { normalizeInvestigationFinalOutput } from '../server/orchestrator';
 
 function testPromptAssemblyMetadata() {
   const withoutMetadata = buildPromptForModel({
@@ -34,6 +35,9 @@ function testPromptAssemblyMetadata() {
   assert.match(withoutMetadata.systemPrompt, /When work is not applied and validated, label it as a proposal or next step/i);
   assert.match(withoutMetadata.systemPrompt, /Stay grounded in provided context, tool results, files, and explicit user instructions/i);
   assert.match(withoutMetadata.systemPrompt, /If evidence is missing, ask for the needed context or label the statement as an assumption/i);
+  const coderOutputStyle = withoutMetadata.assembly.sections.find((section) => section.id === 'output-style');
+  assert.match(coderOutputStyle?.preview || '', /changed files, validation proof, and remaining risk/i);
+  assert.match(withoutMetadata.systemPrompt, /changed files, validation proof, and remaining risk/i);
 
   const minimalPrompt = buildPromptForModel({
     modelId: 'phi-4-mini',
@@ -43,6 +47,17 @@ function testPromptAssemblyMetadata() {
   });
   assert.match(minimalPrompt.systemPrompt, /final answers must name the files changed and the exact validation proof/i);
   assert.match(minimalPrompt.systemPrompt, /Do not invent APIs, files, settings, test results, dates, prices, or external facts/i);
+
+  const reviewerPrompt = buildPromptForModel({
+    modelId: 'claude-sonnet-4.6',
+    role: 'reviewer',
+    workingDir: '/tmp/project',
+    projectProfileSummary: 'Project profile summary',
+    taskDescription: 'Review routing output.',
+  });
+  const reviewerOutputStyle = reviewerPrompt.assembly.sections.find((section) => section.id === 'output-style');
+  assert.match(reviewerOutputStyle?.preview || '', /findings first, ordered by severity/i);
+  assert.match(reviewerPrompt.systemPrompt, /findings first, ordered by severity/i);
 }
 
 function testBoundedReviewRouting() {
@@ -613,6 +628,32 @@ function testBenchChangedFileValidation() {
   assert.equal(unchangedManifest[0].passed, false, 'unchanged expected path manifest should not prove a new artifact');
 }
 
+function testInvestigationOutputNormalization() {
+  const reviewerRoute = routeRequest('review this project for bugs', 'Auto');
+  assert.equal(reviewerRoute.role, 'reviewer', 'review request should use reviewer role');
+  const normalizedReview = normalizeInvestigationFinalOutput(
+    reviewerRoute,
+    'The auth flow looks risky because src/auth.ts accepts empty tokens.',
+  );
+  assert.match(normalizedReview, /^## Findings\n\nThe auth flow looks risky/m, 'review synthesis should be normalized to findings-first output');
+
+  const alreadyFindings = normalizeInvestigationFinalOutput(
+    reviewerRoute,
+    '## Findings\n\n- P1: Already structured.',
+  );
+  assert.equal(alreadyFindings, '## Findings\n\n- P1: Already structured.', 'structured findings output should not be wrapped twice');
+
+  const summaryRoute = routeRequest('Give me a clear overview of this project architecture.', 'Auto');
+  assert.equal(summaryRoute.role, 'summarizer', 'overview request should use summarizer role');
+  const fallbackSummary = normalizeInvestigationFinalOutput(
+    summaryRoute,
+    'The app has a React client and an Express server.',
+    true,
+  );
+  assert.match(fallbackSummary, /^## Answer\n\nThe app has a React client/m, 'investigation synthesis should be normalized to answer-first output');
+  assert.match(fallbackSummary, /Final synthesis failed, so this answer uses explorer evidence directly/i, 'explorer fallback should disclose residual risk');
+}
+
 testPromptAssemblyMetadata();
 testBoundedReviewRouting();
 testDirectAnswerNoRegression();
@@ -629,5 +670,6 @@ await testSetupCommandsAreScoredAsValidation();
 await testArtifactValidationFailuresBecomeFindings();
 testOrchestrationProofFailureBlocksResolvedStatus();
 testBenchChangedFileValidation();
+testInvestigationOutputNormalization();
 
 console.log('prompt/routing/output P0 regression checks passed');

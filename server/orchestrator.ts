@@ -1111,13 +1111,36 @@ async function runInvestigatePipeline(
   }
 
   const synthesisOk = synthesisArtifact?.status === 'complete' && synthesisArtifact.response.trim().length > 0;
-  const text = synthesisOk && synthesisArtifact ? synthesisArtifact.response : explorerResponse;
+  const text = normalizeInvestigationFinalOutput(
+    route,
+    synthesisOk && synthesisArtifact ? synthesisArtifact.response : explorerResponse,
+    !synthesisOk,
+  );
 
   return {
     finalText: text,
     phases,
     ok: synthesisOk,
   };
+}
+
+export function normalizeInvestigationFinalOutput(route: RouteDecision, text: string, usedExplorerFallback = false): string {
+  const trimmed = sanitizeAgentOutput(text || '').trim();
+  if (!trimmed) return usedExplorerFallback ? '## Investigation Incomplete\n\nNo usable synthesis was produced.' : '';
+
+  const startsWithUsefulHeading = /^#{1,3}\s*(?:findings?|no findings?|verdict|answer|summary|investigation|evidence|result)\b/i.test(trimmed);
+  const startsWithUsefulSentence = /^(?:no\s+(?:issues|findings|blockers)\b|p[0-3]\b|blocker\b|critical\b|high\b|medium\b|low\b|verdict\b|answer\b)/i.test(trimmed);
+  if (startsWithUsefulHeading || startsWithUsefulSentence) {
+    return usedExplorerFallback
+      ? `${trimmed}\n\n### Residual Risk\n- Final synthesis failed, so this answer uses explorer evidence directly.`
+      : trimmed;
+  }
+
+  const heading = route.role === 'reviewer' ? '## Findings' : '## Answer';
+  const fallbackNote = usedExplorerFallback
+    ? '\n\n### Residual Risk\n- Final synthesis failed, so this answer uses explorer evidence directly.'
+    : '';
+  return `${heading}\n\n${trimmed}${fallbackNote}`;
 }
 
 // ── Pipeline: Compare ─────────────────────────────────
