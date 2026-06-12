@@ -93,6 +93,7 @@ function buildBenchTraceProof(params: {
   toolCalls?: number;
   validationCount: number;
   assistedByFallback?: boolean;
+  artifactRepaired?: boolean;
   warning?: string;
 }): benchRuns.BenchTraceProof {
   const route = params.route;
@@ -101,6 +102,7 @@ function buildBenchTraceProof(params: {
     ...(!route ? ['No route decision was recorded.'] : []),
     ...(params.modelRequests ? [] : ['No model request proof was recorded.']),
     ...(params.assistedByFallback ? ['Result was assisted by OpenHarness fallback.'] : []),
+    ...(params.artifactRepaired ? ['Artifact required a validation repair pass before delivery.'] : []),
   ];
   const mode = route?.mode || 'none';
   const role = route?.role || 'unknown';
@@ -116,7 +118,8 @@ function buildBenchTraceProof(params: {
     `${toolCalls} tool call${toolCalls === 1 ? '' : 's'}`,
     `${validationChecks} validation check${validationChecks === 1 ? '' : 's'}`,
     params.assistedByFallback ? 'assisted fallback' : 'model-authored path',
-  ].join(' · ');
+    params.artifactRepaired ? 'validation repair' : '',
+  ].filter(Boolean).join(' · ');
 
   return {
     mode,
@@ -4736,6 +4739,7 @@ app.post('/api/bench/run', async (req, res) => {
       } as unknown as express.Response;
 
       let providerUsage: EstimatedModelUsage | undefined;
+      let artifactRepaired = false;
       try {
         const taskTimeoutMs = task.timeoutMs || 120_000;
         const timeoutController = new AbortController();
@@ -4792,6 +4796,7 @@ app.post('/api/bench/run', async (req, res) => {
               });
               chunks.push(orchResult.finalText);
               assistedByFallback = !!orchResult.assistedByFallback;
+              artifactRepaired = orchResult.phases.some((phase) => phase.label === 'validation-repair' && phase.status === 'complete');
               if (!orchResult.ok) {
                 toolCallsAccum.push({ name: 'orchestrator', status: 'error', output: orchResult.error });
               }
@@ -4932,6 +4937,7 @@ app.post('/api/bench/run', async (req, res) => {
           toolCalls: toolCallsAccum.length,
           validationCount: validationResults.length,
           assistedByFallback,
+          artifactRepaired,
           warning: assistedByFallback ? 'OpenHarness fallback assisted this delivery.' : undefined,
         }),
       });
