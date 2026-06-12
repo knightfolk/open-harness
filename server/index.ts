@@ -2962,6 +2962,12 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
           detail: `model=${phase.modelId} status=${phase.status} duration=${phase.durationMs}ms`,
         });
       }
+      for (const artifact of orchResult.artifacts || []) {
+        emitVisibleStep({
+          type: 'artifact',
+          artifact,
+        });
+      }
 
       // Stream the final text into the chat progressively. The orchestration
       // pipeline produces a complete synthesis, so chunk it at the SSE layer

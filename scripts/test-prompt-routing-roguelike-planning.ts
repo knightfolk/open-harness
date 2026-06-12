@@ -157,6 +157,19 @@ try {
 
   assert.equal(result.ok, true, 'all mocked Planning Room phases should complete');
   assert.equal(result.phases.length, 7, 'three plans, three cross-checks, and one synthesis should be recorded');
+  assert.equal(result.artifacts?.length, 1, 'Planning Room should produce one reusable team-plan artifact');
+  const teamPlan = result.artifacts?.[0];
+  assert.equal(teamPlan?.type, 'team_plan', 'Planning Room artifact should use the team_plan type');
+  assert.match(teamPlan?.id || '', /^team-plan-/, 'Planning Room artifact should have a stable team-plan id prefix');
+  assert.equal(teamPlan?.data.participants.length, 3, 'team-plan artifact should preserve participant metadata');
+  assert.match(teamPlan?.data.recommendation || '', /Neon Decade Descent/, 'team-plan artifact should expose the final recommendation');
+  assert.ok(teamPlan?.data.successCriteria.some((item) => /participant ideas/i.test(item)), 'team-plan artifact should expose success criteria');
+  assert.ok(teamPlan?.data.executionPhases.some((item) => /grid movement/i.test(item)), 'team-plan artifact should expose execution phases');
+  assert.ok(teamPlan?.data.risks.some((item) => /celebrity|brand/i.test(item)), 'team-plan artifact should expose risks');
+  assert.ok(teamPlan?.data.validation.some((item) => /floor/i.test(item)), 'team-plan artifact should expose validation checklist');
+  assert.ok(teamPlan?.data.participantDeltas.some((item) => /arcade planner/i.test(item)), 'team-plan artifact should expose participant deltas');
+  assert.ok(teamPlan?.data.finalDecisionLog.some((item) => /Synthesis model/i.test(item)), 'team-plan artifact should expose a decision log');
+  assert.match(teamPlan?.data.rawMarkdown || '', /Validation checklist/, 'team-plan artifact should keep raw markdown for rendering');
   assert.match(result.finalText, /Planning Room/, 'final artifact should be labeled as Planning Room output');
   assert.match(result.finalText, /Neon Decade Descent/, 'final artifact should include the synthesized game concept');
   assert.match(result.finalText, /arcade mall|mixtape subway|video-rental labyrinth/i, 'final artifact should include 1980s locations');

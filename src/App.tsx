@@ -73,6 +73,7 @@ function describeRunStep(step: HarnessRunStep): string {
   switch (step.type) {
     case 'orchestration': return `${step.label}: ${step.detail || step.mode}`;
     case 'route': return `Routed to ${step.role} using ${step.model}${step.reason ? ` (${step.reason})` : ''}`;
+    case 'artifact': return `Created artifact: ${step.artifact.title}`;
     case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
     case 'auto_router': return describeAutoRouterRunStep(step);
     case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;

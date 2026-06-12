@@ -77,9 +77,39 @@ export interface RoutingStageTrace {
   };
 }
 
+export interface TeamPlanParticipant {
+  modelId: string;
+  independentSummary: string;
+  crossCheckSummary?: string;
+  status: 'complete' | 'error';
+}
+
+export interface TeamPlanArtifactData {
+  recommendation: string;
+  successCriteria: string[];
+  executionPhases: string[];
+  openQuestions: string[];
+  risks: string[];
+  validation: string[];
+  participantDeltas: string[];
+  finalDecisionLog: string[];
+  participants: TeamPlanParticipant[];
+  rawMarkdown: string;
+}
+
+export interface WorkProductArtifact {
+  id: string;
+  type: 'team_plan';
+  title: string;
+  createdAt: string;
+  summary: string;
+  data: TeamPlanArtifactData;
+}
+
 export type HarnessRunStep =
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
+  | { type: 'artifact'; artifact: WorkProductArtifact }
   | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace }
   | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number>; stages?: RoutingStageTrace }
   | { type: 'model_request'; round: number; model: string }

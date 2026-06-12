@@ -8,7 +8,7 @@ import { runAgentPhase, type BackgroundAgentArtifact } from './agentRuntime';
 import type { AgentToolDefinition } from './agentRuntime';
 import type { RouteDecision } from './router';
 import type { StoredConfig } from './config';
-import type { HarnessRunStep } from './runTrace';
+import type { HarnessRunStep, TeamPlanArtifactData, TeamPlanParticipant, WorkProductArtifact } from './runTrace';
 import { applyPatch } from './patchApply';
 import { runValidation, summarizeValidationFailure, type ValidationCommandResult } from './benchRuns';
 import { checkCommandPolicy, type TrustMode } from './toolPolicy';
@@ -27,6 +27,8 @@ export interface OrchestrationResult {
   error?: string;
   /** True when OpenHarness shipped a deterministic scaffold after the model failed to write files. */
   assistedByFallback?: boolean;
+  /** Reusable work products produced by the orchestration run. */
+  artifacts?: WorkProductArtifact[];
 }
 
 export interface OrchestrationPhase {
@@ -325,6 +327,14 @@ async function runPlanningRoomPipeline(
     .filter((phase) => phase.status !== 'complete')
     .map((phase) => `- ${phase.label}: ${phase.summary}`);
   const safeFinalPlan = finalPlan.trim() || usablePlans[0]?.text || 'Planning Room did not produce a final plan.';
+  const teamPlanArtifact = buildTeamPlanArtifact({
+    task: userMessage,
+    finalPlan: safeFinalPlan,
+    targetModels,
+    usablePlans,
+    crossChecks,
+    synthesisModel,
+  });
 
   return {
     finalText: [
@@ -345,13 +355,149 @@ async function runPlanningRoomPipeline(
       `### Participant Signals`,
       planSummaries || '- No participant summaries available.',
       ``,
+      `Artifact: ${teamPlanArtifact.title} (${teamPlanArtifact.id})`,
+      ``,
       `---`,
       `*Planning Room complete - ${ok ? 'all phases passed' : 'some phases had errors'}*`,
     ].join('\n'),
     phases,
     ok,
     error: ok ? undefined : 'One or more Planning Room phases failed',
+    artifacts: [teamPlanArtifact],
   };
+}
+
+function buildTeamPlanArtifact(args: {
+  task: string;
+  finalPlan: string;
+  targetModels: string[];
+  usablePlans: Array<{ modelId: string; text: string; ok: boolean }>;
+  crossChecks: Array<{ modelId: string; text: string; ok: boolean }>;
+  synthesisModel: string;
+}): WorkProductArtifact {
+  const recommendation = extractPlanSection(args.finalPlan, ['final recommendation', 'recommendation'])
+    || firstMeaningfulLine(args.finalPlan)
+    || 'No recommendation captured.';
+  const successCriteria = listFromSection(args.finalPlan, ['success criteria']);
+  const executionPhases = listFromSection(args.finalPlan, ['ordered implementation plan', 'implementation plan', 'step-by-step plan']);
+  const riskLines = listFromSection(args.finalPlan, ['risks, tradeoffs, and assumptions', 'risks and unknowns', 'risks']);
+  const validation = listFromSection(args.finalPlan, ['validation checklist', 'validation proof', 'validation']);
+  const participantDeltas = listFromSection(args.finalPlan, ['what the planning room changed or improved', 'participant signals'])
+    .concat(args.crossChecks.filter((check) => check.ok && check.text.trim()).map((check) => `${check.modelId}: ${oneLine(check.text)}`));
+  const participants = buildTeamPlanParticipants(args.targetModels, args.usablePlans, args.crossChecks);
+  const data: TeamPlanArtifactData = {
+    recommendation,
+    successCriteria,
+    executionPhases,
+    openQuestions: extractOpenQuestions(riskLines),
+    risks: riskLines,
+    validation,
+    participantDeltas: participantDeltas.length > 0 ? participantDeltas : args.usablePlans.map((plan) => `${plan.modelId}: ${oneLine(plan.text)}`),
+    finalDecisionLog: [
+      `Synthesis model: ${args.synthesisModel}`,
+      `Independent plans: ${args.usablePlans.length}/${args.targetModels.length}`,
+      `Peer cross-checks: ${args.crossChecks.filter((check) => check.ok && check.text.trim()).length}`,
+      `Source task: ${oneLine(args.task)}`,
+    ],
+    participants,
+    rawMarkdown: args.finalPlan,
+  };
+  return {
+    id: `team-plan-${Date.now().toString(36)}-${simpleHash(args.task + args.finalPlan)}`,
+    type: 'team_plan',
+    title: titleFromRecommendation(recommendation),
+    createdAt: new Date().toISOString(),
+    summary: oneLine(recommendation).slice(0, 220),
+    data,
+  };
+}
+
+function buildTeamPlanParticipants(
+  targetModels: string[],
+  usablePlans: Array<{ modelId: string; text: string; ok: boolean }>,
+  crossChecks: Array<{ modelId: string; text: string; ok: boolean }>,
+): TeamPlanParticipant[] {
+  return targetModels.map((modelId) => {
+    const plan = usablePlans.find((candidate) => candidate.modelId === modelId);
+    const crossCheck = crossChecks.find((candidate) => candidate.modelId === modelId && candidate.ok && candidate.text.trim());
+    return {
+      modelId,
+      independentSummary: plan?.text ? oneLine(plan.text) : 'No usable independent plan.',
+      crossCheckSummary: crossCheck?.text ? oneLine(crossCheck.text) : undefined,
+      status: plan?.ok ? 'complete' : 'error',
+    };
+  });
+}
+
+function extractPlanSection(markdown: string, headings: string[]): string {
+  const lines = markdown.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const parsed = normalizePlanHeading(lines[i]);
+    if (!parsed || !headings.includes(parsed.heading)) continue;
+    if (parsed.inline) return parsed.inline;
+    const body: string[] = [];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (normalizePlanHeading(lines[j])) break;
+      body.push(lines[j]);
+    }
+    return body.join('\n').trim();
+  }
+  return '';
+}
+
+function normalizePlanHeading(line: string): { heading: string; inline: string } | null {
+  const match = line.trim().match(/^(?:#{1,4}\s*)?(?:(?:\d+|[-*])[).:-]?\s*)?([^:]+?)(?::\s*(.*))?$/);
+  if (!match) return null;
+  const heading = match[1]
+    .replace(/\*\*/g, '')
+    .trim()
+    .toLowerCase();
+  if (!/^(?:final recommendation|recommendation|success criteria|ordered implementation plan|implementation plan|step-by-step plan|risks, tradeoffs, and assumptions|risks and unknowns|risks|validation checklist|validation proof|validation|what the planning room changed or improved|participant signals)$/.test(heading)) {
+    return null;
+  }
+  return { heading, inline: (match[2] || '').trim() };
+}
+
+function listFromSection(markdown: string, headings: string[]): string[] {
+  const section = extractPlanSection(markdown, headings);
+  if (!section) return [];
+  const items = section
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^(?:[-*]\s+|\d+[).]\s*)/, '').trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : [section.trim()];
+}
+
+function extractOpenQuestions(riskLines: string[]): string[] {
+  return riskLines.filter((line) => /\b(?:unknown|question|assumption|confirm|decide|tbd|unclear)\b/i.test(line));
+}
+
+function firstMeaningfulLine(markdown: string): string {
+  return markdown
+    .split('\n')
+    .map((line) => line.replace(/^#{1,4}\s*/, '').trim())
+    .find((line) => line && !/^planning room$/i.test(line)) || '';
+}
+
+function titleFromRecommendation(recommendation: string): string {
+  const cleaned = oneLine(recommendation)
+    .replace(/^build\s+/i, '')
+    .replace(/^recommendation\s*:\s*/i, '')
+    .replace(/[*_`]/g, '')
+    .trim();
+  const words = cleaned.split(/\s+/).slice(0, 8).join(' ');
+  return words ? `Team Plan: ${words}` : 'Team Plan';
+}
+
+function simpleHash(text: string): string {
+  let hash = 0;
+  for (const char of text.slice(0, 500)) {
+    hash = ((hash << 5) - hash) + char.charCodeAt(0);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
 }
 
 // ── Pipeline: Execute ─────────────────────────────────

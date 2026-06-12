@@ -112,6 +112,7 @@ function stepIcon(step: HarnessRunStep) {
   switch (step.type) {
     case 'orchestration': return Route;
     case 'route': return Route;
+    case 'artifact': return FileText;
     case 'auto_router': return Gauge;
     case 'prompt_built': return FileText;
     case 'model_request': return Zap;
@@ -129,6 +130,7 @@ function stepTitle(step: HarnessRunStep): string {
   switch (step.type) {
     case 'orchestration': return `Orchestration · ${step.label}`;
     case 'route': return `Route: ${step.role} → ${step.model}`;
+    case 'artifact': return `Artifact · ${step.artifact.title}`;
     case 'auto_router': return formatAutoRouterStepTitle(step);
     case 'prompt_built': return `Prompt built · ${step.toolCount} tool${step.toolCount === 1 ? '' : 's'}`;
     case 'model_request': return `Model request · round ${step.round}`;
@@ -148,6 +150,7 @@ function stepDetail(step: HarnessRunStep): string | null {
   switch (step.type) {
     case 'orchestration': return step.detail || step.mode;
     case 'route': return step.reason || null;
+    case 'artifact': return `${step.artifact.type} · ${step.artifact.summary}`;
     case 'auto_router': return formatAutoRouterStepDetail(step);
     case 'prompt_built': return step.promptPreview;
     case 'model_request': return step.model;
