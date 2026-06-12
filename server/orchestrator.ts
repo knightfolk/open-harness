@@ -6,6 +6,7 @@
 
 import { runAgentPhase, type BackgroundAgentArtifact } from './agentRuntime';
 import type { AgentToolDefinition } from './agentRuntime';
+import type { AgentProfileId } from './agentProfiles';
 import type { RouteDecision } from './router';
 import type { StoredConfig } from './config';
 import type { HarnessRunStep, TeamPlanArtifactData, TeamPlanParticipant, WorkProductArtifact } from './runTrace';
@@ -967,7 +968,7 @@ async function runInvestigatePipeline(
 ): Promise<OrchestrationResult> {
   const phases: OrchestrationPhase[] = [];
 
-  // Explorer gathers evidence; reviewer synthesizes it into a human-facing answer.
+  // Explorer gathers evidence; a role-appropriate synthesizer turns it into a human-facing answer.
   const exploreProfile = 'explorer';
   const exploreModel = resolveAgentModel(config, exploreProfile, route, config.activeModel || '');
   const explorePrompt = [
@@ -1041,8 +1042,8 @@ async function runInvestigatePipeline(
   }
 
   const explorerResponse = exploreArtifact?.response || '';
-  const reviewerProfile = route.role === 'reviewer' ? 'reviewer' : 'eval-judge';
-  const reviewerModel = resolveAgentModel(config, reviewerProfile, route, config.activeModel || '');
+  const synthesisProfile = investigationSynthesisProfile(route);
+  const synthesisModel = resolveAgentModel(config, synthesisProfile, route, config.activeModel || '');
   const synthesisPrompt = [
     `## Original Request`,
     userMessage,
@@ -1051,10 +1052,15 @@ async function runInvestigatePipeline(
     explorerResponse,
     '',
     `## Synthesis Instructions`,
-    `Start directly with a verdict or findings. Do not narrate your process.`,
-    `Prioritize bugs, risks, quality gaps, and concrete next actions.`,
-    `Keep the final answer readable: use severity labels and short explanations.`,
+    route.role === 'reviewer'
+      ? `Start directly with a verdict or findings. Do not narrate your process.`
+      : `Start directly with the answer to the user's question. Do not narrate your process.`,
+    route.role === 'reviewer'
+      ? `Prioritize bugs, risks, quality gaps, and concrete next actions.`
+      : `Prioritize a clear overview, architecture, main components, risks, and concrete next actions when relevant.`,
+    `Keep the final answer readable: use short explanations and only the headings that help the answer scan.`,
     `Do not dump raw file inventory. Cite only the file paths needed to support findings.`,
+    `Do not return scoring JSON, rubric JSON, eval reports, or model-grading artifacts.`,
     `Preserve evidence boundaries: do not promote explorer assumptions into facts, and label any unsupported claim as unverified.`,
     route.role === 'reviewer'
       ? `For audits or reviews, lead with findings ordered by severity. For each finding include severity, file:line when known, evidence, and action.`
@@ -1064,9 +1070,9 @@ async function runInvestigatePipeline(
   let synthesisArtifact: BackgroundAgentArtifact | null = null;
   try {
     synthesisArtifact = await runAgentPhase(config, {
-      profileId: reviewerProfile,
+      profileId: synthesisProfile,
       prompt: synthesisPrompt,
-      modelId: reviewerModel,
+      modelId: synthesisModel,
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
@@ -1075,25 +1081,31 @@ async function runInvestigatePipeline(
     });
     phases.push({
       label: 'synthesis',
-      modelId: reviewerModel,
+      modelId: synthesisModel,
       durationMs: synthesisArtifact.durationMs,
-      status: synthesisArtifact.status === 'complete' ? 'complete' : 'error',
+      status: synthesisArtifact.status === 'complete' && !isScoringRubricOutput(synthesisArtifact.response) ? 'complete' : 'error',
       artifact: synthesisArtifact,
       summary: synthesisArtifact.status === 'complete'
-        ? synthesisArtifact.response.slice(0, 200)
+        ? isScoringRubricOutput(synthesisArtifact.response)
+          ? 'Synthesis returned internal scoring JSON instead of a user-facing answer.'
+          : synthesisArtifact.response.slice(0, 200)
         : `Synthesis error: ${synthesisArtifact.error}`,
     });
   } catch (err: any) {
     phases.push({
       label: 'synthesis',
-      modelId: reviewerModel,
+      modelId: synthesisModel,
       durationMs: 0,
       status: 'error',
       summary: `Synthesis failed: ${err?.message || err}`,
     });
   }
 
-  const synthesisOk = synthesisArtifact?.status === 'complete' && synthesisArtifact.response.trim().length > 0;
+  const synthesisOk = !!(
+    synthesisArtifact?.status === 'complete'
+    && synthesisArtifact.response.trim().length > 0
+    && !isScoringRubricOutput(synthesisArtifact.response)
+  );
   const text = normalizeInvestigationFinalOutput(
     route,
     synthesisOk && synthesisArtifact ? synthesisArtifact.response : explorerResponse,
@@ -1204,6 +1216,16 @@ function buildExecuteResidualRisk(args: {
 export function normalizeInvestigationFinalOutput(route: RouteDecision, text: string, usedExplorerFallback = false): string {
   const trimmed = sanitizeAgentOutput(text || '').trim();
   if (!trimmed) return usedExplorerFallback ? '## Investigation Incomplete\n\nNo usable synthesis was produced.' : '';
+  if (isScoringRubricOutput(trimmed)) {
+    return [
+      '## Investigation Incomplete',
+      '',
+      'The synthesis phase returned an internal scoring artifact instead of a user-facing answer.',
+      '',
+      '### Residual Risk',
+      '- Re-run the investigation so OpenHarness can synthesize the gathered evidence into prose.',
+    ].join('\n');
+  }
 
   const startsWithUsefulHeading = /^#{1,3}\s*(?:findings?|no findings?|verdict|answer|summary|investigation|evidence|result)\b/i.test(trimmed);
   const startsWithUsefulSentence = /^(?:no\s+(?:issues|findings|blockers)\b|p[0-3]\b|blocker\b|critical\b|high\b|medium\b|low\b|verdict\b|answer\b)/i.test(trimmed);
@@ -1218,6 +1240,35 @@ export function normalizeInvestigationFinalOutput(route: RouteDecision, text: st
     ? '\n\n### Residual Risk\n- Final synthesis failed, so this answer uses explorer evidence directly.'
     : '';
   return `${heading}\n\n${trimmed}${fallbackNote}`;
+}
+
+export function investigationSynthesisProfile(route: Pick<RouteDecision, 'role'>): AgentProfileId {
+  return route.role === 'reviewer' ? 'reviewer' : 'summarizer';
+}
+
+export function isScoringRubricOutput(text: string): boolean {
+  const parsed = parseJudgeJson(sanitizeAgentOutput(text || ''));
+  if (!parsed) return false;
+  const topLevelKeys = new Set(Object.keys(parsed).map((key) => key.toLowerCase()));
+  const rubric = parsed.rubric;
+  const rubricKeys = rubric && typeof rubric === 'object' && !Array.isArray(rubric)
+    ? Object.keys(rubric as Record<string, unknown>).map((key) => key.toLowerCase())
+    : [];
+  const hasRubric = topLevelKeys.has('rubric');
+  const hasVerdict = topLevelKeys.has('verdict') || topLevelKeys.has('recommendation') || topLevelKeys.has('winner');
+  const hasScoringShape = [
+    'coverage_of_user_question',
+    'citation_accuracy',
+    'risk_identification',
+    'actionable_next_steps',
+    'readability_and_structure',
+    'evidence_grounding',
+    'score',
+    'scores',
+    'weighted_score',
+  ].some((key) => topLevelKeys.has(key) || rubricKeys.includes(key));
+  const hasUserFacingPayload = ['answer', 'final_answer', 'summary', 'findings'].some((key) => topLevelKeys.has(key));
+  return hasRubric && (hasVerdict || hasScoringShape) && !hasUserFacingPayload;
 }
 
 export function buildEvidenceArtifact(task: string, explorerText: string, finalText: string): WorkProductArtifact | null {
@@ -1769,6 +1820,7 @@ function resolveAgentModel(
 function getProfileFromId(id: string) {
   const profiles: Record<string, { preferredRole: string }> = {
     explorer: { preferredRole: 'summarizer' },
+    summarizer: { preferredRole: 'summarizer' },
     planner: { preferredRole: 'planner' },
     implementer: { preferredRole: 'coder' },
     reviewer: { preferredRole: 'reviewer' },

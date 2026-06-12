@@ -7,7 +7,7 @@ import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
-import { buildComparisonArtifact, buildEvidenceArtifact, buildReviewFindingsArtifact, extractComparisonSubject, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { buildComparisonArtifact, buildEvidenceArtifact, buildReviewFindingsArtifact, extractComparisonSubject, investigationSynthesisProfile, isScoringRubricOutput, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
 import { filterMonologue, normalizeDirectAnswer, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
 import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from '../server/sessionGoals';
@@ -701,6 +701,7 @@ function testBenchChangedFileValidation() {
 function testInvestigationOutputNormalization() {
   const reviewerRoute = routeRequest('review this project for bugs', 'Auto');
   assert.equal(reviewerRoute.role, 'reviewer', 'review request should use reviewer role');
+  assert.equal(investigationSynthesisProfile(reviewerRoute), 'reviewer', 'review investigations should keep reviewer synthesis');
   const normalizedReview = normalizeInvestigationFinalOutput(
     reviewerRoute,
     'The auth flow looks risky because src/auth.ts accepts empty tokens.',
@@ -715,6 +716,7 @@ function testInvestigationOutputNormalization() {
 
   const summaryRoute = routeRequest('Give me a clear overview of this project architecture.', 'Auto');
   assert.equal(summaryRoute.role, 'summarizer', 'overview request should use summarizer role');
+  assert.equal(investigationSynthesisProfile(summaryRoute), 'summarizer', 'overview investigations should use human-facing synthesis');
   const fallbackSummary = normalizeInvestigationFinalOutput(
     summaryRoute,
     'The app has a React client and an Express server.',
@@ -722,6 +724,22 @@ function testInvestigationOutputNormalization() {
   );
   assert.match(fallbackSummary, /^## Answer\n\nThe app has a React client/m, 'investigation synthesis should be normalized to answer-first output');
   assert.match(fallbackSummary, /Final synthesis failed, so this answer uses explorer evidence directly/i, 'explorer fallback should disclose residual risk');
+
+  const scoringJson = [
+    '```json',
+    JSON.stringify({
+      verdict: 'Strong overview, but this is a judge artifact.',
+      rubric: {
+        coverage_of_user_question: { weight: 0.2, score: 0.9 },
+        citation_accuracy: { weight: 0.15, score: 0.85 },
+      },
+    }),
+    '```',
+  ].join('\n');
+  assert.equal(isScoringRubricOutput(scoringJson), true, 'internal rubric JSON should be detected before display');
+  const normalizedScoringArtifact = normalizeInvestigationFinalOutput(summaryRoute, scoringJson);
+  assert.match(normalizedScoringArtifact, /^## Investigation Incomplete/m, 'rubric JSON should not become the chat answer');
+  assert.doesNotMatch(normalizedScoringArtifact, /```json|coverage_of_user_question/, 'internal scoring JSON should not be shown to the user');
 }
 
 function testExecuteOutputNormalization() {

@@ -7,6 +7,7 @@
 // the model in Settings without changing the role description.
 export type AgentProfileId =
   | 'explorer'
+  | 'summarizer'
   | 'planner'
   | 'implementer'
   | 'reviewer'
@@ -45,6 +46,19 @@ export const AGENT_PROFILES: Record<AgentProfileId, AgentProfile> = {
     canBrowser: false,
     systemPrompt:
       'You are an Explorer agent. Survey the repository and answer questions about it. Never propose code edits. Never run shell commands. Use read-only tools and the project profile to ground every claim in an actual file path. Cite the file and line number for each finding.',
+    temperature: 0.2,
+    backgroundSafe: true,
+  },
+  summarizer: {
+    id: 'summarizer',
+    label: 'Synthesizer',
+    description: 'Turns gathered evidence into a human-facing answer. No scoring reports or raw inventories.',
+    preferredRole: 'summarizer',
+    readOnly: true,
+    canShell: false,
+    canBrowser: false,
+    systemPrompt:
+      'You are a Synthesizer agent. Turn gathered evidence into a clear human-facing answer. Start with the answer, then include only the evidence and next steps needed to support it. Never return scoring JSON, rubric JSON, eval reports, or raw file inventories unless the user explicitly asks for those artifacts.',
     temperature: 0.2,
     backgroundSafe: true,
   },
