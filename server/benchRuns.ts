@@ -273,9 +273,15 @@ function extractValidationFindings(output: string): string[] {
     const trimmed = line.trim();
     if (/^- /.test(trimmed)) {
       findings.push(trimmed.slice(2).trim());
+    } else if (
+      /^(?:standalone artifact verification|ship readiness|browser smoke|openharness artifact manifest check)\s+failed\b/i.test(trimmed)
+      || /^HTML uses remote or embedded asset references:/i.test(trimmed)
+      || /^Remote or embedded asset references prevent inspectable standalone shipping:/i.test(trimmed)
+    ) {
+      findings.push(trimmed);
     }
   }
-  return findings.slice(0, 20);
+  return [...new Set(findings)].slice(0, 20);
 }
 
 function normalizeChangedPath(path: string): string {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeBenchScores, createBenchRun, exportBenchRunCSV, generateBenchSummary, runSetupCommands, saveBenchRun, summarizeValidationFailure, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
+import { computeBenchScores, createBenchRun, exportBenchRunCSV, generateBenchSummary, runSetupCommands, runValidation, saveBenchRun, summarizeValidationFailure, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
 import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
@@ -506,6 +506,30 @@ async function testSetupCommandsAreScoredAsValidation() {
   }
 }
 
+async function testArtifactValidationFailuresBecomeFindings() {
+  const dir = mkdtempSync(join(tmpdir(), 'openharness-artifact-finding-'));
+  try {
+    const results = await runValidation([
+      "printf '%s\\n' 'Standalone artifact verification failed:' 'HTML uses remote or embedded asset references: https://cdn.example.com/game.js' >&2; exit 1",
+    ], dir);
+
+    assert.equal(results.length, 1, 'artifact validation should produce one result');
+    assert.equal(results[0].passed, false, 'failing artifact validation should fail');
+    assert.match(
+      results[0].findings.join('\n'),
+      /Standalone artifact verification failed|HTML uses remote or embedded asset references/,
+      'standalone verifier summary lines should become visible findings',
+    );
+    assert.match(
+      summarizeValidationFailure(results),
+      /remote or embedded asset references|Standalone artifact verification failed/i,
+      'artifact validation summary should preserve actionable standalone failure details',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function testBenchChangedFileValidation() {
   const pass = validateChangedFiles({
     before: ['README.md'],
@@ -578,6 +602,7 @@ testRubricCoverageIsScored();
 testValidationFailureSummaryUsesCommandOutput();
 testUnknownModelPricingIsNotFree();
 await testSetupCommandsAreScoredAsValidation();
+await testArtifactValidationFailuresBecomeFindings();
 testBenchChangedFileValidation();
 
 console.log('prompt/routing/output P0 regression checks passed');
