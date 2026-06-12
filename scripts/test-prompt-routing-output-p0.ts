@@ -7,7 +7,7 @@ import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
-import { buildComparisonArtifact, buildEvidenceArtifact, buildReviewFindingsArtifact, extractComparisonSubject, investigationSynthesisProfile, isScoringRubricOutput, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { buildComparisonArtifact, buildEvidenceArtifact, buildInvestigationExplorePrompt, buildReviewFindingsArtifact, extractComparisonSubject, investigationSynthesisProfile, isScoringRubricOutput, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
 import { filterMonologue, normalizeDirectAnswer, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
 import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from '../server/sessionGoals';
@@ -222,6 +222,17 @@ function testMiniMaxInvokeDelimiterRegression() {
   assert.equal(attrEnvelope.calls[0].name, 'list_directory');
   assert.deepEqual(attrEnvelope.calls[0].arguments, { path: '/tmp/project' });
   assert.equal(attrEnvelope.remainder.trim(), '', 'attribute-style tool_call should be fully removed from final text');
+
+  const pathResidue = parseToolCallMarkup(
+    '<tool_call>{"name":"list_directory","arguments":{"path":"/Users/kevink/Projects/neon-decade-descent</path>"}}</tool_call>',
+    ['list_directory'],
+  );
+  assert.equal(pathResidue.calls.length, 1, 'JSON tool call with path tag residue should still parse');
+  assert.deepEqual(
+    pathResidue.calls[0].arguments,
+    { path: '/Users/kevink/Projects/neon-decade-descent' },
+    'path tag residue should be stripped before trust policy checks',
+  );
 }
 
 function testScoringRejectsBadOutput() {
@@ -742,6 +753,19 @@ function testInvestigationOutputNormalization() {
   assert.doesNotMatch(normalizedScoringArtifact, /```json|coverage_of_user_question/, 'internal scoring JSON should not be shown to the user');
 }
 
+function testInvestigationExplorePromptToolCall() {
+  const workspace = '/Users/kevink/Projects/neon-decade-descent';
+  const prompt = buildInvestigationExplorePrompt(
+    "Give me an overview of this project -- what does it do, what's the architecture, and what are the main components?",
+    workspace,
+  );
+  assert.doesNotMatch(prompt, /<list_directory><path>/, 'investigation prompt should not teach raw XML tool calls');
+  assert.doesNotMatch(prompt, /<\/path>/, 'investigation prompt should not include raw path closing tags');
+  const parsed = parseToolCallMarkup(prompt, ['list_directory']);
+  assert.equal(parsed.calls.length, 1, 'investigation prompt should include one parseable starter tool call');
+  assert.deepEqual(parsed.calls[0].arguments, { path: workspace });
+}
+
 function testExecuteOutputNormalization() {
   const shipped = normalizeExecuteFinalOutput({
     deliveryProven: true,
@@ -971,6 +995,7 @@ await testArtifactValidationFailuresBecomeFindings();
 testOrchestrationProofFailureBlocksResolvedStatus();
 testBenchChangedFileValidation();
 testInvestigationOutputNormalization();
+testInvestigationExplorePromptToolCall();
 testExecuteOutputNormalization();
 testCompareOutputNormalization();
 testEvidenceArtifactExtraction();

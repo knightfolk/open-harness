@@ -505,15 +505,29 @@ function aliasToolName(name: string, known: Set<string>): string | null {
 
 function normalizeToolArguments(name: string, args: Record<string, unknown>): Record<string, unknown> {
   const table = ARG_ALIASES[name];
-  if (!table) return args;
   let changed = false;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
-    const canonical = table[k] || k;
-    out[canonical] = v;
-    if (canonical !== k) changed = true;
+    const canonical = table?.[k] || k;
+    const normalizedValue = normalizeToolArgumentValue(canonical, v);
+    out[canonical] = normalizedValue;
+    if (canonical !== k || normalizedValue !== v) changed = true;
   }
   return changed ? out : args;
+}
+
+function normalizeToolArgumentValue(key: string, value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  if (!/^(?:path|cwd|dir|directory|file|filename)$/i.test(key)) return value;
+  let cleaned = value.trim();
+  const wrapped = cleaned.match(/^<([A-Za-z_][A-Za-z0-9_-]*)>\s*([\s\S]*?)\s*<\/\1>$/);
+  if (wrapped && /^(?:path|cwd|dir|directory|file|filename)$/i.test(wrapped[1])) {
+    cleaned = wrapped[2].trim();
+  }
+  return cleaned
+    .replace(/^<(?:path|cwd|dir|directory|file|filename)>\s*/i, '')
+    .replace(/\s*<\/(?:path|cwd|dir|directory|file|filename)>\s*$/i, '')
+    .trim();
 }
 
 /**

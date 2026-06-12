@@ -971,21 +971,7 @@ async function runInvestigatePipeline(
   // Explorer gathers evidence; a role-appropriate synthesizer turns it into a human-facing answer.
   const exploreProfile = 'explorer';
   const exploreModel = resolveAgentModel(config, exploreProfile, route, config.activeModel || '');
-  const explorePrompt = [
-    `## Investigation Request`,
-    userMessage,
-    '',
-    `## Instructions`,
-    workingDir ? `Working directory: ${workingDir}` : '(no project folder open)',
-    '',
-    `Inspect the relevant project context using available read-only tools.`,
-    workingDir ? `Start by listing the working directory with <list_directory><path>${workingDir}</path></list_directory>.` : '',
-    `Ground every claim in a specific file path and line number.`,
-    `Synthesize findings into a direct answer with risks and next actions.`,
-    `If the request is about the codebase, reference concrete code.`,
-    `If the request is about the user's question, answer directly.`,
-    `Separate observed evidence from assumptions, and say when more context is needed.`,
-  ].filter(Boolean).join('\n');
+  const explorePrompt = buildInvestigationExplorePrompt(userMessage, workingDir);
 
   let exploreArtifact: BackgroundAgentArtifact | null = null;
   try {
@@ -1240,6 +1226,27 @@ export function normalizeInvestigationFinalOutput(route: RouteDecision, text: st
     ? '\n\n### Residual Risk\n- Final synthesis failed, so this answer uses explorer evidence directly.'
     : '';
   return `${heading}\n\n${trimmed}${fallbackNote}`;
+}
+
+export function buildInvestigationExplorePrompt(userMessage: string, workingDir?: string): string {
+  const initialToolCall = workingDir
+    ? `<tool_call>{"name":"list_directory","arguments":{"path":${JSON.stringify(workingDir)}}}</tool_call>`
+    : '';
+  return [
+    `## Investigation Request`,
+    userMessage,
+    '',
+    `## Instructions`,
+    workingDir ? `Working directory: ${workingDir}` : '(no project folder open)',
+    '',
+    `Inspect the relevant project context using available read-only tools.`,
+    initialToolCall ? `Start by listing the working directory with this exact tool call: ${initialToolCall}` : '',
+    `Ground every claim in a specific file path and line number.`,
+    `Synthesize findings into a direct answer with risks and next actions.`,
+    `If the request is about the codebase, reference concrete code.`,
+    `If the request is about the user's question, answer directly.`,
+    `Separate observed evidence from assumptions, and say when more context is needed.`,
+  ].filter(Boolean).join('\n');
 }
 
 export function investigationSynthesisProfile(route: Pick<RouteDecision, 'role'>): AgentProfileId {
