@@ -4740,6 +4740,7 @@ app.post('/api/bench/run', async (req, res) => {
 
       let providerUsage: EstimatedModelUsage | undefined;
       let artifactRepaired = false;
+      let orchestrationProofError: string | undefined;
       try {
         const taskTimeoutMs = task.timeoutMs || 120_000;
         const timeoutController = new AbortController();
@@ -4798,6 +4799,7 @@ app.post('/api/bench/run', async (req, res) => {
               assistedByFallback = !!orchResult.assistedByFallback;
               artifactRepaired = orchResult.phases.some((phase) => phase.label === 'validation-repair' && phase.status === 'complete');
               if (!orchResult.ok) {
+                orchestrationProofError = orchResult.error || 'Orchestrator did not produce applied-and-validated proof.';
                 toolCallsAccum.push({ name: 'orchestrator', status: 'error', output: orchResult.error });
               }
               providerUsage = estimateUsageForTexts(modelId, task.prompt, orchResult.finalText);
@@ -4871,6 +4873,9 @@ app.post('/api/bench/run', async (req, res) => {
           OPENHARNESS_BENCH_MODEL: modelId,
           OPENHARNESS_BENCH_TASK: task.name,
         });
+      }
+      if (orchestrationProofError) {
+        validationResults.push(benchRuns.createOrchestrationProofFailure(orchestrationProofError));
       }
       validationResults.push(...benchRuns.validateExpectedPathChanges({
         before: expectedPathsBeforeRun,

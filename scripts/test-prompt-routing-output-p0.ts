@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeBenchScores, createBenchRun, exportBenchRunCSV, generateBenchSummary, runSetupCommands, runValidation, saveBenchRun, summarizeValidationFailure, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
+import { computeBenchScores, createBenchRun, createOrchestrationProofFailure, exportBenchRunCSV, generateBenchSummary, runSetupCommands, runValidation, saveBenchRun, summarizeValidationFailure, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
 import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
@@ -530,6 +530,26 @@ async function testArtifactValidationFailuresBecomeFindings() {
   }
 }
 
+function testOrchestrationProofFailureBlocksResolvedStatus() {
+  const validationResults = [
+    createOrchestrationProofFailure('Execute mode did not produce applied-and-validated proof'),
+  ];
+  assert.equal(validationResults[0].passed, false, 'orchestration proof failure should be a failed validation result');
+  assert.match(validationResults[0].findings.join('\n'), /applied-and-validated proof/);
+
+  const score = computeBenchScores({
+    response: '## Orchestration: Execute Mode\n\n### Delivery Status\nThe model produced a plausible answer but no shipped proof is available.',
+    toolCalls: [{ name: 'orchestrator', status: 'error' }],
+    wallMs: 1000,
+    validationResults,
+    stepCount: 2,
+    tokenCount: 400,
+    costEstimate: 0.001,
+  });
+  assert.equal(score.validationPassed, false, 'unproven orchestration should fail validation scoring');
+  assert.notEqual(score.resolvedStatus, 'resolved', 'unproven orchestration must not be model-resolved');
+}
+
 function testBenchChangedFileValidation() {
   const pass = validateChangedFiles({
     before: ['README.md'],
@@ -603,6 +623,7 @@ testValidationFailureSummaryUsesCommandOutput();
 testUnknownModelPricingIsNotFree();
 await testSetupCommandsAreScoredAsValidation();
 await testArtifactValidationFailuresBecomeFindings();
+testOrchestrationProofFailureBlocksResolvedStatus();
 testBenchChangedFileValidation();
 
 console.log('prompt/routing/output P0 regression checks passed');

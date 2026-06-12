@@ -267,6 +267,19 @@ export async function runSetupCommands(
   }));
 }
 
+export function createOrchestrationProofFailure(error?: string): ValidationCommandResult {
+  const finding = error || 'Orchestration did not produce applied-and-validated proof.';
+  return {
+    command: 'openharness orchestration proof',
+    exitCode: 1,
+    stdout: '',
+    stderr: finding,
+    findings: [finding],
+    durationMs: 0,
+    passed: false,
+  };
+}
+
 function extractValidationFindings(output: string): string[] {
   const findings: string[] = [];
   for (const line of output.split('\n')) {
