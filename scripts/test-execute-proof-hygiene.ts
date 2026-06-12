@@ -166,6 +166,18 @@ try {
         'Validation commands:',
         'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'neon-game/index.html\', \'utf8\').includes(\'Playable demo\')) process.exit(1)"',
       ].join('\n');
+    } else if (prompt.includes('Produce a unified-diff patch') && fullPrompt.includes('Force a failing validation detail.')) {
+      content = [
+        'diff --git a/src/App.tsx b/src/App.tsx',
+        '--- a/src/App.tsx',
+        '+++ b/src/App.tsx',
+        '@@ -1 +1 @@',
+        '-export default function App() { return null; }',
+        '+export default function App() { return <main>Broken demo</main>; }',
+        '',
+        'Validation commands:',
+        'node -e "console.error(\'- Browser smoke: missing visible HUD after keyboard input\'); process.exit(1)"',
+      ].join('\n');
     } else if (prompt.includes('Produce a unified-diff patch')) {
       content = [
         'diff --git a/src/App.tsx b/src/App.tsx',
@@ -224,6 +236,25 @@ try {
     assert.match(readFileSync(join(tempDir, 'src', 'App.tsx'), 'utf8'), /Playable demo/);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  const failingValidationDir = mkdtempSync(join(tmpdir(), 'openharness-execute-failure-detail-'));
+  try {
+    mkdirSync(join(failingValidationDir, 'src'), { recursive: true });
+    writeFileSync(join(failingValidationDir, 'src', 'App.tsx'), 'export default function App() { return null; }\n');
+
+    const writeConfig: StoredConfig = { ...config, trustMode: 'workspace-write' };
+    const failedResult = await runOrchestratorPipeline(
+      route,
+      'Force a failing validation detail.',
+      writeConfig,
+      failingValidationDir,
+    );
+
+    assert.equal(failedResult.ok, false, 'failed validation should not be marked delivered');
+    assert.match(failedResult.finalText, /Failure detail: Browser smoke: missing visible HUD after keyboard input/i);
+  } finally {
+    rmSync(failingValidationDir, { recursive: true, force: true });
   }
 
   const artifactDir = mkdtempSync(join(tmpdir(), 'openharness-artifact-proof-'));

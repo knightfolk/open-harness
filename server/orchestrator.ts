@@ -10,7 +10,7 @@ import type { RouteDecision } from './router';
 import type { StoredConfig } from './config';
 import type { HarnessRunStep } from './runTrace';
 import { applyPatch } from './patchApply';
-import { runValidation, type ValidationCommandResult } from './benchRuns';
+import { runValidation, summarizeValidationFailure, type ValidationCommandResult } from './benchRuns';
 import { checkCommandPolicy, type TrustMode } from './toolPolicy';
 import { existsSync, statSync } from 'fs';
 import { extname, isAbsolute, join } from 'path';
@@ -1630,6 +1630,9 @@ function executeProof(
   if (validationResults.length > 0) {
     for (const result of validationResults) {
       lines.push(`- Validation ${result.passed ? 'passed' : 'failed'}: ${result.command}`);
+      if (!result.passed) {
+        lines.push(`- Failure detail: ${summarizeValidationFailure([result])}`);
+      }
     }
   } else {
     lines.push('- Validation did not run.');
