@@ -1126,17 +1126,19 @@ export function normalizeExecuteFinalOutput(args: {
     sections.push('');
   }
   if (args.plannerText?.trim()) {
-    sections.push('### Plan');
-    sections.push(args.plannerText.trim());
+    sections.push('### Phase Summaries');
+    sections.push(`- Plan: ${summarizeExecutePhaseText(args.plannerText)}`);
     sections.push('');
   }
   if (args.implementationText?.trim()) {
-    sections.push('### Implementation');
-    sections.push(args.implementationText.trim());
+    if (!args.plannerText?.trim()) {
+      sections.push('### Phase Summaries');
+    }
+    sections.push(`- Implementation: ${summarizeExecutePhaseText(args.implementationText)}`);
     sections.push('');
   }
   sections.push('### Review');
-  sections.push(args.reviewText?.trim() || 'Review did not produce a usable result.');
+  sections.push(args.reviewText?.trim() ? summarizeExecutePhaseText(args.reviewText) : 'Review did not produce a usable result.');
   sections.push('');
   sections.push('### Residual Risk');
   sections.push(residualRisk.map((line) => `- ${line}`).join('\n'));
@@ -1149,6 +1151,26 @@ export function normalizeExecuteFinalOutput(args: {
     : 'proposal only; no applied-and-validated proof yet'}*`);
 
   return sections.join('\n');
+}
+
+function summarizeExecutePhaseText(text: string, maxChars = 360): string {
+  const cleaned = sanitizeAgentOutput(text || '')
+    .replace(/```[\s\S]*?```/g, (block) => {
+      const firstLine = block.split('\n')[0].replace(/^```/, '').trim();
+      return firstLine ? `[${firstLine} block omitted from summary]` : '[code block omitted from summary]';
+    })
+    .split('\n')
+    .map((line) => line
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/^\s*(?:[-*]|\d+[).])\s*/, '')
+      .trim())
+    .filter(Boolean)
+    .filter((line) => !/^(?:plan|implementation|review|summary|findings?)$/i.test(line))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return 'No usable summary captured.';
+  return cleaned.length > maxChars ? `${cleaned.slice(0, maxChars - 1).trimEnd()}…` : cleaned;
 }
 
 function buildExecuteResidualRisk(args: {

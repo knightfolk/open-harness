@@ -702,13 +702,25 @@ function testExecuteOutputNormalization() {
       '- Applied-and-validated proof is available for human testing.',
     ].join('\n'),
     plannerText: 'Inspect the target files, then make the smallest change.',
-    implementationText: 'Changed src/components/ArtifactDrawer.tsx.',
-    reviewText: 'No blockers found.',
+    implementationText: [
+      '## Implementation',
+      'Changed src/components/ArtifactDrawer.tsx.',
+      '```diff',
+      'diff --git a/src/components/ArtifactDrawer.tsx b/src/components/ArtifactDrawer.tsx',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '```',
+    ].join('\n'),
+    reviewText: '## Findings\n\nNo blockers found.',
   });
 
   assert.match(shipped, /^## Delivered/m, 'proven execute output should lead with delivered status');
   assert.match(shipped, /### Delivery Status\nDelivered with applied-and-validated proof\./m);
   assert.match(shipped, /### Changed Files and Proof\n- Direct artifact file writes were used\./m);
+  assert.match(shipped, /### Phase Summaries\n- Plan: Inspect the target files, then make the smallest change\./m);
+  assert.match(shipped, /- Implementation: Changed src\/components\/ArtifactDrawer\.tsx\. \[diff block omitted from summary\]/m);
+  assert.doesNotMatch(shipped, /diff --git/, 'execute report should keep raw patch details out of the main answer');
   assert.match(shipped, /### Review\nNo blockers found\./m);
   assert.match(shipped, /### Residual Risk\n- No additional residual risk was detected beyond normal human review\./m);
 

@@ -88,6 +88,8 @@ The durable assistant message still stores only the final answer. Reasoning-capa
 
 Review and investigation runs can also attach structured artifacts to the final answer. Evidence and review findings stay collapsed by default, while file, line, severity, evidence, and suggested action metadata remain available for inspection in the artifact drawer when the model output includes those signals.
 
+Execute-mode reports lead with delivery status, changed-file proof, concise phase summaries, review outcome, and residual risk so raw planner or patch transcripts do not crowd the final answer.
+
 ## Architecture
 
 ```text
