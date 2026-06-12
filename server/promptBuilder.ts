@@ -103,11 +103,15 @@ const OUTPUT_STYLE_CONTRACTS: Record<string, Omit<OutputStyleTrace, 'role' | 'so
   coder: {
     id: 'implementation-report',
     label: 'Implementation report',
-    mustHave: ['changed files or delivered answer', 'validation proof', 'remaining risk'],
+    mustHave: ['changed files or delivered answer', 'validation proof when work ran', 'remaining risk', 'concise isolated-snippet answer'],
     contract: [
       'Output contract: lead with what changed or what answer is ready.',
       'For implementation work, include changed files, validation proof, and remaining risk.',
       'If no files were changed or validation did not run, say that plainly before next steps.',
+      'For isolated code questions or explanations, lead with the finding or answer, include the minimal corrected snippet when useful, and stay concise.',
+      'If the user asks for findings first, start with a "Findings" heading before any explanation.',
+      'For isolated correctness prompts, do not include style nits unless they affect behavior or the user asks for style review.',
+      'Do not add repo-specific claims, lint claims, broad defensive rewrites, or extra issues unless the user asked for depth or tool evidence proves them.',
     ].join(' '),
   },
   planner: {

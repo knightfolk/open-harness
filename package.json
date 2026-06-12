@@ -23,7 +23,7 @@
     "test:ship-readiness": "tsx scripts/test-ship-readiness.ts",
     "ship:check": "tsx scripts/run-ship-readiness.ts",
     "smoke:standalone-game-browser": "node scripts/smoke-standalone-game-browser.mjs",
-    "ship:check:neon-decade": "npm run test:neon-decade-descent && tsx scripts/run-ship-readiness.ts neon-decade-descent && npm run smoke:standalone-game-browser -- neon-decade-descent",
+    "ship:check:neon-decade": "npm run test:neon-decade-descent -- ${OPENHARNESS_NEON_DECADE_DIR:-../neon-decade-descent} && tsx scripts/run-ship-readiness.ts ${OPENHARNESS_NEON_DECADE_DIR:-../neon-decade-descent} && npm run smoke:standalone-game-browser -- ${OPENHARNESS_NEON_DECADE_DIR:-../neon-decade-descent}",
     "automation:model-ranking-token-spend": "tsx scripts/run-model-ranking-token-spend-automation.ts",
     "test:planning-room-failure-hygiene": "tsx scripts/test-planning-room-failure-hygiene.ts",
     "test:session-persistence": "tsx scripts/test-session-persistence-regression.ts",

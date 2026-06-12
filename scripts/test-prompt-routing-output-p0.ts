@@ -7,9 +7,10 @@ import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
-import { buildEvidenceArtifact, buildReviewFindingsArtifact, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { buildComparisonArtifact, buildEvidenceArtifact, buildReviewFindingsArtifact, extractComparisonSubject, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
 import { filterMonologue, normalizeDirectAnswer, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
+import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from '../server/sessionGoals';
 
 function testPromptAssemblyMetadata() {
   const withoutMetadata = buildPromptForModel({
@@ -39,10 +40,19 @@ function testPromptAssemblyMetadata() {
   assert.match(withoutMetadata.systemPrompt, /If evidence is missing, ask for the needed context or label the statement as an assumption/i);
   const coderOutputStyle = withoutMetadata.assembly.sections.find((section) => section.id === 'output-style');
   assert.match(coderOutputStyle?.preview || '', /changed files, validation proof, and remaining risk/i);
+  assert.match(coderOutputStyle?.preview || '', /isolated code questions or explanations/i);
+  assert.match(coderOutputStyle?.preview || '', /start with a "Findings" heading/i);
+  assert.match(coderOutputStyle?.preview || '', /do not include style nits unless they affect behavior/i);
+  assert.match(coderOutputStyle?.preview || '', /Do not add repo-specific claims, lint claims, broad defensive rewrites, or extra issues/i);
   assert.match(withoutMetadata.systemPrompt, /changed files, validation proof, and remaining risk/i);
   assert.equal(withoutMetadata.assembly.outputStyle.id, 'implementation-report');
   assert.equal(withoutMetadata.assembly.outputStyle.source, 'promptBuilder');
-  assert.deepEqual(withoutMetadata.assembly.outputStyle.mustHave, ['changed files or delivered answer', 'validation proof', 'remaining risk']);
+  assert.deepEqual(withoutMetadata.assembly.outputStyle.mustHave, [
+    'changed files or delivered answer',
+    'validation proof when work ran',
+    'remaining risk',
+    'concise isolated-snippet answer',
+  ]);
 
   const minimalPrompt = buildPromptForModel({
     modelId: 'phi-4-mini',
@@ -65,6 +75,28 @@ function testPromptAssemblyMetadata() {
   assert.match(reviewerPrompt.systemPrompt, /findings first, ordered by severity/i);
   assert.equal(reviewerPrompt.assembly.outputStyle.id, 'code-review-findings');
   assert.ok(reviewerPrompt.assembly.outputStyle.mustHave.includes('severity order'));
+}
+
+function testSessionGoalCommands() {
+  const session = { goal: null as any, updatedAt: '2026-06-12T00:00:00.000Z' };
+  const command = parseGoalCommand('/goal Improve multi-model output convergence');
+  assert.deepEqual(command, { action: 'set', objective: 'Improve multi-model output convergence' });
+  const started = applyGoalCommand(session, command!, '2026-06-12T01:00:00.000Z');
+  assert.match(started, /^## Goal Started/m);
+  assert.equal(session.goal?.status, 'active');
+  assert.equal(session.goal?.objective, 'Improve multi-model output convergence');
+  assert.match(formatGoalForPrompt(session.goal) || '', /Active Session Goal/);
+  assert.match(formatGoalForPrompt(session.goal) || '', /Improve multi-model output convergence/);
+
+  const status = applyGoalCommand(session, parseGoalCommand('/goal status')!, '2026-06-12T01:01:00.000Z');
+  assert.match(status, /Status: active/);
+  const done = applyGoalCommand(session, parseGoalCommand('/goal done')!, '2026-06-12T01:02:00.000Z');
+  assert.match(done, /^## Goal Completed/m);
+  assert.equal(session.goal?.status, 'complete');
+  assert.equal(formatGoalForPrompt(session.goal), undefined, 'completed goals should not keep steering future prompts');
+  const cleared = applyGoalCommand(session, parseGoalCommand('/goal clear')!, '2026-06-12T01:03:00.000Z');
+  assert.match(cleared, /^## Goal Cleared/m);
+  assert.equal(session.goal, null);
 }
 
 function testOutputStyleRunTraceMetadata() {
@@ -738,6 +770,12 @@ function testExecuteOutputNormalization() {
 }
 
 function testCompareOutputNormalization() {
+  assert.equal(
+    extractComparisonSubject('Compare outputs for this prompt: What is wrong with `function sum(a,b){ return a - b }`?'),
+    'What is wrong with `function sum(a,b){ return a - b }`?',
+    'compare mode should run candidate models on the embedded prompt, not the meta-comparison request',
+  );
+
   const judged = normalizeCompareFinalOutput({
     modelLabels: 'fast-model: OK, strong-model: OK',
     judgeOk: true,
@@ -762,6 +800,18 @@ function testCompareOutputNormalization() {
   assert.doesNotMatch(judged, /diff --git/, 'compare verdict should summarize raw code blocks instead of dumping them first');
   assert.match(judged, /Raw model outputs are summarized; inspect phase artifacts for full response text when needed\./);
 
+  const jsonJudged = normalizeCompareFinalOutput({
+    modelLabels: 'a: OK, b: OK',
+    judgeOk: true,
+    judgeText: '```json\n{"recommendation":"Choose b","reason":"It is more concise and keeps the corrected snippet."}\n```',
+    responses: [
+      { model: 'a', ok: true, text: 'Verbose but correct return a + b.' },
+      { model: 'b', ok: true, text: 'Findings first and return a + b.' },
+    ],
+  });
+  assert.match(jsonJudged, /### Verdict\nChoose b It is more concise/m);
+  assert.doesNotMatch(jsonJudged, /\[json block omitted\]/);
+
   const partial = normalizeCompareFinalOutput({
     modelLabels: 'fast-model: OK, broken-model: FAILED',
     judgeOk: false,
@@ -776,6 +826,21 @@ function testCompareOutputNormalization() {
   assert.match(partial, /Judge phase failed: provider unavailable/);
   assert.match(partial, /\| broken-model \| Failed \| No usable response\. \|/);
   assert.match(partial, /Fewer than two models produced usable responses/);
+
+  const artifact = buildComparisonArtifact({
+    task: 'Compare the same bug-fix prompt across models.',
+    judgeOk: true,
+    judgeText: 'The strong model should win because it is more specific.',
+    responses: [
+      { model: 'fast-model', ok: true, text: 'Correct and concise answer with return a + b.' },
+      { model: 'strong-model', ok: true, text: 'Correct, grounded, and includes return a + b with validation caveats.' },
+    ],
+  });
+  assert.equal(artifact.type, 'comparison');
+  assert.match(artifact.title, /^Comparison:/);
+  assert.equal(artifact.data.modelResults.length, 2);
+  assert.ok(artifact.data.convergence.some((item) => /corrected snippet/i.test(item)));
+  assert.match(artifact.data.recommendation, /strong model should win/i);
 }
 
 function testEvidenceArtifactExtraction() {
@@ -870,6 +935,7 @@ function testDirectAnswerNormalization() {
 }
 
 testPromptAssemblyMetadata();
+testSessionGoalCommands();
 testOutputStyleRunTraceMetadata();
 testBoundedReviewRouting();
 testDirectAnswerNoRegression();

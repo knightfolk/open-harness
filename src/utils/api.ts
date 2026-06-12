@@ -41,6 +41,14 @@ export interface HarnessRun {
   steps: HarnessRunStep[];
 }
 
+export interface SessionGoal {
+  objective: string;
+  status: 'active' | 'complete';
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
 export interface PromptAssemblySection {
   id: string;
   label: string;
@@ -132,6 +140,23 @@ export interface ReviewFindingsArtifactData {
   rawMarkdown: string;
 }
 
+export interface ComparisonModelResult {
+  modelId: string;
+  status: 'complete' | 'error';
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+}
+
+export interface ComparisonArtifactData {
+  task: string;
+  recommendation: string;
+  convergence: string[];
+  divergences: string[];
+  modelResults: ComparisonModelResult[];
+  rawJudgeMarkdown: string;
+}
+
 export type WorkProductArtifact =
   | {
   id: string;
@@ -156,6 +181,14 @@ export type WorkProductArtifact =
   createdAt: string;
   summary: string;
   data: ReviewFindingsArtifactData;
+}
+  | {
+  id: string;
+  type: 'comparison';
+  title: string;
+  createdAt: string;
+  summary: string;
+  data: ComparisonArtifactData;
 };
 
 export type HarnessRunStep =
@@ -205,6 +238,7 @@ export interface SessionDetail {
   createdAt: string;
   updatedAt: string;
   kind?: 'main' | 'side-chat';
+  goal?: SessionGoal | null;
 }
 
 export interface MessageInfo {

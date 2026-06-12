@@ -54,7 +54,8 @@ import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
 import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins } from './promptPlugins';
-import type { PersistedSession } from './sessionStore';
+import type { PersistedSession, SessionGoal } from './sessionStore';
+import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from './sessionGoals';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
 import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './streamCleaner';
@@ -263,6 +264,7 @@ interface SessionRow {
   createdAt: string;
   updatedAt: string;
   kind?: SessionKind;
+  goal?: SessionGoal | null;
 }
 
 interface MessageRow {
@@ -727,8 +729,8 @@ app.get('/api/sessions', (_req, res) => {
 app.get('/api/sessions/:id', (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
-  const { id, title, workingDir, messages, createdAt, updatedAt, kind } = session;
-  res.json({ id, title, workingDir, messages, createdAt, updatedAt, kind });
+  const { id, title, workingDir, messages, createdAt, updatedAt, kind, goal } = session;
+  res.json({ id, title, workingDir, messages, createdAt, updatedAt, kind, goal: goal || null });
 });
 
 app.post('/api/sessions', (req, res) => {
@@ -751,6 +753,7 @@ app.post('/api/sessions', (req, res) => {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     kind,
+    goal: null,
   };
   sessions.set(session.id, session);
   sessionStore.saveSession(session);
@@ -2692,6 +2695,21 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
+  const goalCommand = parseGoalCommand(content);
+  if (goalCommand) {
+    const assistantId = uuid();
+    const goalResponse = applyGoalCommand(session, goalCommand);
+    sessionStore.saveSession(session);
+    writeSSE(res, 'user_message', userMsg);
+    writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
+    await streamTextSSE(res, 'text', goalResponse);
+    writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: goalResponse });
+    persistAssistantMessage(session, assistantId, goalResponse);
+    writeSSE(res, 'done', {});
+    res.end();
+    return;
+  }
+
   const requestController = new AbortController();
   let streamFinished = false;
   const sseStartedAt = Date.now();
@@ -2742,6 +2760,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   writeSSE(res, 'assistant_start', { id: assistantId, role: 'assistant' });
 
   const requestedModel = requestedModelOverride || getActiveModel();
+  const activeGoalPrompt = formatGoalForPrompt(session.goal);
   const workspaceMismatch = openHarnessWorkspaceMismatch(content, session.workingDir);
   if (workspaceMismatch) {
     const guardRun = createHarnessRun({
@@ -2898,9 +2917,11 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       );
       if (orchestrationToolPolicy.reason) console.log('[trust]' + orchestrationToolPolicy.reason);
 
-      const orchestrationContent = sideChatPromptContext
-        ? `${sideChatPromptContext}\n\n## Current Side Chat User Request\n${content}`
-        : content;
+      const orchestrationContent = [
+        activeGoalPrompt,
+        sideChatPromptContext ? `${sideChatPromptContext}\n\n## Current Side Chat User Request` : undefined,
+        content,
+      ].filter(Boolean).join('\n\n');
       const orchResult = await runOrchestratorPipeline(route, orchestrationContent, appConfig, session.workingDir || undefined, {
         onStep: (step) => emitVisibleStep(step),
         signal: requestController.signal,
@@ -3637,6 +3658,7 @@ async function streamModel(
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
     projectProfileSummary: [
+      formatGoalForPrompt(session.goal),
       projectProfile ? formatProjectProfileForPrompt(projectProfile) : undefined,
       session.workingDir ? projectMemory.formatMemoryForPrompt(session.workingDir) : undefined,
       orchestrationInstruction(route),

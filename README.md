@@ -131,6 +131,12 @@ npm run smoke:docker-ui
 npm run smoke:ui-clicks
 ```
 
+The standalone Neon Decade Descent browser game used for human-facing artifact checks lives outside this repository at `../neon-decade-descent` by default, so it is not uploaded with OpenHarness. To run its checks from this repo, keep the folder beside `OpenHarness` or set `OPENHARNESS_NEON_DECADE_DIR` to its absolute path, then run:
+
+```bash
+npm run ship:check:neon-decade
+```
+
 For runtime sanity:
 
 ```bash

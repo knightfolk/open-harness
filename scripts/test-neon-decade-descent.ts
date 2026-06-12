@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import vm from 'node:vm';
 
 type Listener = () => void;
@@ -86,9 +87,12 @@ const context = {
   },
 };
 
+const gameDir = resolve(process.argv[2] || process.env.OPENHARNESS_NEON_DECADE_DIR || '../neon-decade-descent');
+const gameScript = resolve(gameDir, 'game.js');
+
 vm.createContext(context);
-vm.runInContext(readFileSync('neon-decade-descent/game.js', 'utf8'), context, {
-  filename: 'neon-decade-descent/game.js',
+vm.runInContext(readFileSync(gameScript, 'utf8'), context, {
+  filename: gameScript,
 });
 
 const api = (context.window as any).neonDecadeDescent;

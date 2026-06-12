@@ -1020,10 +1020,23 @@ async function runInvestigatePipeline(
 
   const ok = exploreArtifact?.status === 'complete';
   if (!ok) {
+    const failureReason = exploreArtifact?.error
+      || phases.find((phase) => phase.status === 'error')?.summary
+      || 'Explorer did not complete.';
     return {
-      finalText: `Investigation failed: ${exploreArtifact?.error || 'unknown error'}`,
+      finalText: [
+        `Investigation failed: ${failureReason}`,
+        '',
+        '### Phase Issues',
+        ...(
+          phases.length > 0
+            ? phases.map((phase) => `- ${phase.label}: ${phase.summary}`)
+            : ['- No phase details were recorded.']
+        ),
+      ].join('\n'),
       phases,
       ok,
+      error: failureReason,
     };
   }
 
@@ -1403,6 +1416,7 @@ async function runComparePipeline(
   callbacks: OrchestrationCallbacks = {},
 ): Promise<OrchestrationResult> {
   const phases: OrchestrationPhase[] = [];
+  const comparisonSubject = extractComparisonSubject(userMessage);
 
   // Run each suggested model independently, then judge
   // We use the first two non-duplicate suggestedModels, or fall back to
@@ -1424,7 +1438,9 @@ async function runComparePipeline(
       `## Comparison Request`,
       userMessage,
       '',
-      `Answer the above using your best judgment.`,
+      comparisonSubject !== userMessage
+        ? [`## Candidate Task`, comparisonSubject, '', `Answer the candidate task above. Do not compare models in this phase; produce your own best answer.`].join('\n')
+        : `Answer the above using your best judgment.`,
       `Ground claims in the request and any available workspace/tool evidence. Mark unsupported claims as assumptions.`,
       workingDir ? `Working directory: ${workingDir}` : '',
     ].filter(Boolean).join('\n');
@@ -1467,6 +1483,7 @@ async function runComparePipeline(
     `## Comparison Request`,
     userMessage,
     '',
+    comparisonSubject !== userMessage ? ['## Candidate Task That Each Model Answered', comparisonSubject, ''].join('\n') : '',
     `## Model Responses`,
     ...responses.map((r) => [
       `### ${r.model}`,
@@ -1481,10 +1498,11 @@ async function runComparePipeline(
   ].join('\n');
 
   try {
+    const judgeModel = resolveAgentModel(config, 'eval-judge', route, targetModels[0]);
     const judgeArt = await runAgentPhase(config, {
       profileId: 'eval-judge',
       prompt: judgePrompt,
-      modelId: config.activeModel || '',
+      modelId: judgeModel,
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
@@ -1493,7 +1511,7 @@ async function runComparePipeline(
     });
     phases.push({
       label: 'judge',
-      modelId: config.activeModel || '',
+      modelId: judgeModel,
       durationMs: judgeArt.durationMs,
       status: judgeArt.status === 'complete' ? 'complete' : 'error',
       artifact: judgeArt,
@@ -1501,6 +1519,12 @@ async function runComparePipeline(
     });
 
     const ok = judgeArt.status === 'complete';
+    const comparisonArtifact = buildComparisonArtifact({
+      task: userMessage,
+      responses,
+      judgeText: judgeArt.response || '',
+      judgeOk: ok,
+    });
     return {
       finalText: normalizeCompareFinalOutput({
         modelLabels,
@@ -1510,15 +1534,23 @@ async function runComparePipeline(
       }),
       phases,
       ok,
+      artifacts: [comparisonArtifact],
     };
   } catch (err: any) {
     // Without judge, keep the result scannable while disclosing that final judgment failed.
     phases.push({
       label: 'judge',
-      modelId: config.activeModel || '',
+      modelId: resolveAgentModel(config, 'eval-judge', route, targetModels[0]),
       durationMs: 0,
       status: 'error',
       summary: `Judge failed: ${err?.message || err}`,
+    });
+    const comparisonArtifact = buildComparisonArtifact({
+      task: userMessage,
+      responses,
+      judgeText: '',
+      judgeOk: false,
+      error: `Judge phase failed: ${err?.message || err}`,
     });
     return {
       finalText: normalizeCompareFinalOutput({
@@ -1531,6 +1563,7 @@ async function runComparePipeline(
       phases,
       ok: false,
       error: `Judge phase failed: ${err?.message || err}`,
+      artifacts: [comparisonArtifact],
     };
   }
 }
@@ -1553,7 +1586,7 @@ export function normalizeCompareFinalOutput(args: {
   sections.push(`Models: ${args.modelLabels}`);
   sections.push('');
   sections.push('### Verdict');
-  sections.push(judge ? summarizeCompareText(judge, 700) : (args.error || 'Judge phase failed before a final recommendation was produced.'));
+  sections.push(judge ? compareVerdictText(judge, 700) : (args.error || 'Judge phase failed before a final recommendation was produced.'));
   sections.push('');
   sections.push('### Model Snapshot');
   sections.push('| Model | Status | Response summary |');
@@ -1577,6 +1610,123 @@ export function normalizeCompareFinalOutput(args: {
   sections.push(`*Comparison complete - ${args.judgeOk ? 'judge synthesized the result' : 'partial result from raw model responses'}*`);
 
   return sections.join('\n');
+}
+
+export function buildComparisonArtifact(args: {
+  task: string;
+  responses: Array<{ model: string; text: string; ok: boolean }>;
+  judgeText?: string;
+  judgeOk: boolean;
+  error?: string;
+}): WorkProductArtifact {
+  const judge = sanitizeAgentOutput(args.judgeText || '').trim();
+  const recommendation = args.judgeOk
+    ? compareVerdictText(judge, 500) || 'No recommendation captured.'
+    : args.error || 'Judge phase did not produce a final recommendation.';
+  const modelResults = args.responses.map((response) => ({
+    modelId: response.model,
+    status: response.ok ? 'complete' as const : 'error' as const,
+    summary: response.ok ? summarizeCompareText(response.text, 240) : 'No usable response.',
+    strengths: response.ok ? compareSignals(response.text, 'strength') : [],
+    weaknesses: response.ok ? compareSignals(response.text, 'weakness') : ['Model did not produce a usable response.'],
+  }));
+  const convergence = computeComparisonConvergence(args.responses);
+  const divergences = computeComparisonDivergences(modelResults);
+  return {
+    id: `comparison-${Date.now().toString(36)}-${simpleHash(args.task + judge + args.responses.map((r) => r.text).join('\n'))}`,
+    type: 'comparison',
+    title: `Comparison: ${oneLine(args.task).slice(0, 70) || 'Model outputs'}`,
+    createdAt: new Date().toISOString(),
+    summary: oneLine(recommendation).slice(0, 220),
+    data: {
+      task: args.task,
+      recommendation,
+      convergence,
+      divergences,
+      modelResults,
+      rawJudgeMarkdown: judge,
+    },
+  };
+}
+
+function compareVerdictText(text: string, maxChars: number): string {
+  const parsed = parseJudgeJson(text);
+  if (parsed) {
+    const parts = [
+      parsed.recommendation || parsed.verdict || parsed.winner,
+      parsed.reason || parsed.rationale || parsed.summary,
+    ].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
+    if (parts.length > 0) return summarizeCompareText(parts.join(' '), maxChars);
+  }
+  return summarizeCompareText(text, maxChars);
+}
+
+function parseJudgeJson(text: string): Record<string, unknown> | null {
+  const candidates = [
+    text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1],
+    text,
+  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0);
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (!trimmed.startsWith('{')) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch {
+      // Keep trying other candidates.
+    }
+  }
+  return null;
+}
+
+function compareSignals(text: string, kind: 'strength' | 'weakness'): string[] {
+  const lines = sanitizeAgentOutput(text)
+    .split('\n')
+    .map((line) => line.replace(/^#{1,6}\s*/, '').replace(/^\s*(?:[-*]|\d+[).])\s*/, '').trim())
+    .filter(Boolean);
+  const pattern = kind === 'strength'
+    ? /\b(?:correct|concise|clear|complete|specific|grounded|good|strong|includes|covers)\b/i
+    : /\b(?:missing|unclear|verbose|wrong|risk|weak|unsupported|omits|fails|lacks)\b/i;
+  return lines.filter((line) => pattern.test(line)).slice(0, 4);
+}
+
+function computeComparisonConvergence(responses: Array<{ model: string; text: string; ok: boolean }>): string[] {
+  const usable = responses.filter((response) => response.ok && response.text.trim());
+  if (usable.length < 2) return ['Not enough successful model outputs to measure convergence.'];
+  const lower = usable.map((response) => response.text.toLowerCase());
+  const signals = [
+    { label: 'corrected snippet', pattern: /return\s+a\s*\+\s*b/ },
+    { label: 'findings-first structure', pattern: /findings?/ },
+    { label: 'concise answer', pattern: /\bconcise|short|brief|minimal\b/ },
+    { label: 'grounded caveats', pattern: /\bassumption|unverified|evidence|claim\b/ },
+  ];
+  const hits = signals
+    .filter((signal) => lower.every((text) => signal.pattern.test(text)))
+    .map((signal) => `All successful models included ${signal.label}.`);
+  return hits.length > 0 ? hits : ['Successful models answered the same prompt but did not share a detected structural signal.'];
+}
+
+function computeComparisonDivergences(results: Array<{ modelId: string; status: 'complete' | 'error'; summary: string; strengths: string[]; weaknesses: string[] }>): string[] {
+  const divergences = results.flatMap((result) => {
+    if (result.status === 'error') return [`${result.modelId} failed to produce a usable response.`];
+    return result.weaknesses.slice(0, 2).map((weakness) => `${result.modelId}: ${weakness}`);
+  });
+  return divergences.length > 0 ? divergences.slice(0, 8) : ['No major divergence was automatically detected; inspect model summaries for nuance.'];
+}
+
+export function extractComparisonSubject(userMessage: string): string {
+  const patterns = [
+    /\bfor this prompt\s*:\s*([\s\S]+)$/i,
+    /\busing this prompt\s*:\s*([\s\S]+)$/i,
+    /\bsame prompt\s*:\s*([\s\S]+)$/i,
+    /\bcompare (?:model )?(?:answers|outputs) (?:for|to)\s*:\s*([\s\S]+)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = userMessage.match(pattern);
+    const subject = match?.[1]?.trim();
+    if (subject && subject.length >= 8) return subject;
+  }
+  return userMessage;
 }
 
 function summarizeCompareText(text: string, maxChars: number): string {

@@ -8,7 +8,7 @@ import electron from 'electron';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
-const projectDir = resolve(args.find((arg) => !arg.startsWith('--')) || 'neon-decade-descent');
+const projectDir = resolve(args.find((arg) => !arg.startsWith('--')) || process.env.OPENHARNESS_NEON_DECADE_DIR || '../neon-decade-descent');
 const json = args.includes('--json');
 const screenshotsDirArg = args.find((arg) => arg.startsWith('--screenshots-dir='));
 const screenshotsDir = screenshotsDirArg ? resolve(screenshotsDirArg.split('=').slice(1).join('=')) : join(projectDir, '.openharness-smoke');

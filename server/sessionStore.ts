@@ -30,7 +30,16 @@ export interface PersistedSession {
   createdAt: string;
   updatedAt: string;
   kind?: SessionKind;
+  goal?: SessionGoal | null;
   version?: number;
+}
+
+export interface SessionGoal {
+  objective: string;
+  status: 'active' | 'complete';
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 }
 
 function redactPersistedValue<T>(value: T): T {

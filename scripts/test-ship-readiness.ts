@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runShipReadiness } from '../server/shipReadiness';
 
-const gameReport = runShipReadiness('neon-decade-descent');
+const gameDir = process.env.OPENHARNESS_NEON_DECADE_DIR || '../neon-decade-descent';
+const gameReport = runShipReadiness(gameDir);
 assert.equal(gameReport.status, 'pass', gameReport.summary);
 assert.equal(gameReport.checks.find((check) => check.id === 'entry-html')?.status, 'pass');
 assert.equal(gameReport.checks.find((check) => check.id === 'local-assets')?.status, 'pass');
@@ -16,7 +17,7 @@ assert.match(
   /keyboard input/i,
 );
 
-const browserSmoke = spawnSync(process.execPath, ['scripts/smoke-standalone-game-browser.mjs', 'neon-decade-descent', '--json'], {
+const browserSmoke = spawnSync(process.execPath, ['scripts/smoke-standalone-game-browser.mjs', gameDir, '--json'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   timeout: 60_000,

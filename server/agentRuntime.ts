@@ -359,6 +359,7 @@ export function startBackgroundAgent(
     } catch (err: any) {
       if (controller.signal.aborted) {
         artifact.status = 'cancelled';
+        artifact.error = 'Agent request aborted';
         recordRoutingAdherenceEvent({
           kind: 'abort',
           phase: 'agent-request',
@@ -589,6 +590,7 @@ export async function runAgentPhase(
   } catch (err: any) {
     if (controller.signal.aborted) {
       artifact.status = 'cancelled';
+      artifact.error = 'Agent request aborted';
       recordRoutingAdherenceEvent({
         kind: 'abort',
         phase: 'agent-request',
