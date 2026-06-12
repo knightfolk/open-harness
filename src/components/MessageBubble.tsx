@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap, FileText, Play } from 'lucide-react';
+import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap, FileText, Play, RefreshCw } from 'lucide-react';
 import type { Message, ToolCall, ProjectProfile, WorkProductArtifact } from '../types';
 import { ToolCallComponent } from './ToolCall';
 import { NextBestActions } from './NextBestActions';
@@ -156,6 +156,20 @@ function executionPromptFromTeamPlan(artifact: WorkProductArtifact): string {
   ].join('\n');
 }
 
+function revisionPromptFromTeamPlan(artifact: WorkProductArtifact): string {
+  return [
+    'Revise this Planning Room team plan.',
+    '',
+    'Use Planning Room mode. Keep the existing plan as context, update only changed sections, preserve unchanged decisions, and call out what changed.',
+    '',
+    `Planning artifact: ${artifact.title}`,
+    `Artifact id: ${artifact.id}`,
+    '',
+    '## Existing Team Plan',
+    artifact.data.rawMarkdown || artifact.summary,
+  ].join('\n');
+}
+
 function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: WorkProductArtifact; onPromote?: (prompt: string) => void }) {
   const participants = artifact.data.participants;
   const completedParticipants = participants.filter((participant) => participant.status === 'complete').length;
@@ -172,14 +186,24 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: WorkProductAr
           <span>{artifact.title}</span>
         </div>
         {onPromote && (
-          <button
-            className="btn btn-secondary btn-small team-plan-promote-btn"
-            onClick={() => onPromote(executionPromptFromTeamPlan(artifact))}
-            title="Start an execute-mode run from this team plan"
-          >
-            <Play size={12} />
-            Execute
-          </button>
+          <div className="team-plan-card-actions">
+            <button
+              className="btn btn-secondary btn-small team-plan-promote-btn"
+              onClick={() => onPromote(revisionPromptFromTeamPlan(artifact))}
+              title="Ask Planning Room to revise only changed sections"
+            >
+              <RefreshCw size={12} />
+              Revise
+            </button>
+            <button
+              className="btn btn-secondary btn-small team-plan-promote-btn"
+              onClick={() => onPromote(executionPromptFromTeamPlan(artifact))}
+              title="Start an execute-mode run from this team plan"
+            >
+              <Play size={12} />
+              Execute
+            </button>
+          </div>
         )}
       </div>
 

@@ -6373,6 +6373,13 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.team-plan-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .team-plan-promote-btn {
   flex: 0 0 auto;
 }

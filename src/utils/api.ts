@@ -1746,6 +1746,7 @@ export async function runBench(params: {
   modelIds: string[];
   suiteId?: string;
   workingDir?: string;
+  includePlanningRoomBaseline?: boolean;
 }): Promise<{ id: string; status: string; total: number }> {
   const res = await fetch(`${API_BASE}/api/bench/run`, {
     method: 'POST',

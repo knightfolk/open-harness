@@ -66,6 +66,8 @@ function sanitizeFilePart(value: string): string {
   return value.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'model';
 }
 
+const PLANNING_ROOM_BENCH_MODEL_ID = 'OpenHarness Planning Room';
+
 interface EstimatedModelUsage {
   inputTokens: number;
   outputTokens: number;
@@ -4572,12 +4574,13 @@ app.get('/api/bench/runs/:id/export', (req, res) => {
 });
 
 app.post('/api/bench/run', async (req, res) => {
-  const { name, taskIds, modelIds, suiteId, workingDir } = req.body as {
+  const { name, taskIds, modelIds, suiteId, workingDir, includePlanningRoomBaseline } = req.body as {
     name?: string;
     taskIds: string[];
     modelIds: string[];
     suiteId?: string;
     workingDir?: string;
+    includePlanningRoomBaseline?: boolean;
   };
 
   if (!taskIds?.length || !modelIds?.length) {
@@ -4598,20 +4601,36 @@ app.post('/api/bench/run', async (req, res) => {
     taskDirs.set(task.id, validated.dir);
   }
 
+  const planningRoomTaskIds = includePlanningRoomBaseline
+    ? new Set(tasks
+      .filter((task) => routeRequest(task.prompt, appConfig.activeModel || modelIds[0] || '', appConfig.roleAssignments || {}).mode === 'plan')
+      .map((task) => task.id))
+    : new Set<string>();
+  const effectiveModelIds = planningRoomTaskIds.size > 0
+    ? [...modelIds, PLANNING_ROOM_BENCH_MODEL_ID]
+    : modelIds;
+
   const run = benchRuns.createBenchRun({
     name: name || `Bench ${new Date().toLocaleDateString()}`,
     suiteId,
     taskIds: tasks.map(t => t.id),
-    modelIds,
+    modelIds: effectiveModelIds,
   });
+  if (planningRoomTaskIds.size > 0) {
+    run.total = (tasks.length * modelIds.length) + planningRoomTaskIds.size;
+    benchRuns.saveBenchRun(run);
+  }
 
   res.status(201).json({ id: run.id, status: 'running', total: run.total });
 
   // Run in background
   const targetDir = targetWorkspace.dir;
 
-  for (const modelId of modelIds) {
-    const resolved = resolveProviderForModel(modelId);
+  for (const modelId of effectiveModelIds) {
+    const isPlanningRoomBaseline = modelId === PLANNING_ROOM_BENCH_MODEL_ID;
+    const resolved = isPlanningRoomBaseline
+      ? { providerId: 'openharness', chatURL: '', apiKey: '' }
+      : resolveProviderForModel(modelId);
     if (!resolved) {
       for (const task of tasks) {
         run.results.push({
@@ -4648,6 +4667,9 @@ app.post('/api/bench/run', async (req, res) => {
     }
 
     for (const task of tasks) {
+      if (isPlanningRoomBaseline && !planningRoomTaskIds.has(task.id)) {
+        continue;
+      }
       const taskDir = taskDirs.get(task.id) || targetDir;
       const startMs = Date.now();
       const startedAt = new Date().toISOString();
@@ -4756,7 +4778,7 @@ app.post('/api/bench/run', async (req, res) => {
         let timeout: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([
           (async () => {
-            benchRoute = routeRequest(task.prompt, modelId, appConfig.roleAssignments || {});
+            benchRoute = routeRequest(task.prompt, isPlanningRoomBaseline ? (appConfig.activeModel || modelIds[0] || '') : modelId, appConfig.roleAssignments || {});
             if (benchRoute.mode !== 'direct') {
               const { tools: orchestrationApiTools, toolServerMap: orchestrationToolServerMap } = gatherMCPToolsForAPI();
               const taskTrustMode = task.trustMode as TrustMode;
@@ -4764,20 +4786,26 @@ app.post('/api/bench/run', async (req, res) => {
               const orchestrationTools = orchestrationApiTools.filter((t: any) =>
                 orchestrationToolPolicy.filteredTools?.includes(t.function?.name || t.name)
               );
-              const benchConfig: typeof appConfig = {
-                ...appConfig,
-                activeModel: modelId,
-                trustMode: taskTrustMode,
-                roleAssignments: {
-                  ...appConfig.roleAssignments,
-                  planner: modelId,
-                  coder: modelId,
-                  reviewer: modelId,
-                  worker: modelId,
-                  reasoner: modelId,
-                  summarizer: modelId,
-                },
-              };
+              const benchConfig: typeof appConfig = isPlanningRoomBaseline
+                ? {
+                  ...appConfig,
+                  activeModel: appConfig.activeModel || modelIds[0] || appConfig.activeModel,
+                  trustMode: taskTrustMode,
+                }
+                : {
+                  ...appConfig,
+                  activeModel: modelId,
+                  trustMode: taskTrustMode,
+                  roleAssignments: {
+                    ...appConfig.roleAssignments,
+                    planner: modelId,
+                    coder: modelId,
+                    reviewer: modelId,
+                    worker: modelId,
+                    reasoner: modelId,
+                    summarizer: modelId,
+                  },
+                };
               const orchResult = await runOrchestratorPipeline(benchRoute, task.prompt, benchConfig, taskDir, {
                 tools: orchestrationTools,
                 signal: timeoutController.signal,

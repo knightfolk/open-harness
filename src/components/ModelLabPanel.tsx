@@ -18,6 +18,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [runName, setRunName] = useState('');
+  const [includePlanningRoomBaseline, setIncludePlanningRoomBaseline] = useState(false);
   const [running, setRunning] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeBenchId, setActiveBenchId] = useState<string | null>(null);
@@ -191,6 +192,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
         taskIds: Array.from(selectedTaskIds),
         modelIds: Array.from(selectedModelIds),
         workingDir: workingDir || undefined,
+        includePlanningRoomBaseline,
       });
       setActiveBenchId(result.id);
       const run = await api.getBenchRun(result.id);
@@ -204,7 +206,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       });
       setRunning(false);
     }
-  }, [selectedTaskIds, selectedModelIds, runName, workingDir]);
+  }, [selectedTaskIds, selectedModelIds, runName, workingDir, includePlanningRoomBaseline]);
 
   const handleSeedTasks = useCallback(async () => {
     try {
@@ -379,6 +381,20 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 
                 {/* Model selection & run */}
                 <ModelSelection models={models} selected={selectedModelIds} onToggle={toggleModel} onSelectAll={selectAllModels} />
+
+                <label style={{ ...checkboxRowStyle(includePlanningRoomBaseline), marginBottom: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={includePlanningRoomBaseline}
+                    onChange={(event) => setIncludePlanningRoomBaseline(event.target.checked)}
+                  />
+                  <div>
+                    <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>Compare Planning Room baseline</div>
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 1 }}>
+                      For plan-mode tasks, add the configured team plan beside the selected single-model runs.
+                    </div>
+                  </div>
+                </label>
 
                 <button
                   onClick={handleBenchRun}
