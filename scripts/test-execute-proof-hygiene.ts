@@ -371,6 +371,8 @@ try {
     assert.match(artifactInitialPrompt, /generated-artifact\/game\.js/);
     assert.match(artifactInitialPrompt, /verify-standalone-artifact-fixture\.mjs/);
     assert.match(artifactInitialPrompt, /run-ship-readiness\.ts/);
+    assert.match(artifactInitialPrompt, /Do not use remote\/CDN asset URLs/i);
+    assert.match(artifactInitialPrompt, /Do not use data: or blob: payloads/i);
     assert.doesNotMatch(artifactInitialPrompt.slice(0, 400), /## Plan/);
     assert.match(artifactResult.finalText, /## Delivered/);
     assert.match(artifactResult.finalText, /Direct artifact file writes were used/i);
@@ -419,6 +421,8 @@ try {
     assert.equal(repairedResult.assistedByFallback, false, 'validation repair should preserve model-authored status');
     assert.match(repairArtifactPrompt, /Artifact Validation Repair/);
     assert.match(repairArtifactPrompt, /Browser smoke: missing visible HUD after keyboard input/i);
+    assert.match(repairArtifactPrompt, /no remote\/CDN src or href values/i);
+    assert.match(repairArtifactPrompt, /no data: or blob: payloads/i);
     assert.match(repairedResult.finalText, /Validation passed: node -e/);
     assert.match(readFileSync(join(repairDir, 'repair-game', 'game.js'), 'utf8'), /Repaired moved/);
   } finally {
