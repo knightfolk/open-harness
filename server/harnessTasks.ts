@@ -321,7 +321,7 @@ export function seedFixtures(workingDir: string): void {
       workingDir,
       setupCommands: ['node scripts/reset-standalone-artifact-fixture.mjs'],
       verificationCommands: [
-        'node scripts/verify-standalone-artifact-fixture.mjs',
+        'node scripts/verify-standalone-artifact-fixture.mjs test-fixtures/standalone-artifact-eval',
         'node --import tsx scripts/run-ship-readiness.ts test-fixtures/standalone-artifact-eval',
       ],
       expectedChangedFiles: [

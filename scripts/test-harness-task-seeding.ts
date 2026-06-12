@@ -44,7 +44,7 @@ try {
   assert.match(parsed.prompt, /no remote\/CDN src or href assets/i);
   assert.match(parsed.prompt, /no data: or blob: payloads/i);
   assert.deepEqual(parsed.verificationCommands, [
-    'node scripts/verify-standalone-artifact-fixture.mjs',
+    'node scripts/verify-standalone-artifact-fixture.mjs test-fixtures/standalone-artifact-eval',
     'node --import tsx scripts/run-ship-readiness.ts test-fixtures/standalone-artifact-eval',
   ]);
   assert.ok(
