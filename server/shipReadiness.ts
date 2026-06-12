@@ -76,13 +76,14 @@ function extractHtmlRefs(html: string): string[] {
   return [...refs];
 }
 
-function extractExternalHtmlRefs(html: string): string[] {
+function extractBlockedStandaloneRefs(html: string): string[] {
   const refs = new Set<string>();
   const attrRe = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
   let match: RegExpExecArray | null;
   while ((match = attrRe.exec(html))) {
     const ref = normalizeLocalRef(match[1].trim());
-    if (/^(?:https?:)?\/\//i.test(ref)) refs.add(ref);
+    if (/^data:,$/i.test(ref)) continue;
+    if (/^(?:https?:)?\/\//i.test(ref) || /^(?:data|blob):/i.test(ref)) refs.add(ref);
   }
   return [...refs];
 }
@@ -179,7 +180,7 @@ export function runShipReadiness(projectDirInput: string): ShipReadinessReport {
   if (hasIndex) {
     const html = readFileSync(indexPath, 'utf8');
     const refs = extractHtmlRefs(html);
-    const externalRefs = extractExternalHtmlRefs(html);
+    const blockedStandaloneRefs = extractBlockedStandaloneRefs(html);
     const missingRefs = refs.filter((ref) => !existsSync(resolve(dirname(indexPath), ref)));
     checks.push(check(
       'local-assets',
@@ -193,11 +194,11 @@ export function runShipReadiness(projectDirInput: string): ShipReadinessReport {
     checks.push(check(
       'standalone-assets',
       'Standalone asset policy',
-      externalRefs.length === 0 ? 'pass' : 'fail',
-      externalRefs.length === 0
-        ? 'HTML does not depend on remote scripts, stylesheets, or media.'
-        : `Remote asset references prevent direct-open standalone shipping: ${externalRefs.join(', ')}`,
-      externalRefs,
+      blockedStandaloneRefs.length === 0 ? 'pass' : 'fail',
+      blockedStandaloneRefs.length === 0
+        ? 'HTML does not depend on remote or embedded data/blob scripts, stylesheets, or media.'
+        : `Remote or embedded asset references prevent inspectable standalone shipping: ${blockedStandaloneRefs.join(', ')}`,
+      blockedStandaloneRefs,
     ));
 
     const hasTitle = /<title>\s*[^<\s][^<]*<\/title>/i.test(html);

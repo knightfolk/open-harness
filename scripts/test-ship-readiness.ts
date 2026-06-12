@@ -64,7 +64,23 @@ try {
   const remoteReport = runShipReadiness(join(fixtureDir, 'remote-assets'));
   assert.equal(remoteReport.status, 'fail', 'remote scripts should block standalone shipping');
   assert.equal(remoteReport.checks.find((check) => check.id === 'standalone-assets')?.status, 'fail');
-  assert.match(remoteReport.checks.find((check) => check.id === 'standalone-assets')?.detail || '', /Remote asset references/);
+  assert.match(remoteReport.checks.find((check) => check.id === 'standalone-assets')?.detail || '', /Remote or embedded asset references/);
+
+  mkdirSync(join(fixtureDir, 'embedded-assets'), { recursive: true });
+  writeFileSync(join(fixtureDir, 'embedded-assets', 'index.html'), [
+    '<!doctype html>',
+    '<html><head><title>Embedded</title><meta name="viewport" content="width=device-width">',
+    '<script src="data:text/javascript,console.log(1)"></script></head>',
+    '<body><main id="game"><span id="hp">HP 1</span><button id="restart">Restart</button></main><script src="game.js"></script></body></html>',
+  ].join('\n'));
+  writeFileSync(join(fixtureDir, 'embedded-assets', 'game.js'), [
+    'document.addEventListener("keydown", () => { document.getElementById("game").textContent = "Moved"; });',
+  ].join('\n'));
+  writeFileSync(join(fixtureDir, 'embedded-assets', 'README.md'), 'Controls: use the keyboard. Tester objective: verify direct-open runtime behavior and restart. '.repeat(4));
+  const embeddedReport = runShipReadiness(join(fixtureDir, 'embedded-assets'));
+  assert.equal(embeddedReport.status, 'fail', 'embedded data scripts should block inspectable standalone shipping');
+  assert.equal(embeddedReport.checks.find((check) => check.id === 'standalone-assets')?.status, 'fail');
+  assert.match(embeddedReport.checks.find((check) => check.id === 'standalone-assets')?.detail || '', /data:text\/javascript/);
 } finally {
   rmSync(fixtureDir, { recursive: true, force: true });
 }
