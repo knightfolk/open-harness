@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap } from 'lucide-react';
-import type { Message, ToolCall, ProjectProfile } from '../types';
+import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap, FileText, Play } from 'lucide-react';
+import type { Message, ToolCall, ProjectProfile, WorkProductArtifact } from '../types';
 import { ToolCallComponent } from './ToolCall';
 import { NextBestActions } from './NextBestActions';
 import { ConfidenceMeter } from './ConfidenceMeter';
@@ -127,6 +127,118 @@ function ToolCallSummary({ toolCalls }: { toolCalls: ToolCall[] }) {
   );
 }
 
+function latestTeamPlanArtifact(message: Message): WorkProductArtifact | null {
+  const artifacts = message.runTrace?.steps
+    .filter((step): step is Extract<NonNullable<Message['runTrace']>['steps'][number], { type: 'artifact' }> => step.type === 'artifact')
+    .map((step) => step.artifact)
+    .filter((artifact) => artifact.type === 'team_plan') || [];
+  return artifacts.at(-1) || null;
+}
+
+function summarizeList(items: string[], limit: number): string[] {
+  return items
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function executionPromptFromTeamPlan(artifact: WorkProductArtifact): string {
+  return [
+    'Execute this Planning Room team plan.',
+    '',
+    'Use EXECUTE mode. Do not stop at a plan. Implement the next sensible phase, validate the result, and report proof.',
+    '',
+    `Planning artifact: ${artifact.title}`,
+    `Artifact id: ${artifact.id}`,
+    '',
+    '## Team Plan',
+    artifact.data.rawMarkdown || artifact.summary,
+  ].join('\n');
+}
+
+function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: WorkProductArtifact; onPromote?: (prompt: string) => void }) {
+  const participants = artifact.data.participants;
+  const completedParticipants = participants.filter((participant) => participant.status === 'complete').length;
+  const phases = summarizeList(artifact.data.executionPhases, 4);
+  const validation = summarizeList(artifact.data.validation, 3);
+  const risks = summarizeList(artifact.data.risks, 2);
+  const deltas = summarizeList(artifact.data.participantDeltas, 3);
+
+  return (
+    <div className="team-plan-card">
+      <div className="team-plan-card-header">
+        <div className="team-plan-card-title">
+          <FileText size={14} />
+          <span>{artifact.title}</span>
+        </div>
+        {onPromote && (
+          <button
+            className="btn btn-secondary btn-small team-plan-promote-btn"
+            onClick={() => onPromote(executionPromptFromTeamPlan(artifact))}
+            title="Start an execute-mode run from this team plan"
+          >
+            <Play size={12} />
+            Execute
+          </button>
+        )}
+      </div>
+
+      <div className="team-plan-recommendation">{artifact.data.recommendation}</div>
+
+      <div className="team-plan-meta">
+        <span>{participants.length} participant{participants.length === 1 ? '' : 's'}</span>
+        <span>{completedParticipants}/{participants.length} complete</span>
+        <span>{artifact.data.executionPhases.length} phase{artifact.data.executionPhases.length === 1 ? '' : 's'}</span>
+      </div>
+
+      {participants.length > 0 && (
+        <div className="team-plan-participants">
+          {participants.map((participant) => (
+            <span key={participant.modelId} className={`team-plan-participant ${participant.status}`}>
+              {participant.modelId}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="team-plan-grid">
+        {phases.length > 0 && (
+          <div className="team-plan-section">
+            <div className="team-plan-section-label">Phases</div>
+            <ol>
+              {phases.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+            </ol>
+          </div>
+        )}
+        {validation.length > 0 && (
+          <div className="team-plan-section">
+            <div className="team-plan-section-label">Validation</div>
+            <ul>
+              {validation.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+        {risks.length > 0 && (
+          <div className="team-plan-section">
+            <div className="team-plan-section-label">Risks</div>
+            <ul>
+              {risks.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+        {deltas.length > 0 && (
+          <div className="team-plan-section">
+            <div className="team-plan-section-label">Deltas</div>
+            <ul>
+              {deltas.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MessageBubble({ message, assistantName, projectProfile, onSendMessage, onRunCommand, onCompareModel, onProposePatch }: Props) {
   const visibleContent = stripThinking(message.content);
   const isStreaming = message.status === 'streaming';
@@ -146,6 +258,10 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
 
   const extractedDiff = useMemo(
     () => isAssistant && !isStreaming ? extractUnifiedDiff(message) : null,
+    [isAssistant, isStreaming, message],
+  );
+  const teamPlanArtifact = useMemo(
+    () => isAssistant && !isStreaming ? latestTeamPlanArtifact(message) : null,
     [isAssistant, isStreaming, message],
   );
 
@@ -213,6 +329,13 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
             <>
               {/* Artifact drawer */}
               <ArtifactDrawer message={message} />
+
+              {teamPlanArtifact && (
+                <TeamPlanArtifactCard
+                  artifact={teamPlanArtifact}
+                  onPromote={onSendMessage}
+                />
+              )}
 
               {/* Prompt microscope */}
               <PromptMicroscope runTrace={message.runTrace} />
