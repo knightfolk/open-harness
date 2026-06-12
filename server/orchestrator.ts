@@ -1501,16 +1501,18 @@ async function runComparePipeline(
     });
 
     const ok = judgeArt.status === 'complete';
-    const header = `## Comparison: ${modelLabels}\n\n`;
     return {
-      finalText: header + (judgeArt.response || 'Comparison failed'),
+      finalText: normalizeCompareFinalOutput({
+        modelLabels,
+        responses,
+        judgeText: judgeArt.response || 'Comparison failed',
+        judgeOk: ok,
+      }),
       phases,
       ok,
     };
   } catch (err: any) {
-    // Without judge, show raw responses
-    const header = `## Comparison (raw): ${modelLabels}\n\n`;
-    const raw = responses.map((r) => `### ${r.model}\n${r.text || '(failed)'}`).join('\n\n');
+    // Without judge, keep the result scannable while disclosing that final judgment failed.
     phases.push({
       label: 'judge',
       modelId: config.activeModel || '',
@@ -1519,7 +1521,13 @@ async function runComparePipeline(
       summary: `Judge failed: ${err?.message || err}`,
     });
     return {
-      finalText: header + raw,
+      finalText: normalizeCompareFinalOutput({
+        modelLabels,
+        responses,
+        judgeText: '',
+        judgeOk: false,
+        error: `Judge phase failed: ${err?.message || err}`,
+      }),
       phases,
       ok: false,
       error: `Judge phase failed: ${err?.message || err}`,
@@ -1528,6 +1536,68 @@ async function runComparePipeline(
 }
 
 // ── Helpers ────────────────────────────────────────────
+
+export function normalizeCompareFinalOutput(args: {
+  modelLabels: string;
+  responses: Array<{ model: string; text: string; ok: boolean }>;
+  judgeText?: string;
+  judgeOk: boolean;
+  error?: string;
+}): string {
+  const judge = sanitizeAgentOutput(args.judgeText || '').trim();
+  const successful = args.responses.filter((response) => response.ok && response.text.trim()).length;
+  const sections: string[] = [];
+
+  sections.push(args.judgeOk ? '## Comparison Result' : '## Comparison Result: Partial');
+  sections.push('');
+  sections.push(`Models: ${args.modelLabels}`);
+  sections.push('');
+  sections.push('### Verdict');
+  sections.push(judge ? summarizeCompareText(judge, 700) : (args.error || 'Judge phase failed before a final recommendation was produced.'));
+  sections.push('');
+  sections.push('### Model Snapshot');
+  sections.push('| Model | Status | Response summary |');
+  sections.push('| --- | --- | --- |');
+  for (const response of args.responses) {
+    const status = response.ok ? 'Complete' : 'Failed';
+    const summary = response.ok
+      ? summarizeCompareText(response.text, 180).replace(/\|/g, '\\|')
+      : 'No usable response.';
+    sections.push(`| ${response.model.replace(/\|/g, '\\|')} | ${status} | ${summary} |`);
+  }
+  sections.push('');
+  sections.push('### Residual Risk');
+  const risk: string[] = [];
+  if (!args.judgeOk) risk.push(args.error || 'Judge phase failed, so this comparison uses model-response summaries without a synthesized winner.');
+  if (successful < 2) risk.push('Fewer than two models produced usable responses, so the comparison is incomplete.');
+  if (risk.length === 0) risk.push('Raw model outputs are summarized; inspect phase artifacts for full response text when needed.');
+  sections.push(risk.map((line) => `- ${line}`).join('\n'));
+  sections.push('');
+  sections.push('---');
+  sections.push(`*Comparison complete - ${args.judgeOk ? 'judge synthesized the result' : 'partial result from raw model responses'}*`);
+
+  return sections.join('\n');
+}
+
+function summarizeCompareText(text: string, maxChars: number): string {
+  const cleaned = sanitizeAgentOutput(text || '')
+    .replace(/```[\s\S]*?```/g, (block) => {
+      const firstLine = block.split('\n')[0].replace(/^```/, '').trim();
+      return firstLine ? `[${firstLine} block omitted]` : '[code block omitted]';
+    })
+    .split('\n')
+    .map((line) => line
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/^\s*(?:[-*]|\d+[).])\s*/, '')
+      .trim())
+    .filter(Boolean)
+    .filter((line) => !/^(?:comparison|analysis|reasoning|model response|summary|verdict)$/i.test(line))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return 'No usable summary captured.';
+  return cleaned.length > maxChars ? `${cleaned.slice(0, maxChars - 1).trimEnd()}…` : cleaned;
+}
 
 function resolveAgentModel(
   config: StoredConfig,

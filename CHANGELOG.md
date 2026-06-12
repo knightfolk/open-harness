@@ -6,3 +6,4 @@
 - Documented the collapsed artifact drawer behavior for review and investigation evidence in the README.
 - Tightened execute-mode final reports so they show delivery status, proof, concise phase summaries, review outcome, and residual risk instead of raw orchestration transcripts.
 - Normalized direct answers so transcript labels, leading process sections, and internal preamble are removed while legitimate first-person answers remain intact.
+- Normalized compare-mode reports so judged and partial comparisons lead with a verdict, compact model snapshot, and residual-risk note instead of raw response dumps.

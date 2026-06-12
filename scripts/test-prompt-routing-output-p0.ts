@@ -7,7 +7,7 @@ import { estimateCostForRanking } from '../server/modelProfiles';
 import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
-import { buildEvidenceArtifact, buildReviewFindingsArtifact, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { buildEvidenceArtifact, buildReviewFindingsArtifact, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
 import { filterMonologue, normalizeDirectAnswer, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
 
@@ -737,6 +737,47 @@ function testExecuteOutputNormalization() {
   assert.match(proposal, /Reviewer output was missing/);
 }
 
+function testCompareOutputNormalization() {
+  const judged = normalizeCompareFinalOutput({
+    modelLabels: 'fast-model: OK, strong-model: OK',
+    judgeOk: true,
+    judgeText: [
+      '## Analysis',
+      'The strong model should win because it named concrete risks and gave a validation path.',
+      '',
+      '```diff',
+      'diff --git a/example b/example',
+      '```',
+    ].join('\n'),
+    responses: [
+      { model: 'fast-model', ok: true, text: 'Fast answer, but it skipped validation details.' },
+      { model: 'strong-model', ok: true, text: 'Strong answer with concrete risks, tradeoffs, and validation proof.' },
+    ],
+  });
+
+  assert.match(judged, /^## Comparison Result/m, 'judge-backed compare output should use a scannable heading');
+  assert.match(judged, /### Verdict\nThe strong model should win/m, 'compare output should lead with judge verdict text');
+  assert.match(judged, /\| Model \| Status \| Response summary \|/m, 'compare output should include a compact model table');
+  assert.match(judged, /\| fast-model \| Complete \| Fast answer/m);
+  assert.doesNotMatch(judged, /diff --git/, 'compare verdict should summarize raw code blocks instead of dumping them first');
+  assert.match(judged, /Raw model outputs are summarized; inspect phase artifacts for full response text when needed\./);
+
+  const partial = normalizeCompareFinalOutput({
+    modelLabels: 'fast-model: OK, broken-model: FAILED',
+    judgeOk: false,
+    error: 'Judge phase failed: provider unavailable',
+    responses: [
+      { model: 'fast-model', ok: true, text: 'Fast answer only.' },
+      { model: 'broken-model', ok: false, text: '' },
+    ],
+  });
+
+  assert.match(partial, /^## Comparison Result: Partial/m, 'judge failure should be disclosed in the main heading');
+  assert.match(partial, /Judge phase failed: provider unavailable/);
+  assert.match(partial, /\| broken-model \| Failed \| No usable response\. \|/);
+  assert.match(partial, /Fewer than two models produced usable responses/);
+}
+
 function testEvidenceArtifactExtraction() {
   const artifact = buildEvidenceArtifact(
     'review authentication',
@@ -847,6 +888,7 @@ testOrchestrationProofFailureBlocksResolvedStatus();
 testBenchChangedFileValidation();
 testInvestigationOutputNormalization();
 testExecuteOutputNormalization();
+testCompareOutputNormalization();
 testEvidenceArtifactExtraction();
 testReviewFindingsArtifactExtraction();
 testStreamCleanerFirstPersonHandling();

@@ -90,6 +90,8 @@ Review and investigation runs can also attach structured artifacts to the final 
 
 Execute-mode reports lead with delivery status, changed-file proof, concise phase summaries, review outcome, and residual risk so raw planner or patch transcripts do not crowd the final answer.
 
+Compare-mode reports lead with a verdict and compact model snapshot, then disclose residual risk when the judge phase or one of the candidate models fails.
+
 Direct single-model answers also get a final cleanup pass that removes transcript labels, leading process sections, and internal preamble while preserving normal first-person answers.
 
 ## Architecture
