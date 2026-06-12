@@ -1820,6 +1820,7 @@ function buildExecuteProofSummary(implementationText: string, applyProof: Execut
   const validationCommandsNamed = extractValidationCommands(implementationText).length > 0
     || /\bvalidation commands?\b/i.test(implementationText);
   const filesChanged = applyProof.applyErrors.length === 0 && applyProof.appliedFiles.length > 0;
+  const validationProofAvailable = applyProof.validationResults.length > 0;
   const validationRan = applyProof.validationResults.length > 0 && applyProof.validationResults.every((result) => result.passed);
   const lines = [
     applyProof.writeToolUsed
@@ -1827,10 +1828,14 @@ function buildExecuteProofSummary(implementationText: string, applyProof: Execut
       : patchProposed
       ? '- Patch proposal detected in implementer output.'
       : '- No unified-diff patch proposal was detected.',
-    validationCommandsNamed
+    validationProofAvailable
       ? validationRan
-        ? '- Validation commands ran successfully.'
-        : '- Validation commands were named, but did not produce passing proof.'
+        ? validationCommandsNamed
+          ? '- Validation commands ran successfully.'
+          : '- OpenHarness validation gates ran successfully.'
+        : validationCommandsNamed
+          ? '- Validation commands were named, but did not produce passing proof.'
+          : '- OpenHarness validation gates ran, but did not produce passing proof.'
       : '- No concrete validation command was detected.',
     ...applyProof.summary.split('\n'),
     filesChanged && validationRan

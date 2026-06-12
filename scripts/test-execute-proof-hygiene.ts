@@ -278,9 +278,6 @@ try {
       artifactContinuationPrompt = fullPrompt;
       content = [
         'Created neon-game/index.html.',
-        '',
-        'Validation commands:',
-        'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'neon-game/game.js\', \'utf8\').includes(\'neonDecadeDescent\')) process.exit(1)"',
       ].join('\n');
     } else if (prompt.includes('Produce a unified-diff patch') && fullPrompt.includes('Force a failing validation detail.')) {
       content = [
@@ -452,7 +449,8 @@ try {
     assert.match(artifactResult.finalText, /openharness artifact manifest check/i);
     assert.match(artifactResult.finalText, /verify-standalone-artifact-fixture\.mjs/i);
     assert.match(artifactResult.finalText, /run-ship-readiness\.ts/i);
-    assert.match(artifactResult.finalText, /Validation passed: node -e/i);
+    assert.match(artifactResult.finalText, /OpenHarness validation gates ran successfully/i);
+    assert.doesNotMatch(artifactResult.finalText, /No concrete validation command was detected/i);
     assert.match(artifactContinuationPrompt, /request more write_file tool calls/i);
     assert.doesNotMatch(artifactContinuationPrompt, /request one read-only tool call/i);
     assert.match(readFileSync(join(artifactDir, 'neon-game', 'index.html'), 'utf8'), /Neon Decade Descent/);
