@@ -13,7 +13,7 @@ import { applyPatch } from './patchApply';
 import { runValidation, summarizeValidationFailure, type ValidationCommandResult } from './benchRuns';
 import { checkCommandPolicy, type TrustMode } from './toolPolicy';
 import { existsSync, statSync } from 'fs';
-import { extname, isAbsolute, join } from 'path';
+import { dirname, extname, isAbsolute, join } from 'path';
 import { fileURLToPath } from 'url';
 
 export interface OrchestrationResult {
@@ -1583,12 +1583,18 @@ async function tryApplyAndValidateExecute(
 ): Promise<ExecuteApplyProof> {
   const trustMode = (config.trustMode || 'workspace-write') as TrustMode;
   const patchText = extractUnifiedDiff(implementationText);
-  const validationCommands = extractValidationCommands(implementationText);
+  const modelValidationCommands = extractValidationCommands(implementationText);
   const canMutate = trustMode === 'workspace-write' || trustMode === 'full-local';
 
   if (!workingDir) {
     return executeProof(false, [], [], [], 'No working directory was available.', options.writeToolUsed);
   }
+  const validationCommands = options.artifactCreation && options.writeToolUsed
+    ? uniqueValidationCommands([
+      ...buildAutomaticArtifactValidationCommands(options.writtenFiles || [], workingDir),
+      ...modelValidationCommands,
+    ])
+    : modelValidationCommands;
   if (!canMutate) {
     return executeProof(false, [], [], [], `Trust mode ${trustMode} does not allow automatic patch application.`, options.writeToolUsed);
   }
@@ -1648,6 +1654,25 @@ function validateArtifactWrites(writtenFiles: string[], taskText: string): Valid
     durationMs: Date.now() - started,
     passed: findings.length === 0,
   }];
+}
+
+function uniqueValidationCommands(commands: string[]): string[] {
+  const unique = new Set<string>();
+  for (const command of commands) {
+    const normalized = command.trim();
+    if (normalized) unique.add(normalized);
+  }
+  return [...unique];
+}
+
+function buildAutomaticArtifactValidationCommands(writtenFiles: string[], workingDir: string): string[] {
+  const indexPath = writtenFiles.find((file) => /(^|\/)index\.html$/i.test(file));
+  if (!indexPath) return [];
+  const targetDir = dirname(isAbsolute(indexPath) ? indexPath : join(workingDir, indexPath));
+  return [
+    `node ${shellQuote(repoScriptPath('verify-standalone-artifact-fixture.mjs'))} ${shellQuote(targetDir)}`,
+    `cd ${shellQuote(repoRootPath())} && node --import tsx ${shellQuote(repoScriptPath('run-ship-readiness.ts'))} ${shellQuote(targetDir)}`,
+  ];
 }
 
 async function runAllowedValidationCommands(

@@ -59,6 +59,78 @@ let partialArtifactRetryPrompt: string;
 let repairArtifactTempDir = '';
 let repairArtifactPrompt: string;
 
+function artifactIndex(title: string): string {
+  return [
+    '<!doctype html>',
+    '<html><head>',
+    `<title>${title}</title>`,
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<link rel="stylesheet" href="styles.css">',
+    '</head><body>',
+    '<main id="game">',
+    '<h1>Neon Decade Descent</h1>',
+    '<p id="hud">HP 10 Score 0 Depth 1 Turn 0</p>',
+    '<canvas id="board" width="320" height="240"></canvas>',
+    '<button id="restart">Restart</button>',
+    '<p>Controls: Arrow keys or WASD. Collect mixtapes, dodge VHS sentries, reach the arcade exit.</p>',
+    '</main>',
+    '<script src="game.js"></script>',
+    '</body></html>',
+  ].join('\n');
+}
+
+const artifactStyles = [
+  'body { margin: 0; min-height: 100vh; background: #050505; color: #00ffff; display: grid; place-items: center; font-family: monospace; }',
+  '#game { width: min(720px, 94vw); display: grid; gap: 12px; }',
+  'canvas { width: 100%; max-width: 640px; border: 2px solid #ff00ff; background: #111; image-rendering: pixelated; }',
+  'button { width: max-content; padding: 8px 12px; background: #ff00ff; color: #050505; border: 0; font-weight: 700; }',
+].join('\n');
+
+const artifactGame = [
+  'const canvas = document.getElementById("board");',
+  'const ctx = canvas.getContext("2d");',
+  'const hud = document.getElementById("hud");',
+  'const player = { x: 1, y: 1, hp: 10 };',
+  'const enemies = [{ x: 4, y: 2, hp: 2, name: "VHS Sentry" }];',
+  'const items = [{ x: 2, y: 1, name: "mixtape powerup" }, { x: 5, y: 4, name: "floppy key" }];',
+  'let score = 0;',
+  'let depth = 1;',
+  'let turn = 0;',
+  'function render() {',
+  '  hud.textContent = `HP ${player.hp} Score ${score} Depth ${depth} Turn ${turn}`;',
+  '  ctx.fillStyle = "#111"; ctx.fillRect(0, 0, canvas.width, canvas.height);',
+  '  ctx.fillStyle = "#00ffff"; ctx.fillRect(player.x * 32, player.y * 32, 28, 28);',
+  '  ctx.fillStyle = "#ff00ff"; for (const enemy of enemies) ctx.fillRect(enemy.x * 32, enemy.y * 32, 28, 28);',
+  '  ctx.fillStyle = "#ffff00"; for (const item of items) ctx.fillRect(item.x * 32 + 8, item.y * 32 + 8, 12, 12);',
+  '}',
+  'function restart() { player.x = 1; player.y = 1; player.hp = 10; score = 0; depth = 1; turn = 0; render(); }',
+  'function move(dx, dy) { player.x = Math.max(0, Math.min(9, player.x + dx)); player.y = Math.max(0, Math.min(6, player.y + dy)); score += 1; turn += 1; render(); }',
+  'document.addEventListener("keydown", (event) => {',
+  '  if (event.key === "r" || event.key === "R") restart();',
+  '  if (event.key === "ArrowRight" || event.key === "d") move(1, 0);',
+  '  if (event.key === "ArrowLeft" || event.key === "a") move(-1, 0);',
+  '  if (event.key === "ArrowDown" || event.key === "s") move(0, 1);',
+  '  if (event.key === "ArrowUp" || event.key === "w") move(0, -1);',
+  '});',
+  'document.getElementById("restart").addEventListener("click", restart);',
+  'window.neonDecadeDescent = { getState: () => ({ player, score, depth, turn, enemies: enemies.length, items: items.length }) };',
+  'render();',
+].join('\n');
+
+const artifactReadme = [
+  '# Neon Decade Descent',
+  '',
+  'Neon Decade Descent is a direct-open standalone 1980s roguelike test artifact about an arcade mall dungeon with VHS sentries, mixtape powerups, floppy-disk keys, neon signage, grid movement, score, HP, depth, turn state, and replay.',
+  '',
+  'Controls: open index.html in a browser, move with Arrow keys or WASD, and press R or the Restart button to begin a new run.',
+  '',
+  'Tester objective: verify that the page loads without a build step, a canvas and HUD are visible, keyboard input changes score or turn state, enemies and items are represented, the 1980s arcade theme is obvious, and restart resets the run. Expected result: this is ready for a human to judge feel and clarity rather than basic functionality.',
+].join('\n');
+
+function toolCall(path: string, content: string): string {
+  return `<tool_call>${JSON.stringify({ name: 'write_file', arguments: { path, content } })}</tool_call>`;
+}
+
 try {
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body || '{}'));
@@ -86,7 +158,7 @@ try {
                   name: 'write_file',
                   arguments: JSON.stringify({
                     path: `${nativeToolTempDir}/native-game/index.html`,
-                    content: '<!doctype html><title>Native Game</title><link rel="stylesheet" href="styles.css"><main id="game">Native game</main><script src="game.js"></script>',
+                    content: artifactIndex('Native Game'),
                   }),
                 },
               },
@@ -97,7 +169,7 @@ try {
                   name: 'write_file',
                   arguments: JSON.stringify({
                     path: `${nativeToolTempDir}/native-game/styles.css`,
-                    content: 'body { background: #080808; color: #f5f5f5; font-family: monospace; }',
+                    content: artifactStyles,
                   }),
                 },
               },
@@ -108,7 +180,7 @@ try {
                   name: 'write_file',
                   arguments: JSON.stringify({
                     path: `${nativeToolTempDir}/native-game/game.js`,
-                    content: 'document.addEventListener("keydown", () => { document.getElementById("game").textContent = "Native moved"; });',
+                    content: artifactGame,
                   }),
                 },
               },
@@ -119,7 +191,7 @@ try {
                   name: 'write_file',
                   arguments: JSON.stringify({
                     path: `${nativeToolTempDir}/native-game/README.md`,
-                    content: '# Native Game\n\nOpen index.html and press a key to verify movement for human testing.',
+                    content: artifactReadme,
                   }),
                 },
               },
@@ -135,7 +207,7 @@ try {
         'Created native-game/index.html, native-game/styles.css, native-game/game.js, and native-game/README.md.',
         '',
         'Validation commands:',
-        'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'native-game/game.js\', \'utf8\').includes(\'Native moved\')) process.exit(1)"',
+        'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'native-game/game.js\', \'utf8\').includes(\'neonDecadeDescent\')) process.exit(1)"',
       ].join('\n');
     } else if (
       fullPrompt.includes('Create a playable browser game in partial-game folder.')
@@ -158,10 +230,10 @@ try {
       && !fullPrompt.includes('Tool results:')
     ) {
       content = [
-        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/index.html","content":"<!doctype html><title>Repair Game</title><link rel=\\"stylesheet\\" href=\\"styles.css\\"><main id=\\"game\\">Repair game</main><script src=\\"game.js\\"></script>"}}</tool_call>`,
-        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/styles.css","content":"body { background: #111; color: #0ff; font-family: monospace; }"}}</tool_call>`,
+        toolCall(`${repairArtifactTempDir}/repair-game/index.html`, artifactIndex('Repair Game')),
+        toolCall(`${repairArtifactTempDir}/repair-game/styles.css`, artifactStyles),
         `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/game.js","content":"document.getElementById('game').textContent = 'Broken state';"}}</tool_call>`,
-        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/README.md","content":"# Repair Game\\n\\nOpen index.html and use the keyboard for human testing."}}</tool_call>`,
+        toolCall(`${repairArtifactTempDir}/repair-game/README.md`, artifactReadme),
       ].join('\n');
     } else if (
       fullPrompt.includes('repair-game')
@@ -181,7 +253,7 @@ try {
     ) {
       repairArtifactPrompt = fullPrompt;
       content = [
-        `<tool_call>{"name":"write_file","arguments":{"path":"${repairArtifactTempDir}/repair-game/game.js","content":"document.addEventListener('keydown', () => { document.getElementById('game').textContent = 'Repaired moved'; });"}}</tool_call>`,
+        toolCall(`${repairArtifactTempDir}/repair-game/game.js`, `${artifactGame}\n// Repaired moved`),
       ].join('\n');
     } else if (
       fullPrompt.includes('repair-game')
@@ -197,10 +269,10 @@ try {
     } else if (fullPrompt.includes('Create the requested artifact') && !fullPrompt.includes('Tool results:')) {
       artifactInitialPrompt = fullPrompt;
       content = [
-        `<tool_call>{"name":"write_file","arguments":{"path":"${artifactTempDir}/neon-game/index.html","content":"<!doctype html><title>Playable demo</title><link rel=\\"stylesheet\\" href=\\"styles.css\\"><main id=\\"game\\">Playable demo</main><script src=\\"game.js\\"></script>"}}</tool_call>`,
-        `<tool_call>{"name":"write_file","arguments":{"path":"${artifactTempDir}/neon-game/styles.css","content":"body { background: #111; color: #0ff; font-family: monospace; }"}}</tool_call>`,
-        `<tool_call>{"name":"write_file","arguments":{"path":"${artifactTempDir}/neon-game/game.js","content":"document.addEventListener('keydown', () => { document.getElementById('game').textContent = 'Moved'; });"}}</tool_call>`,
-        `<tool_call>{"name":"write_file","arguments":{"path":"${artifactTempDir}/neon-game/README.md","content":"# Playable Demo\\n\\nOpen index.html and press a key to verify movement for human testing."}}</tool_call>`,
+        toolCall(`${artifactTempDir}/neon-game/index.html`, artifactIndex('Playable Demo')),
+        toolCall(`${artifactTempDir}/neon-game/styles.css`, artifactStyles),
+        toolCall(`${artifactTempDir}/neon-game/game.js`, artifactGame),
+        toolCall(`${artifactTempDir}/neon-game/README.md`, artifactReadme),
       ].join('\n');
     } else if (fullPrompt.includes('Tool results:') && fullPrompt.includes('write_file')) {
       artifactContinuationPrompt = fullPrompt;
@@ -208,7 +280,7 @@ try {
         'Created neon-game/index.html.',
         '',
         'Validation commands:',
-        'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'neon-game/index.html\', \'utf8\').includes(\'Playable demo\')) process.exit(1)"',
+        'node -e "const fs=require(\'fs\'); if (!fs.readFileSync(\'neon-game/game.js\', \'utf8\').includes(\'neonDecadeDescent\')) process.exit(1)"',
       ].join('\n');
     } else if (prompt.includes('Produce a unified-diff patch') && fullPrompt.includes('Force a failing validation detail.')) {
       content = [
@@ -378,10 +450,12 @@ try {
     assert.match(artifactResult.finalText, /Direct artifact file writes were used/i);
     assert.match(artifactResult.finalText, /Workspace write tool used by implementer/i);
     assert.match(artifactResult.finalText, /openharness artifact manifest check/i);
+    assert.match(artifactResult.finalText, /verify-standalone-artifact-fixture\.mjs/i);
+    assert.match(artifactResult.finalText, /run-ship-readiness\.ts/i);
     assert.match(artifactResult.finalText, /Validation passed: node -e/i);
     assert.match(artifactContinuationPrompt, /request more write_file tool calls/i);
     assert.doesNotMatch(artifactContinuationPrompt, /request one read-only tool call/i);
-    assert.match(readFileSync(join(artifactDir, 'neon-game', 'index.html'), 'utf8'), /Playable demo/);
+    assert.match(readFileSync(join(artifactDir, 'neon-game', 'index.html'), 'utf8'), /Neon Decade Descent/);
     assert.match(readFileSync(join(artifactDir, 'neon-game', 'game.js'), 'utf8'), /keydown/);
   } finally {
     rmSync(artifactDir, { recursive: true, force: true });
@@ -420,7 +494,7 @@ try {
     assert.equal(repairedResult.ok, true, `validation repair should recover a complete but failing artifact:\n${repairedResult.finalText}`);
     assert.equal(repairedResult.assistedByFallback, false, 'validation repair should preserve model-authored status');
     assert.match(repairArtifactPrompt, /Artifact Validation Repair/);
-    assert.match(repairArtifactPrompt, /Browser smoke: missing visible HUD after keyboard input/i);
+    assert.match(repairArtifactPrompt, /JavaScript must wire real player input|Includes enemies or hazards/i);
     assert.match(repairArtifactPrompt, /no remote\/CDN src or href values/i);
     assert.match(repairArtifactPrompt, /no data: or blob: payloads/i);
     assert.match(repairedResult.finalText, /Validation passed: node -e/);
@@ -506,7 +580,7 @@ try {
     assert.equal(nativeToolResult.assistedByFallback, false, 'native model-authored artifact writes should not be fallback-assisted');
     assert.match(nativeToolResult.finalText, /Direct artifact file writes were used/i);
     assert.doesNotMatch(nativeToolResult.finalText, /deterministic fallback scaffold/i);
-    assert.match(readFileSync(join(nativeToolDir, 'native-game', 'game.js'), 'utf8'), /Native moved/);
+    assert.match(readFileSync(join(nativeToolDir, 'native-game', 'game.js'), 'utf8'), /neonDecadeDescent/);
   } finally {
     rmSync(nativeToolDir, { recursive: true, force: true });
     nativeToolTempDir = '';
