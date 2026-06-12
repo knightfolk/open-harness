@@ -818,7 +818,11 @@ async function runExecutePipeline(
   }
 
   parts.push(`---`);
-  parts.push(`*Orchestration complete — ${deliveryProven ? 'files changed and validation ran' : 'proposal only; no applied-and-validated proof yet'}*`);
+  parts.push(`*Orchestration complete — ${deliveryProven
+    ? fallbackArtifactUsed
+      ? 'fallback-assisted files changed and validation ran'
+      : 'files changed and validation ran'
+    : 'proposal only; no applied-and-validated proof yet'}*`);
 
   return {
     finalText: parts.join('\n'),
