@@ -82,6 +82,13 @@ const OUTPUT_PROOF_RULES = [
   'For created apps, games, or artifacts, final answers must name the files changed and the exact validation proof or say that validation is still missing.',
 ].join(' ');
 
+const GROUNDING_RULES = [
+  'Stay grounded in provided context, tool results, files, and explicit user instructions.',
+  'For codebase or workspace claims, cite the supporting file path, symbol, command result, or tool output; use line numbers when available.',
+  'If evidence is missing, ask for the needed context or label the statement as an assumption instead of presenting it as fact.',
+  'Do not invent APIs, files, settings, test results, dates, prices, or external facts; verify them with available tools or state that they are unverified.',
+].join(' ');
+
 // ── Main builder ───────────────────────────────────────
 
 /**
@@ -199,11 +206,21 @@ function buildPromptAssembly(
       id: 'safety-rules',
       label: 'Safety and trust rules',
       source: 'untrustedContent',
-      tokenEstimate: estimatePromptTokens(UNTRUSTED_CONTEXT_RULES),
+      tokenEstimate: estimatePromptTokens(`${UNTRUSTED_CONTEXT_RULES} ${GROUNDING_RULES}`),
       included: true,
-      reason: 'Untrusted context boundaries are always included in system prompt rules.',
+      reason: 'Untrusted context boundaries and grounding rules are always included in system prompt rules.',
       redacted: false,
-      preview: UNTRUSTED_CONTEXT_RULES,
+      preview: `${UNTRUSTED_CONTEXT_RULES} ${GROUNDING_RULES}`,
+    },
+    {
+      id: 'grounding',
+      label: 'Grounding contract',
+      source: 'promptBuilder',
+      tokenEstimate: estimatePromptTokens(GROUNDING_RULES),
+      included: true,
+      reason: 'Models should distinguish evidence-backed facts from assumptions and request missing context when needed.',
+      redacted: false,
+      preview: GROUNDING_RULES,
     },
     {
       id: 'task-contract',
@@ -304,8 +321,9 @@ function buildXMLPrompt(
   parts.push('4. Respond in English');
   parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
   parts.push(`6. ${OUTPUT_PROOF_RULES}`);
+  parts.push(`7. ${GROUNDING_RULES}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('7. Follow the most recent trusted user instructions precisely');
+    parts.push('8. Follow the most recent trusted user instructions precisely');
   }
   parts.push('</rules>');
 
@@ -350,8 +368,9 @@ function buildStructuredPrompt(
   parts.push('4. Respond in English');
   parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
   parts.push(`6. ${OUTPUT_PROOF_RULES}`);
+  parts.push(`7. ${GROUNDING_RULES}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('7. Follow the most recent trusted user instructions precisely');
+    parts.push('8. Follow the most recent trusted user instructions precisely');
   }
 
   if (options.taskDescription) {
@@ -382,7 +401,7 @@ function buildConcisePrompt(
     if (options.projectProfileSummary) parts.push(wrapUntrustedBlock('project context', options.projectProfileSummary));
   }
 
-  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES}`);
+  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES}`);
 
   if (options.taskDescription) {
     parts.push(`Task: ${options.taskDescription}`);
@@ -403,9 +422,9 @@ function buildMinimalPrompt(
   const base = personality || rolePrompt;
   if (options.workingDir) {
     const profile = options.projectProfileSummary ? ` ${wrapUntrustedBlock('project context', options.projectProfileSummary)}` : '';
-    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} Be concise.`;
+    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} Be concise.`;
   }
-  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES}`;
+  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES}`;
 }
 
 // ── Tool adaptation ────────────────────────────────────

@@ -28,9 +28,12 @@ function testPromptAssemblyMetadata() {
   assert.ok(withoutMetadata.assembly.sections.length >= 5, 'Prompt assembly should expose ordered sections');
   assert.ok(withoutMetadata.assembly.sections.some((section) => section.id === 'identity'), 'Prompt assembly should include identity metadata');
   assert.ok(withoutMetadata.assembly.sections.some((section) => section.id === 'context-pack'), 'Prompt assembly should include context metadata');
+  assert.ok(withoutMetadata.assembly.sections.some((section) => section.id === 'grounding'), 'Prompt assembly should include grounding metadata');
   assert.ok(withoutMetadata.assembly.totalTokenEstimate > 0, 'Prompt assembly should include token estimate');
   assert.match(withoutMetadata.systemPrompt, /Do not claim you changed files, used tools, ran commands, launched an app, or validated output unless/i);
   assert.match(withoutMetadata.systemPrompt, /When work is not applied and validated, label it as a proposal or next step/i);
+  assert.match(withoutMetadata.systemPrompt, /Stay grounded in provided context, tool results, files, and explicit user instructions/i);
+  assert.match(withoutMetadata.systemPrompt, /If evidence is missing, ask for the needed context or label the statement as an assumption/i);
 
   const minimalPrompt = buildPromptForModel({
     modelId: 'phi-4-mini',
@@ -39,6 +42,7 @@ function testPromptAssemblyMetadata() {
     taskDescription: 'Create a tiny artifact.',
   });
   assert.match(minimalPrompt.systemPrompt, /final answers must name the files changed and the exact validation proof/i);
+  assert.match(minimalPrompt.systemPrompt, /Do not invent APIs, files, settings, test results, dates, prices, or external facts/i);
 }
 
 function testBoundedReviewRouting() {

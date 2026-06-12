@@ -118,6 +118,7 @@ async function runPlanningRoomPipeline(
     ``,
     `You are one participant in a planning room. Produce your own best plan before seeing any peer output.`,
     `Do not write code. Do not propose a patch. Be decisive and practical.`,
+    `Ground recommendations in the provided task, working directory, and any tool evidence. Mark assumptions explicitly.`,
     ``,
     `Return these sections:`,
     `1. Recommendation`,
@@ -380,6 +381,7 @@ async function runExecutePipeline(
       : `Produce a step-by-step implementation plan for the requested change.`,
     `For each step, list the specific files to inspect or modify and the`,
     `validation command that proves the step is complete. Do not write code.`,
+    `Only name files, APIs, or repo behavior when the task, working directory, or tool evidence supports them; otherwise mark them as assumptions to verify.`,
   ].join('\n');
 
   let plannerArtifact: BackgroundAgentArtifact | null = null;
@@ -462,6 +464,7 @@ async function runExecutePipeline(
         `For a new app/game/site, make its own folder, write complete runnable files, and keep dependencies minimal.`,
         `After writing files, list exactly which validation commands should be run to verify correctness and browser ship-readiness.`,
         `If write_file is not available, provide complete file contents and exact paths instead of a vague plan.`,
+        `Do not claim any file exists, command passed, or artifact behavior works unless tool results prove it; otherwise label it as unverified.`,
       ].join('\n')
       : [
         `## Plan`,
@@ -476,6 +479,7 @@ async function runExecutePipeline(
         `Prefer minimal, surgical edits. After the patch, list exactly which validation`,
         `commands should be run to verify correctness.`,
         `If you cannot write files, provide the complete file contents and exact paths.`,
+        `Ground the patch in inspected files and preserve uncertainty for anything not verified by tools or provided context.`,
       ].join('\n'),
   ].filter(Boolean).join('\n');
 
@@ -717,6 +721,8 @@ async function runExecutePipeline(
     `- Severity: blocker, warning, nit, or suggestion`,
     `- A one-line suggested fix`,
     ``,
+    `Only approve behavior that is supported by the implementation text or apply/validation proof.`,
+    `If evidence is incomplete, say what is unverified instead of assuming success.`,
     `If the implementation is correct, state that clearly.`,
   ].join('\n');
 
@@ -861,6 +867,7 @@ async function runInvestigatePipeline(
     `Synthesize findings into a direct answer with risks and next actions.`,
     `If the request is about the codebase, reference concrete code.`,
     `If the request is about the user's question, answer directly.`,
+    `Separate observed evidence from assumptions, and say when more context is needed.`,
   ].filter(Boolean).join('\n');
 
   let exploreArtifact: BackgroundAgentArtifact | null = null;
@@ -919,6 +926,7 @@ async function runInvestigatePipeline(
     `Prioritize bugs, risks, quality gaps, and concrete next actions.`,
     `Keep the final answer readable: use severity labels and short explanations.`,
     `Do not dump raw file inventory. Cite only the file paths needed to support findings.`,
+    `Preserve evidence boundaries: do not promote explorer assumptions into facts, and label any unsupported claim as unverified.`,
     route.role === 'reviewer'
       ? `For audits or reviews, lead with findings ordered by severity, then give a practical path forward.`
       : `For investigations, answer the user's question directly and summarize evidence.`
@@ -998,6 +1006,7 @@ async function runComparePipeline(
       userMessage,
       '',
       `Answer the above using your best judgment.`,
+      `Ground claims in the request and any available workspace/tool evidence. Mark unsupported claims as assumptions.`,
       workingDir ? `Working directory: ${workingDir}` : '',
     ].filter(Boolean).join('\n');
 
@@ -1049,6 +1058,7 @@ async function runComparePipeline(
     `Compare the model outputs above. Call out strengths, weaknesses, risks,`,
     `and a final recommendation. Be specific about what each model did well or poorly.`,
     `If some models failed to produce output, note that as a critical difference.`,
+    `Do not add facts that are absent from the original request or model responses unless you label them as assumptions.`,
   ].join('\n');
 
   try {
