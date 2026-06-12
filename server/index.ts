@@ -3723,6 +3723,7 @@ async function streamModel(
       promptPreview: systemPrompt.slice(0, 500),
       toolCount: filteredMcpTools.length,
       assembly: promptResult.assembly,
+      outputStyle: promptResult.assembly.outputStyle,
     });
   }
 

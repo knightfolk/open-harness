@@ -1,13 +1,36 @@
 import { useState, useMemo } from 'react';
-import { Package, ChevronDown, ChevronRight, Copy, Check, FileCode, Terminal, GitBranch, FileText } from 'lucide-react';
+import { Package, ChevronDown, ChevronRight, Copy, Check, FileCode, Terminal, GitBranch, FileText, Search } from 'lucide-react';
 import type { Message } from '../types';
 
 interface Artifact {
   id: string;
-  type: 'code' | 'diff' | 'command' | 'plan' | 'file-ref';
+  type: 'code' | 'diff' | 'command' | 'plan' | 'evidence' | 'file-ref';
   label: string;
   content: string;
   lang?: string;
+}
+
+function extractNamedSections(content: string, names: string[]): Array<{ name: string; body: string }> {
+  const lines = content.split('\n');
+  const sections: Array<{ name: string; body: string }> = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^#{2,4}\s+(.+?)\s*$/);
+    if (!match) continue;
+
+    const name = match[1].replace(/[*_`]/g, '').trim();
+    if (!names.some((candidate) => candidate.toLowerCase() === name.toLowerCase())) continue;
+
+    const body: string[] = [];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      if (/^#{2,4}\s+/.test(lines[next])) break;
+      body.push(lines[next]);
+    }
+    const trimmed = body.join('\n').trim();
+    if (trimmed) sections.push({ name, body: trimmed });
+  }
+
+  return sections;
 }
 
 function extractArtifacts(message: Message): Artifact[] {
@@ -49,6 +72,16 @@ function extractArtifacts(message: Message): Artifact[] {
     });
   }
 
+  const evidenceSections = extractNamedSections(content, ['Evidence', 'Sources', 'Sources Used', 'Evidence Used']);
+  for (const section of evidenceSections) {
+    artifacts.push({
+      id: `artifact-${idx++}`,
+      type: 'evidence',
+      label: section.name,
+      content: section.body,
+    });
+  }
+
   // Extract file references from content
   const fileRegex = /(?:^|\s)(`[/\w.-]+\.\w+`)/gm;
   const fileRefs = new Set<string>();
@@ -87,6 +120,7 @@ export function ArtifactDrawer({ message }: Props) {
   const diffs = artifacts.filter(a => a.type === 'diff');
   const commands = artifacts.filter(a => a.type === 'command');
   const plans = artifacts.filter(a => a.type === 'plan');
+  const evidence = artifacts.filter(a => a.type === 'evidence');
   const fileRefs = artifacts.filter(a => a.type === 'file-ref');
 
   const iconForType = (type: Artifact['type']) => {
@@ -95,6 +129,7 @@ export function ArtifactDrawer({ message }: Props) {
       case 'diff': return <GitBranch size={12} />;
       case 'command': return <Terminal size={12} />;
       case 'plan': return <FileText size={12} />;
+      case 'evidence': return <Search size={12} />;
       case 'file-ref': return <FileCode size={12} />;
     }
   };
@@ -118,6 +153,7 @@ export function ArtifactDrawer({ message }: Props) {
               diffs.length > 0 && `${diffs.length} diff${diffs.length > 1 ? 's' : ''}`,
               commands.length > 0 && `${commands.length} cmd${commands.length > 1 ? 's' : ''}`,
               plans.length > 0 && `${plans.length} plan${plans.length > 1 ? 's' : ''}`,
+              evidence.length > 0 && `${evidence.length} evidence`,
               fileRefs.length > 0 && `${fileRefs.length} file${fileRefs.length > 1 ? 's' : ''}`,
             ].filter(Boolean).join(', ')}
           </span>

@@ -8,6 +8,7 @@ import { buildPromptForModel } from '../server/promptBuilder';
 import { routeRequest } from '../server/router';
 import { parseToolCallMarkup } from '../server/toolCallMarkup';
 import { normalizeInvestigationFinalOutput } from '../server/orchestrator';
+import { appendRunStep, createHarnessRun } from '../server/runTrace';
 
 function testPromptAssemblyMetadata() {
   const withoutMetadata = buildPromptForModel({
@@ -38,6 +39,9 @@ function testPromptAssemblyMetadata() {
   const coderOutputStyle = withoutMetadata.assembly.sections.find((section) => section.id === 'output-style');
   assert.match(coderOutputStyle?.preview || '', /changed files, validation proof, and remaining risk/i);
   assert.match(withoutMetadata.systemPrompt, /changed files, validation proof, and remaining risk/i);
+  assert.equal(withoutMetadata.assembly.outputStyle.id, 'implementation-report');
+  assert.equal(withoutMetadata.assembly.outputStyle.source, 'promptBuilder');
+  assert.deepEqual(withoutMetadata.assembly.outputStyle.mustHave, ['changed files or delivered answer', 'validation proof', 'remaining risk']);
 
   const minimalPrompt = buildPromptForModel({
     modelId: 'phi-4-mini',
@@ -58,6 +62,39 @@ function testPromptAssemblyMetadata() {
   const reviewerOutputStyle = reviewerPrompt.assembly.sections.find((section) => section.id === 'output-style');
   assert.match(reviewerOutputStyle?.preview || '', /findings first, ordered by severity/i);
   assert.match(reviewerPrompt.systemPrompt, /findings first, ordered by severity/i);
+  assert.equal(reviewerPrompt.assembly.outputStyle.id, 'code-review-findings');
+  assert.ok(reviewerPrompt.assembly.outputStyle.mustHave.includes('severity order'));
+}
+
+function testOutputStyleRunTraceMetadata() {
+  const prompt = buildPromptForModel({
+    modelId: 'claude-sonnet-4.6',
+    role: 'reviewer',
+    workingDir: '/tmp/project',
+    taskDescription: 'Review routed output shape.',
+  });
+  const run = createHarnessRun({
+    sessionId: 'session',
+    userMessageId: 'message',
+    requestedModel: 'Auto',
+    effectiveModel: 'claude-sonnet-4.6',
+    providerId: 'anthropic',
+    role: 'reviewer',
+  });
+  const step = appendRunStep(run, {
+    type: 'prompt_built',
+    promptPreview: prompt.systemPrompt.slice(0, 80),
+    toolCount: 0,
+    assembly: prompt.assembly,
+    outputStyle: prompt.assembly.outputStyle,
+  });
+
+  assert.equal(step.type, 'prompt_built');
+  if (step.type === 'prompt_built') {
+    assert.equal(step.outputStyle?.id, 'code-review-findings', 'prompt_built trace should expose the output style per run');
+    assert.equal(step.assembly?.outputStyle?.id, 'code-review-findings', 'assembly should also carry output style metadata');
+    assert.match(step.outputStyle?.contract || '', /findings first/i);
+  }
 }
 
 function testBoundedReviewRouting() {
@@ -655,6 +692,7 @@ function testInvestigationOutputNormalization() {
 }
 
 testPromptAssemblyMetadata();
+testOutputStyleRunTraceMetadata();
 testBoundedReviewRouting();
 testDirectAnswerNoRegression();
 testRunCheckRouting();

@@ -150,6 +150,8 @@ function assertPromptAssemblyReadiness() {
     assert.equal(prompt.assembly.family, modelCase.expectedFamily, `${modelCase.modelId}: family`);
     assert.equal(prompt.systemInstruction.target, modelCase.expectedTarget, `${modelCase.modelId}: prompt target`);
     assert.ok(prompt.assembly.totalTokenEstimate > 20, `${modelCase.modelId}: token estimate`);
+    assert.equal(prompt.assembly.outputStyle.id, 'code-review-findings', `${modelCase.modelId}: output style id`);
+    assert.ok(prompt.assembly.outputStyle.mustHave.includes('severity order'), `${modelCase.modelId}: review output style must preserve severity order`);
 
     const sectionIds = new Set(prompt.assembly.sections.map((section) => section.id));
     for (const section of REQUIRED_ASSEMBLY_SECTIONS) {

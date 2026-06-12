@@ -37,8 +37,18 @@ export interface PromptAssembly {
   family: string;
   style: ModelPromptConfig['systemPromptStyle'];
   target: 'system-message' | 'anthropic-system' | 'gemini-systemInstruction';
+  outputStyle: OutputStyleTrace;
   sections: PromptAssemblySection[];
   totalTokenEstimate: number;
+}
+
+export interface OutputStyleTrace {
+  id: string;
+  label: string;
+  role: string;
+  source: 'promptBuilder';
+  contract: string;
+  mustHave: string[];
 }
 
 export interface PromptBuildResult {
@@ -89,41 +99,80 @@ const GROUNDING_RULES = [
   'Do not invent APIs, files, settings, test results, dates, prices, or external facts; verify them with available tools or state that they are unverified.',
 ].join(' ');
 
-const OUTPUT_STYLE_CONTRACTS: Record<string, string> = {
-  coder: [
-    'Output contract: lead with what changed or what answer is ready.',
-    'For implementation work, include changed files, validation proof, and remaining risk.',
-    'If no files were changed or validation did not run, say that plainly before next steps.',
-  ].join(' '),
-  planner: [
-    'Output contract: produce an actionable plan, not implementation.',
-    'Include recommendation, success criteria, ordered phases, risks, validation, and open questions.',
-    'For Planning Room work, preserve participant deltas and final decisions.',
-  ].join(' '),
-  reviewer: [
-    'Output contract: findings first, ordered by severity.',
-    'Each finding should name impact, evidence, and a concrete fix; include file and line when known.',
-    'If no issues are found, say that first and then list residual risk or test gaps.',
-  ].join(' '),
-  summarizer: [
-    'Output contract: answer first, then the smallest useful evidence summary.',
-    'Use observed facts from files or tool results for project claims and label assumptions.',
-    'Avoid raw inventories unless the user asked for them.',
-  ].join(' '),
-  reasoner: [
-    'Output contract: give the conclusion first, then a concise rationale and tradeoffs.',
-    'Do not expose hidden reasoning or planning monologue.',
-    'Separate evidence-backed claims from assumptions.',
-  ].join(' '),
-  worker: [
-    'Output contract: report the completed action or blocker directly.',
-    'Include only the proof needed to trust the result.',
-    'Keep the answer short unless the task failed.',
-  ].join(' '),
+const OUTPUT_STYLE_CONTRACTS: Record<string, Omit<OutputStyleTrace, 'role' | 'source'>> = {
+  coder: {
+    id: 'implementation-report',
+    label: 'Implementation report',
+    mustHave: ['changed files or delivered answer', 'validation proof', 'remaining risk'],
+    contract: [
+      'Output contract: lead with what changed or what answer is ready.',
+      'For implementation work, include changed files, validation proof, and remaining risk.',
+      'If no files were changed or validation did not run, say that plainly before next steps.',
+    ].join(' '),
+  },
+  planner: {
+    id: 'plan-artifact',
+    label: 'Plan artifact',
+    mustHave: ['recommendation', 'success criteria', 'ordered phases', 'risks', 'validation', 'open questions'],
+    contract: [
+      'Output contract: produce an actionable plan, not implementation.',
+      'Include recommendation, success criteria, ordered phases, risks, validation, and open questions.',
+      'For Planning Room work, preserve participant deltas and final decisions.',
+    ].join(' '),
+  },
+  reviewer: {
+    id: 'code-review-findings',
+    label: 'Code review findings',
+    mustHave: ['findings first', 'severity order', 'impact', 'evidence', 'concrete fix'],
+    contract: [
+      'Output contract: findings first, ordered by severity.',
+      'Each finding should name impact, evidence, and a concrete fix; include file and line when known.',
+      'If no issues are found, say that first and then list residual risk or test gaps.',
+    ].join(' '),
+  },
+  summarizer: {
+    id: 'investigation-answer',
+    label: 'Answer with evidence',
+    mustHave: ['answer first', 'evidence summary', 'assumptions labeled'],
+    contract: [
+      'Output contract: answer first, then the smallest useful evidence summary.',
+      'Use observed facts from files or tool results for project claims and label assumptions.',
+      'Avoid raw inventories unless the user asked for them.',
+    ].join(' '),
+  },
+  reasoner: {
+    id: 'concise-rationale',
+    label: 'Concise rationale',
+    mustHave: ['conclusion first', 'concise rationale', 'tradeoffs', 'assumptions labeled'],
+    contract: [
+      'Output contract: give the conclusion first, then a concise rationale and tradeoffs.',
+      'Do not expose hidden reasoning or planning monologue.',
+      'Separate evidence-backed claims from assumptions.',
+    ].join(' '),
+  },
+  worker: {
+    id: 'terse-terminal-report',
+    label: 'Terse terminal report',
+    mustHave: ['completed action or blocker', 'minimal proof', 'short answer'],
+    contract: [
+      'Output contract: report the completed action or blocker directly.',
+      'Include only the proof needed to trust the result.',
+      'Keep the answer short unless the task failed.',
+    ].join(' '),
+  },
 };
 
 function outputContractForRole(role: string): string {
-  return OUTPUT_STYLE_CONTRACTS[role] || OUTPUT_STYLE_CONTRACTS.coder;
+  return outputStyleForRole(role).contract;
+}
+
+export function outputStyleForRole(role: string): OutputStyleTrace {
+  const style = OUTPUT_STYLE_CONTRACTS[role] || OUTPUT_STYLE_CONTRACTS.coder;
+  return {
+    ...style,
+    role,
+    source: 'promptBuilder',
+  };
 }
 
 // ── Main builder ───────────────────────────────────────
@@ -207,7 +256,8 @@ function buildPromptAssembly(
   const role = options.role || config.defaultRole || 'coder';
   const rolePrompt = ROLE_PROMPTS[role] || ROLE_PROMPTS.coder;
   const personality = normalizePersonality(options.personality);
-  const outputContract = outputContractForRole(role);
+  const outputStyle = outputStyleForRole(role);
+  const outputContract = outputStyle.contract;
   const sections: PromptAssemblySection[] = [
     {
       id: 'identity',
@@ -296,6 +346,7 @@ function buildPromptAssembly(
     family: config.family,
     style: config.systemPromptStyle,
     target,
+    outputStyle,
     sections,
     totalTokenEstimate: estimatePromptTokens(finalPrompt),
   };

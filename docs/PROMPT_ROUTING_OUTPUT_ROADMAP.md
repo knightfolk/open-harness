@@ -197,12 +197,18 @@ Priority: P1
 
 Goal: Make direct and single-agent outputs feel concise, useful, and native.
 
+Progress:
+- [x] Output style contracts are defined in `server/promptBuilder.ts` and exposed as structured per-run metadata on `prompt_built` trace steps.
+- [x] Prompt Microscope shows Output Style as a dedicated inspector section instead of burying it in generic prompt text.
+- [x] Investigation and review answers can expose collapsed Evidence/Sources artifacts through the artifact drawer without cluttering normal chat.
+- [x] Focused regression coverage pins output-style trace metadata and investigation/review response normalization.
+
 Work:
-- Define output styles for direct answer, code review, investigation, implementation report, learning/explainer, and terse terminal-style output.
-- Make output style a visible per-run setting with model-family rendering support.
+- Define output styles for direct answer, code review, investigation, implementation report, learning/explainer, and terse terminal-style output. **Partially done:** role-backed contracts exist for implementation, plan, review, investigation answer, concise rationale, and terse worker report.
+- Make output style a visible per-run setting with model-family rendering support. **Done for run trace and Prompt Microscope; still open for explicit user-selectable style controls.**
 - Improve stream cleaning so legitimate first-person answers are not stripped while monologue preamble still disappears for non-reasoning models.
 - Add response section normalization after orchestration: findings first for reviews, final answer first for direct, phases and proof for execute.
-- Add "sources used" and "evidence" affordances for investigation responses without cluttering normal chat.
+- Add "sources used" and "evidence" affordances for investigation responses without cluttering normal chat. **Done for markdown Evidence/Sources sections in the collapsed artifact drawer; still open for fully structured source objects.**
 
 Acceptance:
 - Direct answers do not look like orchestration transcripts.

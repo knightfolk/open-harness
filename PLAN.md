@@ -46,13 +46,13 @@ After source code audit, the 6 critical gaps from the review have this status:
 | 1. Orchestrator is docs-only | ✅ DONE | `orchestrator.ts` calls `runAgentPhase()` for execute/investigate/compare |
 | 2. Router is heuristic-only | ✅ DONE | `autoRouter.ts` adds classifier-based model selection |
 | 3. Single-model bottleneck | ✅ DONE | Role buckets select different models per task; Planning Room now runs multiple planners on planning requests |
-| 4. No cost-aware/complexity-aware selection | ❌ **OPEN** | No de-escalation logic; auto-router runs on every task regardless of complexity |
-| 5. No eval feedback loop into routing | ❌ **OPEN** | `EvalSummary.recommendations` exist but are never consumed by routing |
+| 4. No cost-aware/complexity-aware selection | ✅ DONE | `server/router.ts` uses cheap-direct, classifier, and escalated model-selection policies; `server/autoRouter.ts` supports deterministic cheapest/strongest policy gates |
+| 5. No eval feedback loop into routing | ◐ PARTIAL | `server/autoRouter.ts` annotates candidate cards from latest eval recommendations and can auto-adjust threshold from routing history; broader per-task eval dashboard/role suggestion work remains open |
 | 6. "Start with answer" rule fights reasoning | ✅ DONE | `isReasoningModel()` gate at line 2203 of `server/index.ts` |
 
 ### Notes
-- Gap 4 (cost-aware): `autoRouter.ts` has no `skipClassifierForSimpleTasks` or complexity detection. Every task gets classified, even "hello".
-- Gap 5 (eval feedback): `evals.ts` produces `EvalSummary.recommendations` but `autoRouter.ts` and `router.ts` never read them. No API to surface them. No UI to display them.
+- Gap 4 (cost-aware): current code already bypasses classifier for simple low-risk tasks and escalates deep/tool-heavy work via `modelSelectionPolicy`; preserve this behavior in future routing changes.
+- Gap 5 (eval feedback): routing consumes some eval/history signals, but the larger user-facing feedback loop, per-task dashboards, and role-assignment suggestions remain roadmap work.
 - NEXT_SESSION.md has been updated with a consolidated todo addressing all open items.
 
 ### What's Built Well
@@ -83,9 +83,9 @@ After source code audit, the 6 critical gaps from the review have this status:
 
 3. **Single-model bottleneck.** ✅ Addressed for core orchestrated workflows. Execute/investigate/compare use real sub-agent calls, and planning requests now use Planning Room with multiple planner participants when configured.
 
-4. **No cost-aware or complexity-aware selection.** Simple questions use the same model as complex ones. No automatic de-escalation to cheap models for trivial tasks.
+4. **Cost-aware and complexity-aware selection is implemented.** Simple low-risk tasks use cheap-direct without classifier overhead, medium tasks use classifier routing, and deep/tool-heavy work escalates through policy gates.
 
-5. **No eval feedback loop into routing.** The eval harness produces recommendations but nothing consumes them to update routing defaults or role assignments.
+5. **Eval feedback loop into routing is partial.** Candidate cards and threshold adjustment can consume eval/history signals, but user-facing dashboards, per-task recommendations, and role-assignment suggestions remain open.
 
 6. **"Start with answer" rule fights reasoning models.** The monologue prevention instruction (`"Start your response directly with the answer"`) actively harms DeepSeek R1, Qwen3 Thinking, and Grok 4+.
 

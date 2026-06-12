@@ -20,6 +20,7 @@ export function PromptMicroscope({ runTrace }: Props) {
       if (step.type === 'prompt_built') {
         if (step.assembly?.sections?.length) {
           for (const section of step.assembly.sections) {
+            if (section.id === 'output-style') continue;
             if (!section.included && !section.preview) continue;
             out.push({
               id: `assembly:${section.id}`,
@@ -83,6 +84,7 @@ export function PromptMicroscope({ runTrace }: Props) {
   const autoRouterStep = runTrace.steps.find((s): s is Extract<HarnessRunStep, { type: 'auto_router' }> => s.type === 'auto_router');
   const autoRouterScores = sortedCandidateScores(autoRouterStep?.candidateScores);
   const promptStep = runTrace.steps.find((s): s is Extract<HarnessRunStep, { type: 'prompt_built' }> => s.type === 'prompt_built');
+  const outputStyle = promptStep?.outputStyle || promptStep?.assembly?.outputStyle;
   const orchestrationStep = runTrace.steps.find((s): s is Extract<HarnessRunStep, { type: 'orchestration' }> => s.type === 'orchestration');
   const errorSteps = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'error' }> => s.type === 'error');
   const modelRequests = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'model_request' }> => s.type === 'model_request');
@@ -126,6 +128,46 @@ export function PromptMicroscope({ runTrace }: Props) {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Output style */}
+          {outputStyle && (
+            <div className="pm-section">
+              <div className="pm-section-header">
+                <ShieldCheck size={12} />
+                <span>Output Style</span>
+              </div>
+              <div className="pm-section-body">
+                <div className="pm-row">
+                  <span className="pm-key">Style</span>
+                  <span className="pm-value">{outputStyle.label}</span>
+                </div>
+                <div className="pm-row">
+                  <span className="pm-key">Role</span>
+                  <span className="pm-value">{outputStyle.role}</span>
+                </div>
+                <div className="pm-row">
+                  <span className="pm-key">Source</span>
+                  <span className="pm-value">{outputStyle.source}</span>
+                </div>
+                {outputStyle.mustHave.length > 0 && (
+                  <div className="pm-row pm-row-block">
+                    <span className="pm-key">Expected shape</span>
+                    <div className="pm-score-list">
+                      {outputStyle.mustHave.map((item) => (
+                        <div key={item} className="pm-score-row">
+                          <span className="pm-score-model">{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="pm-row pm-row-block">
+                  <span className="pm-key">Contract</span>
+                  <pre className="pm-pre">{outputStyle.contract}</pre>
+                </div>
               </div>
             </div>
           )}
@@ -298,6 +340,12 @@ export function PromptMicroscope({ runTrace }: Props) {
                       <span className="pm-key">Assembly sections</span>
                       <span className="pm-value">{promptStep.assembly.sections.length} · {promptStep.assembly.totalTokenEstimate} estimated tokens</span>
                     </div>
+                    {promptStep.assembly.outputStyle && (
+                      <div className="pm-row">
+                        <span className="pm-key">Output style</span>
+                        <span className="pm-value">{promptStep.assembly.outputStyle.label} · {promptStep.assembly.outputStyle.id}</span>
+                      </div>
+                    )}
                   </>
                 )}
                 {promptStep.promptPreview && (

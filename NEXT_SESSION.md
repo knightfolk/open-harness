@@ -13,6 +13,22 @@ You are **Friday**, the AI assistant for OpenHarness. Follow all rules in `AGENT
 
 Use `docs/PROMPT_ROUTING_OUTPUT_ROADMAP.md` as the next roadmap for refining prompt processing, routing, Planning Room/team-model output, single-model responses, eval feedback, and native-app presentation.
 
+## Latest Completed Slice — 2026-06-12
+
+Commit to check first: this session should include output-style visibility work after `1a9d04b Add output contracts for routed responses`.
+
+Completed Phase 4 items:
+- Output style contracts from `server/promptBuilder.ts` are now structured metadata (`outputStyle`) on prompt assembly and `prompt_built` trace steps.
+- Prompt Microscope has a dedicated Output Style section, separated from generic prompt section previews.
+- The artifact drawer detects markdown `Evidence`, `Sources`, `Sources Used`, and `Evidence Used` sections as collapsed evidence artifacts.
+- Focused regressions cover output-style trace metadata and investigation/review response normalization.
+
+Still open before Phase 5 or eval-feedback-loop work:
+- Add explicit user-selectable output style controls only if the product wants styles beyond route/role-derived defaults.
+- Make review/investigation sources fully structured objects instead of markdown-section extraction.
+- Tighten orchestration normalization for execute reports and direct answers with focused tests.
+- Consider stream-cleaning refinements for legitimate first-person direct answers, especially non-reasoning models.
+
 ## Current Runtime Status
 - ✅ **Server**: Running on `http://127.0.0.1:3001` (via `screen -S oh-server`)
 - ✅ **Frontend**: Running on `http://127.0.0.1:5173` (via `screen -S oh-vite`)
@@ -32,10 +48,11 @@ screen -dmS oh-vite bash -c 'cd /Users/kevink/Projects/OpenHarness && npx vite -
 
 After auditing the source code against the 6 Critical Gaps from PLAN.md and adding Planning Room:
 
-### ✅ Fully Addressed (4 of 6)
+### ✅ Fully Addressed (5 of 6)
 1. **Orchestrator spawns agents** — Execute/investigate/compare modes use `agentRuntime.ts` with sub-agents
 2. **Auto-router (classifier-based)** — `server/autoRouter.ts` scores candidates on capability
 3. **Agent Roles + Planning Room** — Different models per role, and planning requests now run multiple planner participants when configured
+4. **Cost-aware/complexity-aware selection** — Simple low-risk tasks use cheap-direct, medium tasks use classifier routing, and deep/tool-heavy/image work escalates through policy gates
 6. **"Start with answer" rule gated** — `isReasoningModel()` check at line 2203 of `server/index.ts`
 
 ### ✅ New Source of Truth
@@ -43,9 +60,8 @@ After auditing the source code against the 6 Critical Gaps from PLAN.md and addi
 - **Planning Room v1** — independent model plans, peer cross-checks, and final team-plan synthesis are implemented in `server/orchestrator.ts`
 - **Project Companion is next** — cheap/local side assistant that answers quick questions from plans, run traces, repo maps, and summaries
 
-### ❌ Still Open (2 of 6)
-4. **No cost-aware/complexity-aware selection** — Auto-router always classifies regardless of task complexity. No de-escalation to cheap models for trivial tasks. Bypass-classifier-for-simple-tasks logic is missing.
-5. **No eval feedback loop into routing** — `EvalSummary.recommendations` exist but nothing consumes them to update role assignments or auto-router candidate cards.
+### ◐ Still Open / Partial (1 of 6)
+5. **Eval feedback loop into routing is partial** — candidate cards and threshold adjustment consume some eval/history data, but user-facing dashboards, per-task recommendations, and role-assignment suggestions remain open.
 
 ### From NEXT_SESSION.md "What Could Be Next" — Also Open
 - **Project Companion** — cheap/local side assistant for quick project questions and token savings
@@ -60,18 +76,16 @@ After auditing the source code against the 6 Critical Gaps from PLAN.md and addi
 ## Consolidated Todo — Critical Gaps #4 & #5 + Related Items
 
 ### Gap #4: Cost-Aware & Complexity-Aware Selection
-**Files to touch:** `server/autoRouter.ts`, `server/router.ts`, `server/index.ts`, `src/components/Settings/`
 
-1. **Add task complexity detection** to `routeRequest()` in `server/router.ts`
-   - Simple: message length < 100 chars, no code blocks, no file references
-   - Medium: normal flow
-   - Complex: long messages with code blocks, multi-file references, architecture questions
-2. **Bypass auto-router for simple tasks** — route directly to cheapest candidate (MiniMax-M3), skip classifier call entirely
-3. **Escalate complex tasks** — force strongest model, skip threshold check
-4. **Surface cost estimate** — show estimated cost before sending, or in status bar per-message
-5. **Test with real queries** — "hello" should use M3, "refactor auth.ts" should use classifier
+This is implemented in the current code. Future work should preserve and improve visibility, not rebuild it:
+- Simple low-risk tasks use `cheap-direct` and skip classifier overhead.
+- Medium tasks use classifier routing.
+- Deep, tool-heavy, and image tasks escalate to stronger suitable candidates.
+- Route trace separates workflow routing from model-selection policy.
 
 ### Gap #5: Eval Feedback Loop into Routing
+
+Do not start this until the remaining higher-priority prompt/routing/output presentation items above are clearly complete.
 **Files to touch:** `server/evals.ts`, `server/autoRouter.ts`, `server/router.ts`, `server/index.ts`
 
 1. **Expose `EvalSummary.recommendations`** as an API endpoint

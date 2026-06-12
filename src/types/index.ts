@@ -61,8 +61,18 @@ export interface PromptAssemblyTrace {
   family: string;
   style: string;
   target: string;
+  outputStyle?: OutputStyleTrace;
   sections: PromptAssemblySection[];
   totalTokenEstimate: number;
+}
+
+export interface OutputStyleTrace {
+  id: string;
+  label: string;
+  role: string;
+  source: string;
+  contract: string;
+  mustHave: string[];
 }
 
 export interface RoutingStageTrace {
@@ -114,7 +124,7 @@ export type HarnessRunStep =
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
   | { type: 'artifact'; artifact: WorkProductArtifact }
-  | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace }
+  | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace; outputStyle?: OutputStyleTrace }
   | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number>; stages?: RoutingStageTrace }
   | { type: 'model_request'; round: number; model: string }
   | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
