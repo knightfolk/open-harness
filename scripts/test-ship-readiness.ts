@@ -49,6 +49,22 @@ try {
   assert.equal(brokenReport.checks.find((check) => check.id === 'local-assets')?.status, 'fail');
   assert.equal(brokenReport.checks.find((check) => check.id === 'javascript-syntax')?.status, 'fail');
   assert.equal(brokenReport.checks.find((check) => check.id === 'browser-smoke')?.status, 'fail');
+
+  mkdirSync(join(fixtureDir, 'remote-assets'), { recursive: true });
+  writeFileSync(join(fixtureDir, 'remote-assets', 'index.html'), [
+    '<!doctype html>',
+    '<html><head><title>Remote</title><meta name="viewport" content="width=device-width">',
+    '<script src="https://cdn.example.com/game-engine.js"></script></head>',
+    '<body><main id="game"><span id="hp">HP 1</span><button id="restart">Restart</button></main><script src="game.js"></script></body></html>',
+  ].join('\n'));
+  writeFileSync(join(fixtureDir, 'remote-assets', 'game.js'), [
+    'document.addEventListener("keydown", () => { document.getElementById("game").textContent = "Moved"; });',
+  ].join('\n'));
+  writeFileSync(join(fixtureDir, 'remote-assets', 'README.md'), 'Controls: use the keyboard. Tester objective: verify direct-open runtime behavior and restart. '.repeat(4));
+  const remoteReport = runShipReadiness(join(fixtureDir, 'remote-assets'));
+  assert.equal(remoteReport.status, 'fail', 'remote scripts should block standalone shipping');
+  assert.equal(remoteReport.checks.find((check) => check.id === 'standalone-assets')?.status, 'fail');
+  assert.match(remoteReport.checks.find((check) => check.id === 'standalone-assets')?.detail || '', /Remote asset references/);
 } finally {
   rmSync(fixtureDir, { recursive: true, force: true });
 }

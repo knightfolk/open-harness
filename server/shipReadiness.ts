@@ -76,6 +76,17 @@ function extractHtmlRefs(html: string): string[] {
   return [...refs];
 }
 
+function extractExternalHtmlRefs(html: string): string[] {
+  const refs = new Set<string>();
+  const attrRe = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+  let match: RegExpExecArray | null;
+  while ((match = attrRe.exec(html))) {
+    const ref = normalizeLocalRef(match[1].trim());
+    if (/^(?:https?:)?\/\//i.test(ref)) refs.add(ref);
+  }
+  return [...refs];
+}
+
 function nodeCheck(path: string): { ok: boolean; error?: string } {
   try {
     execFileSync(process.execPath, ['--check', path], { stdio: 'pipe' });
@@ -168,6 +179,7 @@ export function runShipReadiness(projectDirInput: string): ShipReadinessReport {
   if (hasIndex) {
     const html = readFileSync(indexPath, 'utf8');
     const refs = extractHtmlRefs(html);
+    const externalRefs = extractExternalHtmlRefs(html);
     const missingRefs = refs.filter((ref) => !existsSync(resolve(dirname(indexPath), ref)));
     checks.push(check(
       'local-assets',
@@ -177,6 +189,15 @@ export function runShipReadiness(projectDirInput: string): ShipReadinessReport {
         ? `${refs.length} local HTML reference${refs.length === 1 ? '' : 's'} resolved.`
         : `Missing local references: ${missingRefs.join(', ')}`,
       refs,
+    ));
+    checks.push(check(
+      'standalone-assets',
+      'Standalone asset policy',
+      externalRefs.length === 0 ? 'pass' : 'fail',
+      externalRefs.length === 0
+        ? 'HTML does not depend on remote scripts, stylesheets, or media.'
+        : `Remote asset references prevent direct-open standalone shipping: ${externalRefs.join(', ')}`,
+      externalRefs,
     ));
 
     const hasTitle = /<title>\s*[^<\s][^<]*<\/title>/i.test(html);
