@@ -496,6 +496,7 @@ try {
     assert.match(repairArtifactPrompt, /JavaScript must wire real player input|Includes enemies or hazards/i);
     assert.match(repairArtifactPrompt, /no remote\/CDN src or href values/i);
     assert.match(repairArtifactPrompt, /no data: or blob: payloads/i);
+    assert.match(repairArtifactPrompt, /remove that reference and move the required code or styling into local files/i);
     assert.match(repairedResult.finalText, /Validation passed: node -e/);
     assert.match(readFileSync(join(repairDir, 'repair-game', 'game.js'), 'utf8'), /Repaired moved/);
   } finally {

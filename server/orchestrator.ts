@@ -650,6 +650,7 @@ async function runExecutePipeline(
       ``,
       `Use write_file to update only the files needed to make validation pass. Do not return a plan.`,
       `Keep the artifact inspectable and direct-open: no remote/CDN src or href values, and no data: or blob: payloads for scripts, styles, or media.`,
+      `If failure evidence names a remote, data:, or blob: reference, remove that reference and move the required code or styling into local files in the artifact folder.`,
       `Required artifact files are still:`,
       ...artifactRequiredPaths.map((path) => `- ${path}`),
       ``,
