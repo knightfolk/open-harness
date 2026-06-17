@@ -1642,6 +1642,10 @@ Phase-mapped manual UI evidence:
   memory, session outcomes, and normalized error signatures.
 - Settings > Auto-Router candidate rows now also include session/run
   breadcrumbs in the visible recent recovery path and accessibility text.
+- Settings Auto-Router candidate rows expose the same saved session/run
+  breadcrumb expected by the kickoff stop condition, but populated live recovery
+  rows still require a real provider-approved or local runtime tool-error run.
+- This same proof lane remains responsible for tool, prompt strategy, saved session/run id, retry distance, and later working path requirements for routing/model-harness evidence.
 - Settings > Auto-Router candidate rows now label the saved-session breadcrumb
   separately as `Recovery proof: session ..., run ...`.
 - The visible Recovery proof label now also exposes a model-specific

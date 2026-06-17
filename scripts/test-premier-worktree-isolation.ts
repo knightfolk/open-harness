@@ -127,7 +127,7 @@ for (const expected of [
 }
 
 for (const expected of [
-  "step.type === 'worktree_isolation'",
+  "s.type === 'worktree_isolation'",
   'runTrace.steps.slice().reverse().find',
   'Worktree isolation',
   'ready · ${worktreeIsolation.worktreeId',
@@ -164,7 +164,7 @@ for (const expected of [
 
 for (const expected of [
   'Phase 6 model harness trust',
-  'Model routing and evaluation are visible enough to trust.',
+  'Model Library scorecards visibly cover coding, reasoning',
   'worktree isolation',
 ]) {
   assert.ok(

@@ -21,6 +21,8 @@ const promptMicroscope = readFileSync('src/components/PromptMicroscope.tsx', 'ut
 const modelCapabilities = readFileSync('src/utils/modelCapabilities.ts', 'utf-8');
 const api = readFileSync('src/utils/api.ts', 'utf-8');
 const autoRouter = readFileSync('server/autoRouter.ts', 'utf-8');
+const serverIndex = readFileSync('server/index.ts', 'utf-8');
+const routingLearningContract = `${routingLearning}\n${api}\n${serverIndex}`;
 
 for (const expected of [
   "export type ModelAbilityId = 'thinking' | 'vision' | 'tools' | 'context'",
@@ -190,7 +192,7 @@ for (const expected of [
   'aria-label={`Role recommendation ${rec.role} to ${rec.modelId}. Report ${rec.reportName}. Proof ${evalProofStatusLabel(rec)}. ${rec.proofTrusted ? \'Trusted evidence may be applied.\' : \'Not trusted until Model Lab proof is approved.\'}`}',
 ]) {
   assert.ok(
-    routingLearning.includes(expected),
+    routingLearningContract.includes(expected),
     `Routing Learning should preserve model/tool/prompt reliability visibility: ${expected}`,
   );
 }

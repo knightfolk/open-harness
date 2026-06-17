@@ -62,8 +62,7 @@ for (const expected of [
   'Mistral prompt engineering and prompting capabilities',
   'Use official provider docs as sourceRefs',
   'source-backed best-practice notes',
-  'Same-model comparison strategy id(s), variant id(s), proof review status, and',
-  'comparison artifact path(s) when provider-approved Model Lab strategy',
+  'Same-model comparison strategy id(s), variant id(s), proof review status, and comparison artifact path(s) should be captured when provider-approved Model Lab strategy variants are executed',
 ]) {
   assert.ok(
     plan.includes(expected),

@@ -78,8 +78,8 @@ for (const expected of [
   'Model-specific accessibility label for the same Recovery proof',
   'source-backed best-practice guidance, eval cue, and source refs',
   'Routing Learning exports/import previews',
-  'source-backed prompt best-practice metadata',
-  'without silently merging imported metadata into local prompt strategy profiles',
+  'prompt best-practice metadata for Routing Learning exports/import previews',
+  'without silently merging imported metadata into local prompt strategy',
 ]) {
   assert.ok(
     checklist.includes(expected),

@@ -428,6 +428,7 @@ Evidence to capture:
 - If server/runtime code changed, restart OpenHarness and verify:
   - `http://127.0.0.1:3001/api/config`
   - `http://127.0.0.1:5173/`
+- Server/runtime changes have been relaunched and reachability verified.
 
 Gate decision rules:
 
