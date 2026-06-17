@@ -2776,3 +2776,13 @@ Phase-mapped manual UI evidence:
 - `closeoutReady: false` means Phase 7 tool-error recovery remains open even if static/staged tests pass.
 - Probe result on 2026-06-17: `npm run check:live-tool-error-evidence` passed and reported `closeoutReady: false`, `status: missing_ledger`, `totalErrorEvents: 0`, `persistedLedgerExists: false`, `persistedEventCount: 0`, and `logTraceEventCount: 0`.
 - `npm run test:premier-live-evidence-guard` passed after adding the probe guard.
+
+## Approval-gated live tool-error recovery scenario - 2026-06-17
+
+- Added `scripts/run-live-tool-error-recovery-scenario.ts` and package script `run:live-tool-error-recovery`.
+- The scenario is no-spend by default: without `OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1`, it exits with `skipped: true` and does not send a model request.
+- Approved usage requires `OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1` and should set `OPENHARNESS_LIVE_TOOL_ERROR_MODEL` to a configured tool-capable model.
+- The approved scenario asks the model to fail `read_file` on a missing probe file, recover with `list_directory`, then reports before/after ledger status, observed tool calls, failed tool, later working tool, session id, run id, and `closeoutReady`.
+- Remaining gap: this scenario has not been run with approval yet, so genuine live tool-error recovery evidence remains pending.
+- Default no-approval run of `npm run run:live-tool-error-recovery` passed with `approved: false`, `skipped: true`, `currentStatus: missing_ledger`, and `closeoutReady: false`.
+- `npm run test:premier-live-evidence-guard` passed after adding the scenario guard.

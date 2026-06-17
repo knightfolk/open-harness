@@ -121,3 +121,43 @@ Guard result:
 ```text
 npm run test:premier-live-evidence-guard -> passed
 ```
+
+## Approval-gated live recovery scenario
+
+Added `npm run run:live-tool-error-recovery` as the repeatable command for creating the genuine closeout row when a provider-approved or local tool-capable runtime is available.
+
+Default behavior is no-spend/no-mutation:
+
+```text
+npm run run:live-tool-error-recovery
+```
+
+Without approval, the command exits successfully with `skipped: true` and explains that `OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1` is required.
+
+Approved run shape:
+
+```text
+OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1 \
+OPENHARNESS_LIVE_TOOL_ERROR_MODEL=<configured tool-capable model> \
+npm run run:live-tool-error-recovery
+```
+
+The scenario creates a temporary OpenHarness session, asks the selected model to intentionally fail `read_file` for `./__openharness_missing_tool_error_probe__.txt`, then recover with `list_directory` for `.`. It reports before/after ledger status, observed tool calls, failed tool, later working tool, session id, run id, and `closeoutReady`.
+
+Only an approved run that returns `closeoutReady: true`, followed by `npm run check:live-tool-error-evidence` returning `closeoutReady: true`, should be used to close Phase 7 tool-error recovery evidence.
+
+Default no-approval scenario result:
+
+```text
+npm run run:live-tool-error-recovery -> passed
+approved: false
+skipped: true
+currentStatus: missing_ledger
+closeoutReady: false
+```
+
+Guard result after adding the scenario:
+
+```text
+npm run test:premier-live-evidence-guard -> passed
+```

@@ -74,7 +74,8 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "electron:prod": "npm run build && electron .",
-    "check:live-tool-error-evidence": "tsx scripts/check-live-tool-error-evidence.ts"
+    "check:live-tool-error-evidence": "tsx scripts/check-live-tool-error-evidence.ts",
+    "run:live-tool-error-recovery": "tsx scripts/run-live-tool-error-recovery-scenario.ts"
   },
   "dependencies": {
     "allotment": "^1.20.5",

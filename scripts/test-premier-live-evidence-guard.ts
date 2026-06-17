@@ -8,6 +8,7 @@ const proof = readFileSync('docs/proof/2026-06-16-premier-harness-closeout.md', 
 const nextSession = readFileSync('NEXT_SESSION.md', 'utf-8');
 const stagedToolErrorProof = readFileSync('docs/proof/2026-06-17-routing-learning-staged-tool-error-proof.md', 'utf-8');
 const liveToolErrorProbe = readFileSync('scripts/check-live-tool-error-evidence.ts', 'utf-8');
+const liveToolErrorScenario = readFileSync('scripts/run-live-tool-error-recovery-scenario.ts', 'utf-8');
 
 assert.ok(
   pkg.scripts['test:premier-no-spend']?.includes('npm run test:premier-live-evidence-guard'),
@@ -17,6 +18,11 @@ assert.ok(
 assert.ok(
   pkg.scripts['check:live-tool-error-evidence']?.includes('tsx scripts/check-live-tool-error-evidence.ts'),
   'package scripts should expose the live tool-error evidence probe',
+);
+
+assert.ok(
+  pkg.scripts['run:live-tool-error-recovery']?.includes('tsx scripts/run-live-tool-error-recovery-scenario.ts'),
+  'package scripts should expose the approval-gated live tool-error recovery scenario',
 );
 
 for (const expected of [
@@ -30,6 +36,22 @@ for (const expected of [
   assert.ok(
     liveToolErrorProbe.includes(expected),
     `Live tool-error probe should preserve closeout readiness fields: ${expected}`,
+  );
+}
+
+for (const expected of [
+  'OPENHARNESS_APPROVE_LIVE_TOOL_ERROR',
+  'OPENHARNESS_LIVE_TOOL_ERROR_MODEL',
+  'Set OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1',
+  'First, intentionally call read_file',
+  'Then recover by calling list_directory',
+  'failedTool',
+  'laterWorkingTool',
+  'closeoutReady',
+]) {
+  assert.ok(
+    liveToolErrorScenario.includes(expected),
+    `Live tool-error scenario should preserve approval gate and recovery shape: ${expected}`,
   );
 }
 
