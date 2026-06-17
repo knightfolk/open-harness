@@ -147,16 +147,17 @@ function registerSnapShortcuts() {
   globalShortcut.register('CmdOrCtrl+Shift+Up', () => snapToZone('maximize'));
   globalShortcut.register('CmdOrCtrl+Shift+Down', () => snapToZone('bottom-half'));
 
-  // Cmd+Shift+1-9 for specific zones
-  globalShortcut.register('CmdOrCtrl+Shift+1', () => snapToZone('top-left'));
-  globalShortcut.register('CmdOrCtrl+Shift+2', () => snapToZone('top-half'));
-  globalShortcut.register('CmdOrCtrl+Shift+3', () => snapToZone('top-right'));
-  globalShortcut.register('CmdOrCtrl+Shift+4', () => snapToZone('left-half'));
-  globalShortcut.register('CmdOrCtrl+Shift+5', () => snapToZone('maximize'));
-  globalShortcut.register('CmdOrCtrl+Shift+6', () => snapToZone('right-half'));
-  globalShortcut.register('CmdOrCtrl+Shift+7', () => snapToZone('bottom-left'));
-  globalShortcut.register('CmdOrCtrl+Shift+8', () => snapToZone('bottom-half'));
-  globalShortcut.register('CmdOrCtrl+Shift+9', () => snapToZone('bottom-right'));
+  // Avoid Cmd+Shift+3/4/5 because macOS reserves them for screenshots.
+  // Use Cmd+Option+Shift+1-9 for explicit zone shortcuts instead.
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+1', () => snapToZone('top-left'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+2', () => snapToZone('top-half'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+3', () => snapToZone('top-right'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+4', () => snapToZone('left-half'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+5', () => snapToZone('maximize'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+6', () => snapToZone('right-half'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+7', () => snapToZone('bottom-left'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+8', () => snapToZone('bottom-half'));
+  globalShortcut.register('CmdOrCtrl+Alt+Shift+9', () => snapToZone('bottom-right'));
 }
 
 // ── IPC Handlers ───────────────────────────────────────

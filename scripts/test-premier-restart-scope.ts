@@ -46,10 +46,23 @@ for (const expected of [
   'app.requestSingleInstanceLock()',
   "app.on('second-instance'",
   'mainWindow.focus()',
+  'Avoid Cmd+Shift+3/4/5 because macOS reserves them for screenshots.',
+  "globalShortcut.register('CmdOrCtrl+Alt+Shift+5'",
 ]) {
   assert.ok(
     electronMain.includes(expected),
     `Electron main process should enforce a single OpenHarness instance: ${expected}`,
+  );
+}
+
+for (const reservedScreenshotShortcut of [
+  "globalShortcut.register('CmdOrCtrl+Shift+3'",
+  "globalShortcut.register('CmdOrCtrl+Shift+4'",
+  "globalShortcut.register('CmdOrCtrl+Shift+5'",
+]) {
+  assert.ok(
+    !electronMain.includes(reservedScreenshotShortcut),
+    `Electron main process should not override macOS screenshot shortcut: ${reservedScreenshotShortcut}`,
   );
 }
 
