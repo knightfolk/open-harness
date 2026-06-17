@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 
 import { loadAllSessions } from './sessionStore';
 import { getProcessLedgerLogsDir } from './processLedger';
@@ -65,6 +66,89 @@ interface RawLogLine {
   file: string;
   line: number;
   raw: string;
+}
+
+export interface ToolReliabilitySourceFingerprint {
+  sessions: {
+    count: number;
+    sessionFileNames: string[];
+    latestMtimeMs: number;
+  };
+  logs: {
+    count: number;
+    logFileNames: string[];
+    latestMtimeMs: number;
+    totalLogBytes: number;
+  };
+  computedAt: string;
+}
+
+const SESSIONS_DIR = join(homedir(), '.openharness', 'sessions');
+
+function safeStat(path: string): ReturnType<typeof statSync> | null {
+  try {
+    return statSync(path);
+  } catch {
+    return null;
+  }
+}
+
+function collectSessionsFingerprint(): ToolReliabilitySourceFingerprint['sessions'] {
+  try {
+    const files = readdirSync(SESSIONS_DIR).filter((name) => name.endsWith('.json')).sort();
+    const latestMtime = files
+      .map((name) => safeStat(join(SESSIONS_DIR, name)))
+      .map((stat) => stat?.mtimeMs || 0)
+      .reduce((max, value) => Math.max(max, value), 0);
+    return {
+      count: files.length,
+      sessionFileNames: files.slice(-20),
+      latestMtimeMs: latestMtime,
+    };
+  } catch {
+    return {
+      count: 0,
+      sessionFileNames: [],
+      latestMtimeMs: 0,
+    };
+  }
+}
+
+function collectLogFingerprint(): ToolReliabilitySourceFingerprint['logs'] {
+  const logTraceLogDir = getProcessLedgerLogsDir();
+  try {
+    const files = readdirSync(logTraceLogDir).filter((name) => name.endsWith('.log')).sort();
+    let latestMtime = 0;
+    let totalLogBytes = 0;
+    for (const fileName of files) {
+      const filePath = join(logTraceLogDir, fileName);
+      const stat = safeStat(filePath);
+      if (!stat || !stat.isFile()) continue;
+      latestMtime = Math.max(latestMtime, stat.mtimeMs);
+      totalLogBytes += stat.size;
+    }
+    return {
+      count: files.length,
+      logFileNames: files.slice(-20),
+      latestMtimeMs: latestMtime,
+      totalLogBytes,
+    };
+  } catch {
+    return {
+      count: 0,
+      logFileNames: [],
+      latestMtimeMs: 0,
+      totalLogBytes: 0,
+    };
+  }
+}
+
+export function getToolReliabilitySourceFingerprint(): ToolReliabilitySourceFingerprint {
+  return {
+    sessions: collectSessionsFingerprint(),
+    logs: collectLogFingerprint(),
+    computedAt: new Date().toISOString(),
+  };
 }
 
 function ensureToolReliabilitySessionsFromSavedSessions(): ToolReliabilitySession[] {

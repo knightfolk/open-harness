@@ -21,8 +21,8 @@ import { getLatestEvalRecommendations } from './evals';
 import type { EvalRecommendation } from './evals';
 import { estimateTokens } from './contextManager';
 import { getModelConfig, isReasoningModel } from './modelProfiles';
-import { buildToolReliabilitySummary, type ToolReliabilitySummary } from './toolReliability';
-import { getToolReliabilitySessions } from './toolReliabilityLogTrace';
+import { getToolReliabilitySummaryCached } from './toolReliabilityStore';
+import type { ToolReliabilitySummary } from './toolReliability';
 import { getPromptStrategySelectionForModel } from './promptStrategies';
 import type { StoredConfig, StoredProvider } from './config';
 
@@ -447,7 +447,7 @@ function annotateCandidatesWithCurrentEvidence(candidates: AutoRouterCandidate[]
   try {
     annotatedCandidates = annotateCandidatesWithToolReliability(
       annotatedCandidates,
-      buildToolReliabilitySummary(getToolReliabilitySessions()),
+      getToolReliabilitySummaryCached(),
     );
   } catch {
     // Best-effort; persisted sessions may be unavailable during tests/startup.

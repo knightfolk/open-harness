@@ -121,6 +121,7 @@ Recent trust-surface improvements include:
 - The same layer now also supports model-id based prompt-strategy overrides (for example OpenAI reasoning IDs like `o1`/`o3`, including provider-prefixed forms like `openai/o1-mini` and `provider:o3-mini-high`) so routing can keep a common family base while selecting dedicated contracts for selected model families.
 - Prompt strategy profile source provenance now includes primary family references (for example Llama prompt-format contracts and Gemma/Phi chat template guidance), so prompt strategy changes can be traced back to model-provider documentation before routing default updates.
 - Tool-call reliability now aggregates per-model/provider/tool outcomes with retry distance and first-call failure signals so routing can prefer lower-friction recovery paths.
+- Tool-reliability evidence is now cached in `~/.openharness/router/toolReliabilityCache.json` and rebuilt only when saved-session or process-log fingerprints change, reducing repeated aggregation overhead while preserving fresh recovery/retry evidence.
 - Auto-Router and Routing Learning now expose evidence-source-tagged avoid/prefer recommendations (`saved_session_trace`, `log_trace`, `imported_trace`) with supporting session/run ids for audit.
 - Auto-Router candidate traces now include structured eval evidence metadata (`approved`, `unreviewed`, `needs-attention`) so candidate rows and settings surfaces can filter prompt-strategy guidance by proof trust level.
 - Routing Learning exports now also include provider-qualified recovery and outcome evidence assertions so exported model/prompt strategy rows can be traced to the exact failing and working model/tool path.
@@ -135,6 +136,7 @@ If you are validating the Phase 7 prompt/routing memory loop specifically, run:
 npm run test:prompt-strategy-database
 npm run test:prompt-routing-memory
 npm run test:tool-reliability
+npm run test:tool-reliability-cache
 ```
 
 ## Architecture

@@ -60,8 +60,7 @@ import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from './sessi
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
 import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './streamCleaner';
-import { buildToolReliabilitySummary } from './toolReliability';
-import { getToolReliabilitySessions } from './toolReliabilityLogTrace';
+import { getToolReliabilitySummaryCached, getToolReliabilityCacheMeta, invalidateToolReliabilitySummaryCache } from './toolReliabilityStore';
 import { buildRouterLearningExportPayload } from './routerLearningExport';
 import { buildRouterLearningImportPreview } from './routerLearningImport';
 
@@ -1390,13 +1389,7 @@ app.get('/api/providers/rate-limits/status', (_req, res) => {
 
 // ── Router Learning (M19) ────────────────────────────
 app.get('/api/router/learning', (_req, res) => {
-  const toolReliability = (() => {
-    try {
-      return buildToolReliabilitySummary(getToolReliabilitySessions());
-    } catch {
-      return buildToolReliabilitySummary([]);
-    }
-  })();
+  const toolReliability = getToolReliabilitySummaryCached();
   res.json({
     ...getLearningSummary(),
     toolReliability,
@@ -1411,19 +1404,28 @@ app.get('/api/router/learning/events', (req, res) => {
 
 app.get('/api/router/learning/export', (_req, res) => {
   const events = getAllRoutingEvents();
-  const toolReliability = (() => {
-    try {
-      return buildToolReliabilitySummary(getToolReliabilitySessions());
-    } catch {
-      return buildToolReliabilitySummary([]);
-    }
-  })();
+  const toolReliability = getToolReliabilitySummaryCached();
   res.json(buildRouterLearningExportPayload({
     events,
     learningSummary: getLearningSummary(),
     toolReliability,
     routerState: getAutoRouterState(),
   }));
+});
+
+app.get('/api/router/learning/tool-reliability/cache', (_req, res) => {
+  res.json(getToolReliabilityCacheMeta());
+});
+
+app.post('/api/router/learning/tool-reliability/cache/refresh', (_req, res) => {
+  invalidateToolReliabilitySummaryCache();
+  const toolReliability = getToolReliabilitySummaryCached({ forceRefresh: true });
+  const cacheMeta = getToolReliabilityCacheMeta();
+  res.json({
+    ok: true,
+    cache: cacheMeta,
+    toolReliability,
+  });
 });
 
 app.post('/api/router/learning/import', (req, res) => {
