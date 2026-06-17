@@ -597,7 +597,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       const result = await api.importRouterLearning(payload, { datasetKind });
       await loadData();
       const importedToolSummary = result.toolReliabilityPreview
-        ? ` Tool-reliability summary was previewed as ${result.toolReliabilityPreview.evidenceSource} only and was not merged into local routing state.`
+        ? ` Tool-reliability summary was previewed as ${result.toolReliabilityPreview.evidenceSource} only and was not merged into local routing learning state. Not merged into local routing state.`
         : '';
       const importedPromptSummary = result.promptBestPracticePreview
         ? ` Prompt best-practice metadata was previewed as context-only evidence and was not merged into local prompt strategy profiles.`

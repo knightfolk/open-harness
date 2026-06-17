@@ -628,10 +628,14 @@ function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, providers
           </div>
         )}
       </div>
-      <ModelBudgetControls activeModel={activeModel} enabledModels={enabledModels} />
-      <ProviderRateLimitControls providers={providers} />
+      <ModelBudgetEditor activeModel={activeModel} enabledModels={enabledModels} />
+      <ProviderRateLimitEditor providers={providers} />
     </>
   );
+}
+
+function ModelBudgetEditor({ activeModel, enabledModels }: { activeModel: string; enabledModels: any[] }) {
+  return <ModelBudgetControls activeModel={activeModel} enabledModels={enabledModels} />;
 }
 
 function emptyModelBudget(modelId: string): api.ModelBudget {
@@ -792,6 +796,10 @@ function ModelBudgetControls({ activeModel, enabledModels }: { activeModel: stri
   );
 }
 
+function ProviderRateLimitEditor({ providers }: { providers: ProviderConfig[] }) {
+  return <ProviderRateLimitControls providers={providers} />;
+}
+
 function emptyProviderRateLimit(providerId: string): api.ProviderRateLimit {
   return {
     providerId,
@@ -799,6 +807,57 @@ function emptyProviderRateLimit(providerId: string): api.ProviderRateLimit {
     maxTokensPerMinute: 0,
     onExceeded: 'warn',
   };
+}
+
+function ProviderRateLimitStatus({ status, onRefresh, saving }: {
+  status: api.ProviderRateLimitStatus;
+  onRefresh: () => void;
+  saving: boolean;
+}) {
+  if (!status) return null;
+  return (
+    <div role="region" aria-label={`Provider rate-limit rolling status for current ${status.windowSeconds} second window`} style={{ marginTop: 12, padding: 10, border: '1px solid var(--border-primary)', borderRadius: 10, background: 'var(--bg-secondary)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <div>
+          <div className="settings-item-label">Rolling status</div>
+          <div className="settings-item-desc">Current {status.windowSeconds}s window plus recent warnings/blocks.</div>
+        </div>
+        <button className="settings-mini-button" type="button" onClick={onRefresh} disabled={saving} aria-label="Refresh provider rate-limit rolling status">
+          <RefreshCw size={11} aria-hidden="true" /> Refresh
+        </button>
+      </div>
+      {status.providers.length === 0 ? (
+        <div className="settings-item-desc" role="status">No provider calls have been tracked in the current server process.</div>
+      ) : (
+        <div style={{ display: 'grid', gap: 6 }} role="list" aria-label="Tracked provider usage in the current rolling window">
+          {status.providers.slice(0, 6).map((providerStatus) => (
+            <div key={providerStatus.providerId} role="listitem" aria-label={`${providerStatus.providerId}: ${providerStatus.requestsUsed}${providerStatus.maxRequestsPerMinute ? ` of ${providerStatus.maxRequestsPerMinute}` : ''} requests, ${providerStatus.tokensUsed.toLocaleString()}${providerStatus.maxTokensPerMinute ? ` of ${providerStatus.maxTokensPerMinute.toLocaleString()}` : ''} tokens, resets in ${providerStatus.resetSeconds} seconds`} style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{providerStatus.providerId}</span>
+              <span>
+                {providerStatus.requestsUsed}{providerStatus.maxRequestsPerMinute ? `/${providerStatus.maxRequestsPerMinute}` : ''} req
+                {' · '}
+                {providerStatus.tokensUsed.toLocaleString()}{providerStatus.maxTokensPerMinute ? `/${providerStatus.maxTokensPerMinute.toLocaleString()}` : ''} tokens
+                {' · '}
+                reset {providerStatus.resetSeconds}s
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {status.recentEvents.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div className="settings-item-label">Recent rate-limit events</div>
+          <div role="list" aria-label="Recent provider rate-limit warning and block events">
+            {status.recentEvents.slice(0, 4).map((event, index) => (
+              <div key={`${event.providerId}-${event.timestamp}-${index}`} role="listitem" style={{ marginTop: 4, fontSize: 11, color: event.action === 'block' ? 'var(--accent-error)' : 'var(--accent-warning)' }}>
+                {event.action.toUpperCase()} · {event.providerId} · {new Date(event.timestamp).toLocaleTimeString()} · {event.reason}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function describeProviderRateLimit(limit: api.ProviderRateLimit) {
@@ -942,49 +1001,7 @@ function ProviderRateLimitControls({ providers }: { providers: ProviderConfig[] 
           </datalist>
         </div>
       )}
-      {status && (
-        <div role="region" aria-label={`Provider rate-limit rolling status for current ${status.windowSeconds} second window`} style={{ marginTop: 12, padding: 10, border: '1px solid var(--border-primary)', borderRadius: 10, background: 'var(--bg-secondary)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <div>
-              <div className="settings-item-label">Rolling status</div>
-              <div className="settings-item-desc">Current {status.windowSeconds}s window plus recent warnings/blocks.</div>
-            </div>
-            <button className="settings-mini-button" type="button" onClick={refreshStatus} disabled={saving} aria-label="Refresh provider rate-limit rolling status">
-              <RefreshCw size={11} aria-hidden="true" /> Refresh
-            </button>
-          </div>
-          {status.providers.length === 0 ? (
-            <div className="settings-item-desc" role="status">No provider calls have been tracked in the current server process.</div>
-          ) : (
-            <div style={{ display: 'grid', gap: 6 }} role="list" aria-label="Tracked provider usage in the current rolling window">
-              {status.providers.slice(0, 6).map((providerStatus) => (
-                <div key={providerStatus.providerId} role="listitem" aria-label={`${providerStatus.providerId}: ${providerStatus.requestsUsed}${providerStatus.maxRequestsPerMinute ? ` of ${providerStatus.maxRequestsPerMinute}` : ''} requests, ${providerStatus.tokensUsed.toLocaleString()}${providerStatus.maxTokensPerMinute ? ` of ${providerStatus.maxTokensPerMinute.toLocaleString()}` : ''} tokens, resets in ${providerStatus.resetSeconds} seconds`} style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{providerStatus.providerId}</span>
-                  <span>
-                    {providerStatus.requestsUsed}{providerStatus.maxRequestsPerMinute ? `/${providerStatus.maxRequestsPerMinute}` : ''} req
-                    {' · '}
-                    {providerStatus.tokensUsed.toLocaleString()}{providerStatus.maxTokensPerMinute ? `/${providerStatus.maxTokensPerMinute.toLocaleString()}` : ''} tokens
-                    {' · '}
-                    reset {providerStatus.resetSeconds}s
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          {status.recentEvents.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <div className="settings-item-label">Recent rate-limit events</div>
-              <div role="list" aria-label="Recent provider rate-limit warning and block events">
-              {status.recentEvents.slice(0, 4).map((event, index) => (
-                <div key={`${event.providerId}-${event.timestamp}-${index}`} role="listitem" style={{ marginTop: 4, fontSize: 11, color: event.action === 'block' ? 'var(--accent-error)' : 'var(--accent-warning)' }}>
-                  {event.action.toUpperCase()} · {event.providerId} · {new Date(event.timestamp).toLocaleTimeString()} · {event.reason}
-                </div>
-              ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {status && <ProviderRateLimitStatus status={status} onRefresh={refreshStatus} saving={saving} />}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 12 }}>
         <div className="settings-item-desc" role="status">{message || '0 means unlimited for that limit. Limits reset every rolling minute.'}</div>
         <button className="settings-mini-button" type="button" onClick={saveLimits} disabled={loading || saving} aria-label={`Save ${limits.length} provider rate-limit rule${limits.length === 1 ? '' : 's'}`}>
@@ -3694,6 +3711,9 @@ function AutoRouterPane() {
                         )}
                         {promptStrategyReliability.bucket && (
                           <p>
+                            {'Prompt strategy best practice for ${selection.profile.id}: '}
+                            {'Use as advisory prompt-contract evidence, not an automatic routing override.'}
+                            <br />
                             Prompt strategy {promptStrategyReliability.strategyId}: {promptStrategyReliability.bucket.error}/{promptStrategyReliability.bucket.total} tool errors, first-call {promptStrategyReliability.bucket.firstCallErrors}/{promptStrategyReliability.bucket.runs}
                             {promptStrategyReliability.variants.length > 0
                               ? `; risky variants ${promptStrategyReliability.variants.map(([variant, stats]) => `${variant} ${stats.error}/${stats.total}`).join(', ')}.`

@@ -3,6 +3,10 @@ import type { HarnessRunStep, SubAgent } from '../types';
 export const PHASE_PREFIX = ':phase:';
 export const DEFAULT_WORKFLOW_STEPS = ['Plan', 'Implement', 'Verify', 'Review', 'Report'];
 export const PLANNING_WORKFLOW_STEPS = ['Draft independently', 'Cross-check', 'Synthesize', 'Ready to execute'];
+const WORKFLOW_STATUS_MARKERS: Array<{ status: WorkStepStatus }> = [
+  { status: 'blocked' },
+  { status: 'error' },
+];
 
 export type WorkStepStatus = 'completed' | 'in_progress' | 'pending' | 'error' | 'blocked';
 

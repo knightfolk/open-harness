@@ -14,6 +14,7 @@ import { generateSummary, type EvalResult, type EvalScores } from '../server/eva
 
 const REQUIRED_FAMILIES = [
   'openai',
+  'openaiReasoning',
   'anthropic',
   'gemini',
   'mistral',
@@ -29,6 +30,7 @@ const REQUIRED_FAMILIES = [
 
 const REPRESENTATIVE_MODELS: Array<{ modelId: string; family: string; style: PromptStrategyProfile['systemStyle']; phrase: RegExp }> = [
   { modelId: 'gpt-5.5-codex', family: 'openai', style: 'outcome-first', phrase: /outcome-first/i },
+  { modelId: 'o3-mini', family: 'openaiReasoning', style: 'structured', phrase: /reasoning channel/i },
   { modelId: 'claude-sonnet-4.6', family: 'anthropic', style: 'xml-tagged', phrase: /section boundaries/i },
   { modelId: 'gemini-3-pro', family: 'gemini', style: 'structured', phrase: /Role\/task variant gemini-coder-tool-proof/i },
   { modelId: 'mistral-large-3', family: 'mistral', style: 'structured', phrase: /output-format guidance/i },
@@ -46,8 +48,12 @@ function assertProfileCoverage() {
   for (const family of REQUIRED_FAMILIES) {
     const profile = PROMPT_STRATEGY_PROFILES[family];
     assert.ok(profile, `${family}: prompt strategy profile should exist`);
-    assert.equal(profile.family, family, `${family}: family should match key`);
-    assert.match(profile.id, new RegExp(`^${family === 'anthropic' ? 'anthropic' : family}-`), `${family}: id should be namespaced`);
+    const expectedProfileFamily = family;
+    assert.equal(profile.family, expectedProfileFamily, `${family}: family should match key`);
+    const expectedPrefix = family === 'anthropic' ? 'anthropic'
+      : family === 'openaiReasoning' ? 'openai-openai'
+      : family;
+    assert.match(profile.id, new RegExp(`^${expectedPrefix}-`), `${family}: id should be namespaced`);
     assert.ok(profile.appliesTo.length > 0, `${family}: appliesTo should document match hints`);
     assert.ok(profile.sourceRefs.length > 0, `${family}: source refs should be present`);
     assert.ok(profile.sourceRefs.every((source) => source.startsWith('http') || source.startsWith('docs/')), `${family}: source refs should be URLs or docs paths`);
@@ -73,6 +79,7 @@ function assertSourceRegistry() {
   assert.ok(sourceValues.some((source) => /mistral/i.test(source)), 'source registry should include Mistral guidance');
   assert.ok(sourceValues.some((source) => /function-calling/i.test(source)), 'source registry should include Mistral function-calling guidance');
   assert.ok(sourceValues.some((source) => /x\.ai|xai/i.test(source)), 'source registry should include xAI guidance');
+  assert.ok(sourceValues.includes(PROMPT_STRATEGY_SOURCES.openaiReasoningBestPractices), 'source registry should include OpenAI reasoning best-practices guidance');
 }
 
 function assertRepresentativeModelMapping() {
@@ -165,6 +172,62 @@ function assertSameModelStrategyOverrides() {
   assert.notEqual(defaultPrompt.systemPrompt, overriddenPrompt.systemPrompt, 'same-model strategy comparison should produce distinct prompt contracts');
   assert.match(defaultPrompt.systemPrompt, /Role\/task variant qwen-coder-tool-proof/i, 'prompt should emit the selected role/task variant directive');
   assert.ok(getPromptStrategyById('mistral-structured-purpose-v1'), 'strategy ids should resolve for Model Lab override selection');
+}
+
+function assertModelIdOverridePaths() {
+  const uppercaseOverrideSelection = getPromptStrategySelectionForModel('O1-PREVIEW');
+  assert.equal(uppercaseOverrideSelection.profile.id, 'openai-openai-reasoning-v1', 'upper-case reasoning model IDs should normalize to openai reasoning strategy');
+  assert.equal(uppercaseOverrideSelection.modelMatch.source, 'applies-to', 'reasoning model case normalization should still use override selection source');
+  assert.equal(uppercaseOverrideSelection.modelMatch.hint, 'OpenAI reasoning model IDs (o1/o3) use stricter reasoning-aware contracts.', 'reasoning model override should keep override hint under case-insensitive matching');
+  assert.equal(getPromptStrategyById('openai-openai-reasoning-v1')?.id, 'openai-openai-reasoning-v1', 'reasoning strategy profile should resolve via strategy ID for override-aware same-model comparison');
+
+  const reasoningModel = buildPromptForModel({
+    modelId: 'o1-preview',
+    role: 'coder',
+    taskDescription: 'Diagnose and fix a one-line issue with strict evidence.',
+  });
+  assert.equal(reasoningModel.assembly.promptStrategy.id, 'openai-openai-reasoning-v1', 'reasoning model IDs should use the dedicated openai reasoning strategy profile');
+  assert.equal(reasoningModel.assembly.promptStrategy.modelMatch.source, 'applies-to', 'reasoning model should record override selection source');
+  assert.equal(reasoningModel.assembly.promptStrategy.modelMatch.hint, 'OpenAI reasoning model IDs (o1/o3) use stricter reasoning-aware contracts.', 'reasoning model should carry override hint for auditability');
+
+  const slashReasoningModel = buildPromptForModel({
+    modelId: 'openai/o1-mini',
+    role: 'coder',
+    taskDescription: 'Compare strategy behavior with a provider-prefixed reasoning model id.',
+  });
+  assert.equal(slashReasoningModel.assembly.promptStrategy.id, 'openai-openai-reasoning-v1', 'provider-prefixed o1 model IDs should use the dedicated openai reasoning strategy profile');
+  assert.equal(slashReasoningModel.assembly.promptStrategy.modelMatch.source, 'applies-to', 'provider-prefixed reasoning model IDs should preserve override selection source');
+
+  const colonReasoningModel = buildPromptForModel({
+    modelId: 'provider:o3-mini-high',
+    role: 'coder',
+    taskDescription: 'Check provider-colon reasoning model IDs recover with dedicated strategy.',
+  });
+  assert.equal(colonReasoningModel.assembly.promptStrategy.id, 'openai-openai-reasoning-v1', 'colon-prefixed o3 reasoning model IDs should use the dedicated openai reasoning strategy profile');
+  assert.equal(colonReasoningModel.assembly.promptStrategy.modelMatch.source, 'applies-to', 'colon-prefixed reasoning model IDs should preserve override selection source');
+
+  const spacedReasoningModel = buildPromptForModel({
+    modelId: 'openai o1-preview',
+    role: 'coder',
+    taskDescription: 'Verify normalized model ids with spaces still select reasoning strategy.',
+  });
+  assert.equal(spacedReasoningModel.assembly.promptStrategy.id, 'openai-openai-reasoning-v1', 'space-separated openai o1 model IDs should still use the dedicated reasoning strategy profile');
+
+  const nonReasoningModel = getPromptStrategyForModel('qwen3-coder-480b');
+  assert.equal(nonReasoningModel.family, 'qwen', 'non-reasoning model ids that include number 3 should not match openai reasoning overrides');
+
+  const providerOpenaiModel = getPromptStrategySelectionForModel('provider:openai-gpt-4.1');
+  assert.equal(providerOpenaiModel.profile.family, 'openai', 'provider-openai non-reasoning model IDs should resolve to base OpenAI strategy when no o1/o3 override');
+  assert.equal(providerOpenaiModel.modelMatch.source, 'applies-to', 'provider-openai non-reasoning model IDs should still come from profile applies-to matching');
+  assert.ok(['gpt', 'openai'].includes(providerOpenaiModel.modelMatch.hint), 'provider-openai non-reasoning IDs should resolve via openai appliesTo hints');
+
+  const taggedReasoningModel = buildPromptForModel({
+    modelId: 'tenant/openai:o1-mini@2026-06',
+    role: 'coder',
+    taskDescription: 'Check tenant provider model id variants still get reasoning-specific strategy mapping.',
+  });
+  assert.equal(taggedReasoningModel.assembly.promptStrategy.id, 'openai-openai-reasoning-v1', 'tenant/provider tagged o1 model IDs should still use reasoning strategy');
+  assert.equal(taggedReasoningModel.assembly.promptStrategy.modelMatch.source, 'applies-to', 'tagged reasoning IDs should still expose override-based modelMatch source');
 }
 
 function assertRoleTaskVariants() {
@@ -266,6 +329,7 @@ assertRepresentativeModelMapping();
 assertPromptBuilderIntegration();
 assertModelLabResultStrategyMetadata();
 assertSameModelStrategyOverrides();
+assertModelIdOverridePaths();
 assertRoleTaskVariants();
 assertPromptStrategyEvalSummary();
 assertVariantAwareEvidenceKeys();

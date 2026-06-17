@@ -87,9 +87,16 @@ export interface PromptStrategyTrace {
 
 const UPDATED_AT = '2026-06-17';
 
+interface PromptStrategyModelOverride {
+  match: RegExp;
+  promptStrategyFamily: string;
+  hint: string;
+}
+
 export const PROMPT_STRATEGY_SOURCES = {
   openaiPromptEngineering: 'https://platform.openai.com/docs/guides/prompt-engineering',
   openaiPromptGuidance: 'https://platform.openai.com/docs/guides/prompt-guidance',
+  openaiReasoningBestPractices: 'https://platform.openai.com/docs/guides/reasoning-best-practices',
   anthropicPromptEngineeringOverview: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview',
   anthropicClaudeBestPractices: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting',
   geminiPromptStrategies: 'https://ai.google.dev/gemini-api/docs/prompting-strategies',
@@ -104,6 +111,14 @@ export const PROMPT_STRATEGY_SOURCES = {
   qwenQuickstart: 'https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html',
   openHarnessGuide: 'docs/MODEL_PROMPTING_GUIDE.md',
 } as const;
+
+const PROMPT_STRATEGY_MODEL_OVERRIDES: PromptStrategyModelOverride[] = [
+  {
+    match: /\bo1\b|\bo3\b/i,
+    promptStrategyFamily: 'openaiReasoning',
+    hint: 'OpenAI reasoning model IDs (o1/o3) use stricter reasoning-aware contracts.',
+  },
+];
 
 function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracticeNote[] {
   const common: PromptStrategyBestPracticeNote[] = [
@@ -125,6 +140,19 @@ function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracti
         guidance: 'Use short outcome-first instructions with explicit success criteria, constraints, evidence expectations, and final output shape.',
         rationale: 'OpenAI prompt guidance emphasizes clear task goals and structured outputs over large inherited prompt stacks.',
         evaluationCue: 'Check whether direct answers start with the result and tool-heavy runs preserve proof without extra monologue.',
+      },
+      ...common,
+    ];
+  }
+  if (family === 'openaiReasoning') {
+    return [
+      {
+        id: 'openai-reasoning-contract',
+        sourceRef: PROMPT_STRATEGY_SOURCES.openaiReasoningBestPractices,
+        appliesTo: ['direct', 'tool-use', 'reasoning'],
+        guidance: 'Keep reasoning-model prompts outcome-first, evidence-first, and short on internal workflow language.',
+        rationale: 'Reasoning-first models need strict final-answer contracts so tool-heavy runs do not stall in excessive planning text.',
+        evaluationCue: 'Confirm tool-heavy runs emit concise execution-safe outputs and recover without extra round trips.',
       },
       ...common,
     ];
@@ -272,6 +300,30 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     strengths: ['short outcome-first contracts', 'snapshot-specific evals', 'tool-heavy agent workflows'],
     risks: ['legacy process-heavy prompts can add noise', 'reasoning effort should be measured before escalation'],
     recommendedTests: ['test:prompt-routing-quality-readiness', 'test:prompt-routing-output-p0'],
+  },
+  openaiReasoning: {
+    id: 'openai-openai-reasoning-v1',
+    family: 'openaiReasoning',
+    appliesTo: ['o1', 'o3'],
+    sourceRefs: [
+      PROMPT_STRATEGY_SOURCES.openaiPromptEngineering,
+      PROMPT_STRATEGY_SOURCES.openaiPromptGuidance,
+      PROMPT_STRATEGY_SOURCES.openaiReasoningBestPractices,
+    ],
+    bestPracticeNotes: sourceBackedBestPracticeNotes('openaiReasoning'),
+    updatedAt: UPDATED_AT,
+    systemStyle: 'structured',
+    maxSystemPromptTokens: 2000,
+    instructionPlacement: 'system',
+    contextOrder: 'instructions-first',
+    examplePolicy: 'format-only',
+    reasoningPolicy: 'native',
+    toolPolicy: 'native-tools',
+    outputContract: 'proof-first',
+    variants: defaultPromptStrategyVariants('openaiReasoning'),
+    strengths: ['low-noise reasoning contracts', 'strict proof-first responses', 'tool-heavy execution paths'],
+    risks: ['monologue-like outputs are still possible without post-checks', 'requires stronger downstream cleanup for long tasks'],
+    recommendedTests: ['test:prompt-routing-output-p0', 'test:routing-adherence'],
   },
   anthropic: {
     id: 'anthropic-xml-evidence-v1',
@@ -555,8 +607,24 @@ export interface PromptStrategyModelSelection {
   modelMatch: NonNullable<PromptStrategyTrace['modelMatch']>;
 }
 
+function normalizeModelIdForPromptStrategy(modelId: string): string {
+  return modelId.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+}
+
 export function getPromptStrategySelectionForModel(modelId: string): PromptStrategyModelSelection {
-  const normalized = modelId.toLowerCase();
+  const normalized = normalizeModelIdForPromptStrategy(modelId);
+  for (const override of PROMPT_STRATEGY_MODEL_OVERRIDES) {
+    if (override.match.test(normalized)) {
+      const profile = PROMPT_STRATEGY_PROFILES[override.promptStrategyFamily];
+      if (profile) {
+        return {
+          profile,
+          modelMatch: { source: 'applies-to', hint: override.hint },
+        };
+      }
+    }
+  }
+
   for (const [family, profile] of Object.entries(PROMPT_STRATEGY_PROFILES)) {
     if (family === 'unknown') continue;
     const hint = profile.appliesTo.find((candidate) => normalized.includes(candidate.toLowerCase()));

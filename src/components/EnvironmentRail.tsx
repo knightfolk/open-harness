@@ -226,10 +226,20 @@ export function EnvironmentRail({
         summary: activeWorkState ? <span className="env-change-count">{activeWorkState.workflowLabel}</span> : null,
         body: activeWorkState ? (
           <div className="env-workflow" role="status" aria-live="polite" aria-label={`${activeWorkState.workflowLabel} active work progress`}>
-            <div className="env-workflow-title">{activeWorkState.workflowLabel}</div>
-            {(activeWorkState.currentTask || activeWorkState.modelProvider || activeWorkState.latestArtifact) && (
-              <div
-                className="env-workflow-meta"
+                <div className="env-workflow-title">{activeWorkState.workflowLabel}</div>
+                <div className="env-workflow-actions">
+                  <button
+                    className="env-workflow-action"
+                    type="button"
+                    onClick={onFocusAgents}
+                    aria-label="Open Agent detail"
+                  >
+                    <span>Agent detail</span>
+                  </button>
+                </div>
+                {(activeWorkState.currentTask || activeWorkState.modelProvider || activeWorkState.latestArtifact) && (
+                  <div
+                    className="env-workflow-meta"
                 role="group"
                 aria-label={[
                   activeWorkState.currentTask ? `Current task: ${activeWorkState.currentTask}` : null,
@@ -237,7 +247,9 @@ export function EnvironmentRail({
                   activeWorkState.latestArtifact ? `Latest ${activeWorkState.latestArtifact}` : null,
                 ].filter(Boolean).join('. ')}
               >
-                {[activeWorkState.currentTask, activeWorkState.modelProvider, activeWorkState.latestArtifact].filter(Boolean).join(' · ')}
+                {activeWorkState.currentTask && <span role="group" aria-label={`Current task: ${activeWorkState.currentTask}`}>{activeWorkState.currentTask}</span>}
+                {activeWorkState.modelProvider && <span role="group" aria-label={`Model and provider: ${activeWorkState.modelProvider}`}>{activeWorkState.modelProvider}</span>}
+                {activeWorkState.latestArtifact && <span role="group" aria-label={`Latest proof or artifact: ${activeWorkState.latestArtifact}`}>{activeWorkState.latestArtifact}</span>}
               </div>
             )}
             <div className="env-workflow-steps" role="list" aria-label={`${activeWorkState.workflowLabel} steps`}>

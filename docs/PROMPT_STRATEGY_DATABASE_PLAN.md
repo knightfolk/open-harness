@@ -27,6 +27,7 @@ Primary sources reviewed:
 - OpenAI prompt engineering and prompt guidance:
   - https://platform.openai.com/docs/guides/prompt-engineering
   - https://platform.openai.com/docs/guides/prompt-guidance
+  - https://platform.openai.com/docs/guides/reasoning-best-practices
 - Anthropic Claude prompting best practices:
   - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview
   - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting
@@ -71,6 +72,7 @@ Family-specific synthesis:
 
 | Family | Prompt strategy | Why it matters |
 | --- | --- | --- |
+| OpenAI (GPT + OpenAI reasoning) | Distinct strategy profiles for reasoning IDs (such as `o1`, `o3`) and standard OpenAI non-reasoning models | Reasoning IDs show different tool/error and response traits; family-only prompts can overfit and mask avoidable retry behavior. |
 | OpenAI GPT/reasoning | Shorter outcome-first prompts, explicit success criteria, validation rules, and reasoning effort tests before escalation. | Newer OpenAI guidance warns against carrying old process-heavy prompt stacks into newer models. |
 | Claude | XML-tagged sections, explicit role, structured examples, long-context documents before query/instructions, and quote-grounding for long documents. | Anthropic documents XML and examples as high-value structure for Claude. |
 | Gemini | Clear, specific task instructions with iterative refinement and prompt-gallery-style templates per task type. | Gemini docs frame prompt design as iterative and task-specific. |

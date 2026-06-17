@@ -23,8 +23,8 @@ for (const expected of [
 }
 
 for (const expected of [
-  'title="Export this run\\\'s replay, prompts, routing, artifacts, and proof bundle"',
-  'aria-label="Export this run\\\'s replay bundle from message details"',
+  'title="Export this run\'s replay, prompts, routing, artifacts, and proof bundle"',
+  'aria-label="Export this run\'s replay bundle from message details"',
   "{replayExportStatus || 'Export replay'}",
   "const validationProofs = steps.filter((step) => step.type === 'artifact' && step.artifact.type === 'validation_proof').length",
   "validationProofs > 0 ? `${validationProofs} validation proof${validationProofs === 1 ? '' : 's'}` : null",
@@ -47,8 +47,8 @@ for (const expected of [
 for (const expected of [
   'isAssistant && !isStreaming && showDetails',
   'className="message-details-region" role="region" aria-label="Message details"',
-  'title="Export this run\\\'s replay, prompts, routing, artifacts, and proof bundle"',
-  'aria-label="Export this run\\\'s replay bundle from message details"',
+  'title="Export this run\'s replay, prompts, routing, artifacts, and proof bundle"',
+  'aria-label="Export this run\'s replay bundle from message details"',
   "{replayExportStatus || 'Export replay'}",
   '<ToolCallSummary toolCalls={message.toolCalls} />',
   '<ConfidenceMeter signals={confidenceSignals} />',
