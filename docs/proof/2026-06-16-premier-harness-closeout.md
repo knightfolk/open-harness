@@ -2768,3 +2768,11 @@ Phase-mapped manual UI evidence:
 - `src/utils/api.ts` now types `toolErrorLedger` on `RouterLearningSummary` with `liveEvidenceStatus`, `persistedLedgerExists`, `persistedEventCount`, and `logTraceEventCount`.
 - `npm run test:premier-model-harness` and `npm run test:tool-reliability` passed.
 - Browser refresh is enough because this slice only changed client UI/types and proof docs.
+
+## Live tool-error evidence no-spend probe - 2026-06-17
+
+- Added `scripts/check-live-tool-error-evidence.ts` and package script `check:live-tool-error-evidence`.
+- The probe queries `/api/router/learning/tool-errors?summaryOnly=true` and emits strict JSON containing `closeoutReady`, live status, persisted/log-derived row counts, and the fields required for a genuine closeout row.
+- `closeoutReady: false` means Phase 7 tool-error recovery remains open even if static/staged tests pass.
+- Probe result on 2026-06-17: `npm run check:live-tool-error-evidence` passed and reported `closeoutReady: false`, `status: missing_ledger`, `totalErrorEvents: 0`, `persistedLedgerExists: false`, `persistedEventCount: 0`, and `logTraceEventCount: 0`.
+- `npm run test:premier-live-evidence-guard` passed after adding the probe guard.

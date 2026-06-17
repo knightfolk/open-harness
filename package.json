@@ -73,7 +73,8 @@
     "start": "node scripts/start.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "electron:prod": "npm run build && electron ."
+    "electron:prod": "npm run build && electron .",
+    "check:live-tool-error-evidence": "tsx scripts/check-live-tool-error-evidence.ts"
   },
   "dependencies": {
     "allotment": "^1.20.5",

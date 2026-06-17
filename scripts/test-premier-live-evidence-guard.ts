@@ -7,11 +7,31 @@ const checklist = readFileSync('docs/PREMIER_HARNESS_PROOF_CHECKLIST.md', 'utf-8
 const proof = readFileSync('docs/proof/2026-06-16-premier-harness-closeout.md', 'utf-8');
 const nextSession = readFileSync('NEXT_SESSION.md', 'utf-8');
 const stagedToolErrorProof = readFileSync('docs/proof/2026-06-17-routing-learning-staged-tool-error-proof.md', 'utf-8');
+const liveToolErrorProbe = readFileSync('scripts/check-live-tool-error-evidence.ts', 'utf-8');
 
 assert.ok(
   pkg.scripts['test:premier-no-spend']?.includes('npm run test:premier-live-evidence-guard'),
   'Premier no-spend bundle should include the live-evidence guard',
 );
+
+assert.ok(
+  pkg.scripts['check:live-tool-error-evidence']?.includes('tsx scripts/check-live-tool-error-evidence.ts'),
+  'package scripts should expose the live tool-error evidence probe',
+);
+
+for (const expected of [
+  'closeoutReady',
+  'Live tool-error recovery evidence is still pending',
+  'failed model/provider/tool path',
+  'later working model/provider/tool path',
+  'retryDistance',
+  'finalAnswerCaptured',
+]) {
+  assert.ok(
+    liveToolErrorProbe.includes(expected),
+    `Live tool-error probe should preserve closeout readiness fields: ${expected}`,
+  );
+}
 
 for (const expected of [
   'If any checklist item is missing or only indirectly proven, keep the',

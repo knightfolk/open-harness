@@ -89,3 +89,35 @@ Focused validation:
 npm run test:premier-model-harness -> passed
 npm run test:tool-reliability -> passed
 ```
+
+## No-spend closeout probe
+
+Added `npm run check:live-tool-error-evidence` as the reusable no-spend probe for this proof lane. It queries `/api/router/learning/tool-errors?summaryOnly=true` and emits JSON with:
+
+- `closeoutReady`
+- `status`
+- `totalErrorEvents`
+- `persistedLedgerExists`
+- `persistedEventCount`
+- `logTraceEventCount`
+- required closeout fields for a genuine recovery row
+
+The probe must report `closeoutReady: true` before Phase 7 tool-error recovery evidence can be treated as complete. If it reports `missing_ledger`, `empty`, or `closeoutReady: false`, the next required action is still a real provider-approved or local runtime tool-error recovery scenario.
+
+Probe run result:
+
+```text
+npm run check:live-tool-error-evidence -> passed
+closeoutReady: false
+status: missing_ledger
+totalErrorEvents: 0
+persistedLedgerExists: false
+persistedEventCount: 0
+logTraceEventCount: 0
+```
+
+Guard result:
+
+```text
+npm run test:premier-live-evidence-guard -> passed
+```
