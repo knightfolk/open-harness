@@ -121,6 +121,7 @@ Recent trust-surface improvements include:
 - The same layer now also supports model-id based prompt-strategy overrides (for example OpenAI reasoning IDs like `o1`/`o3`, including provider-prefixed forms like `openai/o1-mini` and `provider:o3-mini-high`) so routing can keep a common family base while selecting dedicated contracts for selected model families.
 - Tool-call reliability now aggregates per-model/provider/tool outcomes with retry distance and first-call failure signals so routing can prefer lower-friction recovery paths.
 - Auto-Router and Routing Learning now expose evidence-source-tagged avoid/prefer recommendations (`saved_session_trace`, `log_trace`, `imported_trace`) with supporting session/run ids for audit.
+- Routing Learning exports now also include provider-qualified recovery and outcome evidence assertions so exported model/prompt strategy rows can be traced to the exact failing and working model/tool path.
 - Model Lab added frontier vs open-source source filtering for enabled model sets so prompt strategy and routing comparisons can isolate local/open models from hosted frontier providers in the same run.
 
 Use [docs/PREMIER_HARNESS_PROOF_CHECKLIST.md](docs/PREMIER_HARNESS_PROOF_CHECKLIST.md) and the closeout proof notes before calling the overhaul done. Final release proof still requires the relevant browser/manual proof plus the validation commands listed below.
