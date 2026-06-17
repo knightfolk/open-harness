@@ -264,6 +264,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     const generatedAt = new Date().toISOString();
     const reviewedEvents = events.filter((event) => event.outcome !== null);
     const unratedEvents = events.filter((event) => event.outcome === null);
+    const byEvidenceSource = summary?.toolReliability?.byEvidenceSource || [];
     try {
       const fullExport = await api.getRouterLearningExport();
       const payload = {
@@ -290,6 +291,16 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           unavailable: unavailableRecommendations,
           proofReviewCounts: countRecommendationProofStates(recommendations),
         },
+        evidenceSourceSummary: byEvidenceSource.map((item) => ({
+          source: item.source,
+          outcomeRuns: item.outcomeRuns,
+          recoveredRuns: item.recoveredRuns,
+          unrecoveredRuns: item.unrecoveredRuns,
+          retryReductionRecommendations: item.retryReductionRecommendations,
+          avgRetryDistance: item.avgRetryDistance,
+          tuningAction: item.tuningAction,
+          latestTimestamp: item.latestTimestamp,
+        })),
         recentEvents: events.map((event) => ({
           ...event,
           outcomeNote: outcomeNotes[event.id] || event.outcomeNote,
