@@ -2740,3 +2740,13 @@ Phase-mapped manual UI evidence:
 - The proof temporarily staged one `saved_session_trace` ledger row, queried the real running `/api/router/learning/tool-errors` endpoint, captured failed `proof-provider:proof-primary-model/read_file`, later working `proof-provider:proof-primary-model/list_directory`, retry distance `1`, final-answer capture, session id, and run id, then restored the ledger.
 - Cleanup proof confirmed the staged row was removed and the endpoint returned zero rows for `proof-primary-model` afterward.
 - Status: no-provider endpoint proof only. Real provider-approved or local runtime tool-error rows, browser/UI proof, exports, and final gates remain pending.
+
+## Runtime relaunch and duplicate-shell proof - 2026-06-17
+
+- Added `docs/proof/2026-06-17-runtime-relaunch-process-shape-proof.md` after a live repo-native relaunch.
+- Starting state had only the server on `3001`; Vite `5173` was absent and no OpenHarness Electron shell was present.
+- Stopped the stale OpenHarness server-only chain and relaunched with `npm start`.
+- Relaunch output showed `✓ Express ready on port 3001`, `✓ Vite ready on port 5173`, `Launching Electron...`, Docker MCP connected with 50 tools, and the MCP watchdog started.
+- Reachability proof returned HTTP 200 for `http://127.0.0.1:3001/api/config` and `http://127.0.0.1:5173/`.
+- Duplicate Electron/process-shape check showed one managed OpenHarness server, one Vite UI process, one OpenHarness Electron main process, and normal Electron helper processes rather than duplicate OpenHarness shells.
+- Remaining gaps: this is runtime/process proof only; provider-backed/manual proof, genuine live tool-error recovery rows, and final closeout gates remain open.

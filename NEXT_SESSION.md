@@ -1399,3 +1399,5 @@ screen -dmS oh-vite bash -c 'cd /Users/kevink/Projects/OpenHarness && npx vite -
 - The Agent Detail steering evidence template is included in the generic per-template safety audit.
 - The Calm Chat artifact-review evidence template captures collapsed diagnostics, Prompt Microscope/detail affordances, artifact drawer review controls, Review Changes consolidation, validation proof save status, and labelled details regions.
 - Status: docs/test alignment only. No server/runtime restart was required. Closeout-matrix validation remains pending.
+
+- 2026-06-17 runtime proof continuation: added `docs/proof/2026-06-17-runtime-relaunch-process-shape-proof.md` after stopping a stale server-only chain and relaunching with `npm start`. Live checks returned HTTP 200 for `3001` `/api/config` and `5173` `/`, Docker MCP connected with 50 tools, and process-shape evidence showed one OpenHarness Electron main process plus normal helper processes rather than duplicate shells. Remaining proof gaps still include genuine live tool-error recovery rows and provider-backed/manual final gates.
