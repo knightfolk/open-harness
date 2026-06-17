@@ -161,3 +161,43 @@ Guard result after adding the scenario:
 ```text
 npm run test:premier-live-evidence-guard -> passed
 ```
+
+## Scenario preflight metadata
+
+The approval-gated scenario runner now performs a no-spend preflight before any model call. The default skipped output includes:
+
+- active model
+- Auto-Router enabled state
+- Auto-Router default model
+- configured enabled model count
+- active candidate count
+- candidate examples
+- explicitly requested model, if provided
+- recommended model for the approved run
+- current live tool-error evidence status and total event count
+
+Use this preflight to choose `OPENHARNESS_LIVE_TOOL_ERROR_MODEL` before approving a provider-backed run. Preflight metadata does not close the evidence gap; it only prepares the approved scenario.
+
+Latest preflight run:
+
+```text
+npm run run:live-tool-error-recovery -> passed
+approved: false
+skipped: true
+activeModel: Auto
+autoRouterEnabled: true
+autoRouterDefaultModel: minimax:MiniMax-M3
+configuredEnabledModelCount: 18
+activeCandidateCount: 10
+candidateExamples: minimax:MiniMax-M3, minimax:MiniMax-M2.7, z-ai-zhipu:glm-4.7, opencode-go:mimo-v2.5-pro, opencode-go:deepseek-v4-pro
+recommendedModel: minimax:MiniMax-M3
+currentEvidenceStatus: missing_ledger
+currentTotalErrorEvents: 0
+closeoutReady: false
+```
+
+Guard result:
+
+```text
+npm run test:premier-live-evidence-guard -> passed
+```

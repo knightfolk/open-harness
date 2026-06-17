@@ -2803,3 +2803,11 @@ Phase-mapped manual UI evidence:
 - The audit remains non-strict inside the no-spend bundle; strict final acceptance still requires `OPENHARNESS_REQUIRE_CLOSEOUT_READY=1 npm run check:premier-closeout-readiness`.
 - Current expected no-spend result remains `closeoutReady: false` until live tool-error recovery evidence is available.
 - Focused validation after wiring: `npm run test:premier-baseline-manifest` passed, and `npm run check:premier-closeout-readiness` passed in non-strict mode with `closeoutReady: false`; the only blocking check remains `live-tool-error-recovery-ready` with status `missing_ledger` and `totalErrorEvents: 0`.
+
+## Live tool-error recovery scenario preflight - 2026-06-17
+
+- `run:live-tool-error-recovery` now includes no-spend preflight metadata before any approved model call.
+- The preflight reports active model, Auto-Router enabled/default state, configured enabled model count, active candidate count, candidate examples, requested model, recommended model, and current live tool-error evidence status.
+- This helps choose `OPENHARNESS_LIVE_TOOL_ERROR_MODEL` for the approved run without exposing provider keys or spending tokens.
+- Latest no-approval preflight passed and recommended `minimax:MiniMax-M3`; it reported active model `Auto`, Auto-Router enabled, default `minimax:MiniMax-M3`, 18 configured enabled models, 10 active candidates, `currentEvidenceStatus: missing_ledger`, and `currentTotalErrorEvents: 0`.
+- `npm run test:premier-live-evidence-guard` passed after adding preflight guard coverage.

@@ -8,6 +8,18 @@ type ToolCallEvent = {
   output?: string;
 };
 
+type ConfigModel = { id?: string; name?: string; enabled?: boolean };
+type ConfigProvider = { id?: string; name?: string; models?: ConfigModel[] };
+type ConfigPayload = {
+  activeModel?: string;
+  providers?: ConfigProvider[];
+  autoRouter?: {
+    enabled?: boolean;
+    defaultModel?: string;
+    candidates?: Array<{ modelId?: string; disabled?: boolean }>;
+  };
+};
+
 const base = (process.env.OPENHARNESS_BASE || 'http://127.0.0.1:3001').replace(/\/$/, '');
 const workingDir = process.env.OPENHARNESS_WORKING_DIR || process.cwd();
 const modelId = process.env.OPENHARNESS_LIVE_TOOL_ERROR_MODEL || '';
@@ -32,6 +44,49 @@ async function jsonRequest(path: string, init: RequestInit = {}): Promise<any> {
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) throw new Error(`${path} returned ${res.status}: ${text}`);
   return body;
+}
+
+function providerModelIds(config: ConfigPayload): string[] {
+  const ids: string[] = [];
+  for (const provider of config.providers || []) {
+    for (const model of provider.models || []) {
+      if (model.enabled === false || !model.id) continue;
+      ids.push(`${provider.id}:${model.id}`);
+    }
+  }
+  return ids;
+}
+
+function autoRouterCandidateIds(config: ConfigPayload): string[] {
+  return (config.autoRouter?.candidates || [])
+    .filter((candidate) => candidate.modelId && !candidate.disabled)
+    .map((candidate) => candidate.modelId!)
+    .slice(0, 12);
+}
+
+function buildPreflight(config: ConfigPayload | null, summary: any) {
+  const enabledProviderModels = config ? providerModelIds(config) : [];
+  const activeCandidates = config ? autoRouterCandidateIds(config) : [];
+  const recommendedModel = modelId
+    || config?.autoRouter?.defaultModel
+    || activeCandidates[0]
+    || (config?.activeModel && config.activeModel !== 'Auto' ? config.activeModel : '')
+    || enabledProviderModels[0]
+    || '';
+  return {
+    endpoint: base,
+    approved,
+    activeModel: config?.activeModel || 'unknown',
+    autoRouterEnabled: Boolean(config?.autoRouter?.enabled),
+    autoRouterDefaultModel: config?.autoRouter?.defaultModel || null,
+    configuredEnabledModelCount: enabledProviderModels.length,
+    activeCandidateCount: activeCandidates.length,
+    candidateExamples: activeCandidates.slice(0, 5),
+    requestedModel: modelId || null,
+    recommendedModel: recommendedModel || null,
+    currentEvidenceStatus: summary?.liveEvidenceStatus || 'unavailable',
+    currentTotalErrorEvents: summary?.totalErrorEvents ?? null,
+  };
 }
 
 function parseSseBlock(block: string): SseEvent | null {
@@ -89,14 +144,18 @@ async function readEvidenceStatus() {
   return body.summary;
 }
 
+const config = await jsonRequest('/api/config').catch(() => null) as ConfigPayload | null;
+const summary = await readEvidenceStatus().catch(() => null);
+const preflight = buildPreflight(config, summary);
+
 if (!approved) {
-  const summary = await readEvidenceStatus().catch(() => null);
   console.log(JSON.stringify({
     ok: true,
     approved: false,
     skipped: true,
     reason: 'Set OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1 to run the provider/local runtime scenario.',
     modelRequired: 'Set OPENHARNESS_LIVE_TOOL_ERROR_MODEL when you want a specific configured tool-capable model.',
+    preflight,
     currentStatus: summary?.liveEvidenceStatus || 'unavailable',
     closeoutReady: false,
   }, null, 2));
@@ -131,7 +190,8 @@ console.log(JSON.stringify({
   approved: true,
   sessionId: session.id,
   runId: streamed.runId,
-  requestedModel: modelId || 'active model',
+  requestedModel: modelId || preflight.recommendedModel || 'active model',
+  preflight,
   before: {
     status: before.liveEvidenceStatus,
     totalErrorEvents: before.totalErrorEvents,
