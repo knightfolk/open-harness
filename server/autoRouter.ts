@@ -304,7 +304,14 @@ function retryReductionRecommendationLine(candidateModelId: string, summary: Too
     .slice(0, 2);
   if (recommendations.length === 0) return '';
   return ` Retry-reduction recommendations: ${recommendations.map((item) =>
-    `first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}; recovered ${item.preferPath}; prefer after ${item.retryDistance} rounds; avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; session ${item.sessionId}; run ${item.runId}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; recommendation ${item.recommendation}`
+    (() => {
+      const strategy = item.promptStrategyVariantId
+        ? `strategy variant ${item.promptStrategyVariantId} (${item.promptStrategyId || 'unknown'})`
+        : item.promptStrategyId
+          ? `strategy ${item.promptStrategyId}`
+          : 'default strategy';
+      return `first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}; recovered ${item.preferPath}; prefer after ${item.retryDistance} rounds; avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; ${strategy}; recommendation ${item.recommendation}`
+    })()
   ).join('; ')}. Prefer these observed working paths before adding more retries.`;
 }
 
