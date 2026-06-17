@@ -29,6 +29,7 @@ const requiredBundleScripts = [
   'test:premier-closeout-matrix',
   'test:premier-restart-scope',
   'test:premier-worktree-isolation',
+  'check:premier-closeout-readiness',
 ];
 
 assert.ok(pkg.scripts['test:premier-no-spend'], 'package should define test:premier-no-spend');
@@ -72,6 +73,7 @@ for (const expected of [
   'closeout-matrix',
   'restart-scope',
   'worktree-isolation',
+  'closeout-readiness',
   'Auto-Router candidate-card breadcrumb examples',
   'Settings > Auto-Router candidate-row recovery breadcrumb examples',
   'Recovery proof: session ..., run ...',
@@ -112,6 +114,7 @@ for (const expected of [
   'Premier closeout-matrix regression gate',
   'Premier restart-scope regression gate',
   'Premier worktree-isolation regression gate',
+  'Premier closeout-readiness audit gate',
   'Phase 7 auto-router candidate breadcrumb evidence',
   'Auto-Router candidate-card breadcrumb examples',
   'Source-backed prompt best-practice database alignment',
@@ -147,6 +150,7 @@ for (const expected of [
   'Premier closeout-matrix regression',
   'Premier restart-scope regression',
   'Premier worktree-isolation regression',
+  'Premier closeout-readiness audit',
   'routing-adherence',
   'Auto-Router tool-reliability candidate-card annotations now include compact',
   'classifier candidate-card annotations keep those session/run breadcrumb',

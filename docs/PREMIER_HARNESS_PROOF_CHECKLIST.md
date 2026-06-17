@@ -582,3 +582,7 @@ Approval boundaries that must remain explicit:
 
 - Browser/manual proof pass approval needed.
 - Final closeout gates need approval before running local validation.
+
+No-spend baseline addendum:
+
+- closeout-readiness

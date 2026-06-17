@@ -2796,3 +2796,10 @@ Phase-mapped manual UI evidence:
 - Current expected state remains not ready until genuine live tool-error recovery, provider/manual proof, and final gates are complete.
 - Current non-strict readiness result: `npm run check:premier-closeout-readiness` passed with `closeoutReady: false`; the only blocking check is `live-tool-error-recovery-ready` with status `missing_ledger` and `totalErrorEvents: 0`.
 - `npm run test:premier-closeout-matrix` passed after adding the readiness audit guard.
+
+## Premier closeout-readiness audit gate - 2026-06-17
+
+- Added `check:premier-closeout-readiness` to the end of `test:premier-no-spend` so normal no-spend proof runs always report whether final closeout remains blocked.
+- The audit remains non-strict inside the no-spend bundle; strict final acceptance still requires `OPENHARNESS_REQUIRE_CLOSEOUT_READY=1 npm run check:premier-closeout-readiness`.
+- Current expected no-spend result remains `closeoutReady: false` until live tool-error recovery evidence is available.
+- Focused validation after wiring: `npm run test:premier-baseline-manifest` passed, and `npm run check:premier-closeout-readiness` passed in non-strict mode with `closeoutReady: false`; the only blocking check remains `live-tool-error-recovery-ready` with status `missing_ledger` and `totalErrorEvents: 0`.
