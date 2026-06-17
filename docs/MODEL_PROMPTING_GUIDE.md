@@ -940,18 +940,40 @@ After receiving the tool result, continue with your response.
 
 ---
 
-*Document generated: May 30, 2026*
+*Document generated: June 17, 2026*
+*Last reviewed: June 17, 2026*
 *Next review: Quarterly or on major model releases*
-*Sources: OpenRouter live model data, official model documentation, community benchmarking, hands-on testing*
-**Primary references:**
+*Sources: OpenRouter live model data, official model documentation, provider guidance, and repository-level benchmarking notes*
 
-- https://github.com/meta-llama/llama-models/blob/main/models/llama3_3/prompt_format.md
-- https://github.com/meta-llama/llama3
-**Primary references:**
+### Primary References (official family docs)
 
-- https://ai.google.dev/gemma/docs/core/prompt-structure
-- https://ai.google.dev/gemma/docs
-**Primary references:**
-
-- https://huggingface.co/docs/transformers/model_doc/phi3
-- https://learn.microsoft.com/en-us/shows/open-at-microsoft/introduction-to-phi-3cookbook
+- OpenAI prompt guidance
+  - https://platform.openai.com/docs/guides/prompt-engineering
+  - https://platform.openai.com/docs/guides/prompt-guidance
+  - https://platform.openai.com/docs/guides/reasoning-best-practices
+- Anthropic Claude prompting
+  - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview
+  - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting
+- Google Gemini prompting
+  - https://ai.google.dev/gemini-api/docs/prompting-strategies
+- Mistral prompting guidance
+  - https://docs.mistral.ai/models/best-practices/prompt-engineering
+  - https://docs.mistral.ai/studio-api/conversations/function-calling
+  - https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities
+- DeepSeek official APIs and guides
+  - https://api-docs.deepseek.com/api/create-chat-completion
+  - https://api-docs.deepseek.com/guides/thinking_mode
+  - https://api-docs.deepseek.com/guides/multi_round_chat
+- Qwen guidance
+  - https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html
+- xAI Grok function-calling
+  - https://docs.x.ai/overview
+  - https://docs.x.ai/guides/function-calling
+- Llama prompt format
+  - https://github.com/meta-llama/llama-models/blob/main/models/llama3_3/prompt_format.md
+  - https://github.com/meta-llama/llama3
+- Gemma prompt structure
+  - https://ai.google.dev/gemma/docs/core/prompt-structure
+  - https://ai.google.dev/gemma/docs
+- Phi3 chat usage
+  - https://huggingface.co/docs/transformers/model_doc/phi3
