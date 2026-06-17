@@ -995,8 +995,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {r.total} runs · {new Date(r.createdAt).toLocaleString()}
                 </div>
-                <div style={{ fontSize: 10, color: proofReviewHistoryColor(r.proofReview), marginTop: 2 }}>
-                  {proofReviewHistoryLabel(r.proofReview)}
+                <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
+                  {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
                 </div>
               </button>
             ))}
@@ -1032,8 +1032,8 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {r.total} tasks · {new Date(r.createdAt).toLocaleString()}
                 </div>
-                <div style={{ fontSize: 10, color: proofReviewHistoryColor(r.proofReview), marginTop: 2 }}>
-                  {proofReviewHistoryLabel(r.proofReview)}
+                <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
+                  {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
                 </div>
               </button>
             ))}

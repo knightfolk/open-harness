@@ -360,11 +360,11 @@ export function ArtifactDrawer({ message, onSendMessage, onRunSteer }: Props) {
   };
 
   const updateFeedback = (artifactId: string, patch: Partial<ArtifactFeedback>) => {
+    const defaultFeedback: ArtifactFeedback = { flagged: false, note: '' };
     setFeedback((prev) => ({
       ...prev,
       [artifactId]: {
-        flagged: false,
-        note: '',
+        ...defaultFeedback,
         ...prev[artifactId],
         ...patch,
       },

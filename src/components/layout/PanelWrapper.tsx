@@ -21,7 +21,7 @@ export function PanelWrapper({ panelId, onClose, children }: Props) {
         className="panel-header"
       >
         <div className="panel-header-title">
-          <Icon size={14} aria-hidden="true" />
+          <Icon size={14} />
           <span>{config.label}</span>
         </div>
         <button

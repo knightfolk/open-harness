@@ -73,7 +73,6 @@ export function EnvironmentRail({
   const [fileCount, setFileCount] = useState(0);
   const [additions, setAdditions] = useState(0);
   const [deletions, setDeletions] = useState(0);
-  const [clean, setClean] = useState(true);
 
   useEffect(() => {
     if (!workingDir) return;
@@ -87,12 +86,10 @@ export function EnvironmentRail({
         setFileCount(changes.length);
         setAdditions(changes.reduce((s, f) => s + f.insertions, 0));
         setDeletions(changes.reduce((s, f) => s + f.deletions, 0));
-        setClean(status.clean);
       } catch {
         if (mounted) {
           setBranch(null);
           setFileCount(0);
-          setClean(true);
         }
       }
     };
@@ -245,7 +242,7 @@ export function EnvironmentRail({
             )}
             <div className="env-workflow-steps" role="list" aria-label={`${activeWorkState.workflowLabel} steps`}>
               {activeWorkState.steps.map((step) => (
-                <div key={step.id} className="env-workflow-step" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'running' ? 'step' : undefined}>
+                <div key={step.id} className="env-workflow-step" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'in_progress' ? 'step' : undefined}>
                   <span className={`active-work-strip-dot ${step.status}`} aria-hidden="true" />
                   <span className={`active-work-strip-step ${step.status}`}>{step.label}</span>
                 </div>

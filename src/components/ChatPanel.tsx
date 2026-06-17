@@ -187,7 +187,7 @@ function ActiveWorkStrip({ state, onOpenDetails }: { state: ActiveWorkState; onO
         <span className="active-work-strip-title">{state.workflowLabel}</span>
         <span className="active-work-strip-body" role="list" aria-label={`${state.workflowLabel} steps`}>
           {state.steps.map((step, index) => (
-            <span key={step.id} className="active-work-strip-segment" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'running' ? 'step' : undefined}>
+            <span key={step.id} className="active-work-strip-segment" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'in_progress' ? 'step' : undefined}>
               <span className={`active-work-strip-dot ${step.status}`} aria-hidden="true" />
               <span className={`active-work-strip-step ${step.status}`}>{step.label}</span>
               {index < state.steps.length - 1 ? <span className="active-work-strip-separator" aria-hidden="true">›</span> : null}

@@ -1088,3 +1088,18 @@ Phase-mapped manual UI evidence:
   - `http://127.0.0.1:3001/api/config` returned `200`.
 - Startup reported Docker MCP gateway could not start because Docker Desktop is not running, but the OpenHarness server, Vite UI, and config endpoint were reachable.
 - This satisfies the restart/reachability portion for the pushed server/runtime changes. Lint/build/browser/provider proof remains pending.
+
+## Validation gates and no-provider browser proof — 2026-06-17
+
+- `npm run lint` initially failed on an unused `clean` state value in `src/components/EnvironmentRail.tsx`; the dead state/update was removed and the rerun passed.
+- `npm run build` initially failed on TypeScript issues in artifact feedback defaults, active-work status comparisons, panel icon props, and bench history proof-review summary typing; the narrow type fixes were applied and the rerun passed.
+- Final gate results:
+  - `npm run lint` passed.
+  - `npm run build` passed (`tsc -b && vite build`).
+- No-provider browser/manual reachability proof against the running app:
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - UI HTML included `<title>OpenHarness — Universal AI Harness</title>` and `id="root"`.
+  - Config sample returned 5 providers with active model `Auto`.
+- Provider-backed eval/bench proof remains pending unless explicitly approved separately.
