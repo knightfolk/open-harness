@@ -98,6 +98,19 @@ Direct single-model answers also get a final cleanup pass that removes transcrip
 
 The current premier-harness pass is tracked in [docs/PREMIER_HARNESS_KICKOFF.md](docs/PREMIER_HARNESS_KICKOFF.md) with closeout evidence under [docs/proof/](docs/proof/). The work emphasizes a flatter chat-first default UI, clearer agent work ownership, calmer artifact review, accessible theme texture handling, and model-harness trust surfaces.
 
+### Current active slice (2026-06-17)
+
+- Chat layout is now flat by default:
+  - `sub-agents` has been removed as a fixed default panel and is no longer force-hidden list-driven in layout config.
+  - Right side context remains on demand and can still be opened from the standard tools flow.
+  - Environment rail starts hidden by default until user opens it or active work warrants visibility.
+- Message chrome is quieter by default:
+  - Confidence, run replay, prompt microscope, artifacts, and next actions are behind a single Details toggle.
+  - The default assistant stream remains readable prose unless the user asks for depth.
+- Tool/retry evidence is already wired into the routing loop via prompt strategy IDs, per-model/tool stats, and retry-reduction rows in auto-router candidate enrichment.
+
+This slice maps to Phase 1 and Phase 4 in [docs/PREMIER_HARNESS_KICKOFF.md](docs/PREMIER_HARNESS_KICKOFF.md) and is currently represented in the working tree as client-only changes.
+
 Recent trust-surface improvements include:
 
 - Model Library capability scorecards with strengths, weaknesses, fit reasons, cost/context signals, and provider availability.

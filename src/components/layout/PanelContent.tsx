@@ -2,7 +2,6 @@ import { Suspense, lazy } from 'react';
 import type { HarnessRun, RunSteeringAction } from '../../types';
 import type { PanelId } from '../../types/layout';
 
-const SubAgentTracker = lazy(() => import('../SubAgentTracker').then((m) => ({ default: m.SubAgentTracker })));
 const ChatPanel = lazy(() => import('../ChatPanel').then((m) => ({ default: m.ChatPanel })));
 const BrowserPanel = lazy(() => import('../BrowserPanel').then((m) => ({ default: m.BrowserPanel })));
 const TerminalPanel = lazy(() => import('../TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
@@ -76,15 +75,6 @@ export function PanelContent({ panelId, context }: Props) {
       return wrapped(<BrowserPanel workingDir={context.workingDir} onAskAboutScreenshot={context.onAskAboutScreenshot} />);
     case 'terminal':
       return wrapped(<TerminalPanel workingDir={context.workingDir} onSendToChat={context.onSendToChat} />);
-    case 'sub-agents':
-      return wrapped(
-        <SubAgentTracker
-          agents={context.subAgents}
-          focusedAgentId={context.focusedSubAgentId ?? null}
-          onRunSteer={context.onRunSteer}
-          onFocusAgent={context.onFocusSubAgent}
-        />,
-      );
     case 'files':
       return wrapped(<FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />);
     case 'model-lab':

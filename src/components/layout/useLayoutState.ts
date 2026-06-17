@@ -5,10 +5,8 @@ import { DEFAULT_LAYOUT, ALL_PANELS } from '../../types/layout';
 const STORAGE_KEY = 'openharness-layout.v7';
 const KNOWN_PANELS = new Set<string>([
   ...ALL_PANELS,
-  'sub-agents',
 ]);
 const DEFAULT_HIDDEN_PANELS: PanelId[] = ALL_PANELS.filter((id): id is PanelId => id !== 'chat');
-const FORCE_HIDDEN_PANELS: PanelId[] = ['sub-agents'];
 
 function loadLayout(): LayoutNode {
   try {
@@ -16,7 +14,7 @@ function loadLayout(): LayoutNode {
     if (raw) {
       const parsed = JSON.parse(raw) as LayoutNode;
       if (validateLayout(parsed)) {
-        const panelsToHide = [...DEFAULT_HIDDEN_PANELS, ...FORCE_HIDDEN_PANELS];
+        const panelsToHide = [...DEFAULT_HIDDEN_PANELS];
         return [...new Set(panelsToHide)].reduce((next, panelId) => {
           const pruned = removePanelFromTree(next, panelId);
           return pruned ?? structuredClone(DEFAULT_LAYOUT);

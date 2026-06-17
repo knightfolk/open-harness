@@ -1,7 +1,7 @@
 import type { PanelId, PanelConfig } from '../../types/layout';
 import {
   MessageSquare, Globe, Terminal,
-  Bot, FolderOpen, FlaskConical, Shield, Brain,
+  FolderOpen, FlaskConical, Shield, Brain,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -13,7 +13,6 @@ const iconMap: Record<PanelId, ComponentType<{ size?: number; 'aria-hidden'?: bo
   chat: MessageSquare,
   browser: Globe,
   terminal: Terminal,
-  'sub-agents': Bot,
   files: FolderOpen,
   'model-lab': FlaskConical,
   'routing-learning': Brain,
@@ -24,7 +23,6 @@ export const panelConfigs: Record<PanelId, PanelConfig> = {
   chat:        { id: 'chat',        label: 'Chat',        icon: 'MessageSquare', defaultSize: 920, minSize: 280 },
   browser:     { id: 'browser',     label: 'Browser',     icon: 'Globe',         defaultSize: 360, minSize: 240 },
   terminal:    { id: 'terminal',    label: 'Terminal',     icon: 'Terminal',      defaultSize: 200, minSize: 120 },
-  'sub-agents':{ id: 'sub-agents',  label: 'Agent Work',  icon: 'Bot',           defaultSize: 320, minSize: 200 },
   files:       { id: 'files',       label: 'Files',        icon: 'FolderOpen',    defaultSize: 280, minSize: 180 },
   'model-lab': { id: 'model-lab',   label: 'Model Lab',   icon: 'FlaskConical',  defaultSize: 400, minSize: 260 },
   'routing-learning': { id: 'routing-learning', label: 'Routing Learning', icon: 'Brain', defaultSize: 420, minSize: 280 },

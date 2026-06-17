@@ -36,7 +36,7 @@ const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
 const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
 const THEME_TEXTURE_OPACITY_OVERRIDE_KEY = 'openharness.theme.texture-opacity-override.v1';
 const NARROW_SIDEBAR_AUTO_CLOSE_WIDTH = 640;
-const FORCE_HIDDEN_TOOL_PANELS: PanelId[] = ['sub-agents'];
+const FORCE_HIDDEN_TOOL_PANELS: PanelId[] = [];
 
 function sanitizePinnedTools(value: unknown): PanelId[] {
   const knownPanels = new Set<string>(ALL_PANELS);
@@ -65,10 +65,10 @@ function loadPinnedTools(): PanelId[] {
 function loadEnvironmentOpen() {
   try {
     const raw = localStorage.getItem(ENVIRONMENT_HIDDEN_KEY);
-    if (raw === null) return true;
+    if (raw === null) return false;
     return raw !== 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 

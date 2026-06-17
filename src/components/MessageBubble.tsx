@@ -341,16 +341,24 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
     () => isAssistant && !isStreaming ? runReplaySummary(message) : null,
     [isAssistant, isStreaming, message],
   );
+  const hasArtifacts = useMemo(
+    () => (
+      !!message.runTrace?.steps?.some((step): step is Extract<NonNullable<Message['runTrace']>['steps'][number], { type: 'artifact' }> => step.type === 'artifact')
+      || /```[\s\S]*?```/.test(message.content || '')
+    ),
+    [message],
+  );
   const hiddenDetailSummary = useMemo(() => {
     const items = [
       (message.toolCalls?.length || 0) > 0 ? 'tool details' : null,
       confidenceSignals ? 'confidence' : null,
       teamPlanArtifact ? 'team plan' : null,
+      hasArtifacts ? 'artifacts' : null,
       message.runTrace ? 'prompt microscope' : null,
       nextActions.length > 0 ? 'next actions' : null,
     ].filter(Boolean);
     return items.length > 0 ? items.join(', ') : 'message details';
-  }, [message.toolCalls, message.runTrace, confidenceSignals, teamPlanArtifact, nextActions]);
+  }, [message.toolCalls, message.runTrace, confidenceSignals, teamPlanArtifact, nextActions, hasArtifacts]);
 
   const handleExportReplay = async () => {
     if (!message.runTrace?.id) return;
@@ -369,6 +377,7 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
       (message.toolCalls?.length || 0) > 0 ||
       !!confidenceSignals ||
       !!teamPlanArtifact ||
+      hasArtifacts ||
       message.runTrace != null ||
       nextActions.length > 0
     ),
@@ -426,17 +435,6 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
             </div>
           )}
 
-          {isAssistant && !isStreaming && replaySummary && (
-            <div className="message-replay-summary">
-              <span>Run replay</span>
-              <span>{replaySummary}</span>
-            </div>
-          )}
-
-          {isAssistant && !isStreaming && (
-            <ArtifactDrawer message={message} onSendMessage={onSendMessage} onRunSteer={onRunSteer} />
-          )}
-
           {isAssistant && !isStreaming && hasHiddenDetails && (
             <div className="message-action-row">
               <button
@@ -457,6 +455,17 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
           {/* ── Delight features for completed assistant messages ── */}
           {isAssistant && !isStreaming && showDetails && (
             <div id={detailsRegionId} className="message-details-region" role="region" aria-label="Message details">
+              {replaySummary && (
+                <div className="message-replay-summary">
+                  <span>Run replay</span>
+                  <span>{replaySummary}</span>
+                </div>
+              )}
+
+              {hasArtifacts && (
+                <ArtifactDrawer message={message} onSendMessage={onSendMessage} onRunSteer={onRunSteer} />
+              )}
+
               {message.runTrace && (
                 <div className="message-patch-action">
                   <button
