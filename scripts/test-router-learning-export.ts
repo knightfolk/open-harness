@@ -290,9 +290,11 @@ assert.deepEqual(payload.summary.toolReliability.recoveryPatterns[0].exampleSess
 assert.deepEqual(payload.summary.toolReliability.recoveryPatterns[0].exampleEvidenceSources, ['saved_session_trace'], 'export should preserve recovery-pattern evidence sources');
 assert.deepEqual(payload.summary.toolReliability.failureMemory[0].exampleSessionIds, ['session-1'], 'export should preserve failure-memory session breadcrumbs');
 assert.deepEqual(payload.summary.toolReliability.failureMemory[0].exampleEvidenceSources, ['saved_session_trace'], 'export should preserve failure-memory evidence sources');
+assert.equal(payload.summary.toolReliability.failureMemory[0].fixedBy[0].providerId, 'provider', 'export should preserve failure-memory fix path provider id');
 assert.deepEqual(payload.summary.toolReliability.errorSignatures[0].exampleSessionIds, ['session-1'], 'export should preserve normalized signature session breadcrumbs');
 assert.deepEqual(payload.summary.toolReliability.errorSignatures[0].exampleEvidenceSources, ['saved_session_trace'], 'export should preserve normalized signature evidence sources');
 assert.equal(payload.summary.toolReliability.errorSignatures[0].workedBy[0].avgRetryDistance, 1, 'export should preserve normalized signature retry-distance evidence');
+assert.equal(payload.summary.toolReliability.errorSignatures[0].workedBy[0].providerId, 'provider', 'export should preserve error-signature worked-by provider id');
 assert.equal(payload.summary.toolReliability.retryReductionRecommendations[0].avoidPath, 'provider:model/read_file', 'export should preserve retry-reduction avoid path');
 assert.equal(payload.summary.toolReliability.retryReductionRecommendations[0].preferPath, 'provider:model/list_directory', 'export should preserve retry-reduction preferred path');
 assert.equal(payload.summary.toolReliability.retryReductionRecommendations[0].avoidProviderPath, 'provider:provider:model/read_file', 'export should preserve provider-qualified retry-reduction avoid path');
