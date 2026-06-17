@@ -32,8 +32,9 @@ Closeout evidence should name durable proof artifacts directly. The `Premier Har
 - Executed: `npm run test:prompt-routing-memory`
 - Result: all included checks passed.
 - Latest refreshed after commit `a40f0a1 Track log-derived tool error recovery`, including the new log-derived tool-error ledger regression coverage.
-- Session evidence gap: no live `tool-error-ledger.jsonl` entries exist yet under `~/.openharness/router-learning`, so Recovery evidence is still proof-backed by fixtures/synthetic traces and the new reconstructed `log_trace` ledger test until a real run produces live rows.
-- Follow-up action: run one provider-backed or staged live tool-error scenario, then record the resulting session/run breadcrumbs and retry-distance rows in closeout evidence.
+- Staged endpoint proof: `docs/proof/2026-06-17-routing-learning-staged-tool-error-proof.md` temporarily inserted one `saved_session_trace` ledger row, verified `/api/router/learning/tool-errors` returned failed path, later working path, retry distance, final-answer capture, and session/run breadcrumbs, then restored the ledger and verified the staged row was gone.
+- Session evidence gap: no genuine live `tool-error-ledger.jsonl` entries exist yet under `~/.openharness/router-learning`, so Recovery evidence is now proof-backed by fixtures/synthetic traces, the reconstructed `log_trace` ledger test, and the staged endpoint proof until a real run produces live rows.
+- Follow-up action: run one provider-backed or local runtime tool-error scenario, then record the resulting genuine session/run breadcrumbs and retry-distance rows in closeout evidence.
 
 ## Latest Phase 7 Add-on — Prompt Strategy And Routing Memory
 

@@ -2729,3 +2729,10 @@ Phase-mapped manual UI evidence:
 - Confirmed the Agent Detail steering evidence template is included in the generic per-template safety audit.
 - Added Calm Chat artifact-review template guard coverage for collapsed diagnostics, Prompt Microscope/detail affordances, artifact drawer review controls, Review Changes consolidation, validation proof save status, and labelled details regions.
 - Status: docs/test alignment only. No server/runtime restart was required. Closeout-matrix validation remains pending.
+
+## Routing Learning staged tool-error endpoint proof - 2026-06-17
+
+- Added completed staged no-provider proof artifact: `docs/proof/2026-06-17-routing-learning-staged-tool-error-proof.md`.
+- The proof temporarily staged one `saved_session_trace` ledger row, queried the real running `/api/router/learning/tool-errors` endpoint, captured failed `proof-provider:proof-primary-model/read_file`, later working `proof-provider:proof-primary-model/list_directory`, retry distance `1`, final-answer capture, session id, and run id, then restored the ledger.
+- Cleanup proof confirmed the staged row was removed and the endpoint returned zero rows for `proof-primary-model` afterward.
+- Status: no-provider endpoint proof only. Real provider-approved or local runtime tool-error rows, browser/UI proof, exports, and final gates remain pending.
