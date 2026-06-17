@@ -381,6 +381,11 @@ assert.equal(summary.recentErrors[0].evidenceSource, 'saved_session_trace', 'rec
 assert.equal(summary.recentErrors[1].tool, 'read_file', 'older error should follow newest error');
 assert.equal(normalizeToolStatus({ type: 'tool_call', id: 'legacy', name: 'x', input: {}, durationMs: 1 }), 'complete');
 assert.equal(normalizeToolStatus({ type: 'tool_call', id: 'legacy-running', name: 'x', input: {} }), 'running');
+assert.equal(
+  normalizeToolStatus({ type: 'tool_call', id: 'structured-error', name: 'read_file', input: {}, status: 'complete', outputPreview: '{\\n  "error": "Invalid path"\\n}', durationMs: 1 }),
+  'error',
+  'structured tool error payloads should count as tool errors even when the transport marked the call complete',
+);
 
 const tempHome = mkdtempSync(join(tmpdir(), 'openharness-tool-reliability-log-trace-'));
 process.env.HOME = tempHome;

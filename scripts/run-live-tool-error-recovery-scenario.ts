@@ -89,6 +89,16 @@ function buildPreflight(config: ConfigPayload | null, summary: any) {
   };
 }
 
+function toolCallLooksErrored(tool: ToolCallEvent): boolean {
+  if (tool.status === 'error') return true;
+  const text = `${tool.error || ''}\n${tool.output || ''}`.trim();
+  return /^error\W/i.test(text) || /^\{"?error"?:?\s/i.test(text) || /"error"\s*:\s*"/i.test(text);
+}
+
+function toolCallLooksComplete(tool: ToolCallEvent): boolean {
+  return tool.status === 'complete' && !toolCallLooksErrored(tool);
+}
+
 function parseSseBlock(block: string): SseEvent | null {
   let event = 'message';
   let data = '';
@@ -175,9 +185,9 @@ const streamed = await streamScenario(session.id);
 await new Promise((resolve) => setTimeout(resolve, 500));
 const after = await readEvidenceStatus();
 
-const failedTool = streamed.toolCalls.find((tool) => tool.status === 'error');
+const failedTool = streamed.toolCalls.find((tool) => toolCallLooksErrored(tool));
 const laterWorkingTool = failedTool
-  ? streamed.toolCalls.slice(streamed.toolCalls.indexOf(failedTool) + 1).find((tool) => tool.status === 'complete')
+  ? streamed.toolCalls.slice(streamed.toolCalls.indexOf(failedTool) + 1).find((tool) => toolCallLooksComplete(tool))
   : undefined;
 
 const closeoutReady = after?.liveEvidenceStatus === 'available'

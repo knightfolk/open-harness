@@ -201,3 +201,103 @@ Guard result:
 ```text
 npm run test:premier-live-evidence-guard -> passed
 ```
+
+## Provider-approved live recovery row - 2026-06-17
+
+Approval: user confirmed all configured OpenHarness providers were fair game for live testing.
+
+Approved command:
+
+```text
+OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1 OPENHARNESS_LIVE_TOOL_ERROR_MODEL=minimax:MiniMax-M3 npm run run:live-tool-error-recovery
+```
+
+First approved attempt used tools but did not create a ledger row because `read_file` returned structured error JSON while the transport marked the call complete. This exposed a real classification bug in tool reliability status normalization.
+
+Fix applied:
+
+- `server/toolReliability.ts` now treats structured `{ "error": ... }` tool outputs as tool errors even when the transport status is `complete`.
+- `scripts/test-tool-reliability.ts` covers pretty-printed structured tool-error payloads.
+- `scripts/run-live-tool-error-recovery-scenario.ts` now uses the same structured-error interpretation when reporting `failedTool` and `laterWorkingTool`.
+
+Focused validation:
+
+```text
+npm run test:tool-reliability -> passed
+```
+
+Restart proof after server/runtime fix:
+
+```text
+npm start
+✓ Express ready on port 3001
+✓ Vite ready on port 5173
+Launching Electron...
+✓ Docker MCP connected — tools: 50
+✓ MCP watchdog started
+```
+
+Second approved scenario result:
+
+```text
+sessionId: 962eafda-076f-4fae-8257-78b6919f8db6
+runId: 58c6cd58-1e6f-49f9-860b-f9d7aaab4bc8
+requestedModel: minimax:MiniMax-M3
+before.status: missing_ledger
+before.totalErrorEvents: 0
+after.status: available
+after.totalErrorEvents: 1
+after.persistedEventCount: 1
+failedTool: read_file
+failedTool.error: { "error": "Invalid path" }
+laterWorkingTool: list_directory
+closeoutReady: true
+```
+
+Independent evidence probe:
+
+```text
+npm run check:live-tool-error-evidence -> passed
+closeoutReady: true
+status: available
+totalErrorEvents: 1
+persistedLedgerExists: true
+persistedEventCount: 1
+logTraceEventCount: 0
+```
+
+Ledger row proof:
+
+```text
+evidenceSource: saved_session_trace
+sessionId: 962eafda-076f-4fae-8257-78b6919f8db6
+runId: 58c6cd58-1e6f-49f9-860b-f9d7aaab4bc8
+failedModel: minimax:MiniMax-M3
+failedProviderId: minimax
+failedTool: read_file
+error: { "error": "Invalid path" }
+runRecovered: true
+finalStatus: complete
+finalAnswerCaptured: true
+recoveryModel: minimax:MiniMax-M3
+recoveryProviderId: minimax
+recoveryTool: list_directory
+retryDistance: 0
+```
+
+Strict readiness result:
+
+```text
+OPENHARNESS_REQUIRE_CLOSEOUT_READY=1 npm run check:premier-closeout-readiness -> passed
+closeoutReady: true
+blockingChecks: []
+live-tool-error-recovery-ready.status: available
+live-tool-error-recovery-ready.totalErrorEvents: 1
+```
+
+Reachability after proof:
+
+```text
+http://127.0.0.1:3001/api/config -> HTTP 200
+http://127.0.0.1:5173/ -> HTTP 200
+```

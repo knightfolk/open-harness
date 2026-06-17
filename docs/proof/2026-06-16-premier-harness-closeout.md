@@ -2811,3 +2811,26 @@ Phase-mapped manual UI evidence:
 - This helps choose `OPENHARNESS_LIVE_TOOL_ERROR_MODEL` for the approved run without exposing provider keys or spending tokens.
 - Latest no-approval preflight passed and recommended `minimax:MiniMax-M3`; it reported active model `Auto`, Auto-Router enabled, default `minimax:MiniMax-M3`, 18 configured enabled models, 10 active candidates, `currentEvidenceStatus: missing_ledger`, and `currentTotalErrorEvents: 0`.
 - `npm run test:premier-live-evidence-guard` passed after adding preflight guard coverage.
+
+## Full Premier no-spend baseline with readiness audit - 2026-06-17
+
+- Ran `npm run test:premier-no-spend` after adding the closeout readiness audit to the bundle.
+- Result: passed.
+- Covered Phase 5 theme accessibility, Phase 7 prompt/routing memory, execute proof hygiene, Premier narrow layout, proof trust, steering contract, artifact review, calm chat, active work, layout shell, agent detail, model harness, theme textures, Review Changes, baseline manifest, stop-condition audit, prompt-source provenance, live-evidence guard, approval boundaries, closeout matrix, restart scope, worktree isolation, and non-strict closeout readiness.
+- The `check:premier-closeout-readiness` step reported `closeoutReady: false` and `blockingChecks: ["live-tool-error-recovery-ready"]`.
+- Readiness details: `live-tool-error-recovery-ready` remains blocked because status is `missing_ledger`, `totalErrorEvents: 0`, and no genuine live tool-error recovery row exists yet with failed path, later working path, retry distance, session/run ids, and final-answer capture.
+- This proves the no-spend/static baseline is currently green, but it is not final closeout evidence.
+
+## Provider-approved live tool-error recovery evidence - 2026-06-17
+
+- User approved all configured OpenHarness providers for live testing.
+- First approved run with `minimax:MiniMax-M3` used `read_file` and `list_directory`, but exposed a classification bug: structured `{ "error": "Invalid path" }` output was marked as complete, so no ledger row was created.
+- Fixed `server/toolReliability.ts` so structured tool-error payloads count as tool errors even when transport status is `complete`; `npm run test:tool-reliability` passed.
+- Restarted OpenHarness after the server/runtime fix; `3001`, `5173`, Electron launch, Docker MCP connection, and MCP watchdog startup succeeded.
+- Second approved run used `OPENHARNESS_APPROVE_LIVE_TOOL_ERROR=1 OPENHARNESS_LIVE_TOOL_ERROR_MODEL=minimax:MiniMax-M3 npm run run:live-tool-error-recovery`.
+- Resulting live proof: session `962eafda-076f-4fae-8257-78b6919f8db6`, run `58c6cd58-1e6f-49f9-860b-f9d7aaab4bc8`, failed `minimax:MiniMax-M3` / `minimax` / `read_file` with `{ "error": "Invalid path" }`, recovered with `minimax:MiniMax-M3` / `minimax` / `list_directory`, final answer captured, persisted event count `1`, status `available`, retry distance `0`.
+- `npm run check:live-tool-error-evidence` passed with `closeoutReady: true`, `status: available`, `totalErrorEvents: 1`, `persistedLedgerExists: true`, `persistedEventCount: 1`, and `logTraceEventCount: 0`.
+- `OPENHARNESS_REQUIRE_CLOSEOUT_READY=1 npm run check:premier-closeout-readiness` passed with `closeoutReady: true` and no blocking checks.
+- Reachability after proof returned HTTP 200 for `http://127.0.0.1:3001/api/config` and `http://127.0.0.1:5173/`.
+- Full `npm run test:premier-no-spend` passed after the provider-approved live recovery row was created and the structured-error normalizer fix landed.
+- The bundled `check:premier-closeout-readiness` step reported `closeoutReady: true`, `blockingChecks: []`, `live-tool-error-recovery-ready.status: available`, and `live-tool-error-recovery-ready.totalErrorEvents: 1`.

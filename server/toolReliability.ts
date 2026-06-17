@@ -320,12 +320,13 @@ function emptyToolReliabilityBucket(): ToolReliabilityBucket {
 }
 
 export function normalizeToolStatus(step: Extract<HarnessRunStep, { type: 'tool_call' }>): ToolReliabilityStatus {
-  if (step.status === 'running' || step.status === 'complete' || step.status === 'error' || step.status === 'skipped') return step.status;
   if (typeof step.error === 'string' && step.error.trim()) return 'error';
   const outputPreview = typeof step.outputPreview === 'string' ? step.outputPreview : '';
   const output = outputPreview.trim();
   if (/^error\W/i.test(output)) return 'error';
-  if (/^\{"?error"?:?\s/i.test(output)) return 'error';
+  if (/^\{\s*"?error"?:?\s/i.test(output)) return 'error';
+  if (/^\{[\s\S]{0,80}"error"\s*:/i.test(output)) return 'error';
+  if (step.status === 'running' || step.status === 'complete' || step.status === 'error' || step.status === 'skipped') return step.status;
   return step.durationMs == null ? 'running' : 'complete';
 }
 
