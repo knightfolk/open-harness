@@ -4,7 +4,7 @@
 
 > **Audience:** OpenHarness harness, agent orchestration layer, and any system that adapts prompting behavior per-model at runtime.
 
-> **Research date:** May 30, 2026. Update quarterly or on major model releases.
+> **Research date:** 2026-06-17. Update quarterly or on major model releases.
 
 ---
 
@@ -943,3 +943,15 @@ After receiving the tool result, continue with your response.
 *Document generated: May 30, 2026*
 *Next review: Quarterly or on major model releases*
 *Sources: OpenRouter live model data, official model documentation, community benchmarking, hands-on testing*
+**Primary references:**
+
+- https://github.com/meta-llama/llama-models/blob/main/models/llama3_3/prompt_format.md
+- https://github.com/meta-llama/llama3
+**Primary references:**
+
+- https://ai.google.dev/gemma/docs/core/prompt-structure
+- https://ai.google.dev/gemma/docs
+**Primary references:**
+
+- https://huggingface.co/docs/transformers/model_doc/phi3
+- https://learn.microsoft.com/en-us/shows/open-at-microsoft/introduction-to-phi-3cookbook

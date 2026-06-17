@@ -100,6 +100,7 @@ export const PROMPT_STRATEGY_SOURCES = {
   anthropicPromptEngineeringOverview: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview',
   anthropicClaudeBestPractices: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting',
   geminiPromptStrategies: 'https://ai.google.dev/gemini-api/docs/prompting-strategies',
+  gemmaPromptFormat: 'https://ai.google.dev/gemma/docs/core/prompt-structure',
   mistralPromptEngineering: 'https://docs.mistral.ai/models/best-practices/prompt-engineering',
   mistralFunctionCalling: 'https://docs.mistral.ai/studio-api/conversations/function-calling',
   mistralPromptingCapabilities: 'https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities',
@@ -109,6 +110,8 @@ export const PROMPT_STRATEGY_SOURCES = {
   xaiOverview: 'https://docs.x.ai/overview',
   xaiFunctionCalling: 'https://docs.x.ai/guides/function-calling',
   qwenQuickstart: 'https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html',
+  llamaPromptFormats: 'https://github.com/meta-llama/llama-models/blob/main/models/llama3_3/prompt_format.md',
+  phiPromptTemplate: 'https://huggingface.co/docs/transformers/model_doc/phi3',
   openHarnessGuide: 'docs/MODEL_PROMPTING_GUIDE.md',
 } as const;
 
@@ -263,6 +266,48 @@ function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracti
         guidance: 'Use compact system directives plus a strict output contract instead of verbose meta-instructions.',
         rationale: 'Template-based chat construction favors clear prompt sections and compact role-facing instructions.',
         evaluationCue: 'Measure direct answer quality and tool-error rates between compact versus verbose output-contract prompts.',
+      },
+      ...common,
+    ];
+  }
+  if (family === 'llama') {
+    return [
+      {
+        id: 'llama-role-boundaries',
+        sourceRef: PROMPT_STRATEGY_SOURCES.llamaPromptFormats,
+        appliesTo: ['coding', 'tool-use', 'direct'],
+        guidance: 'Use explicit role headers (`system`, `user`, `assistant`) and clear end-of-turn markers to match Llama prompt-format contracts.',
+        rationale: 'Llama prompt docs define role and message boundaries as required structure for stable multi-turn and tool interactions.',
+        evaluationCue: 'Track whether explicit role/turn structure reduces first-call tool failures and retry depth.',
+      },
+      {
+        id: 'llama-tool-calling-first',
+        sourceRef: PROMPT_STRATEGY_SOURCES.openHarnessGuide,
+        appliesTo: ['tool-use', 'coding'],
+        guidance: 'Prefer short, structured tool-call payloads with minimal narrative in tool-heavy tasks.',
+        rationale: 'Compact tool contract wording keeps multi-step execution output parseable.',
+        evaluationCue: 'Measure whether tool-calling rows improve first-call success when tool instructions stay minimal.',
+      },
+      ...common,
+    ];
+  }
+  if (family === 'phi') {
+    return [
+      {
+        id: 'phi-template-stability',
+        sourceRef: PROMPT_STRATEGY_SOURCES.phiPromptTemplate,
+        appliesTo: ['coding', 'tool-use', 'direct'],
+        guidance: 'Preserve chat-template style formatting and keep user-facing requests concise; avoid extra wrapper prose in worker/tool modes.',
+        rationale: 'Phi model docs emphasize chat-template based usage and stable formatting for prompt reliability.',
+        evaluationCue: 'Measure first-call tool errors before/after removing extra prose wrappers from weak/fast-path runs.',
+      },
+      {
+        id: 'phi-local-compact-contract',
+        sourceRef: PROMPT_STRATEGY_SOURCES.openHarnessGuide,
+        appliesTo: ['coding', 'tool-use', 'direct'],
+        guidance: 'Keep the prompt compact, repeat critical constraints close to the user request for weaker instruction followers, and prefer structured JSON contracts when native tool calling is weak.',
+        rationale: 'OpenHarness model-family guidance records that smaller/open models vary in system-prompt strength and tool reliability.',
+        evaluationCue: 'Track prompt-strategy variant, first-call tool errors, retry distance, and final proof quality by model family.',
       },
       ...common,
     ];
@@ -469,7 +514,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     id: 'llama-repeat-rules-v1',
     family: 'llama',
     appliesTo: ['llama'],
-    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.llamaPromptFormats, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('llama'),
     updatedAt: UPDATED_AT,
     systemStyle: 'structured',
@@ -489,7 +534,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     id: 'gemma-concise-first-user-v1',
     family: 'gemma',
     appliesTo: ['gemma'],
-    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.gemmaPromptFormat, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('gemma'),
     updatedAt: UPDATED_AT,
     systemStyle: 'concise',
@@ -509,7 +554,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     id: 'phi-minimal-router-v1',
     family: 'phi',
     appliesTo: ['phi'],
-    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.phiPromptTemplate, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('phi'),
     updatedAt: UPDATED_AT,
     systemStyle: 'minimal',

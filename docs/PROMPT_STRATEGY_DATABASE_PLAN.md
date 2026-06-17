@@ -46,6 +46,12 @@ Primary sources reviewed:
   - https://docs.x.ai/guides/function-calling
 - Qwen quickstart API guidance:
   - https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html
+- Llama prompt format contract:
+  - https://github.com/meta-llama/llama-models/blob/main/models/llama3_3/prompt_format.md
+- Gemma prompt structure guidance:
+  - https://ai.google.dev/gemma/docs/core/prompt-structure
+- Phi-3 chat template and usage guidance:
+  - https://huggingface.co/docs/transformers/model_doc/phi3
 
 Shared best practices:
 
