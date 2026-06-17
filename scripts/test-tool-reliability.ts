@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildRetryReductionRecommendations, buildToolReliabilitySummary, normalizeToolStatus } from '../server/toolReliability';
 import { annotateCandidatesWithToolReliability } from '../server/autoRouter';
-import { buildToolErrorLedgerEventsFromRun } from '../server/toolErrorLedger';
+import { buildToolErrorLedgerEventsFromRun, getToolErrorLedgerSummary } from '../server/toolErrorLedger';
 import type { HarnessRun, HarnessRunStep } from '../server/runTrace';
 
 function run(id: string, status: HarnessRun['status'], steps: HarnessRunStep[]): HarnessRun {
@@ -98,6 +98,18 @@ assert.equal(logLedgerEvents[0].recoveryTool, 'list_directory', 'ledger events s
 assert.equal(logLedgerEvents[0].retryDistance, 1, 'ledger events should preserve recovery retry distance');
 assert.equal(logLedgerEvents[0].runRecovered, true, 'ledger events should identify recovered error runs');
 assert.equal(logLedgerEvents[0].finalAnswerCaptured, true, 'ledger events should show whether the run reached a final answer');
+
+const liveLedgerSummary = getToolErrorLedgerSummary();
+assert.ok(
+  ['missing_ledger', 'empty', 'available'].includes(liveLedgerSummary.liveEvidenceStatus),
+  'ledger summary should expose whether live tool-error evidence is missing, empty, or available',
+);
+assert.equal(typeof liveLedgerSummary.persistedLedgerExists, 'boolean', 'ledger summary should expose whether the persisted ledger file exists');
+assert.equal(typeof liveLedgerSummary.persistedEventCount, 'number', 'ledger summary should expose persisted tool-error event count');
+assert.equal(typeof liveLedgerSummary.logTraceEventCount, 'number', 'ledger summary should expose log-derived tool-error event count');
+if (!liveLedgerSummary.persistedLedgerExists) {
+  assert.equal(liveLedgerSummary.liveEvidenceStatus, 'missing_ledger', 'missing ledger files should not be confused with completed live evidence');
+}
 
 const mixedRun = run('providerless-fallback-run', 'complete', [
   {

@@ -2750,3 +2750,13 @@ Phase-mapped manual UI evidence:
 - Reachability proof returned HTTP 200 for `http://127.0.0.1:3001/api/config` and `http://127.0.0.1:5173/`.
 - Duplicate Electron/process-shape check showed one managed OpenHarness server, one Vite UI process, one OpenHarness Electron main process, and normal Electron helper processes rather than duplicate OpenHarness shells.
 - Remaining gaps: this is runtime/process proof only; provider-backed/manual proof, genuine live tool-error recovery rows, and final closeout gates remain open.
+
+## Live tool-error ledger gap status - 2026-06-17
+
+- Added `docs/proof/2026-06-17-live-tool-error-ledger-gap.md` after checking current local routing-learning storage.
+- Current live state: `~/.openharness/router-learning/tool-error-ledger.jsonl` is missing and `/api/router/learning/tool-errors` has no genuine live rows.
+- `server/toolErrorLedger.ts` now exposes `persistedLedgerExists`, `persistedEventCount`, `logTraceEventCount`, and `liveEvidenceStatus` so `missing_ledger`, `empty`, and `available` states are not conflated.
+- `npm run test:tool-reliability` passed with coverage for the new live-evidence status metadata.
+- Remaining gap: a real provider-approved or local runtime tool-error recovery scenario must still create genuine saved-session/log evidence with failed path, later working path, retry distance, session/run ids, and final-answer capture state.
+- Post-restart endpoint proof returned `liveEvidenceStatus: "missing_ledger"`, `persistedLedgerExists: false`, `persistedEventCount: 0`, and `logTraceEventCount: 0` from `/api/router/learning/tool-errors?summaryOnly=true`.
+- Restart reachability after the runtime change returned HTTP 200 for `/api/config` on `3001` and `/` on `5173`, with one OpenHarness Electron main process plus normal helper processes.

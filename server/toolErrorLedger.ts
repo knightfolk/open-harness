@@ -40,6 +40,10 @@ export interface ToolErrorModelAggregate {
 
 export interface ToolErrorLedgerSummary {
   totalErrorEvents: number;
+  persistedLedgerExists: boolean;
+  persistedEventCount: number;
+  logTraceEventCount: number;
+  liveEvidenceStatus: 'missing_ledger' | 'empty' | 'available';
   byModel: Record<string, ToolErrorModelAggregate>;
   byModelProvider: Record<string, ToolErrorModelAggregate>;
   byTool: Record<string, ToolErrorModelAggregate>;
@@ -237,9 +241,28 @@ function incrementAggregate(target: Record<string, ToolErrorModelAggregate>, key
   addTopExamples(row.exampleRunIds, event.runId);
 }
 
-function buildSummary(events: ToolErrorLedgerEvent[]): ToolErrorLedgerSummary {
+function buildSummary(
+  events: ToolErrorLedgerEvent[],
+  meta: {
+    persistedLedgerExists: boolean;
+    persistedEventCount: number;
+    logTraceEventCount: number;
+  } = {
+    persistedLedgerExists: existsSync(TOOL_ERROR_DB_PATH),
+    persistedEventCount: 0,
+    logTraceEventCount: 0,
+  },
+): ToolErrorLedgerSummary {
   const summary: ToolErrorLedgerSummary = {
     totalErrorEvents: events.length,
+    persistedLedgerExists: meta.persistedLedgerExists,
+    persistedEventCount: meta.persistedEventCount,
+    logTraceEventCount: meta.logTraceEventCount,
+    liveEvidenceStatus: meta.persistedLedgerExists
+      ? events.length > 0
+        ? 'available'
+        : 'empty'
+      : 'missing_ledger',
     byModel: {},
     byModelProvider: {},
     byTool: {},
@@ -297,11 +320,24 @@ export function getToolErrorLedgerEvents(options: ToolErrorLedgerOptions = {}): 
 }
 
 export function getToolErrorLedgerSummary(options: ToolErrorLedgerOptions = {}): ToolErrorLedgerSummary {
-  const events = getToolErrorLedgerEvents({
-    ...options,
+  const query: ToolErrorLedgerQuery = {
+    model: options.model,
+    providerId: options.providerId,
+    tool: options.tool,
+    evidenceSource: options.evidenceSource,
     limit: Number.MAX_SAFE_INTEGER,
+  };
+  const persistedLedgerExists = existsSync(TOOL_ERROR_DB_PATH);
+  const persistedEvents = readAllEvents();
+  const logEvents = getLogTraceToolErrorEvents();
+  const combined = [...persistedEvents, ...logEvents]
+    .filter((event) => matchEvent(event, query))
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  return buildSummary(combined, {
+    persistedLedgerExists,
+    persistedEventCount: persistedEvents.filter((event) => matchEvent(event, query)).length,
+    logTraceEventCount: logEvents.filter((event) => matchEvent(event, query)).length,
   });
-  return buildSummary(events);
 }
 
 export function recordToolErrorRunEvents(run: HarnessRun): void {
