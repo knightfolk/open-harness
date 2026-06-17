@@ -559,3 +559,26 @@ Reviewer:
 - Gate log/artifact path(s):
 - Remaining risks:
 ```
+
+## Final Readiness Audit Command
+
+Use this no-spend audit before any final closeout claim:
+
+```bash
+npm run check:premier-closeout-readiness
+```
+
+The command emits JSON with `closeoutReady`, blocking check ids, runtime reachability, proof/checklist coverage, and live tool-error recovery status.
+
+For final acceptance, run strict mode:
+
+```bash
+OPENHARNESS_REQUIRE_CLOSEOUT_READY=1 npm run check:premier-closeout-readiness
+```
+
+Strict mode exits nonzero while any blocking evidence item remains unresolved. Do not mark the Premier Harness kickoff goal complete unless strict mode passes and the evidence artifacts named above are durable and redacted.
+
+Approval boundaries that must remain explicit:
+
+- Browser/manual proof pass approval needed.
+- Final closeout gates need approval before running local validation.

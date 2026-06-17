@@ -75,7 +75,8 @@
     "dist": "npm run build && electron-builder",
     "electron:prod": "npm run build && electron .",
     "check:live-tool-error-evidence": "tsx scripts/check-live-tool-error-evidence.ts",
-    "run:live-tool-error-recovery": "tsx scripts/run-live-tool-error-recovery-scenario.ts"
+    "run:live-tool-error-recovery": "tsx scripts/run-live-tool-error-recovery-scenario.ts",
+    "check:premier-closeout-readiness": "tsx scripts/check-premier-closeout-readiness.ts"
   },
   "dependencies": {
     "allotment": "^1.20.5",

@@ -2786,3 +2786,13 @@ Phase-mapped manual UI evidence:
 - Remaining gap: this scenario has not been run with approval yet, so genuine live tool-error recovery evidence remains pending.
 - Default no-approval run of `npm run run:live-tool-error-recovery` passed with `approved: false`, `skipped: true`, `currentStatus: missing_ledger`, and `closeoutReady: false`.
 - `npm run test:premier-live-evidence-guard` passed after adding the scenario guard.
+
+## Premier closeout readiness audit command - 2026-06-17
+
+- Added `scripts/check-premier-closeout-readiness.ts` and package script `check:premier-closeout-readiness`.
+- The audit emits JSON with `closeoutReady`, blocking check ids, runtime reachability, proof/checklist coverage, and live tool-error recovery status.
+- Default mode is non-strict so it can be used during continuation without failing the session when known live/provider/manual gaps remain.
+- Final acceptance can set `OPENHARNESS_REQUIRE_CLOSEOUT_READY=1`; in strict mode the command exits nonzero when any blocking check remains.
+- Current expected state remains not ready until genuine live tool-error recovery, provider/manual proof, and final gates are complete.
+- Current non-strict readiness result: `npm run check:premier-closeout-readiness` passed with `closeoutReady: false`; the only blocking check is `live-tool-error-recovery-ready` with status `missing_ledger` and `totalErrorEvents: 0`.
+- `npm run test:premier-closeout-matrix` passed after adding the readiness audit guard.

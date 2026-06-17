@@ -7,6 +7,7 @@ const proof = readFileSync('docs/proof/2026-06-16-premier-harness-closeout.md', 
 const nextSession = readFileSync('NEXT_SESSION.md', 'utf-8');
 const proofReadme = readFileSync('docs/proof/README.md', 'utf-8');
 const stagedToolErrorProof = readFileSync('docs/proof/2026-06-17-routing-learning-staged-tool-error-proof.md', 'utf-8');
+const closeoutReadiness = readFileSync('scripts/check-premier-closeout-readiness.ts', 'utf-8');
 const proofTemplates = [
   'docs/proof/2026-06-17-model-lab-eval-proof-template.md',
   'docs/proof/2026-06-17-model-lab-bench-proof-template.md',
@@ -26,6 +27,25 @@ assert.ok(
   pkg.scripts['test:premier-no-spend']?.includes('npm run test:premier-closeout-matrix'),
   'Premier no-spend bundle should include the closeout-matrix guard',
 );
+
+assert.ok(
+  pkg.scripts['check:premier-closeout-readiness']?.includes('tsx scripts/check-premier-closeout-readiness.ts'),
+  'package scripts should expose the Premier closeout readiness audit',
+);
+
+for (const expected of [
+  'OPENHARNESS_REQUIRE_CLOSEOUT_READY',
+  'closeoutReady',
+  'live-tool-error-recovery-ready',
+  'genuine live tool-error recovery row',
+  'Premier Harness closeout is still open',
+  'process.exit(2)',
+]) {
+  assert.ok(
+    closeoutReadiness.includes(expected),
+    `Closeout readiness audit should preserve strict final-gate behavior: ${expected}`,
+  );
+}
 
 for (const expected of [
   'Phase-mapped review matrix',
