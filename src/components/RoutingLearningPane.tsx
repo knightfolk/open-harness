@@ -357,6 +357,9 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
     const productionEventCount = events.length - benchmarkEventCount;
     const byEvidenceSource = toolReliability?.byEvidenceSource || [];
+    const evidenceSourcesPresent = byEvidenceSource.length > 0
+      ? byEvidenceSource.map((source) => source.source).join(', ')
+      : 'none';
     const lines = [
       '# OpenHarness Routing Learning Evidence Brief',
       '',
@@ -378,6 +381,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       `- Latest route evidence: ${latestEvent ? `${routeEventExactTime(latestEvent.timestamp)} (${routeEventTimeLabel(latestEvent.timestamp)})` : 'none loaded'}`,
       `- Freshness warning: ${latestEventIsStale ? 'refresh with newer route outcomes before trusting trends' : 'recent routing evidence is loaded'}`,
       `- Confidence: ${sampleLabel(summary?.totalEvents || 0)}`,
+      `- Evidence source coverage: ${evidenceSourcesPresent}`,
       `- Candidate evidence refreshed: ${routerState?.candidateEvidenceRefreshedAt ? `${routerState.candidateEvidenceRefreshedAt} (${routerState.candidateEvidenceRefreshCount ?? 0} refresh${(routerState.candidateEvidenceRefreshCount ?? 0) === 1 ? '' : 'es'})` : 'not available'}`,
       '',
       '## Threshold Advice',
@@ -572,6 +576,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       '',
       '## Review Notes',
       '',
+      `- Tool-error evidence source coverage: ${evidenceSourcesPresent}`,
       '- Only marked outcomes should influence trust in success rates.',
       '- Eval recommendations are manual until applied to role assignments; do not treat unreviewed or attention-needed proof as approved evidence.',
       '- Auto-Router candidates remain separate from role recommendations.',
