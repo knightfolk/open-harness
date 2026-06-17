@@ -175,6 +175,7 @@ assert.equal(summary.failureMemory[1].tool, 'read_file', 'recovered failures sho
 assert.equal(summary.failureMemory[1].recoveredRuns, 1, 'failure memory should count recovered runs');
 assert.equal(summary.failureMemory[1].fixedBy[0].tool, 'list_directory', 'failure memory should record what fixed the failed tool path');
 assert.equal(summary.failureMemory[1].fixedBy[0].avgRecoveryRounds, 1, 'failure memory should preserve the retry cost of the working path');
+assert.equal(summary.failureMemory[1].fixedBy[0].providerId, 'primary-provider', 'failure memory should preserve the provider that fixed the failed tool path');
 assert.deepEqual(summary.failureMemory[1].exampleSessionIds, ['session-1'], 'failure memory should keep example session ids for saved session inspection');
 assert.deepEqual(summary.failureMemory[1].exampleRunIds, ['recovered-run'], 'failure memory should keep example run ids for session/log inspection');
 assert.deepEqual(summary.failureMemory[1].exampleEvidenceSources, ['saved_session_trace'], 'failure memory should keep the evidence source for session/log inspection');
@@ -190,6 +191,7 @@ assert.equal(summary.errorSignatures[1].signature, 'enoent', 'signature memory s
 assert.equal(summary.errorSignatures[1].recoveredRuns, 1, 'signature memory should count recovered runs');
 assert.equal(summary.errorSignatures[1].workedBy[0].tool, 'list_directory', 'signature memory should record the follow-up tool that worked');
 assert.equal(summary.errorSignatures[1].workedBy[0].avgRetryDistance, 1, 'signature memory should preserve average retry distance');
+assert.equal(summary.errorSignatures[1].workedBy[0].providerId, 'primary-provider', 'signature memory should preserve the provider that fixed the failed tool signature');
 assert.deepEqual(summary.errorSignatures[1].exampleSessionIds, ['session-1'], 'signature memory should keep example session ids for saved session inspection');
 assert.deepEqual(summary.errorSignatures[1].exampleRunIds, ['recovered-run'], 'signature memory should keep example run ids for session/log inspection');
 assert.deepEqual(summary.errorSignatures[1].exampleEvidenceSources, ['saved_session_trace'], 'signature memory should keep the evidence source for session/log inspection');
