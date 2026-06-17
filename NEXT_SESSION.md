@@ -27,6 +27,13 @@ Closeout evidence should name durable proof artifacts directly. The `Premier Har
 - If no new tool-error sessions exist yet, record that gap explicitly and proceed to the next slice without marking routing-memory claims as complete.
 - Keep runtime/process restart actions to runtime-required paths only; this slice is currently docs/tests aligned.
 
+## Last executed proof status (2026-06-17)
+
+- Executed: `npm run test:prompt-routing-memory`
+- Result: all included checks passed.
+- Session evidence gap: no live `tool-error-ledger.jsonl` entries exist yet under `~/.openharness/router-learning`, so Recovery evidence is still proof-backed only via fixtures and synthetic traces.
+- Follow-up action: run one provider-backed or staged live tool-error scenario, then record the resulting session/run breadcrumbs and retry-distance rows in closeout evidence.
+
 ## Latest Phase 7 Add-on — Prompt Strategy And Routing Memory
 
 Phase 7 now treats prompt strategy and tool reliability as first-class routing
