@@ -402,3 +402,12 @@ recovery, unrecovered aborts, or running/unknown outcomes. Routing Learning
 exports this outcome trail, and auto-router candidate cards include the compact
 session-outcome line so classifier scoring can reduce brittle first-tool choices
 instead of merely counting retries after the fact.
+
+### 2026-06-17 Log-trace tool-error ledger rows
+
+The run-level tool-error ledger now reuses the same recovery-event builder for
+saved session traces and reconstructed process-log traces. `/api/router/learning/tool-errors`
+can therefore include `log_trace` rows with failed model/provider/tool,
+later working model/provider/tool, retry distance, final-answer capture, and
+session/run breadcrumbs, while the append-only JSONL ledger remains reserved for
+locally persisted saved-session events.

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildRetryReductionRecommendations, buildToolReliabilitySummary, normalizeToolStatus } from '../server/toolReliability';
 import { annotateCandidatesWithToolReliability } from '../server/autoRouter';
+import { buildToolErrorLedgerEventsFromRun } from '../server/toolErrorLedger';
 import type { HarnessRun, HarnessRunStep } from '../server/runTrace';
 
 function run(id: string, status: HarnessRun['status'], steps: HarnessRunStep[]): HarnessRun {
@@ -82,6 +83,21 @@ const failedRun = run('failed-run', 'error', [
   },
   { type: 'error', message: 'permission denied' },
 ]);
+
+const logLedgerEvents = buildToolErrorLedgerEventsFromRun(recoveredRun, 'log_trace');
+assert.equal(logLedgerEvents.length, 1, 'log-derived ledger rows should be built from reconstructed tool-error runs');
+assert.equal(logLedgerEvents[0].evidenceSource, 'log_trace', 'ledger events should preserve log trace as the evidence source');
+assert.equal(logLedgerEvents[0].sessionId, 'session-1', 'ledger events should preserve session breadcrumbs');
+assert.equal(logLedgerEvents[0].runId, 'recovered-run', 'ledger events should preserve run breadcrumbs');
+assert.equal(logLedgerEvents[0].failedModel, 'primary-model', 'ledger events should preserve the model that failed the tool call');
+assert.equal(logLedgerEvents[0].failedProviderId, 'primary-provider', 'ledger events should preserve the provider that failed the tool call');
+assert.equal(logLedgerEvents[0].failedTool, 'read_file', 'ledger events should preserve the failed tool name');
+assert.equal(logLedgerEvents[0].recoveryModel, 'primary-model', 'ledger events should preserve the later working model');
+assert.equal(logLedgerEvents[0].recoveryProviderId, 'primary-provider', 'ledger events should preserve the later working provider');
+assert.equal(logLedgerEvents[0].recoveryTool, 'list_directory', 'ledger events should preserve the later working tool');
+assert.equal(logLedgerEvents[0].retryDistance, 1, 'ledger events should preserve recovery retry distance');
+assert.equal(logLedgerEvents[0].runRecovered, true, 'ledger events should identify recovered error runs');
+assert.equal(logLedgerEvents[0].finalAnswerCaptured, true, 'ledger events should show whether the run reached a final answer');
 
 const mixedRun = run('providerless-fallback-run', 'complete', [
   {

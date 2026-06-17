@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { HarnessRun, HarnessRunStep } from './runTrace';
+import { getToolReliabilitySessions } from './toolReliabilityLogTrace';
 import { normalizeToolStatus } from './toolReliability';
 
 type ToolErrorEvidenceSource = 'saved_session_trace' | 'log_trace' | 'imported_trace';
@@ -86,6 +87,83 @@ function emptyAggregate(): ToolErrorModelAggregate {
 
 function parseToolSteps(run: HarnessRun): Extract<HarnessRunStep, { type: 'tool_call' }>[] {
   return run.steps.filter((step): step is Extract<HarnessRunStep, { type: 'tool_call' }> => step.type === 'tool_call');
+}
+
+export function buildToolErrorLedgerEventsFromRun(run: HarnessRun, evidenceSource: ToolErrorEvidenceSource): ToolErrorLedgerEvent[] {
+  const toolSteps = parseToolSteps(run);
+  if (toolSteps.length === 0) return [];
+
+  const finalAnswerCaptured = run.steps.some((step) => step.type === 'final_answer');
+  const errorSteps = toolSteps
+    .map((step, index) => ({ step, index }))
+    .filter(({ step }) => normalizeToolStatus(step) === 'error');
+
+  if (errorSteps.length === 0) return [];
+
+  const timestamp = run.startedAt || new Date().toISOString();
+  const lines: ToolErrorLedgerEvent[] = [];
+
+  for (const { step, index } of errorSteps) {
+    const failedModel = modelFromStep(step, run.effectiveModel);
+    const failedProviderId = providerFromStep(step, run.providerId);
+    const failedTool = step.name || 'unknown';
+    const recoveryStep = getRecoveryAfterError(toolSteps, index);
+    const recoveredBy = recoveryStep
+      ? {
+          model: modelFromStep(recoveryStep, run.effectiveModel),
+          providerId: providerFromStep(recoveryStep, run.providerId),
+          tool: recoveryStep.name || 'unknown',
+          round: recoveryStep.round,
+        }
+      : null;
+    const retryDistance = recoveryStep && typeof recoveryStep.round === 'number' && typeof step.round === 'number'
+      ? Math.max(0, recoveryStep.round - step.round)
+      : undefined;
+
+    lines.push({
+      id: `${run.id}-${step.id}`,
+      timestamp,
+      evidenceSource,
+      sessionId: run.sessionId,
+      runId: run.id,
+      failedModel,
+      failedProviderId,
+      failedTool,
+      round: step.round,
+      error: step.error || step.outputPreview,
+      runRecovered: run.status === 'complete' && Boolean(recoveredBy),
+      finalStatus: run.status,
+      finalAnswerCaptured,
+      recoveryModel: recoveredBy?.model,
+      recoveryProviderId: recoveredBy?.providerId,
+      recoveryTool: recoveredBy?.tool,
+      recoveryRound: recoveredBy?.round,
+      retryDistance,
+    });
+  }
+
+  return lines;
+}
+
+function getLogTraceToolErrorEvents(): ToolErrorLedgerEvent[] {
+  try {
+    const sessions = getToolReliabilitySessions();
+    const events: ToolErrorLedgerEvent[] = [];
+
+    for (const session of sessions) {
+      const messages = session.messages || [];
+      for (const message of messages) {
+        const run = message.runTrace;
+        if (!run) continue;
+        if (message.evidenceSource !== 'log_trace' && session.evidenceSource !== 'log_trace') continue;
+        events.push(...buildToolErrorLedgerEventsFromRun(run, 'log_trace'));
+      }
+    }
+
+    return events;
+  } catch {
+    return [];
+  }
 }
 
 function addTopExamples(target: string[], value: string, max = 5): void {
@@ -209,7 +287,13 @@ export function getToolErrorLedgerEvents(options: ToolErrorLedgerOptions = {}): 
     limit,
   };
 
-  return readAllEvents().filter((event) => matchEvent(event, query)).slice(0, query.limit);
+  const persistedEvents = readAllEvents();
+  const logEvents = getLogTraceToolErrorEvents();
+  const combined = [...persistedEvents, ...logEvents];
+  return combined
+    .filter((event) => matchEvent(event, query))
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, query.limit);
 }
 
 export function getToolErrorLedgerSummary(options: ToolErrorLedgerOptions = {}): ToolErrorLedgerSummary {
@@ -221,65 +305,14 @@ export function getToolErrorLedgerSummary(options: ToolErrorLedgerOptions = {}):
 }
 
 export function recordToolErrorRunEvents(run: HarnessRun): void {
-  const toolSteps = parseToolSteps(run);
-  if (toolSteps.length === 0) return;
-
-  const finalAnswerCaptured = run.steps.some((step) => step.type === 'final_answer');
-  const errorSteps = toolSteps
-    .map((step, index) => ({ step, index }))
-    .filter(({ step }) => normalizeToolStatus(step) === 'error');
-
-  if (errorSteps.length === 0) return;
-
   try {
     if (!existsSync(BASE_DIR)) {
       mkdirSync(BASE_DIR, { recursive: true });
     }
-    const timestamp = new Date().toISOString();
-    const lines: string[] = [];
-
-    for (const { step, index } of errorSteps) {
-      const failedModel = modelFromStep(step, run.effectiveModel);
-      const failedProviderId = providerFromStep(step, run.providerId);
-      const failedTool = step.name || 'unknown';
-      const recoveryStep = getRecoveryAfterError(toolSteps, index);
-      const recoveredBy = recoveryStep
-        ? {
-          model: modelFromStep(recoveryStep, run.effectiveModel),
-          providerId: providerFromStep(recoveryStep, run.providerId),
-          tool: recoveryStep.name || 'unknown',
-          round: recoveryStep.round,
-        }
-        : null;
-      const retryDistance = recoveryStep && typeof recoveryStep.round === 'number' && typeof step.round === 'number'
-        ? Math.max(0, recoveryStep.round - step.round)
-        : undefined;
-      const event: ToolErrorLedgerEvent = {
-        id: `${run.id}-${step.id}`,
-        timestamp,
-        evidenceSource: 'saved_session_trace',
-        sessionId: run.sessionId,
-        runId: run.id,
-        failedModel,
-        failedProviderId,
-        failedTool,
-        round: step.round,
-        error: step.error || step.outputPreview,
-        runRecovered: run.status === 'complete' && Boolean(recoveredBy),
-        finalStatus: run.status,
-        finalAnswerCaptured,
-        recoveryModel: recoveredBy?.model,
-        recoveryProviderId: recoveredBy?.providerId,
-        recoveryTool: recoveredBy?.tool,
-        recoveryRound: recoveredBy?.round,
-        retryDistance,
-      };
-      lines.push(JSON.stringify(event));
-    }
-
-    if (lines.length > 0) {
-      appendFileSync(TOOL_ERROR_DB_PATH, `${lines.join('\n')}\n`, 'utf-8');
-    }
+    const events = buildToolErrorLedgerEventsFromRun(run, 'saved_session_trace');
+    if (events.length === 0) return;
+    const lines = events.map((event) => JSON.stringify(event));
+    appendFileSync(TOOL_ERROR_DB_PATH, `${lines.join('\n')}\n`, 'utf-8');
   } catch {
     // Do not block runtime behavior on telemetry persistence errors.
   }
