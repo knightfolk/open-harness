@@ -6,6 +6,7 @@ const checklist = readFileSync('docs/PREMIER_HARNESS_PROOF_CHECKLIST.md', 'utf-8
 const proof = readFileSync('docs/proof/2026-06-16-premier-harness-closeout.md', 'utf-8');
 const nextSession = readFileSync('NEXT_SESSION.md', 'utf-8');
 const proofReadme = readFileSync('docs/proof/README.md', 'utf-8');
+const stagedToolErrorProof = readFileSync('docs/proof/2026-06-17-routing-learning-staged-tool-error-proof.md', 'utf-8');
 const proofTemplates = [
   'docs/proof/2026-06-17-model-lab-eval-proof-template.md',
   'docs/proof/2026-06-17-model-lab-bench-proof-template.md',
@@ -48,7 +49,7 @@ for (const expected of [
   'Auto-Router recovery proof context',
   'source-backed best-practice guidance, eval cue, and source refs',
   'Routing Learning exports/import previews',
-  'source-backed prompt best-practice metadata',
+  'prompt best-practice metadata for Routing Learning exports/import previews',
   'Premier Harness Closeout Evidence',
   'Runtime Scenario Proof',
   'Final Gates',
@@ -75,7 +76,7 @@ for (const expected of [
   'back from the closeout log.',
   'Before saving logs, traces, screenshots, or DOM notes as durable proof',
   'redact provider keys, API tokens, cookies, raw private prompts,',
-  'Remaining risks / gaps:',
+  'Remaining risks:',
 ]) {
   assert.ok(
     checklist.includes(expected),
@@ -86,8 +87,8 @@ for (const expected of [
 for (const expected of [
   '# Premier Harness Closeout Evidence',
   'Stop condition',
-  'Evidence required',
-  'Status / notes',
+  'Required direct evidence',
+  'Current evidence status',
   'Default UI is chat-first, flat, and non-draggable.',
   'Active agents are visible under the owning thread.',
   'Clicking an agent opens right-hand detail.',
@@ -114,6 +115,28 @@ for (const expected of [
   assert.ok(
     proof.includes(expected),
     `Closeout proof should preserve stop-condition evidence matrix: ${expected}`,
+  );
+}
+
+for (const expected of [
+  'Status: completed staged no-provider proof',
+  'temporary staged `saved_session_trace` ledger row',
+  'The ledger was restored immediately after the endpoint check.',
+  'failed `read_file` and later working `list_directory`',
+  'staged row retry distance was `1`',
+  'Saved session id(s): `codex-proof-session`',
+  'Run id(s): `codex-proof-run`',
+  'Failed first model/provider/tool path: `proof-provider:proof-primary-model/read_file`',
+  'Later working model/provider/tool path: `proof-provider:proof-primary-model/list_directory`',
+  '"totalErrorEvents": 1',
+  '"totalErrorEvents": 0',
+  'Provider keys/tokens/cookies removed: yes',
+  'real provider-approved or local runtime run with genuine tool failure is still pending',
+  'final `check:premier-no-spend`, lint/build, manual/browser evidence, and provider-approved proof are still open',
+]) {
+  assert.ok(
+    stagedToolErrorProof.includes(expected),
+    `Staged tool-error proof should preserve endpoint evidence, cleanup, redaction, and remaining gaps: ${expected}`,
   );
 }
 

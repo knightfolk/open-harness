@@ -48,6 +48,13 @@ private file contents before saving command excerpts or environment details.
 - Unneeded private file contents or paths removed:
 - Large generated artifacts linked or named instead of pasted:
 
+## Remaining Gaps
+
+- Manual/browser proof gaps:
+- Runtime scenario proof gaps:
+- Provider-backed proof gaps:
+- Final-gate gaps:
+
 ## Closeout Decision
 
 - All kickoff stop conditions have current direct evidence:
