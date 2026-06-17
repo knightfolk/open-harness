@@ -130,6 +130,23 @@ export interface ComparisonArtifactData {
   rawJudgeMarkdown: string;
 }
 
+export interface ValidationProofCommand {
+  id: string;
+  command: string;
+  status: 'running' | 'passed' | 'failed';
+  exitCode?: number;
+  duration?: number;
+  outputTail?: string;
+}
+
+export interface ValidationProofArtifactData {
+  workspace: string;
+  sessionId: string;
+  capturedAt: string;
+  commands: ValidationProofCommand[];
+  rawMarkdown: string;
+}
+
 export type WorkProductArtifact =
   | {
   id: string;
@@ -162,7 +179,25 @@ export type WorkProductArtifact =
   createdAt: string;
   summary: string;
   data: ComparisonArtifactData;
+}
+  | {
+  id: string;
+  type: 'validation_proof';
+  title: string;
+  createdAt: string;
+  summary: string;
+  data: ValidationProofArtifactData;
 };
+
+export type RunSteeringAction =
+  | 'flag-assumption'
+  | 'add-note'
+  | 'redirect'
+  | 'pause'
+  | 'cancel'
+  | 'request-proof'
+  | 'approve-artifact'
+  | 'needs-revision';
 
 export type HarnessRunStep =
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
@@ -174,6 +209,7 @@ export type HarnessRunStep =
   | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
   | { type: 'model_text'; chars: number }
   | { type: 'model_thinking'; chars: number; preview?: string; source: 'provider' | 'router' }
+  | { type: 'steering'; action: RunSteeringAction; target?: 'orchestrator' | 'agent'; source: 'user'; note?: string; createdAt: string }
   | { type: 'final_answer'; chars: number }
   | { type: 'error'; message: string }
   | {

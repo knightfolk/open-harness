@@ -77,8 +77,19 @@ export interface ThemeShadowTokens {
   lg: string;
 }
 
+export type ThemeTextureRecipe =
+  | 'none'
+  | 'paper-grain'
+  | 'fine-grid'
+  | 'blueprint-grid'
+  | 'low-noise-matte'
+  | 'soft-glass'
+  | 'terminal-scanline';
+
 export interface ThemeEffectTokens {
   material?: 'solid' | 'frosted-glass' | 'classic-bevel' | 'paper-grain' | 'crt' | 'blueprint-grid' | 'photo-lab' | 'custom';
+  textureRecipe?: ThemeTextureRecipe;
+  textureOpacity?: number;
   backdropBlur?: number;
   surfaceOpacity?: number;
   borderStyle?: 'flat' | 'hairline' | 'beveled' | 'double' | 'inset' | 'glow';

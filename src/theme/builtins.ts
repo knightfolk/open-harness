@@ -9,6 +9,8 @@ import { parseThemePluginManifest, type ThemePluginManifest } from './themePlugi
 export const FALLBACK_THEME_ID = 'midnight';
 const DEFAULT_EFFECTS = {
   material: 'solid' as const,
+  textureRecipe: 'none' as const,
+  textureOpacity: 0,
   backdropBlur: 0,
   surfaceOpacity: 1,
   borderStyle: 'flat' as const,
@@ -225,6 +227,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'low-noise-matte',
+        textureOpacity: 0.035,
         reducedTransparencyFallback: {
           surfaceColor: '#27272a',
           borderColor: '#2e2e32',
@@ -507,6 +511,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'paper-grain',
+        textureOpacity: 0.03,
         reducedTransparencyFallback: {
           surfaceColor: '#ffffff',
           borderColor: '#d0d5dd',
@@ -1081,6 +1087,8 @@ function themeTokensToCssVars(theme: BuiltinTheme): Record<string, string> {
     '--shadow-lg': theme.tokens.shadow.lg,
     '--text-link': theme.tokens.text.link || theme.tokens.color.accentPrimary,
     '--theme-material': theme.tokens.effects?.material || DEFAULT_EFFECTS.material,
+    '--theme-texture-recipe': theme.tokens.effects?.textureRecipe || DEFAULT_EFFECTS.textureRecipe,
+    '--theme-texture-opacity': String(theme.tokens.effects?.textureOpacity ?? DEFAULT_EFFECTS.textureOpacity),
     '--theme-backdrop-blur': toPx(theme.tokens.effects?.backdropBlur ?? DEFAULT_EFFECTS.backdropBlur),
     '--theme-surface-opacity': String(theme.tokens.effects?.surfaceOpacity ?? DEFAULT_EFFECTS.surfaceOpacity),
     '--theme-border-style': theme.tokens.effects?.borderStyle || DEFAULT_EFFECTS.borderStyle,
@@ -1114,6 +1122,7 @@ export function applyTheme(themeId: string, _resolvedInputs?: Record<string, The
     style.setProperty(name, value);
   }
   document.documentElement.setAttribute('data-theme', resolvedThemeId);
+  document.documentElement.setAttribute('data-theme-texture-recipe', theme.tokens.effects?.textureRecipe || DEFAULT_EFFECTS.textureRecipe);
   return resolvedThemeId;
 }
 

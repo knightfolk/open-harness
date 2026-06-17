@@ -133,7 +133,7 @@ export function PatchReviewPanel({ workingDir, sessionId, pendingProposalId, onC
     api.listReviewComments(selectedId).then((c) => setComments(c)).catch(() => setComments([])).finally(() => setCommentsLoading(false));
   }, [selectedId]);
 
-  // When a new proposal was just created elsewhere (DiffViewer / chat
+  // When a new proposal was just created elsewhere (Review Changes / chat
   // diff block / next-best action), refresh and auto-select it.
   // We capture the id locally so a stale effect can't clear a newer
   // signal that the parent has since set.
@@ -1330,54 +1330,65 @@ function CommitAndValidateSection({
   onCommit: () => void;
 }) {
   const canCommit = (validationGate?.ok || (proposal.verificationCommands ?? []).length === 0) && proposal.status === 'open';
+  const verificationCount = proposal.verificationCommands?.length ?? 0;
   return (
-    <div className="patch-commit-section">
+    <div className="patch-commit-section" role="group" aria-label={`Release workflow for proposal ${proposal.id}: ${verificationCount} validation command${verificationCount === 1 ? '' : 's'}, commit ${canCommit ? 'available' : 'blocked'}`}>
       <div className="patch-commit-header">
-        <GitCommit size={12} />
+        <GitCommit size={12} aria-hidden="true" />
         <span>Release workflow</span>
       </div>
-      <div className="patch-commit-actions">
+      <div className="patch-commit-actions" role="group" aria-label="Release workflow proof and commit actions">
         <button
           className="btn btn-ghost btn-small"
+          type="button"
           onClick={onGenerate}
           disabled={busyId === 'commit-msg'}
           title="Generate a commit message from this proposal"
+          aria-label={busyId === 'commit-msg' ? 'Generating commit message from this proposal' : 'Generate commit message from this proposal'}
         >
-          {busyId === 'commit-msg' ? <Loader size={12} className="spin" /> : <MessageCircle size={12} />}
+          {busyId === 'commit-msg' ? <Loader size={12} className="spin" aria-hidden="true" /> : <MessageCircle size={12} aria-hidden="true" />}
           Generate message
         </button>
         <button
           className="btn btn-ghost btn-small"
+          type="button"
           onClick={onValidate}
           disabled={busyId === 'validate' || (proposal.verificationCommands ?? []).length === 0}
           title="Run the configured validation commands"
+          aria-label={verificationCount === 0 ? 'No validation commands configured for this proposal' : busyId === 'validate' ? `Running ${verificationCount} validation command${verificationCount === 1 ? '' : 's'} for this proposal` : `Run ${verificationCount} validation command${verificationCount === 1 ? '' : 's'} for this proposal`}
         >
-          {busyId === 'validate' ? <Loader size={12} className="spin" /> : <ListChecks size={12} />}
+          {busyId === 'validate' ? <Loader size={12} className="spin" aria-hidden="true" /> : <ListChecks size={12} aria-hidden="true" />}
           Run validation
         </button>
         <button
           className="btn btn-secondary btn-small"
+          type="button"
           onClick={onCommit}
           disabled={busyId === 'commit' || !canCommit}
           title={canCommit ? 'Commit the proposal files using the generated message' : 'Run validation successfully first'}
+          aria-label={busyId === 'commit' ? 'Committing proposal files' : canCommit ? 'Commit proposal files using the generated message' : verificationCount === 0 ? 'Commit blocked because proposal is not open' : 'Commit blocked until validation passes'}
         >
-          {busyId === 'commit' ? <Loader size={12} className="spin" /> : <GitCommit size={12} />}
+          {busyId === 'commit' ? <Loader size={12} className="spin" aria-hidden="true" /> : <GitCommit size={12} aria-hidden="true" />}
           Commit
         </button>
       </div>
       {validationGate && (
-        <div className={`patch-gate-result ${validationGate.ok ? 'ok' : 'fail'}`}>
+        <div
+          className={`patch-gate-result ${validationGate.ok ? 'ok' : 'fail'}`}
+          role={validationGate.ok ? 'status' : 'alert'}
+          aria-label={validationGate.bypassed ? 'Validation proof gate bypassed' : validationGate.ok ? `Validation proof gate passed with ${validationGate.results.length} command${validationGate.results.length === 1 ? '' : 's'}` : `Validation proof gate failed with ${validationGate.blockers} blocker${validationGate.blockers === 1 ? '' : 's'}`}
+        >
           {validationGate.bypassed ? (
-            <span><CheckCheck size={11} /> Validation bypassed</span>
+            <span><CheckCheck size={11} aria-hidden="true" /> Validation bypassed</span>
           ) : validationGate.ok ? (
-            <span><CheckCircle2 size={11} /> Validation passed ({validationGate.results.length} command{validationGate.results.length === 1 ? '' : 's'})</span>
+            <span><CheckCircle2 size={11} aria-hidden="true" /> Validation passed ({validationGate.results.length} command{validationGate.results.length === 1 ? '' : 's'})</span>
           ) : (
-            <span><ShieldAlert size={11} /> Validation failed — {validationGate.blockers} blocker{validationGate.blockers === 1 ? '' : 's'}</span>
+            <span><ShieldAlert size={11} aria-hidden="true" /> Validation failed — {validationGate.blockers} blocker{validationGate.blockers === 1 ? '' : 's'}</span>
           )}
         </div>
       )}
       {commitMessage && (
-        <pre className="patch-commit-message" title="Generated commit message">
+        <pre className="patch-commit-message" title="Generated commit message" aria-label="Generated commit message">
 {commitMessage.fullText}
         </pre>
       )}

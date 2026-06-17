@@ -157,6 +157,23 @@ export interface ComparisonArtifactData {
   rawJudgeMarkdown: string;
 }
 
+export interface ValidationProofCommand {
+  id: string;
+  command: string;
+  status: 'running' | 'passed' | 'failed';
+  exitCode?: number;
+  duration?: number;
+  outputTail?: string;
+}
+
+export interface ValidationProofArtifactData {
+  workspace: string;
+  sessionId: string;
+  capturedAt: string;
+  commands: ValidationProofCommand[];
+  rawMarkdown: string;
+}
+
 export type WorkProductArtifact =
   | {
   id: string;
@@ -189,9 +206,28 @@ export type WorkProductArtifact =
   createdAt: string;
   summary: string;
   data: ComparisonArtifactData;
+}
+  | {
+  id: string;
+  type: 'validation_proof';
+  title: string;
+  createdAt: string;
+  summary: string;
+  data: ValidationProofArtifactData;
 };
 
+export type RunSteeringAction =
+  | 'flag-assumption'
+  | 'add-note'
+  | 'redirect'
+  | 'pause'
+  | 'cancel'
+  | 'request-proof'
+  | 'approve-artifact'
+  | 'needs-revision';
+
 export type HarnessRunStep =
+  | { type: 'steering'; action: RunSteeringAction; target?: 'orchestrator' | 'agent'; source: 'user'; note?: string; createdAt: string }
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
   | { type: 'artifact'; artifact: WorkProductArtifact }
@@ -283,6 +319,11 @@ export interface SendMessageOptions {
   };
 }
 
+export interface SendRunSteeringOptions {
+  note?: string;
+  target?: 'orchestrator' | 'agent';
+}
+
 // ── Config API ─────────────────────────────────────────
 
 export interface AutoRouterState {
@@ -323,6 +364,48 @@ export interface ContextConfig {
   minRecentPairs: number;
 }
 
+export interface ModelBudget {
+  modelId: string;
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  maxCost: number;
+  period: 'monthly' | 'weekly' | 'daily';
+  onExceeded: 'block' | 'warn' | 'allow';
+}
+
+export interface ProviderRateLimit {
+  providerId: string;
+  maxRequestsPerMinute: number;
+  maxTokensPerMinute: number;
+  onExceeded: 'block' | 'warn' | 'allow';
+}
+
+export interface ProviderRateLimitStatus {
+  windowSeconds: number;
+  providers: Array<{
+    providerId: string;
+    configured: boolean;
+    action: 'block' | 'warn' | 'allow';
+    requestsUsed: number;
+    tokensUsed: number;
+    maxRequestsPerMinute: number;
+    maxTokensPerMinute: number;
+    remainingRequests: number | null;
+    remainingTokens: number | null;
+    resetSeconds: number;
+  }>;
+  recentEvents: Array<{
+    providerId: string;
+    timestamp: string;
+    action: 'warn' | 'block';
+    reason: string;
+    estimatedTokens: number;
+    remainingRequests?: number;
+    remainingTokens?: number;
+    resetSeconds?: number;
+  }>;
+}
+
 export interface AppConfig {
   version: number;
   configPath?: string;
@@ -339,6 +422,8 @@ export interface AppConfig {
   trustMode: string;
   autoRouter?: AutoRouterConfig;
   contextConfig?: ContextConfig;
+  modelBudgets?: ModelBudget[];
+  providerRateLimits?: ProviderRateLimit[];
 }
 
 export async function getConfig(): Promise<AppConfig | null> {
@@ -349,12 +434,18 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests'>>): Promise<void> {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests' | 'modelBudgets' | 'providerRateLimits'>>): Promise<void> {
   await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   });
+}
+
+export async function getProviderRateLimitStatus(): Promise<ProviderRateLimitStatus> {
+  const res = await fetch(`${API_BASE}/api/providers/rate-limits/status`);
+  if (!res.ok) throw new Error(`Failed to get provider rate-limit status: ${res.status}`);
+  return res.json();
 }
 
 
@@ -874,6 +965,23 @@ export async function deleteSession(id: string): Promise<void> {
   await fetch(`${API_BASE}/api/sessions/${id}`, { method: 'DELETE' });
 }
 
+export interface SaveValidationProofArtifactInput {
+  workingDir?: string | null;
+  proofText: string;
+  commands: ValidationProofCommand[];
+}
+
+export async function saveValidationProofArtifact(sessionId: string, input: SaveValidationProofArtifactInput): Promise<MessageInfo> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/validation-proof-artifacts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error || `Failed to save validation proof: ${res.status}`);
+  return body.message as MessageInfo;
+}
+
 // ── Send Message (streaming) ───────────────────────────
 
 export async function sendMessage(sessionId: string, content: string, callbacks: StreamCallbacks, options: SendMessageOptions = {}): Promise<void> {
@@ -935,6 +1043,29 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
   }
 
   callbacks.onDone();
+}
+
+export async function sendRunSteering(
+  sessionId: string,
+  runId: string,
+  action: RunSteeringAction,
+  options: SendRunSteeringOptions = {},
+): Promise<HarnessRun | null> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/runs/${runId}/steering`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action,
+      note: options.note,
+      target: options.target,
+    }),
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(payload?.error || `Failed to send run steering: ${res.status}`);
+  }
+  const payload = await res.json().catch(() => null) as { run?: HarnessRun } | null;
+  return payload?.run || null;
 }
 
 // ── Native Dialog (Electron) ───────────────────────────
@@ -1529,6 +1660,10 @@ export interface EvalRecommendation {
   reportId: string;
   reportName: string;
   generatedAt: string;
+  proofReviewStatus: ProofReviewState['status'];
+  proofTrusted: boolean;
+  proofReviewedAt?: string;
+  proofReviewNote?: string;
 }
 
 export interface EvalReport {
@@ -1542,6 +1677,13 @@ export interface EvalReport {
   createdAt: string;
   completedAt?: string;
   summary?: EvalSummary;
+  packContext?: {
+    packId: string;
+    packName: string;
+    evalIds: string[];
+    matchedEvalIds: string[];
+  };
+  proofReview?: ProofReviewState;
 }
 
 export interface EvalReportSummary {
@@ -1551,6 +1693,7 @@ export interface EvalReportSummary {
   createdAt: string;
   completedAt?: string;
   total: number;
+  proofReview?: ProofReviewState;
 }
 
 export async function getEvalPrompts(): Promise<PromptCase[]> {
@@ -1588,6 +1731,7 @@ export async function runEval(params: {
   promptIds: string[];
   modelIds: string[];
   workingDir?: string;
+  packContext?: EvalReport['packContext'];
 }): Promise<{ id: string; status: string; total: number }> {
   const res = await fetch(`${API_BASE}/api/evals/run`, {
     method: 'POST',
@@ -1926,6 +2070,39 @@ export interface BenchRun {
       delta: number;
     }>;
   } | null;
+  proofReview?: ProofReviewState;
+}
+
+export interface ProofReviewState {
+  status: 'unreviewed' | 'approved' | 'needs-attention';
+  note?: string;
+  reviewedAt: string;
+}
+
+export async function saveEvalProofReview(
+  id: string,
+  review: { status: ProofReviewState['status']; note?: string },
+): Promise<EvalReport> {
+  const res = await fetch(`${API_BASE}/api/evals/reports/${encodeURIComponent(id)}/proof-review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(review),
+  });
+  if (!res.ok) throw new Error(`Failed to save eval proof review: ${res.status}`);
+  return res.json();
+}
+
+export async function saveBenchProofReview(
+  id: string,
+  review: { status: ProofReviewState['status']; note?: string },
+): Promise<BenchRun> {
+  const res = await fetch(`${API_BASE}/api/bench/runs/${encodeURIComponent(id)}/proof-review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(review),
+  });
+  if (!res.ok) throw new Error(`Failed to save bench proof review: ${res.status}`);
+  return res.json();
 }
 
 export async function getBenchRuns(): Promise<BenchRunSummary[]> {
@@ -2270,6 +2447,31 @@ export interface RoutingEvent {
   wasCached: boolean;
   classifierModel?: string | null;
   outcome: 'success' | 'failure' | 'ambiguous' | null;
+  outcomeNote?: string;
+  datasetKind?: 'production' | 'benchmark';
+}
+
+export interface RouterLearningExport {
+  schemaVersion: number;
+  generatedAt: string;
+  summary: RouterLearningSummary;
+  eventCount: number;
+  productionEventCount?: number;
+  benchmarkEventCount?: number;
+  events: RoutingEvent[];
+}
+
+export interface RouterLearningImportResult {
+  ok: boolean;
+  total: number;
+  imported: number;
+  skippedExisting: number;
+  rejected: number;
+  dryRun?: boolean;
+  importSource?: string;
+  schemaVersion?: number | null;
+  warnings?: string[];
+  datasetKind?: 'production' | 'benchmark';
 }
 
 export async function getRouterLearning(): Promise<RouterLearningSummary> {
@@ -2293,6 +2495,26 @@ export async function getRouterLearningEvents(sessionId?: string, limit = 50): P
   params.set('limit', String(limit));
   const res = await fetch(`${API_BASE}/api/router/learning/events?${params}`);
   if (!res.ok) return [];
+  return res.json();
+}
+
+export async function getRouterLearningExport(): Promise<RouterLearningExport> {
+  const res = await fetch(`${API_BASE}/api/router/learning/export`);
+  if (!res.ok) throw new Error(`Failed to export router learning: ${res.status}`);
+  return res.json();
+}
+
+export async function importRouterLearning(payload: unknown, options: { dryRun?: boolean; datasetKind?: 'production' | 'benchmark' } = {}): Promise<RouterLearningImportResult> {
+  const datasetKind = options.datasetKind === 'benchmark' ? 'benchmark' : 'production';
+  const body = Array.isArray(payload)
+    ? { events: payload, dryRun: options.dryRun === true, datasetKind }
+    : { ...(payload && typeof payload === 'object' ? payload as Record<string, unknown> : { events: [] }), dryRun: options.dryRun === true, datasetKind };
+  const res = await fetch(`${API_BASE}/api/router/learning/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to import router learning: ${res.status}`);
   return res.json();
 }
 

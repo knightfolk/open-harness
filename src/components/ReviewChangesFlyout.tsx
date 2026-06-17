@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, GitPullRequestArrow, CheckCircle2, GitCommit, FileText, Layers, Shield, ChevronRight, RefreshCw } from 'lucide-react';
+import { X, GitPullRequestArrow, CheckCircle2, GitCommit, FileText, Layers, Shield, ChevronRight, RefreshCw, Copy, Download } from 'lucide-react';
 import * as api from '../utils/api';
 import { PatchReviewPanel } from './PatchReviewPanel';
 
@@ -24,9 +24,11 @@ interface Props {
   workingDir: string | null;
   _sessionId: string | null;
   onClose: () => void;
+  initialTab?: Tab;
   onReviewDiff?: (diffText: string) => void;
   onProposePatch?: (diffText: string, explanation?: string) => void;
   onExplainChange?: (filePath: string) => void;
+  onProofArtifactSaved?: (message: api.MessageInfo) => void;
 }
 
 /* ── Helpers ─────────────────────────────────── */
@@ -55,8 +57,8 @@ function TodoStepCircle({ status }: { status: TodoStep['status'] }) {
 }
 
 /* ── Main Component ───────────────────────────── */
-export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onProposePatch, onExplainChange }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>('summary');
+export function ReviewChangesFlyout({ workingDir, _sessionId: sessionId, onClose, initialTab, onReviewDiff, onProposePatch, onExplainChange, onProofArtifactSaved }: Props) {
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab || 'summary');
   const [status, setStatus] = useState<api.GitStatusInfo | null>(null);
   const [diffs, setDiffs] = useState<api.GitDiffInfo[]>([]);
   const [projectProfile, setProjectProfile] = useState<api.ProjectProfile | null>(null);
@@ -69,6 +71,10 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
   const [proposalCount, setProposalCount] = useState(0);
   const [activeProposalCount, setActiveProposalCount] = useState(0);
   const [commitMessage, setCommitMessage] = useState('');
+  const [proofCopied, setProofCopied] = useState(false);
+  const [proofSaving, setProofSaving] = useState(false);
+  const [proofSaved, setProofSaved] = useState(false);
+  const [proofSaveError, setProofSaveError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!workingDir) return;
@@ -96,6 +102,13 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { setValidationRuns({}); }, [workingDir]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const allChanges = [
     ...(status?.staged || []).map(f => ({ ...f, staged: true })),
@@ -116,6 +129,39 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
   const validated = validationCommands.length > 0 && validationCommands.every(({ id }) => validationRuns[id]?.status === 'passed');
   const validationFailed = validationCommands.some(({ id }) => validationRuns[id]?.status === 'failed');
   const validationRunning = validationCommands.some(({ id }) => validationRuns[id]?.status === 'running');
+  const validationProofRuns = validationCommands
+    .map(({ id, command }) => ({ id, command, run: validationRuns[id] }))
+    .filter(({ run }) => !!run);
+  const validationProofKey = validationProofRuns
+    .map(({ id, command, run }) => [
+      id,
+      command,
+      run!.status,
+      run!.exitCode ?? '',
+      run!.duration ?? '',
+      run!.output,
+    ].join(':'))
+    .join('\n');
+  const validationProofText = validationProofRuns.length > 0
+    ? [
+      `## Validation Proof`,
+      ``,
+      `Workspace: ${workingDir || 'unknown'}`,
+      `Session: ${sessionId || 'none'}`,
+      `Captured: ${new Date().toISOString()}`,
+      ``,
+      ...validationProofRuns.flatMap(({ command, run }) => [
+        `- ${command}`,
+        `  Status: ${run!.status}${typeof run!.exitCode === 'number' ? ` (exit ${run!.exitCode})` : ''}${typeof run!.duration === 'number' ? `, ${run!.duration}ms` : ''}`,
+        run!.output ? `  Output tail:\n${run!.output.slice(-1200).split('\n').map((line) => `    ${line}`).join('\n')}` : '',
+      ].filter(Boolean)),
+    ].join('\n')
+    : '';
+
+  useEffect(() => {
+    setProofSaved(false);
+    setProofSaveError(null);
+  }, [sessionId, validationProofKey, workingDir]);
 
   // Smart todo steps
   const todoSteps: TodoStep[] = [
@@ -188,6 +234,52 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
     }
   }, [workingDir]);
 
+  const handleCopyValidationProof = useCallback(async () => {
+    if (!validationProofText) return;
+    await navigator.clipboard.writeText(validationProofText);
+    setProofCopied(true);
+    window.setTimeout(() => setProofCopied(false), 2000);
+  }, [validationProofText]);
+
+  const handleDownloadValidationProof = useCallback(() => {
+    if (!validationProofText) return;
+    const blob = new Blob([validationProofText], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const suffix = new Date().toISOString().replace(/[:.]/g, '-');
+    anchor.href = url;
+    anchor.download = `openharness-validation-proof-${suffix}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [validationProofText]);
+
+  const handleSaveValidationProofArtifact = useCallback(async () => {
+    if (!sessionId || !validationProofText) return;
+    setProofSaving(true);
+    setProofSaved(false);
+    setProofSaveError(null);
+    try {
+      const savedMessage = await api.saveValidationProofArtifact(sessionId, {
+        workingDir,
+        proofText: validationProofText,
+        commands: validationProofRuns.map(({ id, command, run }) => ({
+          id,
+          command,
+          status: run!.status,
+          exitCode: run!.exitCode,
+          duration: run!.duration,
+          outputTail: run!.output.slice(-1200),
+        })),
+      });
+      onProofArtifactSaved?.(savedMessage);
+      setProofSaved(true);
+    } catch (err: any) {
+      setProofSaveError(err?.message || 'Failed to save validation proof');
+    } finally {
+      setProofSaving(false);
+    }
+  }, [sessionId, validationProofText, workingDir, validationProofRuns, onProofArtifactSaved]);
+
   // Group changes by category for summary
   const grouped = new Map<string, typeof allChanges>();
   for (const f of allChanges) {
@@ -208,10 +300,10 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
   if (!workingDir) {
     return (
       <div className="review-flyout-overlay" onClick={onClose}>
-        <div className="review-flyout" onClick={e => e.stopPropagation()}>
+        <div className="review-flyout" role="dialog" aria-modal="true" aria-labelledby="review-changes-title-empty" onClick={e => e.stopPropagation()}>
           <div className="review-flyout-header">
-            <span className="review-flyout-title">Review Changes</span>
-            <button className="review-flyout-close" onClick={onClose}><X size={16} /></button>
+            <span className="review-flyout-title" id="review-changes-title-empty">Review Changes</span>
+            <button className="review-flyout-close" type="button" onClick={onClose} aria-label="Close review changes"><X size={16} /></button>
           </div>
           <div className="review-flyout-empty">
             Open a project to review changes
@@ -223,15 +315,15 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
 
   return (
     <div className="review-flyout-overlay" onClick={onClose}>
-      <div className="review-flyout" onClick={e => e.stopPropagation()}>
+      <div className="review-flyout" role="dialog" aria-modal="true" aria-labelledby="review-changes-title" onClick={e => e.stopPropagation()}>
         {/* ── Header ── */}
         <div className="review-flyout-header">
-          <span className="review-flyout-title">Review Changes</span>
+          <span className="review-flyout-title" id="review-changes-title">Review Changes</span>
           <div className="review-flyout-stats">
             {status && (
               <>
                 <span className="review-flyout-branch">{status.branch}</span>
-                {!status.clean && (
+                {allChanges.length > 0 && (
                   <>
                     <span className="review-flyout-stat added">+{totalAdditions}</span>
                     <span className="review-flyout-stat deleted">-{totalDeletions}</span>
@@ -241,10 +333,10 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
               </>
             )}
           </div>
-          <button className="review-flyout-refresh" onClick={refresh} disabled={loading} title="Refresh">
+          <button className="review-flyout-refresh" type="button" onClick={refresh} disabled={loading} title="Refresh" aria-label="Refresh review changes">
             <RefreshCw size={14} className={loading ? 'spin' : ''} />
           </button>
-          <button className="review-flyout-close" onClick={onClose}><X size={16} /></button>
+          <button className="review-flyout-close" type="button" onClick={onClose} aria-label="Close review changes"><X size={16} /></button>
         </div>
 
         {/* ── Smart Todo Tracker ── */}
@@ -259,12 +351,32 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
         </div>
 
         {/* ── Tabs ── */}
-        <div className="review-flyout-tabs">
+        <div className="review-flyout-tabs" role="tablist" aria-label="Review changes sections">
           {tabs.map(tab => (
             <button
               key={tab.id}
+              type="button"
+              role="tab"
+              id={`review-changes-tab-${tab.id}`}
               className={`review-flyout-tab ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => {
+                const currentIndex = tabs.findIndex((item) => item.id === tab.id);
+                let nextIndex = currentIndex;
+                if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+                if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                if (event.key === 'Home') nextIndex = 0;
+                if (event.key === 'End') nextIndex = tabs.length - 1;
+                if (nextIndex !== currentIndex) {
+                  event.preventDefault();
+                  const nextTab = tabs[nextIndex];
+                  setActiveTab(nextTab.id);
+                  document.getElementById(`review-changes-tab-${nextTab.id}`)?.focus();
+                }
+              }}
+              aria-selected={activeTab === tab.id}
+              aria-controls={`review-changes-panel-${tab.id}`}
+              tabIndex={activeTab === tab.id ? 0 : -1}
             >
               {tab.icon}
               <span>{tab.label}</span>
@@ -276,7 +388,12 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
         <div className="review-flyout-body">
           {/* SUMMARY TAB */}
           {activeTab === 'summary' && (
-            <div className="review-flyout-panel">
+            <div
+              className="review-flyout-panel"
+              role="tabpanel"
+              id="review-changes-panel-summary"
+              aria-labelledby="review-changes-tab-summary"
+            >
               {loading && <div className="review-flyout-loading">Loading...</div>}
               {error && <div className="review-flyout-error">{error}</div>}
               {!loading && !error && allChanges.length === 0 && (
@@ -291,10 +408,12 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                     <div key={category} className="summary-group">
                       <div className="summary-group-title">{category}</div>
                       {files.map(f => (
-                        <div
+                        <button
+                          type="button"
                           key={f.path}
                           className="summary-file-row"
                           onClick={() => { handleShowFileDiff(f.path); setActiveTab('files'); }}
+                          aria-label={`Show diff for ${f.path}`}
                         >
                           <span className={`summary-file-status ${f.status}`}>
                             {f.status === 'added' ? 'A' : f.status === 'deleted' ? 'D' : f.status === 'renamed' ? 'R' : 'M'}
@@ -305,7 +424,7 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                             <span className="deleted">-{f.deletions}</span>
                           </span>
                           <ChevronRight size={12} className="summary-file-arrow" />
-                        </div>
+                        </button>
                       ))}
                     </div>
                   ))}
@@ -316,7 +435,12 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
 
           {/* FILES TAB — inline diff viewer */}
           {activeTab === 'files' && (
-            <div className="review-flyout-panel files-panel">
+            <div
+              className="review-flyout-panel files-panel"
+              role="tabpanel"
+              id="review-changes-panel-files"
+              aria-labelledby="review-changes-tab-files"
+            >
               {loading && <div className="review-flyout-loading">Loading...</div>}
               {error && <div className="review-flyout-error">{error}</div>}
               {!loading && allChanges.length === 0 && (
@@ -327,17 +451,20 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                   {/* File list sidebar */}
                   <div className="diff-file-list">
                     {allChanges.map(fc => (
-                      <div
+                      <button
+                        type="button"
                         key={fc.path}
                         className={`diff-file-item ${selectedFile === fc.path ? 'selected' : ''}`}
                         onClick={() => handleShowFileDiff(fc.path)}
+                        aria-label={`Show diff for ${fc.path}`}
+                        aria-pressed={selectedFile === fc.path}
                       >
                         <span className={`diff-file-badge ${fc.status}`}>
                           {fc.status === 'added' ? 'A' : fc.status === 'deleted' ? 'D' : fc.status === 'renamed' ? 'R' : 'M'}
                         </span>
                         <span className="diff-file-name">{fc.path.split('/').pop()}</span>
                         {fc.staged && <span className="diff-file-staged" title="Staged">●</span>}
-                      </div>
+                      </button>
                     ))}
                   </div>
 
@@ -358,8 +485,10 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                             {status?.unstaged?.some(f => f.path === fileDiff.path) && (
                               <button
                                 className="diff-action-btn stage-btn"
+                                type="button"
                                 onClick={() => handleStage(fileDiff.path)}
                                 disabled={staging === fileDiff.path}
+                                aria-label={`Stage ${fileDiff.path}`}
                               >
                                 {staging === fileDiff.path ? '...' : 'Stage'}
                               </button>
@@ -367,24 +496,26 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                             {status?.staged?.some(f => f.path === fileDiff.path) && (
                               <button
                                 className="diff-action-btn unstage-btn"
+                                type="button"
                                 onClick={() => handleUnstage(fileDiff.path)}
                                 disabled={staging === fileDiff.path}
+                                aria-label={`Unstage ${fileDiff.path}`}
                               >
                                 {staging === fileDiff.path ? '...' : 'Unstage'}
                               </button>
                             )}
                             {onReviewDiff && (
-                              <button className="diff-action-btn review-btn" onClick={() => onReviewDiff(fileDiff.diff)}>
+                              <button className="diff-action-btn review-btn" type="button" onClick={() => onReviewDiff(fileDiff.diff)} aria-label={`Review ${fileDiff.path}`}>
                                 Review
                               </button>
                             )}
                             {onExplainChange && (
-                              <button className="diff-action-btn explain-btn" onClick={() => onExplainChange(fileDiff.path)}>
+                              <button className="diff-action-btn explain-btn" type="button" onClick={() => onExplainChange(fileDiff.path)} aria-label={`Explain ${fileDiff.path}`}>
                                 Explain
                               </button>
                             )}
                             {onProposePatch && (
-                              <button className="diff-action-btn propose-btn" onClick={() => onProposePatch(fileDiff.diff, fileDiff.path)}>
+                              <button className="diff-action-btn propose-btn" type="button" onClick={() => onProposePatch(fileDiff.diff, fileDiff.path)} aria-label={`Propose patch for ${fileDiff.path}`}>
                                 Propose patch
                               </button>
                             )}
@@ -410,6 +541,11 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                         )}
                       </div>
                     )}
+                    {selectedFile && !fileDiff && (
+                      <div className="review-flyout-empty">
+                        Could not load a diff for {selectedFile}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -418,23 +554,69 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
 
           {/* PATCHES TAB */}
           {activeTab === 'patches' && (
-            <div className="review-flyout-panel">
+            <div
+              className="review-flyout-panel"
+              role="tabpanel"
+              id="review-changes-panel-patches"
+              aria-labelledby="review-changes-tab-patches"
+            >
               <div className="review-flyout-panel-header">
                 <span className="review-flyout-panel-title">Patch Proposals</span>
               </div>
               <div style={{ flex: 1, overflow: 'auto' }}>
-                <PatchReviewPanel workingDir={workingDir} sessionId={null} />
+                <PatchReviewPanel workingDir={workingDir} sessionId={sessionId} />
               </div>
             </div>
           )}
 
           {/* VALIDATE TAB */}
           {activeTab === 'validate' && (
-            <div className="review-flyout-panel">
+            <div
+              className="review-flyout-panel"
+              role="tabpanel"
+              id="review-changes-panel-validate"
+              aria-labelledby="review-changes-tab-validate"
+            >
               <div className="review-flyout-panel-header">
                 <span className="review-flyout-panel-title">Validation</span>
               </div>
               <div style={{ padding: 16 }}>
+                {validationProofRuns.length > 0 && (
+                  <div className="validate-proof-card">
+                    <div>
+                      <div className="validate-proof-title">Validation proof</div>
+                      <div className="validate-proof-copy">
+                        {validated
+                          ? 'All configured validation commands have passed.'
+                          : validationFailed
+                            ? 'Some validation commands are failing; copy this proof when reporting the branch state.'
+                            : 'Validation is in progress; proof updates as commands finish.'}
+                      </div>
+                    </div>
+                    <div className="validate-proof-actions">
+                      <button className="validate-run-btn" type="button" onClick={handleCopyValidationProof} aria-label="Copy validation proof">
+                        <Copy size={11} />
+                        {proofCopied ? 'Copied' : 'Copy proof'}
+                      </button>
+                      <button className="validate-run-btn" type="button" onClick={handleDownloadValidationProof} aria-label="Download validation proof">
+                        <Download size={11} />
+                        Download proof
+                      </button>
+                      <button
+                        className="validate-run-btn"
+                        type="button"
+                        onClick={handleSaveValidationProofArtifact}
+                        disabled={proofSaving || !sessionId}
+                        aria-label="Save validation proof artifact to chat"
+                        title={sessionId ? 'Save proof into this session and show it in chat as a review artifact' : 'Open a session to save proof artifacts'}
+                      >
+                        <FileText size={11} />
+                        {proofSaving ? 'Saving...' : proofSaved ? 'Saved to chat' : 'Save artifact'}
+                      </button>
+                    </div>
+                    {proofSaveError && <div className="validate-proof-error">{proofSaveError}</div>}
+                  </div>
+                )}
                 <div className="validate-commands">
                   {validationCommands.map(({ id, command }) => {
                     const run = validationRuns[id];
@@ -445,8 +627,10 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                           <code>{command}</code>
                           <button
                             className="validate-run-btn"
+                            type="button"
                             onClick={() => handleRunValidationCommand(id, command)}
                             disabled={isRunning}
+                            aria-label={`${isRunning ? 'Running' : run ? 'Re-run' : 'Run'} validation command ${command}`}
                           >
                             {isRunning ? 'Running...' : run ? 'Re-run' : 'Run'}
                           </button>
@@ -517,7 +701,12 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
 
           {/* COMMIT TAB */}
           {activeTab === 'commit' && (
-            <div className="review-flyout-panel">
+            <div
+              className="review-flyout-panel"
+              role="tabpanel"
+              id="review-changes-panel-commit"
+              aria-labelledby="review-changes-tab-commit"
+            >
               <div className="review-flyout-panel-header">
                 <span className="review-flyout-panel-title">Commit</span>
               </div>
@@ -527,6 +716,7 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                   <textarea
                     className="commit-input"
                     rows={3}
+                    aria-label="Commit message"
                     placeholder="Describe what changed and why..."
                     value={commitMessage}
                     onChange={(event) => setCommitMessage(event.target.value)}
@@ -549,7 +739,9 @@ export function ReviewChangesFlyout({ workingDir, onClose, onReviewDiff, onPropo
                 <div className="commit-actions">
                   <button
                     className="commit-btn"
+                    type="button"
                     disabled={!status?.staged?.length}
+                    aria-label="Create commit from staged files"
                     onClick={async () => {
                       if (!workingDir) return;
                       try {

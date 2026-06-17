@@ -46,6 +46,45 @@ export interface OrchestrationCallbacks {
   signal?: AbortSignal;
   tools?: AgentToolDefinition[];
   invokeTool?: (toolName: string, args: Record<string, unknown>, workingDir?: string) => Promise<unknown>;
+  takeSteeringNotes?: (target: 'orchestrator' | 'agent') => string[];
+}
+
+function collectSteeringNotes(
+  callbacks: OrchestrationCallbacks,
+  target: 'orchestrator' | 'agent',
+): string[] {
+  if (!callbacks.takeSteeringNotes) return [];
+  const notes = callbacks.takeSteeringNotes(target);
+  return notes.filter(Boolean).map((note) => String(note).trim()).filter(Boolean);
+}
+
+function buildSteeringContextSection(
+  notes: string[],
+  target: 'orchestrator' | 'agent',
+  prefix = true,
+): string {
+  if (!notes.length) return '';
+  const intro = target === 'agent' ? 'Agent steering notes' : 'Orchestrator steering notes';
+  const header = prefix ? `## ${intro}` : `### ${intro}`;
+  return [
+    header,
+    ...notes.map((note) => `- ${note}`),
+    '',
+    'Apply these notes to this phase before finalizing the requested work.',
+  ].join('\n');
+}
+
+function appendSteeringNotesToPrompt(
+  prompt: string,
+  callbacks: OrchestrationCallbacks,
+  targets: { orchestrator?: boolean; agent?: boolean } = {},
+): string {
+  const steeringContexts = [
+    targets.orchestrator === false ? '' : buildSteeringContextSection(collectSteeringNotes(callbacks, 'orchestrator'), 'orchestrator', true),
+    targets.agent === false ? '' : buildSteeringContextSection(collectSteeringNotes(callbacks, 'agent'), 'agent', true),
+  ].filter(Boolean);
+  if (steeringContexts.length === 0) return prompt;
+  return `${steeringContexts.join('\n\n')}\n\n${prompt}`;
 }
 
 // ── Public API ─────────────────────────────────────────
@@ -110,7 +149,7 @@ async function runPlanningRoomPipeline(
       : 'Each participant first plans independently, then reads the peer plans before final synthesis.',
   ].join('\n');
 
-  const independentPrompt = [
+  const independentPrompt = appendSteeringNotesToPrompt([
     `## Planning Room: Independent Plan`,
     ``,
     `## Task`,
@@ -129,7 +168,7 @@ async function runPlanningRoomPipeline(
     `3. Step-by-step plan`,
     `4. Risks and unknowns`,
     `5. Validation proof`,
-  ].join('\n');
+  ].join('\n'), callbacks);
 
   const independentPlans = await Promise.all(targetModels.map(async (modelId) => {
     try {
@@ -191,7 +230,7 @@ async function runPlanningRoomPipeline(
 
   const crossChecks = targetModels.length > 1
     ? await Promise.all(usablePlans.map(async (plan) => {
-      const peerPrompt = [
+      const peerPrompt = appendSteeringNotesToPrompt([
         `## Planning Room: Peer Review`,
         ``,
         `## Original Task`,
@@ -208,7 +247,7 @@ async function runPlanningRoomPipeline(
         `Read the peer plans and improve the shared direction.`,
         `Call out: strongest ideas, disagreements, missing steps, risky assumptions, and what should make the final plan.`,
         `Keep this concise. Do not write code.`,
-      ].join('\n');
+      ].join('\n'), callbacks);
 
       try {
         const artifact = await runAgentPhase(config, {
@@ -249,7 +288,7 @@ async function runPlanningRoomPipeline(
     : [];
 
   const synthesisModel = resolveAgentModel(config, 'planner', route, targetModels[0]);
-  const synthesisPrompt = [
+  const synthesisPrompt = appendSteeringNotesToPrompt([
     `## Planning Room: Final Synthesis`,
     ``,
     `## Original Task`,
@@ -276,7 +315,7 @@ async function runPlanningRoomPipeline(
     `4. Risks, tradeoffs, and assumptions`,
     `5. Validation checklist`,
     `6. What the Planning Room changed or improved`,
-  ].join('\n');
+  ].join('\n'), callbacks);
 
   let synthesisArtifact: BackgroundAgentArtifact | null = null;
   try {
@@ -503,6 +542,12 @@ function simpleHash(text: string): string {
 
 // ── Pipeline: Execute ─────────────────────────────────
 
+const ARTIFACT_PLANNER_TIMEOUT_MS = 45_000;
+const ARTIFACT_IMPLEMENTER_TIMEOUT_MS = 90_000;
+const ARTIFACT_RETRY_TIMEOUT_MS = 60_000;
+const ARTIFACT_REPAIR_TIMEOUT_MS = 60_000;
+const ARTIFACT_REVIEW_TIMEOUT_MS = 45_000;
+
 async function runExecutePipeline(
   route: RouteDecision,
   userMessage: string,
@@ -516,7 +561,7 @@ async function runExecutePipeline(
   // Phase 1: Planner — produce a plan from the user message
   const plannerProfile = 'planner';
   const plannerModel = resolveAgentModel(config, plannerProfile, route, config.activeModel || '');
-  const plannerPrompt = [
+  const plannerPrompt = appendSteeringNotesToPrompt([
     `## Task (from user)`,
     userMessage,
     '',
@@ -529,7 +574,7 @@ async function runExecutePipeline(
     `For each step, list the specific files to inspect or modify and the`,
     `validation command that proves the step is complete. Do not write code.`,
     `Only name files, APIs, or repo behavior when the task, working directory, or tool evidence supports them; otherwise mark them as assumptions to verify.`,
-  ].join('\n');
+  ].join('\n'), callbacks);
 
   let plannerArtifact: BackgroundAgentArtifact | null = null;
   try {
@@ -539,6 +584,7 @@ async function runExecutePipeline(
       modelId: plannerModel,
       workingDir,
       signal: callbacks.signal,
+      timeoutMs: artifactCreation ? ARTIFACT_PLANNER_TIMEOUT_MS : undefined,
       onStep: callbacks.onStep,
       tools: callbacks.tools,
       invokeTool: callbacks.invokeTool,
@@ -575,7 +621,8 @@ async function runExecutePipeline(
       `${artifactFolder}/README.md`,
     ]
     : [];
-  const implPrompt = [
+  const implPrompt = appendSteeringNotesToPrompt(
+  [
     artifactCreation
       ? [
         `## Artifact Write Command`,
@@ -628,7 +675,7 @@ async function runExecutePipeline(
         `If you cannot write files, provide the complete file contents and exact paths.`,
         `Ground the patch in inspected files and preserve uncertainty for anything not verified by tools or provided context.`,
       ].join('\n'),
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n'), callbacks);
 
   let implArtifact: BackgroundAgentArtifact | null = null;
   const implModelId = implModel;
@@ -648,6 +695,7 @@ async function runExecutePipeline(
       modelId: implModelId,
       workingDir,
       signal: callbacks.signal,
+      timeoutMs: artifactCreation ? ARTIFACT_IMPLEMENTER_TIMEOUT_MS : undefined,
       onStep: callbacks.onStep,
       tools: callbacks.tools,
       invokeTool: callbacks.invokeTool,
@@ -677,9 +725,13 @@ async function runExecutePipeline(
   const writeToolAvailable = !!callbacks.tools?.some((tool) => (tool.name || tool.function?.name) === 'write_file');
   let writtenArtifactFiles = extractWrittenFilesFromAgentNotes(implArtifact?.notes || []);
   let artifactManifestComplete = !artifactCreation || artifactWritesPassManifest(writtenArtifactFiles, userMessage);
-  if (artifactCreation && writeToolAvailable && !artifactManifestComplete) {
+  const retryIncompleteArtifactWithModel = artifactCreation
+    && writeToolAvailable
+    && !artifactManifestComplete
+    && implArtifact?.status === 'complete';
+  if (retryIncompleteArtifactWithModel) {
     const manifestFindings = artifactManifestFindings(writtenArtifactFiles, userMessage);
-    const retryPrompt = [
+    const retryPrompt = appendSteeringNotesToPrompt([
       `## Artifact Creation Retry`,
       `The previous implementer pass did not create a complete runnable artifact. Do not inspect more files unless absolutely necessary.`,
       ``,
@@ -698,7 +750,7 @@ async function runExecutePipeline(
       `<tool_call>{"name":"write_file","arguments":{"path":"${artifactRequiredPaths[0] || 'generated-artifact/index.html'}","content":"complete file contents"}}</tool_call>`,
       ``,
       `After writing all files, produce a concise final answer with validation commands. Do not return a plan, review, or explanation instead of writing files.`,
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\n'), callbacks);
     try {
       const retryArtifact = await runAgentPhase(config, {
         profileId: implProfile,
@@ -706,6 +758,7 @@ async function runExecutePipeline(
         modelId: implModelId,
         workingDir,
         signal: callbacks.signal,
+        timeoutMs: ARTIFACT_RETRY_TIMEOUT_MS,
         onStep: callbacks.onStep,
         tools: callbacks.tools,
         invokeTool: callbacks.invokeTool,
@@ -787,7 +840,7 @@ async function runExecutePipeline(
     && !fallbackArtifactUsed
     && executionProof.validationResults.some((result) => !result.passed)
   ) {
-    const repairPrompt = [
+    const repairPrompt = appendSteeringNotesToPrompt([
       `## Artifact Validation Repair`,
       `The artifact files were written, but validation did not pass. Use the failure evidence below to fix the artifact now.`,
       ``,
@@ -806,7 +859,7 @@ async function runExecutePipeline(
       ...artifactRequiredPaths.map((path) => `- ${path}`),
       ``,
       `After writing repairs, produce a concise final answer with validation commands, including browser ship-readiness when this is a standalone browser artifact.`,
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\n'), callbacks);
     try {
       const repairArtifact = await runAgentPhase(config, {
         profileId: implProfile,
@@ -814,6 +867,7 @@ async function runExecutePipeline(
         modelId: implModelId,
         workingDir,
         signal: callbacks.signal,
+        timeoutMs: ARTIFACT_REPAIR_TIMEOUT_MS,
         onStep: callbacks.onStep,
         tools: callbacks.tools,
         invokeTool: callbacks.invokeTool,
@@ -853,7 +907,7 @@ async function runExecutePipeline(
   // Phase 3: Reviewer — review the implementation
   const reviewProfile = 'reviewer';
   const reviewModel = resolveAgentModel(config, reviewProfile, route, implModelId || config.activeModel || '');
-  const reviewPrompt = [
+  const reviewPrompt = appendSteeringNotesToPrompt([
     `## Implementation`,
     implArtifact?.response || '(implementation generation failed)',
     '',
@@ -872,7 +926,7 @@ async function runExecutePipeline(
     `Only approve behavior that is supported by the implementation text or apply/validation proof.`,
     `If evidence is incomplete, say what is unverified instead of assuming success.`,
     `If the implementation is correct, state that clearly.`,
-  ].join('\n');
+  ].join('\n'), callbacks);
 
   let reviewArtifact: BackgroundAgentArtifact | null = null;
   const reviewModelId = reviewModel;
@@ -905,6 +959,7 @@ async function runExecutePipeline(
       modelId: reviewModelId,
       workingDir,
       signal: callbacks.signal,
+      timeoutMs: artifactCreation ? ARTIFACT_REVIEW_TIMEOUT_MS : undefined,
       onStep: callbacks.onStep,
       tools: callbacks.tools,
       invokeTool: callbacks.invokeTool,
@@ -971,7 +1026,7 @@ async function runInvestigatePipeline(
   // Explorer gathers evidence; a role-appropriate synthesizer turns it into a human-facing answer.
   const exploreProfile = 'explorer';
   const exploreModel = resolveAgentModel(config, exploreProfile, route, config.activeModel || '');
-  const explorePrompt = buildInvestigationExplorePrompt(userMessage, workingDir);
+  const explorePrompt = appendSteeringNotesToPrompt(buildInvestigationExplorePrompt(userMessage, workingDir), callbacks);
 
   let exploreArtifact: BackgroundAgentArtifact | null = null;
   try {
@@ -1030,7 +1085,7 @@ async function runInvestigatePipeline(
   const explorerResponse = exploreArtifact?.response || '';
   const synthesisProfile = investigationSynthesisProfile(route);
   const synthesisModel = resolveAgentModel(config, synthesisProfile, route, config.activeModel || '');
-  const synthesisPrompt = [
+  const synthesisPrompt = appendSteeringNotesToPrompt([
     `## Original Request`,
     userMessage,
     '',
@@ -1044,6 +1099,13 @@ async function runInvestigatePipeline(
     route.role === 'reviewer'
       ? `Prioritize bugs, risks, quality gaps, and concrete next actions.`
       : `Prioritize a clear overview, architecture, main components, risks, and concrete next actions when relevant.`,
+    route.role !== 'reviewer'
+      ? `If the request is about product, game, prototype, playtest, or readiness QA, answer in the user's requested structure: verdict, evidence-backed implemented state, human validation needs, and next improvements. Do not convert it into severity-ranked code review unless the user explicitly asks for bugs, security, or audit findings.`
+      : '',
+    `Respect explicit length requests such as "concise", "short", or word limits. Treat "concise" product-owner reports as roughly 250 words unless the user asks for exhaustive depth. Compress evidence instead of adding extra findings, speculative issues, or broad improvement lists.`,
+    `For long-horizon product/game QA, keep each requested section tight: one short paragraph or up to three bullets. Name only the highest-leverage risks and next steps unless the user asks for a full defect backlog.`,
+    `For app/game readiness answers, include run/open proof, controls or primary workflow, core implemented systems, validation or testing proof when available in the evidence, and the highest human-test risk.`,
+    `For playtest readiness, prefer experiential risks such as first-objective readability, thematic clarity, and core-loop feel over incidental implementation defects unless the user explicitly asks for code defects.`,
     `Keep the final answer readable: use short explanations and only the headings that help the answer scan.`,
     `Do not dump raw file inventory. Cite only the file paths needed to support findings.`,
     `Do not return scoring JSON, rubric JSON, eval reports, or model-grading artifacts.`,
@@ -1051,7 +1113,7 @@ async function runInvestigatePipeline(
     route.role === 'reviewer'
       ? `For audits or reviews, lead with findings ordered by severity. For each finding include severity, file:line when known, evidence, and action.`
       : `For investigations, answer the user's question directly and summarize evidence.`
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n'), callbacks);
 
   let synthesisArtifact: BackgroundAgentArtifact | null = null;
   try {
@@ -1133,7 +1195,7 @@ export function normalizeExecuteFinalOutput(args: {
   sections.push('');
   if (args.fallbackArtifactUsed) {
     sections.push('### Assistance');
-    sections.push('OpenHarness generated a deterministic fallback scaffold because the selected model did not create artifact files after the initial pass and retry. Treat this as human-test-ready output, not full model-authored delivery.');
+    sections.push('OpenHarness generated a deterministic fallback scaffold because the selected model did not create a complete artifact before the artifact-phase budget expired. Treat this as human-test-ready output, not full model-authored delivery.');
     sections.push('');
   }
   if (args.plannerText?.trim()) {
@@ -1232,6 +1294,7 @@ export function buildInvestigationExplorePrompt(userMessage: string, workingDir?
   const initialToolCall = workingDir
     ? `<tool_call>{"name":"list_directory","arguments":{"path":${JSON.stringify(workingDir)}}}</tool_call>`
     : '';
+  const productQa = /\b(?:product owner|game state|playtest|readiness|qa pass|prototype milestone|human playtest|next iteration|next-iteration|implemented feature map)\b/i.test(userMessage);
   return [
     `## Investigation Request`,
     userMessage,
@@ -1241,6 +1304,8 @@ export function buildInvestigationExplorePrompt(userMessage: string, workingDir?
     '',
     `Inspect the relevant project context using available read-only tools.`,
     initialToolCall ? `Start by listing the working directory with this exact tool call: ${initialToolCall}` : '',
+    productQa ? `For game/product QA, keep exploration bounded: prioritize README.md, index.html, game.js, and styles.css; collect evidence for run/open path, controls, core systems, validation hooks, and human-test risks; then stop.` : '',
+    productQa ? `Return concise evidence notes rather than a broad code review. Avoid speculative feature requests unless the user asked for next improvements.` : '',
     `Ground every claim in a specific file path and line number.`,
     `Synthesize findings into a direct answer with risks and next actions.`,
     `If the request is about the codebase, reference concrete code.`,
@@ -1492,7 +1557,7 @@ async function runComparePipeline(
   // Run each model
   const responses: Array<{ model: string; text: string; ok: boolean }> = [];
   for (const modelId of targetModels) {
-    const judgePrompt = [
+    const judgePrompt = appendSteeringNotesToPrompt([
       `## Comparison Request`,
       userMessage,
       '',
@@ -1501,7 +1566,7 @@ async function runComparePipeline(
         : `Answer the above using your best judgment.`,
       `Ground claims in the request and any available workspace/tool evidence. Mark unsupported claims as assumptions.`,
       workingDir ? `Working directory: ${workingDir}` : '',
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\n'), callbacks);
 
     try {
       const art = await runAgentPhase(config, {
@@ -1537,7 +1602,7 @@ async function runComparePipeline(
 
   // Judge phase: compare all responses
   const modelLabels = responses.map((r) => `${r.model}: ${r.ok ? 'OK' : 'FAILED'}`).join(', ');
-  const judgePrompt = [
+  const judgePrompt = appendSteeringNotesToPrompt([
     `## Comparison Request`,
     userMessage,
     '',
@@ -1553,7 +1618,7 @@ async function runComparePipeline(
     `and a final recommendation. Be specific about what each model did well or poorly.`,
     `If some models failed to produce output, note that as a critical difference.`,
     `Do not add facts that are absent from the original request or model responses unless you label them as assumptions.`,
-  ].join('\n');
+  ].join('\n'), callbacks);
 
   try {
     const judgeModel = resolveAgentModel(config, 'eval-judge', route, targetModels[0]);

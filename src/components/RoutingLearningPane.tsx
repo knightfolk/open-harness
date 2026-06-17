@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { AlertTriangle, BarChart3, CheckCircle2, CircleHelp, Lightbulb, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { AlertTriangle, BarChart3, CheckCircle2, CircleHelp, Download, Lightbulb, RefreshCw, ShieldCheck, Upload, XCircle } from 'lucide-react';
 import * as api from '../utils/api';
 import { ROUTING_FEEDBACK_GUIDANCE, candidateScoresUnavailableLabel, routingEventDecisionLabel, routingOutcomeHelp, routingOutcomeLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
 
@@ -43,13 +43,87 @@ function eventStatus(event: api.RoutingEvent) {
   return { label: routingOutcomeLabel(event.outcome), icon: CircleHelp, tone: 'warning' };
 }
 
+function routeMarginSummary(event: api.RoutingEvent): string {
+  const scores = sortedCandidateScores(event.candidateScores, 4);
+  if (scores.length === 0) return candidateScoresUnavailableLabel({ fallback: event.wasFallback });
+  const selectedScore = event.candidateScores?.[event.selectedModel] ?? event.score;
+  const competitors = scores.filter(([model]) => model !== event.selectedModel);
+  const closest = competitors[0];
+  if (!closest) return `Selected ${event.selectedModel} with no scored alternatives.`;
+  const [altModel, altScore] = closest;
+  const margin = selectedScore - altScore;
+  if (margin >= 0) return `Selected by ${margin.toFixed(2)} over ${altModel}.`;
+  return `Fallback selected ${event.selectedModel}; top scored alternative was ${altModel} at ${altScore.toFixed(2)}.`;
+}
+
+function routeEventTimeLabel(timestamp: string): string {
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time)) return 'time unknown';
+  const elapsedMs = Date.now() - time;
+  if (elapsedMs < 0) return new Date(time).toLocaleString();
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  if (elapsedMinutes < 1) return 'just now';
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays}d ago`;
+  return new Date(time).toLocaleDateString();
+}
+
+function routeEventExactTime(timestamp: string): string {
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time)) return 'unknown timestamp';
+  return new Date(time).toISOString();
+}
+
+function routeEventIsStale(timestamp: string): boolean {
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time)) return true;
+  return Date.now() - time > 7 * 24 * 60 * 60 * 1000;
+}
+
+function activeFilterLabel(showUnexplainedOnly: boolean, showStaleOnly: boolean, showFallbackOnly: boolean, showBenchmarkOnly: boolean): string {
+  if (showUnexplainedOnly) return 'Needs notes';
+  if (showStaleOnly) return 'Stale only';
+  if (showFallbackOnly) return 'Fallbacks';
+  if (showBenchmarkOnly) return 'Benchmarks';
+  return 'All recent decisions';
+}
+
+function evalProofStatusLabel(rec: api.EvalRecommendation): string {
+  if (rec.proofReviewStatus === 'approved') return 'proof approved';
+  if (rec.proofReviewStatus === 'needs-attention') return 'proof needs attention';
+  return 'proof unreviewed';
+}
+
+function evalProofStatusDetail(rec: api.EvalRecommendation): string {
+  if (rec.proofReviewStatus === 'approved') return 'Human review approved the Model Lab proof for this recommendation.';
+  if (rec.proofReviewStatus === 'needs-attention') return 'Human review flagged this proof; do not apply until the review is resolved.';
+  return 'Review the Model Lab proof before applying this recommendation.';
+}
+
+function countRecommendationProofStates(recommendations: api.EvalRecommendation[]) {
+  return recommendations.reduce((counts, rec) => {
+    counts[rec.proofReviewStatus] = (counts[rec.proofReviewStatus] || 0) + 1;
+    return counts;
+  }, { approved: 0, unreviewed: 0, 'needs-attention': 0 } as Record<api.EvalRecommendation['proofReviewStatus'], number>);
+}
+
 export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendation }: Props) {
   const [summary, setSummary] = useState<api.RouterLearningSummary | null>(null);
   const [events, setEvents] = useState<api.RoutingEvent[]>([]);
   const [recommendations, setRecommendations] = useState<api.EvalRecommendation[]>([]);
   const [thresholdSuggestion, setThresholdSuggestion] = useState<{ suggestedThreshold: number; reason: string; dataPoints: number } | null>(null);
+  const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
+  const [showUnexplainedOnly, setShowUnexplainedOnly] = useState(false);
+  const [showStaleOnly, setShowStaleOnly] = useState(false);
+  const [showFallbackOnly, setShowFallbackOnly] = useState(false);
+  const [showBenchmarkOnly, setShowBenchmarkOnly] = useState(false);
+  const [importAsBenchmark, setImportAsBenchmark] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const enabledModelKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -64,7 +138,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   const loadData = useCallback(async () => {
     const [s, e, r, routerState] = await Promise.all([
       api.getRouterLearning(),
-      api.getRouterLearningEvents(undefined, 25),
+      api.getRouterLearningEvents(undefined, 100),
       api.getEvalRecommendations(),
       api.getRouterState(),
     ]);
@@ -73,6 +147,13 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     setEvents(e);
     setRecommendations(r);
     setThresholdSuggestion(t);
+    setOutcomeNotes((prev) => {
+      const next = { ...prev };
+      for (const event of e) {
+        if (next[event.id] == null) next[event.id] = event.outcomeNote || '';
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -96,6 +177,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     [enabledModelKeys, recommendations],
   );
 
+  const trustedAccessibleRecommendations = useMemo(
+    () => accessibleRecommendations.filter((rec) => rec.proofTrusted),
+    [accessibleRecommendations],
+  );
+
   const modelList = useMemo(
     () => Object.entries(summary?.models || {}).sort(([, a]: any, [, b]: any) => b.total - a.total),
     [summary],
@@ -110,21 +196,223 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   };
 
   const handleApplyAll = () => {
-    if (!onApplyRoleRecommendation || accessibleRecommendations.length === 0) return;
-    for (const rec of accessibleRecommendations) onApplyRoleRecommendation(rec.role, rec.modelId);
-    setSaving(`Applied ${accessibleRecommendations.length} available recommendation${accessibleRecommendations.length === 1 ? '' : 's'}`);
+    if (!onApplyRoleRecommendation || trustedAccessibleRecommendations.length === 0) return;
+    for (const rec of trustedAccessibleRecommendations) onApplyRoleRecommendation(rec.role, rec.modelId);
+    setSaving(`Applied ${trustedAccessibleRecommendations.length} trusted recommendation${trustedAccessibleRecommendations.length === 1 ? '' : 's'}; skipped ${accessibleRecommendations.length - trustedAccessibleRecommendations.length} awaiting approved proof`);
     setTimeout(() => setSaving(null), 1200);
     loadData().catch(() => {});
   };
 
   const handleMarkOutcome = async (eventId: string, outcome: 'success' | 'failure' | 'ambiguous') => {
-    const ok = await api.recordRoutingOutcome(eventId, outcome);
+    const note = outcomeNotes[eventId]?.trim();
+    const ok = await api.recordRoutingOutcome(eventId, outcome, note || undefined);
     if (ok) {
       await loadData();
       return;
     }
     setSaving('Failed to record outcome');
     setTimeout(() => setSaving(null), 1200);
+  };
+
+  const handleSaveOutcomeNote = async (event: api.RoutingEvent) => {
+    if (!event.outcome) {
+      setSaving('Pick Worked, Failed, or Unclear before saving a note');
+      setTimeout(() => setSaving(null), 1600);
+      return;
+    }
+    const note = outcomeNotes[event.id]?.trim();
+    const ok = await api.recordRoutingOutcome(event.id, event.outcome, note || undefined);
+    if (ok) {
+      await loadData();
+      setSaving(note ? 'Saved routing outcome note' : 'Cleared routing outcome note');
+      setTimeout(() => setSaving(null), 1200);
+      return;
+    }
+    setSaving('Failed to save outcome note');
+    setTimeout(() => setSaving(null), 1200);
+  };
+
+  const handleExportEvidence = async () => {
+    const generatedAt = new Date().toISOString();
+    const reviewedEvents = events.filter((event) => event.outcome !== null);
+    const unratedEvents = events.filter((event) => event.outcome === null);
+    try {
+      const fullExport = await api.getRouterLearningExport();
+      const payload = {
+        schemaVersion: 1,
+        generatedAt,
+        activeFilter: activeFilterLabel(showUnexplainedOnly, showStaleOnly, showFallbackOnly, showBenchmarkOnly),
+        activeFilterMatchCount: visibleRecentEvents.length,
+        fullExportDatasetCounts: {
+          production: fullExport.productionEventCount ?? fullExport.events.filter((event) => event.datasetKind !== 'benchmark').length,
+          benchmark: fullExport.benchmarkEventCount ?? fullExport.events.filter((event) => event.datasetKind === 'benchmark').length,
+        },
+        fullExport,
+        summary,
+        thresholdSuggestion,
+        recommendations: {
+          available: accessibleRecommendations,
+          unavailable: unavailableRecommendations,
+          proofReviewCounts: countRecommendationProofStates(recommendations),
+        },
+        recentEvents: events.map((event) => ({
+          ...event,
+          outcomeNote: outcomeNotes[event.id] || event.outcomeNote,
+        })),
+        filteredRecentEvents: visibleRecentEvents.map((event) => ({
+          ...event,
+          outcomeNote: outcomeNotes[event.id] || event.outcomeNote,
+        })),
+        reviewState: {
+          reviewedEventCount: reviewedEvents.length,
+          unratedEventCount: unratedEvents.length,
+          fallbackEventCount: fallbackEvents.length,
+          ratedFallbackEventCount: ratedFallbackEvents.length,
+          notedEventCount: events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length > 0).length,
+          latestEvidenceTimestamp: latestEvent ? routeEventExactTime(latestEvent.timestamp) : null,
+          latestEvidenceAge: latestEvent ? routeEventTimeLabel(latestEvent.timestamp) : null,
+          stale: latestEventIsStale,
+          freshnessWarning: latestEventIsStale
+            ? 'Refresh with newer route outcomes before trusting trends.'
+            : 'Recent routing evidence is loaded.',
+        },
+        notes: [
+          'schemaVersion=1 records the Routing Learning evidence export format used by this bundle.',
+          'fullExport.events contains every persisted routing event returned by the server.',
+          'recentEvents contains the loaded Settings review window.',
+          'filteredRecentEvents contains the currently visible review subset.',
+          'Only marked outcomes should influence trust in success rates.',
+          'Eval recommendations are manual until applied to role assignments, and proofReviewStatus records whether Model Lab proof was approved, unreviewed, or needs attention.',
+          'Auto-Router candidates remain separate from role recommendations.',
+        ],
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `openharness-routing-learning-${generatedAt.replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setSaving(`Downloaded routing learning evidence (${fullExport.eventCount} total events)`);
+      setTimeout(() => setSaving(null), 1200);
+    } catch {
+      setSaving('Could not download full routing evidence');
+      setTimeout(() => setSaving(null), 1600);
+    }
+  };
+
+  const handleExportBrief = () => {
+    const generatedAt = new Date().toISOString();
+    const reviewedEvents = events.filter((event) => event.outcome !== null);
+    const unratedEvents = events.filter((event) => event.outcome === null);
+    const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
+    const productionEventCount = events.length - benchmarkEventCount;
+    const lines = [
+      '# OpenHarness Routing Learning Evidence Brief',
+      '',
+      `Generated: ${generatedAt}`,
+      '',
+      '## Review State',
+      '',
+      `- Active filter at export: ${activeFilterLabel(showUnexplainedOnly, showStaleOnly, showFallbackOnly, showBenchmarkOnly)}`,
+      `- Active filter matching events loaded: ${visibleRecentEvents.length}`,
+      `- Reviewed outcomes: ${summary?.totalEvents || 0}`,
+      `- Observed success: ${pct(summary?.successRate || 0)}`,
+      `- Recent reviewed events loaded: ${reviewedEvents.length}`,
+      `- Recent unrated events loaded: ${unratedEvents.length}`,
+      `- Recent fallback events loaded: ${fallbackEvents.length}`,
+      `- Rated fallback events loaded: ${ratedFallbackEvents.length}`,
+      `- Loaded production events: ${productionEventCount}`,
+      `- Loaded benchmark events: ${benchmarkEventCount}`,
+      `- Recent events with reviewer notes: ${events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length > 0).length}`,
+      `- Latest route evidence: ${latestEvent ? `${routeEventExactTime(latestEvent.timestamp)} (${routeEventTimeLabel(latestEvent.timestamp)})` : 'none loaded'}`,
+      `- Freshness warning: ${latestEventIsStale ? 'refresh with newer route outcomes before trusting trends' : 'recent routing evidence is loaded'}`,
+      `- Confidence: ${sampleLabel(summary?.totalEvents || 0)}`,
+      '',
+      '## Threshold Advice',
+      '',
+      thresholdSuggestion
+        ? `- Suggested threshold: ${thresholdSuggestion.suggestedThreshold.toFixed(2)}`
+        : '- Suggested threshold: unavailable',
+      thresholdSuggestion
+        ? `- Reason: ${thresholdSuggestion.reason}`
+        : '- Reason: no threshold suggestion loaded',
+      thresholdSuggestion
+        ? `- Data points: ${thresholdSuggestion.dataPoints}`
+        : '- Data points: 0',
+      '',
+      '## Best Signals By Task Type',
+      '',
+      ...(summary?.bestByTaskType.length
+        ? summary.bestByTaskType.map((row) => `- ${row.taskType}: ${row.model} at ${pct(row.rate)} from ${row.total} reviewed`)
+        : ['- No reviewed task-type winners yet.']),
+      '',
+      '## Eval Recommendations',
+      '',
+      `- Available recommendations: ${accessibleRecommendations.length}`,
+      `- Unavailable recommendations: ${unavailableRecommendations.length}`,
+      `- Proof approved: ${countRecommendationProofStates(recommendations).approved}`,
+      `- Proof unreviewed: ${countRecommendationProofStates(recommendations).unreviewed}`,
+      `- Proof needs attention: ${countRecommendationProofStates(recommendations)['needs-attention']}`,
+      ...(accessibleRecommendations.length
+        ? accessibleRecommendations.map((rec) => `- ${rec.role}: ${rec.modelId} — ${evalProofStatusLabel(rec)} — ${rec.reason}`)
+        : ['- No available eval-backed role recommendations for enabled models.']),
+      '',
+      '## Recent Routing Decisions',
+      '',
+      ...(visibleRecentEvents.length
+        ? visibleRecentEvents.slice(0, 12).map((event) => {
+            const note = (outcomeNotes[event.id] || event.outcomeNote || '').trim();
+            return `- ${routeEventExactTime(event.timestamp)} (${routeEventTimeLabel(event.timestamp)}) — ${event.selectedModel} (${event.taskType || 'unknown'} / ${event.role || 'unknown'} / ${event.complexity || 'unknown'}): ${routeMarginSummary(event)} Outcome: ${routingOutcomeLabel(event.outcome)}.${note ? ` Note: ${note}` : ''}`;
+          })
+        : ['- No recent routing decisions matched the active filter.']),
+      '',
+      '## Review Notes',
+      '',
+      '- Only marked outcomes should influence trust in success rates.',
+      '- Eval recommendations are manual until applied to role assignments; do not treat unreviewed or attention-needed proof as approved evidence.',
+      '- Auto-Router candidates remain separate from role recommendations.',
+      '',
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `openharness-routing-learning-brief-${generatedAt.replace(/[:.]/g, '-')}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setSaving('Downloaded routing learning brief');
+    setTimeout(() => setSaving(null), 1200);
+  };
+
+  const handleImportEvidenceFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      const datasetKind = importAsBenchmark ? 'benchmark' : 'production';
+      const preview = await api.importRouterLearning(payload, { dryRun: true, datasetKind });
+      const approved = window.confirm(
+        `Import routing evidence from ${file.name}?\n\nSource: ${preview.importSource || 'unknown'}\nSchema: ${preview.schemaVersion ?? 'unknown'}\nDataset: ${preview.datasetKind || datasetKind}${preview.warnings?.length ? `\nWarning: ${preview.warnings.join(' ')}` : ''}\nNew events: ${preview.imported}\nAlready present: ${preview.skippedExisting}\nRejected: ${preview.rejected}`,
+      );
+      if (!approved) {
+        setSaving('Routing import cancelled');
+        setTimeout(() => setSaving(null), 1200);
+        return;
+      }
+      const result = await api.importRouterLearning(payload, { datasetKind });
+      await loadData();
+      setSaving(`Imported ${result.imported}; skipped ${result.skippedExisting}; rejected ${result.rejected}`);
+      setTimeout(() => setSaving(null), 1800);
+    } catch {
+      setSaving('Could not import routing learning JSON');
+      setTimeout(() => setSaving(null), 1800);
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
   };
 
   if (loading) {
@@ -146,6 +434,22 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   const fallbackEvents = events.filter((event) => event.wasFallback);
   const ratedFallbackEvents = fallbackEvents.filter((event) => event.outcome !== null);
   const bestLearningSignal = summary?.bestByTaskType[0] || null;
+  const notedEventCount = events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length > 0).length;
+  const latestEventAge = latestEvent ? routeEventTimeLabel(latestEvent.timestamp) : 'No route yet';
+  const latestEventIsStale = !latestEvent || routeEventIsStale(latestEvent.timestamp);
+  const unexplainedEventCount = events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length === 0).length;
+  const staleEventCount = events.filter((event) => routeEventIsStale(event.timestamp)).length;
+  const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
+  const productionEventCount = events.length - benchmarkEventCount;
+  const recommendationProofCounts = countRecommendationProofStates(recommendations);
+  const untrustedRecommendationCount = recommendationProofCounts.unreviewed + recommendationProofCounts['needs-attention'];
+  const visibleRecentEvents = events.filter((event) => {
+    const matchesUnexplained = !showUnexplainedOnly || (outcomeNotes[event.id] || event.outcomeNote || '').trim().length === 0;
+    const matchesStale = !showStaleOnly || routeEventIsStale(event.timestamp);
+    const matchesFallback = !showFallbackOnly || event.wasFallback;
+    const matchesBenchmark = !showBenchmarkOnly || event.datasetKind === 'benchmark';
+    return matchesUnexplained && matchesStale && matchesFallback && matchesBenchmark;
+  });
 
   return (
     <div className="routing-learning-pane">
@@ -156,30 +460,82 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             Learns from marked routing outcomes and eval reports. It does not change routing by itself until you apply a recommendation.
           </div>
         </div>
-        <button className="settings-mini-button" onClick={() => loadData().catch(() => {})}>
-          <RefreshCw size={12} /> Refresh
-        </button>
+        <div className="routing-header-actions">
+          <button
+            type="button"
+            className="settings-mini-button"
+            onClick={handleExportBrief}
+            aria-label="Export Routing Learning Markdown evidence brief"
+            title="Export a human-readable Routing Learning evidence brief"
+          >
+            <Download size={12} aria-hidden="true" /> Export brief
+          </button>
+          <button
+            type="button"
+            className="settings-mini-button"
+            onClick={handleExportEvidence}
+            aria-label="Export Routing Learning JSON evidence bundle"
+            title="Export the full Routing Learning JSON evidence bundle"
+          >
+            <Download size={12} aria-hidden="true" /> Export evidence
+          </button>
+          <button
+            type="button"
+            className="settings-mini-button"
+            onClick={() => importInputRef.current?.click()}
+            aria-label="Import Routing Learning JSON evidence"
+            title="Preview and import a Routing Learning JSON evidence file"
+          >
+            <Upload size={12} aria-hidden="true" /> Import evidence
+          </button>
+          <button
+            type="button"
+            className={`settings-mini-button ${importAsBenchmark ? 'active' : ''}`}
+            onClick={() => setImportAsBenchmark((value) => !value)}
+            aria-pressed={importAsBenchmark}
+            aria-label={`${importAsBenchmark ? 'Disable' : 'Enable'} benchmark import mode for Routing Learning evidence`}
+            title="Imported benchmark events are preserved but excluded from production learning summaries"
+          >
+            Benchmark import
+          </button>
+          <button
+            type="button"
+            className="settings-mini-button"
+            onClick={() => loadData().catch(() => {})}
+            aria-label="Refresh Routing Learning evidence"
+            title="Reload Routing Learning summaries, events, and recommendations"
+          >
+            <RefreshCw size={12} aria-hidden="true" /> Refresh
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: 'none' }}
+            onChange={(event) => handleImportEvidenceFile(event.target.files?.[0] || null)}
+          />
+        </div>
       </div>
 
       {saving && <div className="routing-learning-toast">{saving}</div>}
 
       <section className="routing-explain">
         <div className="routing-explain-item">
-          <BarChart3 size={15} />
+          <BarChart3 size={15} aria-hidden="true" />
           <div>
             <strong>Observed outcomes</strong>
             <span>Only decisions marked worked, failed, or unclear count toward success rates.</span>
           </div>
         </div>
         <div className="routing-explain-item">
-          <Lightbulb size={15} />
+          <Lightbulb size={15} aria-hidden="true" />
           <div>
             <strong>Recommendations</strong>
             <span>Eval suggestions are filtered to models enabled in your Providers settings.</span>
           </div>
         </div>
         <div className="routing-explain-item">
-          <ShieldCheck size={15} />
+          <ShieldCheck size={15} aria-hidden="true" />
           <div>
             <strong>Manual apply</strong>
             <span>Use Apply to update an agent role. Auto-Router candidates stay separate.</span>
@@ -187,7 +543,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         </div>
       </section>
 
-      <section className="routing-metrics">
+      <section className="routing-metrics" aria-label={`Routing Learning trust metrics: ${totalEvents} reviewed outcomes, ${pct(successRate)} observed success, ${notedEventCount} notes attached, latest evidence ${latestEventAge}, ${recommendationProofCounts.approved} approved eval proof recommendation${recommendationProofCounts.approved === 1 ? '' : 's'}`}>
         <div className="routing-metric-card">
           <span>Reviewed outcomes</span>
           <strong>{totalEvents}</strong>
@@ -203,6 +559,26 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           <strong>{totalEvents < 20 ? 'Learning' : 'Stable'}</strong>
           <small>{totalEvents < 20 ? 'Mark more recent events before trusting winners' : 'Enough samples for trend checks'}</small>
         </div>
+        <div className={`routing-metric-card ${notedEventCount === 0 ? 'low' : 'ok'}`}>
+          <span>Notes attached</span>
+          <strong>{notedEventCount}</strong>
+          <small>{notedEventCount === 0 ? 'Add notes to explain wins, misses, and fallbacks' : 'Reviewer context included in exports'}</small>
+        </div>
+        <div className={`routing-metric-card ${latestEventIsStale ? 'low' : 'ok'}`}>
+          <span>Data age</span>
+          <strong>{latestEventAge}</strong>
+          <small>{latestEventIsStale ? 'Refresh with newer route outcomes before trusting trends' : 'Recent routing evidence is loaded'}</small>
+        </div>
+        <div className={`routing-metric-card ${benchmarkEventCount > 0 ? 'low' : 'ok'}`}>
+          <span>Dataset mix</span>
+          <strong>{benchmarkEventCount}</strong>
+          <small>{benchmarkEventCount > 0 ? `${productionEventCount} production in loaded window` : `${productionEventCount} production, no benchmark imports loaded`}</small>
+        </div>
+        <div className={`routing-metric-card ${untrustedRecommendationCount > 0 ? 'low' : 'ok'}`}>
+          <span>Eval proof review</span>
+          <strong>{recommendationProofCounts.approved}</strong>
+          <small>{untrustedRecommendationCount > 0 ? `${untrustedRecommendationCount} unapproved recommendation${untrustedRecommendationCount === 1 ? '' : 's'}` : 'All loaded recommendations approved'}</small>
+        </div>
       </section>
 
       <section className="routing-section">
@@ -217,9 +593,9 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             <span>Latest candidate scores</span>
             <strong>{latestEvent ? latestEvent.selectedModel : 'No route yet'}</strong>
             {latestScores.length > 0 ? (
-              <div className="routing-score-chips">
+              <div className="routing-score-chips" role="list" aria-label={`Latest candidate scores for ${latestEvent.selectedModel}`}>
                 {latestScores.map(([model, score]) => (
-                  <span key={model} title={`${model}: ${score.toFixed(2)}`}>{model} {score.toFixed(2)}</span>
+                  <span key={model} role="listitem" title={`${model}: ${score.toFixed(2)}`}>{model} {score.toFixed(2)}</span>
                 ))}
               </div>
             ) : (
@@ -243,7 +619,9 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           <div className="routing-debug-card">
             <span>Eval recommendations</span>
             <strong>{accessibleRecommendations.length} available</strong>
-            <small>{unavailableRecommendations.length} unavailable · Apply updates roles only; Auto-Router candidates stay separate.</small>
+            <small>
+              {recommendationProofCounts.approved} approved · {recommendationProofCounts.unreviewed} unreviewed · {recommendationProofCounts['needs-attention']} need attention
+            </small>
           </div>
         </div>
         {thresholdSuggestion && (
@@ -257,10 +635,16 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         <div className="routing-section-header">
           <div>
             <h3>Recommended Role Updates</h3>
-            <p>Safe actions from eval reports that match enabled provider models.</p>
+            <p>Safe actions from eval reports that match enabled provider models. Bulk apply only uses approved proof.</p>
           </div>
-          <button className="settings-mini-button" onClick={handleApplyAll} disabled={accessibleRecommendations.length === 0}>
-            Apply available
+          <button
+            className="settings-mini-button"
+            onClick={handleApplyAll}
+            disabled={trustedAccessibleRecommendations.length === 0}
+            title={trustedAccessibleRecommendations.length === 0 ? 'No enabled recommendations have approved Model Lab proof yet.' : 'Apply only recommendations with approved Model Lab proof.'}
+            aria-label={`Apply ${trustedAccessibleRecommendations.length} trusted approved-proof recommendation${trustedAccessibleRecommendations.length === 1 ? '' : 's'}; ${accessibleRecommendations.length - trustedAccessibleRecommendations.length} unapproved recommendation${accessibleRecommendations.length - trustedAccessibleRecommendations.length === 1 ? '' : 's'} will be skipped`}
+          >
+            Apply trusted ({trustedAccessibleRecommendations.length})
           </button>
         </div>
 
@@ -270,15 +654,27 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           </div>
         ) : (
           <div className="routing-recommendation-list">
+            {trustedAccessibleRecommendations.length === 0 && (
+              <div className="routing-empty">
+                Recommendations are available, but none have approved proof yet. Review Model Lab proof before bulk applying changes.
+              </div>
+            )}
             {accessibleRecommendations.map((rec) => (
               <div key={`${rec.reportId}:${rec.role}:${rec.modelId}`} className="routing-recommendation-card">
                 <div>
                   <div className="routing-rec-title">{rec.role} {'->'} {rec.modelId}</div>
                   <div className="routing-rec-reason">{rec.reason}</div>
-                  <div className="routing-rec-source">{rec.reportName}</div>
+                  <div className="routing-rec-source">{rec.reportName} · {evalProofStatusLabel(rec)}</div>
+                  <div className={`routing-rec-source eval-proof-status ${rec.proofReviewStatus}`}>{evalProofStatusDetail(rec)}</div>
                 </div>
-                <button className="settings-mini-button" onClick={() => handleApplyRecommendation(rec.role, rec.modelId)}>
-                  Apply
+                <button
+                  className="settings-mini-button"
+                  onClick={() => handleApplyRecommendation(rec.role, rec.modelId)}
+                  disabled={rec.proofReviewStatus === 'needs-attention'}
+                  aria-label={`${rec.proofTrusted ? 'Apply approved-proof' : rec.proofReviewStatus === 'needs-attention' ? 'Blocked needs-attention proof for' : 'Apply manually after reviewing unapproved proof for'} ${rec.role}: ${rec.modelId}`}
+                  title={rec.proofReviewStatus === 'needs-attention' ? 'Resolve the Model Lab proof review before applying this recommendation.' : evalProofStatusDetail(rec)}
+                >
+                  {rec.proofTrusted ? 'Apply' : 'Apply manually'}
                 </button>
               </div>
             ))}
@@ -357,52 +753,160 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         <div className="routing-section-header">
           <div>
             <h3>Recent Routing Decisions</h3>
-            <p>{ROUTING_FEEDBACK_GUIDANCE} These labels are what make the learning data useful.</p>
+            <p>{ROUTING_FEEDBACK_GUIDANCE} Showing {visibleRecentEvents.length} of {events.length} loaded decisions.</p>
           </div>
+          <button
+            type="button"
+            className={`settings-mini-button ${showUnexplainedOnly ? 'active' : ''}`}
+            aria-pressed={showUnexplainedOnly}
+            aria-label={`${showUnexplainedOnly ? 'Disable' : 'Enable'} needs-notes Routing Learning filter with ${unexplainedEventCount} matching decision${unexplainedEventCount === 1 ? '' : 's'}`}
+            onClick={() => {
+              setShowUnexplainedOnly((value) => !value);
+              setShowStaleOnly(false);
+              setShowFallbackOnly(false);
+              setShowBenchmarkOnly(false);
+            }}
+          >
+            {showUnexplainedOnly ? 'Show all' : `Needs notes (${unexplainedEventCount})`}
+          </button>
+          <button
+            type="button"
+            className={`settings-mini-button ${showStaleOnly ? 'active' : ''}`}
+            aria-pressed={showStaleOnly}
+            aria-label={`${showStaleOnly ? 'Disable' : 'Enable'} stale-only Routing Learning filter with ${staleEventCount} matching decision${staleEventCount === 1 ? '' : 's'}`}
+            onClick={() => {
+              setShowStaleOnly((value) => !value);
+              setShowUnexplainedOnly(false);
+              setShowFallbackOnly(false);
+              setShowBenchmarkOnly(false);
+            }}
+          >
+            {showStaleOnly ? 'Show all' : `Stale only (${staleEventCount})`}
+          </button>
+          <button
+            type="button"
+            className={`settings-mini-button ${showFallbackOnly ? 'active' : ''}`}
+            aria-pressed={showFallbackOnly}
+            aria-label={`${showFallbackOnly ? 'Disable' : 'Enable'} fallback Routing Learning filter with ${fallbackEvents.length} matching decision${fallbackEvents.length === 1 ? '' : 's'}`}
+            onClick={() => {
+              setShowFallbackOnly((value) => !value);
+              setShowUnexplainedOnly(false);
+              setShowStaleOnly(false);
+              setShowBenchmarkOnly(false);
+            }}
+          >
+            {showFallbackOnly ? 'Show all' : `Fallbacks (${fallbackEvents.length})`}
+          </button>
+          <button
+            type="button"
+            className={`settings-mini-button ${showBenchmarkOnly ? 'active' : ''}`}
+            aria-pressed={showBenchmarkOnly}
+            aria-label={`${showBenchmarkOnly ? 'Disable' : 'Enable'} benchmark Routing Learning filter with ${benchmarkEventCount} matching decision${benchmarkEventCount === 1 ? '' : 's'}`}
+            onClick={() => {
+              setShowBenchmarkOnly((value) => !value);
+              setShowUnexplainedOnly(false);
+              setShowStaleOnly(false);
+              setShowFallbackOnly(false);
+            }}
+          >
+            {showBenchmarkOnly ? 'Show all' : `Benchmarks (${benchmarkEventCount})`}
+          </button>
+          {(showUnexplainedOnly || showStaleOnly || showFallbackOnly || showBenchmarkOnly) && (
+            <button
+              type="button"
+              className="settings-mini-button"
+              aria-label="Clear Routing Learning recent-decision filters"
+              onClick={() => {
+                setShowUnexplainedOnly(false);
+                setShowStaleOnly(false);
+                setShowFallbackOnly(false);
+                setShowBenchmarkOnly(false);
+              }}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
 
         {events.length === 0 ? (
           <div className="routing-empty">No routing events recorded yet.</div>
+        ) : visibleRecentEvents.length === 0 ? (
+          <div className="routing-empty">
+            {showStaleOnly
+              ? 'No loaded routing events are stale.'
+              : showFallbackOnly
+                ? 'No loaded routing events used fallback routing.'
+                : showBenchmarkOnly
+                  ? 'No loaded routing events are marked as benchmark data.'
+                  : showUnexplainedOnly
+                    ? 'All loaded routing events have reviewer notes.'
+                    : 'No routing events match the current filter.'}
+          </div>
         ) : (
           <div className="routing-event-list">
-            {events.slice(0, 12).map((event) => {
+            {visibleRecentEvents.slice(0, 12).map((event) => {
               const status = eventStatus(event);
               const Icon = status.icon;
               const topScores = sortedCandidateScores(event.candidateScores, 4);
               return (
-                <div key={event.id} className="routing-event-row">
+                <div key={event.id} className="routing-event-row" role="group" aria-label={`Routing decision for ${event.selectedModel}: ${status.label}`}>
                   <div className={`routing-event-status ${status.tone}`}>
-                    <Icon size={13} />
+                    <Icon size={13} aria-hidden="true" />
                     {status.label}
                   </div>
-                  <div className="routing-event-main">
+                  <div className="routing-event-main" role="group" aria-label={`Route summary for ${event.selectedModel}: ${event.taskType || 'unknown'} task, ${event.role || 'unknown'} role, ${event.complexity || 'unknown'} complexity, score ${event.score.toFixed(2)}`}>
                     <div>{event.selectedModel}</div>
                     <span>
                       {event.taskType || 'unknown'} / {event.role || 'unknown'} / {event.complexity || 'unknown'} / score {event.score.toFixed(2)}
                     </span>
-                    <div className="routing-event-trace">
-                      <span>{routingEventDecisionLabel(event)}</span>
-                      {event.classifierModel && <span>classifier: {event.classifierModel}</span>}
-                      {event.wasCached && <span>cached</span>}
-                      {event.wasFallback && <span>fallback used</span>}
-                    </div>
-                    <div className="routing-score-chips">
-                      {topScores.length > 0 ? (
+                  <div className="routing-event-trace" role="group" aria-label={`Route trace context for ${event.selectedModel}`}>
+                    <span>{routingEventDecisionLabel(event)}</span>
+                  {event.classifierModel && <span>classifier: {event.classifierModel}</span>}
+                  {event.wasCached && <span>cached</span>}
+                  {event.wasFallback && <span>fallback used</span>}
+                  <span title={event.datasetKind === 'benchmark' ? 'Benchmark events are preserved but excluded from production learning summaries.' : 'Production routing event.'}>
+                    {event.datasetKind === 'benchmark' ? 'benchmark data' : 'production data'}
+                  </span>
+                  <span title={routeEventExactTime(event.timestamp)}>{routeEventTimeLabel(event.timestamp)}</span>
+                </div>
+                  <div className="routing-event-margin" aria-label={`Route margin summary for ${event.selectedModel}`}>
+                    {routeMarginSummary(event)}
+                  </div>
+                  <div className="routing-score-chips" role="list" aria-label={`Candidate scores for ${event.selectedModel}`}>
+                    {topScores.length > 0 ? (
                         topScores.map(([model, score]) => (
-                          <span key={model} title={`${model}: ${score.toFixed(2)}`}>
+                          <span key={model} role="listitem" title={`${model}: ${score.toFixed(2)}`}>
                             {model} {score.toFixed(2)}
                           </span>
                         ))
                       ) : (
-                        <span className="muted">{candidateScoresUnavailableLabel({ fallback: event.wasFallback })}</span>
+                        <span className="muted" role="listitem">{candidateScoresUnavailableLabel({ fallback: event.wasFallback })}</span>
                       )}
                     </div>
                     <div className="routing-event-help">{routingOutcomeHelp(event.outcome)}</div>
+                    <div role="group" aria-label={`Routing outcome note controls for ${event.selectedModel}`}>
+                      <input
+                        className="routing-event-note-input"
+                        value={outcomeNotes[event.id] || ''}
+                        onChange={(changeEvent) => setOutcomeNotes((prev) => ({ ...prev, [event.id]: changeEvent.target.value }))}
+                        placeholder="Optional note: why this route worked, failed, or was unclear"
+                        aria-label={`Routing outcome note for ${event.selectedModel}`}
+                      />
+                      <button
+                        type="button"
+                        title="Save the note for the current outcome"
+                        aria-label={`Save routing outcome note for ${event.selectedModel}`}
+                        onClick={() => handleSaveOutcomeNote(event)}
+                        disabled={!event.outcome}
+                      >
+                        Save note
+                      </button>
+                    </div>
                   </div>
-                  <div className="routing-event-actions">
-                    <button title={routingOutcomeHelp('success')} onClick={() => handleMarkOutcome(event.id, 'success')} disabled={event.outcome === 'success'}>{routingOutcomeLabel('success')}</button>
-                    <button title={routingOutcomeHelp('failure')} onClick={() => handleMarkOutcome(event.id, 'failure')} disabled={event.outcome === 'failure'}>{routingOutcomeLabel('failure')}</button>
-                    <button title={routingOutcomeHelp('ambiguous')} onClick={() => handleMarkOutcome(event.id, 'ambiguous')} disabled={event.outcome === 'ambiguous'}>{routingOutcomeLabel('ambiguous')}</button>
+                  <div className="routing-event-actions" role="group" aria-label={`Routing outcome actions for ${event.selectedModel}`}>
+                    <button type="button" aria-label={`Mark ${event.selectedModel} route as ${routingOutcomeLabel('success')}`} title={routingOutcomeHelp('success')} onClick={() => handleMarkOutcome(event.id, 'success')} disabled={event.outcome === 'success'}>{routingOutcomeLabel('success')}</button>
+                    <button type="button" aria-label={`Mark ${event.selectedModel} route as ${routingOutcomeLabel('failure')}`} title={routingOutcomeHelp('failure')} onClick={() => handleMarkOutcome(event.id, 'failure')} disabled={event.outcome === 'failure'}>{routingOutcomeLabel('failure')}</button>
+                    <button type="button" aria-label={`Mark ${event.selectedModel} route as ${routingOutcomeLabel('ambiguous')}`} title={routingOutcomeHelp('ambiguous')} onClick={() => handleMarkOutcome(event.id, 'ambiguous')} disabled={event.outcome === 'ambiguous'}>{routingOutcomeLabel('ambiguous')}</button>
                   </div>
                 </div>
               );

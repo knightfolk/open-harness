@@ -41,6 +41,15 @@ const EXTENDED_PROVIDERS: OnboardingProvider[] = [
   { id: 'lmstudio', name: 'LM Studio', type: 'local', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:1234/v1', placeholder: '(no key needed)', isLocal: true },
 ];
 
+function onboardingTextureLabel(recipe?: string, opacity?: number): string {
+  if (!recipe || recipe === 'none' || !opacity) return 'Texture: none';
+  const label = recipe
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+  return `Texture: ${label} · ${Math.round(opacity * 100)}%`;
+}
+
 function providerType(provider: OnboardingProvider): 'openai-compatible' | 'anthropic' | 'google' | 'local' {
   return provider.type || (provider.isLocal ? 'local' : 'openai-compatible');
 }
@@ -332,22 +341,24 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
       <div className="onboarding-root">
         <div className="onboarding-card" style={{ maxWidth: 620 }}>
           <h2 className="onboarding-step-title">
-            <Sun size={20} /> Pick a theme
+            <Sun size={20} aria-hidden="true" /> Pick a theme
           </h2>
           <p className="onboarding-step-subtitle">Choose a UI theme first, then continue through setup.</p>
 
           {themeGroups.map((group) => (
-            <div key={group.mode} style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-tertiary)', marginBottom: 8 }}>
+            <div key={group.mode} role="group" aria-labelledby={`onboarding-theme-group-${group.mode}`} style={{ marginBottom: 16 }}>
+              <div id={`onboarding-theme-group-${group.mode}`} style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-tertiary)', marginBottom: 8 }}>
                 {group.label}
               </div>
               <div className="onboarding-theme-grid">
                 {group.themes.map((theme) => {
                   const isSelected = activeTheme === theme.id;
+                  const texture = onboardingTextureLabel(theme.tokens.effects?.textureRecipe, theme.tokens.effects?.textureOpacity);
                   return (
                     <button
                       key={theme.id}
                       className={`onboarding-theme-card ${isSelected ? 'selected' : ''}`}
+                      aria-label={`Choose ${theme.label}. ${texture}${isSelected ? '. Active theme' : ''}`}
                       onClick={async () => {
                         const resolvedTheme = applyTheme(theme.id);
                         setActiveTheme(resolvedTheme);
@@ -357,9 +368,10 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
                       <div className="onboarding-theme-swatch" style={{ background: theme.color }} />
                       <div className="onboarding-theme-info">
                         <div className="onboarding-theme-label">{theme.label}</div>
+                        <div className="onboarding-theme-texture">{texture}</div>
                         {isSelected && <div className="onboarding-theme-active">Active</div>}
                       </div>
-                      <Moon size={14} style={{ color: isSelected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
+                      <Moon size={14} aria-hidden="true" style={{ color: isSelected ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
                     </button>
                   );
                 })}

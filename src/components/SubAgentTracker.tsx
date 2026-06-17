@@ -1,19 +1,99 @@
-import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
+import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, Flag, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { HarnessRunStep, SubAgent } from '../types';
+import type { HarnessRun, HarnessRunStep, RunSteeringAction, SubAgent } from '../types';
+import { getActiveWorkState, type ActiveWorkState } from '../utils/agentWorkState';
 import { formatAutoRouterStepDetail, formatAutoRouterStepTitle } from '../utils/autoRouterTrace';
 
 interface Props {
   agents: SubAgent[];
   focusedAgentId?: string | null;
+  onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;
+  onFocusAgent?: (agentId: string) => void;
 }
 
 const statusLabels = {
   idle: 'Waiting',
   running: 'Running',
   complete: 'Complete',
-  error: 'Error',
+  error: 'Failed',
+  blocked: 'Blocked',
 };
+
+function latestArtifactTitle(agent: SubAgent): string | null {
+  const artifactStep = agent.runTrace?.steps?.slice().reverse().find((step): step is Extract<HarnessRunStep, { type: 'artifact' }> =>
+    step.type === 'artifact',
+  );
+  if (!artifactStep) return null;
+  if (artifactStep.artifact.type === 'validation_proof') return `${artifactStep.artifact.title} (${artifactStep.artifact.summary})`;
+  return artifactStep.artifact.title;
+}
+
+function latestArtifactCue(agent: SubAgent): string | null {
+  const artifactStep = agent.runTrace?.steps?.slice().reverse().find((step): step is Extract<HarnessRunStep, { type: 'artifact' }> =>
+    step.type === 'artifact',
+  );
+  if (!artifactStep) return null;
+  const label = artifactStep.artifact.type === 'validation_proof' ? 'validation proof' : 'artifact';
+  return `${label}: ${latestArtifactTitle(agent)}`;
+}
+
+function statusClass(status: SubAgent['status']) {
+  return status === 'error' || status === 'blocked' ? 'error' : status;
+}
+
+const steeringActions: Array<{ action: RunSteeringAction; label: string }> = [
+  { action: 'flag-assumption', label: 'Flag assumption' },
+  { action: 'redirect', label: 'Redirect' },
+  { action: 'pause', label: 'Pause run' },
+  { action: 'cancel', label: 'Cancel run' },
+  { action: 'request-proof', label: 'Request proof' },
+  { action: 'approve-artifact', label: 'Approve artifact' },
+  { action: 'needs-revision', label: 'Needs revision' },
+];
+
+const steeringActionDescriptions: Partial<Record<RunSteeringAction, string>> = {
+  'flag-assumption': 'Records an assumption flag for the next safe phase.',
+  redirect: 'Requests orchestrator redirection and stops the current path where possible.',
+  pause: 'Requests a safe pause for this run.',
+  cancel: 'Requests cancellation for this run.',
+  'request-proof': 'Records a proof request in the replay.',
+  'approve-artifact': 'Records artifact approval in the replay.',
+  'needs-revision': 'Records artifact revision feedback in the replay.',
+};
+
+type ReplayFilter = 'all' | 'proof' | 'files' | 'tools' | 'routing' | 'steering' | 'errors';
+
+const replayFilters: Array<{ id: ReplayFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'proof', label: 'Proof' },
+  { id: 'files', label: 'Files' },
+  { id: 'tools', label: 'Tools' },
+  { id: 'routing', label: 'Routing' },
+  { id: 'steering', label: 'Steering' },
+  { id: 'errors', label: 'Errors' },
+];
+
+function availableSteeringActions(agent: SubAgent): Array<{ action: RunSteeringAction; label: string }> {
+  const active = agent.status === 'running' || agent.status === 'blocked' || agent.status === 'idle';
+  if (!active) return [];
+  const hasArtifact = latestArtifactTitle(agent) != null;
+  return steeringActions.filter(({ action }) => {
+    if (action === 'pause' || action === 'cancel' || action === 'redirect' || action === 'request-proof') return active;
+    if (action === 'approve-artifact' || action === 'needs-revision') return hasArtifact;
+    return true;
+  });
+}
+
+function stepMatchesReplayFilter(step: HarnessRunStep, filter: ReplayFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'proof') return step.type === 'artifact' || step.type === 'final_answer' || step.type === 'context_pack' || step.type === 'repo_map';
+  if (filter === 'files') return step.type === 'context_pack' || step.type === 'repo_map' || step.type === 'artifact';
+  if (filter === 'tools') return step.type === 'tool_call' || step.type === 'prompt_built';
+  if (filter === 'routing') return step.type === 'route' || step.type === 'auto_router' || step.type === 'orchestration' || step.type === 'model_request';
+  if (filter === 'steering') return step.type === 'steering';
+  if (filter === 'errors') return step.type === 'error';
+  return true;
+}
 
 function formatDuration(start: Date, end?: Date): string {
   const ms = (end || new Date()).getTime() - start.getTime();
@@ -91,6 +171,23 @@ function compactToolBundle(steps: Array<Extract<HarnessRunStep, { type: 'tool_ca
   return `${status}${names.length > 0 ? ` · ${names.join(', ')}` : ''}`;
 }
 
+function WorkFlowStrip({ state }: { state: ActiveWorkState }) {
+  return (
+    <div className="active-flow-strip" role="group" aria-label={`${state.workflowLabel} workflow progress`}>
+      <span className="active-flow-strip-title">{state.workflowLabel}</span>
+      <span className="active-flow-strip-body" role="list" aria-label={`${state.workflowLabel} steps`}>
+        {state.steps.map((step, index) => (
+          <span key={step.id} className="active-work-strip-segment" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'running' ? 'step' : undefined}>
+            <span className={`active-work-strip-dot ${step.status}`} aria-hidden="true" />
+            <span className={`active-work-strip-step ${step.status}`}>{step.label}</span>
+            {index < state.steps.length - 1 ? <span className="active-work-strip-separator" aria-hidden="true">›</span> : null}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 function visibleRunSteps(steps: HarnessRunStep[]): HarnessRunStep[] {
   const toolSteps = steps.filter((step): step is Extract<HarnessRunStep, { type: 'tool_call' }> => step.type === 'tool_call');
   const nonToolSteps = steps.filter((step) => step.type !== 'tool_call');
@@ -110,6 +207,7 @@ function visibleRunSteps(steps: HarnessRunStep[]): HarnessRunStep[] {
 
 function stepIcon(step: HarnessRunStep) {
   switch (step.type) {
+    case 'steering': return Flag;
     case 'orchestration': return Route;
     case 'route': return Route;
     case 'artifact': return FileText;
@@ -128,6 +226,7 @@ function stepIcon(step: HarnessRunStep) {
 
 function stepTitle(step: HarnessRunStep): string {
   switch (step.type) {
+    case 'steering': return `Steering · ${step.action}${step.target ? ` (${step.target})` : ''}`;
     case 'orchestration': return `Orchestration · ${step.label}`;
     case 'route': return `Route: ${step.role} → ${step.model}`;
     case 'artifact': return `Artifact · ${step.artifact.title}`;
@@ -141,16 +240,20 @@ function stepTitle(step: HarnessRunStep): string {
       : `Model thinking · ${step.chars} chars`;
     case 'final_answer': return `Final answer · ${step.chars} chars`;
     case 'error': return 'Error';
-    case 'repo_map': return `Repo map · ${step.totalFiles} files (${step.tokenBudget} tokens)`;
-    case 'context_pack': return `Context pack · ${step.pack} (${step.files.length} files)`;
+    case 'repo_map': return `Repo files surfaced · ${step.totalFiles} files (${step.tokenBudget} tokens)`;
+    case 'context_pack': return `Files in context · ${step.pack} (${step.files.length} files)`;
   }
 }
 
 function stepDetail(step: HarnessRunStep): string | null {
   switch (step.type) {
+    case 'steering':
+      return `${step.note ? `note: ${step.note} · ` : ''}${step.target ? `target: ${step.target}` : 'target: orchestrator'}`;
     case 'orchestration': return step.detail || step.mode;
     case 'route': return step.reason || null;
-    case 'artifact': return `${step.artifact.type} · ${step.artifact.summary}`;
+    case 'artifact': return step.artifact.type === 'validation_proof'
+      ? `Validation proof · ${step.artifact.summary}`
+      : `${step.artifact.type} · ${step.artifact.summary}`;
     case 'auto_router': return formatAutoRouterStepDetail(step);
     case 'prompt_built': return step.promptPreview;
     case 'model_request': return step.model;
@@ -169,13 +272,77 @@ function stepDetail(step: HarnessRunStep): string | null {
       : 'Provider emitted reasoning/thinking content.');
     case 'final_answer': return 'Assistant response completed.';
     case 'error': return step.message;
-    case 'repo_map': return `Indexed ${step.totalFiles} files; top: ${step.topFiles.slice(0, 3).join(', ')}`;
-    case 'context_pack': return `${step.suggestion} · ${Object.keys(step.reasons).length} files included`;
+    case 'repo_map': {
+      const topFiles = step.topFiles.slice(0, 4).map(basename).join(', ');
+      return topFiles
+        ? `Indexed ${step.totalFiles} files; surfaced: ${topFiles}${step.truncated ? ' and more' : ''}`
+        : `Indexed ${step.totalFiles} files${step.truncated ? '; truncated' : ''}`;
+    }
+    case 'context_pack': {
+      const files = step.files.slice(0, 4).map(basename).join(', ');
+      const fileSummary = files
+        ? `files: ${files}${step.files.length > 4 ? ' and more' : ''}`
+        : 'no files listed';
+      return `${step.suggestion} · ${fileSummary} · ${Object.keys(step.reasons).length} reason${Object.keys(step.reasons).length === 1 ? '' : 's'}`;
+    }
   }
 }
 
-export function SubAgentTracker({ agents, focusedAgentId }: Props) {
+function latestReplayProof(steps: HarnessRunStep[]): string {
+  const proofStep = steps
+    .slice()
+    .reverse()
+    .find((step) => step.type === 'artifact' || step.type === 'final_answer' || step.type === 'tool_call' || step.type === 'error');
+  if (!proofStep) return 'Waiting for proof.';
+  if (proofStep.type === 'artifact') return `${proofStep.artifact.title}: ${proofStep.artifact.summary}`;
+  if (proofStep.type === 'final_answer') return `Final answer captured (${proofStep.chars} chars).`;
+  if (proofStep.type === 'tool_call') return proofStep.durationMs == null
+    ? `Tool running: ${proofStep.name}`
+    : `Tool finished: ${proofStep.name}${proofStep.outputPreview ? ` · ${compactToolOutput(proofStep.outputPreview)}` : ''}`;
+  return proofStep.message;
+}
+
+function RunReplaySummary({ steps }: { steps: HarnessRunStep[] }) {
+  const artifacts = steps.filter((step) => step.type === 'artifact').length;
+  const validationProofs = steps.filter((step) => step.type === 'artifact' && step.artifact.type === 'validation_proof').length;
+  const tools = steps.filter((step) => step.type === 'tool_call').length;
+  const steering = steps.filter((step) => step.type === 'steering').length;
+  const modelRequests = steps.filter((step) => step.type === 'model_request').length;
+  const contextFiles = new Set(
+    steps.flatMap((step) => {
+      if (step.type === 'context_pack') return step.files;
+      if (step.type === 'repo_map') return step.topFiles;
+      return [];
+    }),
+  ).size;
+  const hasFinal = steps.some((step) => step.type === 'final_answer');
+  return (
+    <div className="sub-agent-replay" role="group" aria-label={`Run replay summary: ${steps.length} events, ${artifacts} artifacts, ${validationProofs} validation proofs, ${contextFiles} context files, ${tools} tool calls, ${steering} steering events, ${modelRequests} model requests, ${hasFinal ? 'final answer captured' : 'final answer pending'}`}>
+      <div className="sub-agent-replay-header">
+        <span>Run replay</span>
+        <span>{steps.length} event{steps.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="sub-agent-replay-grid">
+        <span><FileText size={11} aria-hidden="true" /> {artifacts} artifact{artifacts === 1 ? '' : 's'}</span>
+        <span><CheckCircle2 size={11} aria-hidden="true" /> {validationProofs} validation proof{validationProofs === 1 ? '' : 's'}</span>
+        <span><FileText size={11} aria-hidden="true" /> {contextFiles} context file{contextFiles === 1 ? '' : 's'}</span>
+        <span><Terminal size={11} aria-hidden="true" /> {tools} tool call{tools === 1 ? '' : 's'}</span>
+        <span><Flag size={11} aria-hidden="true" /> {steering} steering</span>
+        <span><Zap size={11} aria-hidden="true" /> {modelRequests} request{modelRequests === 1 ? '' : 's'}</span>
+        <span><CheckCircle2 size={11} aria-hidden="true" /> {hasFinal ? 'final answer' : 'in progress'}</span>
+      </div>
+      <div className="sub-agent-replay-proof">
+        <span>Latest proof</span>
+        <span>{latestReplayProof(steps)}</span>
+      </div>
+    </div>
+  );
+}
+
+export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAgent }: Props) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [replayFilterByAgent, setReplayFilterByAgent] = useState<Record<string, ReplayFilter>>({});
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollKey = useMemo(
     () => agents.map((agent) => `${agent.id}:${agent.status}:${agent.runTrace?.steps.length || 0}`).join('|'),
@@ -194,19 +361,48 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const handleSteer = (agent: SubAgent, action: RunSteeringAction) => {
+    if (!onRunSteer || !agent.runTrace?.id) return;
+    const target = agent.id.includes(':phase:') ? 'agent' : 'orchestrator';
+    if (action === 'add-note') {
+      const note = (noteDrafts[agent.id] || '').trim();
+      if (!note) return;
+      setNoteDrafts((prev) => ({ ...prev, [agent.id]: '' }));
+      onRunSteer(agent.runTrace.id, action, target, note);
+      return;
+    }
+    if (action === 'redirect') {
+      const note = (noteDrafts[agent.id] || '').trim();
+      if (note) {
+        setNoteDrafts((prev) => ({ ...prev, [agent.id]: '' }));
+        onRunSteer(agent.runTrace.id, action, target, note);
+        return;
+      }
+    }
+    onRunSteer(agent.runTrace.id, action, target);
+  };
+
+  const submitNote = (agent: SubAgent) => {
+    if (!agent.runTrace?.id) return;
+    handleSteer(agent, 'add-note');
+  };
+
   if (agents.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-icon">🤖</div>
+      <div className="empty-state" role="status" aria-live="polite">
+        <div className="empty-state-icon" aria-hidden="true">🤖</div>
         <div className="empty-state-text">No harness run active</div>
       </div>
     );
   }
 
   const running = agents.filter((a) => a.status === 'running').length;
+  const blocked = agents.filter((a) => a.status === 'blocked').length;
   const waiting = agents.filter((a) => a.status === 'idle').length;
   const completed = agents.filter((a) => a.status === 'complete').length;
+  const failed = agents.filter((a) => a.status === 'error').length;
   const totalTokens = agents.reduce((sum, a) => sum + (a.tokensUsed || 0), 0);
+  const activeWorkState = getActiveWorkState(agents);
 
   const orderedAgents = focusedAgentId
     ? [
@@ -216,53 +412,129 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
     : [...agents].reverse();
 
   return (
-    <div className="sub-agent-tracker" ref={scrollRef}>
-      <div className="sub-agent-summary">
+    <div className="sub-agent-tracker" ref={scrollRef} role="region" aria-label="Agent work run details">
+      <div
+        className="sub-agent-summary"
+        role="status"
+        aria-label={`Harness run summary: ${running} working, ${blocked} blocked, ${waiting} waiting, ${failed} failed, ${completed} complete, ${formatTokens(totalTokens)} tokens`}
+      >
         <span>{running} working</span>
+        {blocked > 0 && <span>{blocked} blocked</span>}
         <span>{waiting} waiting</span>
+        <span>{failed} failed</span>
         <span>{completed} complete</span>
         <span>{formatTokens(totalTokens)} tokens</span>
       </div>
+      {activeWorkState && (
+        <WorkFlowStrip state={activeWorkState} />
+      )}
 
       {orderedAgents.map((agent) => {
         const trace = agent.runTrace;
         const steps = [...visibleRunSteps(trace?.steps || [])].reverse();
+        const replayFilter = replayFilterByAgent[agent.id] || 'all';
+        const replayFilterLabel = replayFilters.find((filter) => filter.id === replayFilter)?.label || 'Replay';
+        const filteredSteps = steps.filter((step) => stepMatchesReplayFilter(step, replayFilter));
+        const latestStep = steps[0] || null;
         const isFocused = agent.id === focusedAgentId;
         const isExpanded = expanded[agent.id] ?? (isFocused || agents.length === 1);
+        const expandedRegionId = `agent-detail-expanded-${agent.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        const availableActions = availableSteeringActions(agent);
+        const canSteer = availableActions.length > 0;
+        const steeringTargetLabel = agent.id.includes(':phase:')
+          ? 'Notes target this agent for the next safe phase.'
+          : 'Notes target the orchestrator for the next safe phase.';
+        const steeringPersistenceLabel = latestArtifactTitle(agent)
+          ? 'Active controls are saved as replay steering events. Artifact approval and revision are available because this run has an artifact cue.'
+          : 'Active controls are saved as replay steering events. Redirect uses the note field when present; artifact approval appears after the run produces an artifact cue.';
+        const agentCardLabel = [
+          `${trace ? `${trace.role} run` : agent.name}`,
+          `status ${statusLabels[agent.status]}`,
+          agent.task ? `task ${agent.task}` : null,
+          trace?.effectiveModel || agent.model ? `model ${trace?.effectiveModel || agent.model}` : null,
+          trace?.providerId ? `provider ${trace.providerId}` : null,
+          latestArtifactCue(agent),
+        ].filter(Boolean).join('. ');
+        const agentMetaLabel = [
+          trace?.effectiveModel || agent.model ? `model ${trace?.effectiveModel || agent.model}` : null,
+          trace?.providerId ? `provider ${trace.providerId}` : null,
+          latestArtifactCue(agent),
+          `duration ${formatDuration(agent.startTime, agent.endTime)}`,
+          trace?.context ? `tokens ${formatTokens(trace.context.tokensUsed)} of ${formatTokens(trace.context.budget)}` : null,
+          trace?.context.summarized ? 'context summarized' : null,
+          trace?.context.compressedCount ? `${trace.context.compressedCount} compressed context items` : null,
+        ].filter(Boolean).join('. ');
 
         return (
-          <div key={agent.id} className={`sub-agent-card ${isFocused ? 'focused' : ''}`}>
+        <div
+          key={agent.id}
+          className={`sub-agent-card ${isFocused ? 'focused' : ''}`}
+          role="group"
+          aria-label={agentCardLabel}
+          aria-current={isFocused ? 'true' : undefined}
+        >
             <div className="sub-agent-header">
               <div className="sub-agent-name">
-                {isExpanded ? (
-                  <ChevronDown size={14} style={{ cursor: 'pointer' }} onClick={() => toggle(agent.id)} />
-                ) : (
-                  <ChevronRight size={14} style={{ cursor: 'pointer' }} onClick={() => toggle(agent.id)} />
-                )}
-                <Bot size={14} style={{ color: 'var(--accent-primary)' }} />
+                <button
+                  type="button"
+                  className="sub-agent-detail-toggle"
+                  aria-expanded={isExpanded}
+                  aria-controls={expandedRegionId}
+                  aria-label={`${isExpanded ? 'Collapse' : 'Expand'} details for ${trace ? `${trace.role} run` : agent.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggle(agent.id);
+                  }}
+                >
+                  {isExpanded ? (
+                    <ChevronDown size={14} aria-hidden="true" />
+                  ) : (
+                    <ChevronRight size={14} aria-hidden="true" />
+                  )}
+                </button>
+                <Bot size={14} style={{ color: 'var(--accent-primary)' }} aria-hidden="true" />
                 {trace ? `${trace.role} run` : agent.name}
               </div>
-              <span className={`sub-agent-status-badge ${agent.status}`}>
+              <span
+                className={`sub-agent-status-badge ${statusClass(agent.status)}`}
+                aria-label={`${agent.name} status: ${statusLabels[agent.status]}`}
+              >
                 {statusLabels[agent.status]}
               </span>
+              {onFocusAgent && (
+                <button
+                  type="button"
+                  className="sub-agent-focus-button"
+                  aria-label={`Focus ${trace ? `${trace.role} run` : agent.name} in Agent detail`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onFocusAgent(agent.id);
+                  }}
+                >
+                  Focus
+                </button>
+              )}
             </div>
 
-            <div className="sub-agent-task">{agent.task}</div>
+            <div className="sub-agent-task" aria-label={`Agent objective: ${agent.task || 'No objective recorded'}`}>{agent.task}</div>
 
-            {agent.status === 'running' && (
-              <div className="sub-agent-progress">
-                <div className="sub-agent-progress-bar" style={{ width: `${agent.progress || 0}%` }} />
+            {(agent.status === 'running' || agent.status === 'blocked') && latestStep && (
+              <div className="sub-agent-current-step" role="status" aria-live="polite" aria-label={`Current run step: ${stepTitle(latestStep)}`}>
+                {stepTitle(latestStep)}
               </div>
             )}
 
-            <div className="sub-agent-meta">
-              <span className="sub-agent-meta-item">
-                <Zap size={10} />
-                {trace?.effectiveModel || agent.model}
-              </span>
+            <div className="sub-agent-meta" role="group" aria-label={agentMetaLabel || 'Agent run metadata'}>
+                <span className="sub-agent-meta-item">
+                  <Zap size={10} aria-hidden="true" />
+                  {trace?.effectiveModel || agent.model}
+                </span>
               {trace?.providerId && <span className="sub-agent-meta-item">{trace.providerId}</span>}
+              {latestArtifactCue(agent) && (
+                <span className="sub-agent-meta-item">{latestArtifactCue(agent)}</span>
+              )}
               <span className="sub-agent-meta-item">
-                <Clock size={10} />
+                <Clock size={10} aria-hidden="true" />
                 {formatDuration(agent.startTime, agent.endTime)}
               </span>
               {trace?.context && (
@@ -275,18 +547,116 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
             </div>
 
             {isExpanded && (
-              <div className="sub-agent-steps">
+              <div id={expandedRegionId} className="sub-agent-expanded-detail">
+              {onRunSteer && trace?.id && (
+                <div
+                  className="sub-agent-steering"
+                  role="group"
+                  aria-label={`${canSteer ? 'Steering controls' : 'Steering history'} for ${agent.name}`}
+                >
+                  <div className="sub-agent-steering-title">
+                    {canSteer ? 'Steering controls' : 'Steering history'}
+                  </div>
+                  {canSteer ? (
+                    <>
+                      <div className="sub-agent-steering-target">{steeringTargetLabel}</div>
+                      <div className="sub-agent-steering-target">{steeringPersistenceLabel}</div>
+                      <div className="sub-agent-steering-actions" role="group" aria-label={`Available steering actions for ${agent.name}`}>
+                        {availableActions.map((action) => (
+                          <button
+                            key={`${agent.id}-${action.action}`}
+                            className="sub-agent-steering-button"
+                            type="button"
+                            title={steeringActionDescriptions[action.action]}
+                            aria-label={`${action.label} for ${agent.name}. ${steeringActionDescriptions[action.action] || ''} ${steeringTargetLabel}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleSteer(agent, action.action);
+                            }}
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="sub-agent-steering-note-row" role="group" aria-label={`Steering note for ${agent.name}`}>
+                        <input
+                          type="text"
+                          className="sub-agent-steering-note-input"
+                          value={noteDrafts[agent.id] || ''}
+                          onChange={(event) => setNoteDrafts((prev) => ({ ...prev, [agent.id]: event.target.value }))}
+                          placeholder="Add steering note or redirect reason..."
+                          aria-label={`Steering note for ${agent.name}`}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                            if (event.key === 'Enter') submitNote(agent);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="sub-agent-steering-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            submitNote(agent);
+                          }}
+                          disabled={!noteDrafts[agent.id]?.trim()}
+                          aria-label={`Add steering note for ${agent.name}`}
+                        >
+                          Add note
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="sub-agent-steering-empty" role="status" aria-live="polite">
+                      This run is {statusLabels[agent.status].toLowerCase()}. Steering actions are shown only while work is active; use the replay filters below to inspect proof, routing, artifact feedback, and past steering events.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {trace?.steps && trace.steps.length > 0 && (
+                <RunReplaySummary steps={trace.steps} />
+              )}
+
+              <div className="sub-agent-steps" role="list" aria-label={`Replay events for ${agent.name}`}>
                 {steps.length === 0 && (
-                  <div className="sub-agent-empty">
+                  <div className="sub-agent-empty" role="status" aria-live="polite">
                     {agent.status === 'idle' ? 'Waiting for this phase to start.' : 'Waiting for run events.'}
                   </div>
                 )}
-                {steps.map((step, i) => {
+                {steps.length > 0 && (
+                  <div className="sub-agent-replay-filter-row" role="group" aria-label={`Replay filters for ${agent.name}`}>
+                    {replayFilters.map((filter) => {
+                      const filterCount = steps.filter((step) => stepMatchesReplayFilter(step, filter.id)).length;
+                      return (
+                        <button
+                          key={`${agent.id}-${filter.id}`}
+                          type="button"
+                          className={`sub-agent-replay-filter ${replayFilter === filter.id ? 'active' : ''}`}
+                          aria-pressed={replayFilter === filter.id}
+                          aria-current={replayFilter === filter.id ? 'true' : undefined}
+                          aria-label={`Show ${filterCount} ${filter.label.toLowerCase()} replay event${filterCount === 1 ? '' : 's'} for ${agent.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setReplayFilterByAgent((prev) => ({ ...prev, [agent.id]: filter.id }));
+                          }}
+                        >
+                          <span>{filter.label}</span>
+                          <span className="sub-agent-replay-filter-count" title={`${filterCount} matching event${filterCount === 1 ? '' : 's'}`} aria-hidden="true">{filterCount}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {steps.length > 0 && filteredSteps.length === 0 && (
+                  <div className="sub-agent-empty" role="status" aria-live="polite">No {replayFilterLabel.toLowerCase()} replay events match this filter.</div>
+                )}
+                {filteredSteps.map((step, i) => {
                   const Icon = stepIcon(step);
                   const detail = stepDetail(step);
                   return (
-                    <div key={`${step.type}-${i}`} className="sub-agent-step">
-                      <Icon size={14} className={step.type === 'error' ? 'sub-agent-step-icon error' : 'sub-agent-step-icon'} />
+                    <div key={`${step.type}-${i}`} className="sub-agent-step" role="listitem" aria-label={`${stepTitle(step)}${detail ? `. ${detail}` : ''}`}>
+                      <Icon size={14} className={step.type === 'error' ? 'sub-agent-step-icon error' : 'sub-agent-step-icon'} aria-hidden="true" />
                       <div>
                         <div className="sub-agent-step-title">{stepTitle(step)}</div>
                         {detail && (
@@ -298,6 +668,7 @@ export function SubAgentTracker({ agents, focusedAgentId }: Props) {
                     </div>
                   );
                 })}
+              </div>
               </div>
             )}
           </div>

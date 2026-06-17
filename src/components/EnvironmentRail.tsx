@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Bot, ChevronDown, ChevronRight, CircleGauge, FileSearch, GitBranch, Laptop,
-  ListPlus, Loader, PanelRightClose, Send, Shield, ShieldCheck, Eye, EyeOff,
+  Bot, ChevronDown, ChevronRight, CircleGauge, FileSearch, GitBranch,
+  ListPlus, Loader, PanelRightClose, Shield, ShieldCheck, Eye, EyeOff,
   X,
 } from 'lucide-react';
 import * as api from '../utils/api';
 import type { SubAgent } from '../types';
+import { getActiveWorkState } from '../utils/agentWorkState';
 
 interface Props {
   workingDir: string | null;
@@ -19,11 +20,11 @@ interface Props {
 }
 
 const TRUST_ICONS: Record<string, React.ReactNode> = {
-  'chat-only': <EyeOff size={16} />,
-  'read-only': <Eye size={16} />,
-  'ask-before-write': <Shield size={16} />,
-  'workspace-write': <ShieldCheck size={16} />,
-  'full-local': <Shield size={16} />,
+  'chat-only': <EyeOff size={16} aria-hidden="true" />,
+  'read-only': <Eye size={16} aria-hidden="true" />,
+  'ask-before-write': <Shield size={16} aria-hidden="true" />,
+  'workspace-write': <ShieldCheck size={16} aria-hidden="true" />,
+  'full-local': <Shield size={16} aria-hidden="true" />,
 };
 
 const TRUST_COLORS: Record<string, string> = {
@@ -44,21 +45,7 @@ const TRUST_LABELS: Record<string, string> = {
 
 type SectionId = 'git' | 'agents' | 'access' | 'progress' | 'sources';
 const DEFAULT_ORDER: SectionId[] = ['git', 'agents', 'access', 'progress', 'sources'];
-const ORDER_KEY = 'openharness.right-panel.order.v1';
 const COLLAPSED_KEY = 'openharness.right-panel.collapsed.v1';
-
-function loadOrder(): SectionId[] {
-  try {
-    const raw = localStorage.getItem(ORDER_KEY);
-    if (!raw) return DEFAULT_ORDER;
-    const parsed = JSON.parse(raw) as SectionId[];
-    if (!Array.isArray(parsed)) return DEFAULT_ORDER;
-    // Filter to known ids, then append any missing ones (forward compat).
-    const known = parsed.filter((id): id is SectionId => DEFAULT_ORDER.includes(id));
-    const missing = DEFAULT_ORDER.filter((id) => !known.includes(id));
-    return [...known, ...missing];
-  } catch { return DEFAULT_ORDER; }
-}
 
 function loadCollapsed(): Record<SectionId, boolean> {
   try {
@@ -69,7 +56,7 @@ function loadCollapsed(): Record<SectionId, boolean> {
     }
   } catch { /* ignore */ }
   // Default: Progress and Sources start collapsed to honor the cleanup plan.
-  return { git: false, agents: false, access: false, progress: true, sources: true };
+  return { git: false, agents: true, access: false, progress: true, sources: true };
 }
 
 export function EnvironmentRail({
@@ -114,15 +101,8 @@ export function EnvironmentRail({
     return () => { mounted = false; clearInterval(interval); };
   }, [workingDir]);
 
-  const [order, setOrder] = useState<SectionId[]>(loadOrder);
   const [collapsed, setCollapsed] = useState<Record<SectionId, boolean>>(loadCollapsed);
-  const [dragId, setDragId] = useState<SectionId | null>(null);
-  const [dragOverId, setDragOverId] = useState<SectionId | null>(null);
 
-  // Persist on change.
-  useEffect(() => {
-    try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch { /* ignore */ }
-  }, [order]);
   useEffect(() => {
     try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsed)); } catch { /* ignore */ }
   }, [collapsed]);
@@ -130,44 +110,6 @@ export function EnvironmentRail({
   const toggleCollapse = (id: SectionId) =>
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
 
-  // Drag-and-drop reorder handlers (HTML5 DnD — simple list, no library needed).
-  const onDragStart = (id: SectionId) => (e: React.DragEvent) => {
-    setDragId(id);
-    e.dataTransfer.effectAllowed = 'move';
-    // Use a plain text payload so the browser still permits the drag without
-    // requiring external asset previews. We only act on items where our type matches.
-    e.dataTransfer.setData('text/plain', id);
-  };
-  const onDragOver = (id: SectionId) => (e: React.DragEvent) => {
-    if (!dragId || dragId === id) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (dragOverId !== id) setDragOverId(id);
-  };
-  const onDragLeave = (id: SectionId) => () => {
-    if (dragOverId === id) setDragOverId(null);
-  };
-  const onDrop = (id: SectionId) => (e: React.DragEvent) => {
-    e.preventDefault();
-    const from = e.dataTransfer.getData('text/plain') as SectionId;
-    if (!from || from === id) {
-      setDragId(null);
-      setDragOverId(null);
-      return;
-    }
-    setOrder((prev) => {
-      const next = prev.slice();
-      const fromIdx = next.indexOf(from);
-      const toIdx = next.indexOf(id);
-      if (fromIdx < 0 || toIdx < 0) return prev;
-      next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, from);
-      return next;
-    });
-    setDragId(null);
-    setDragOverId(null);
-  };
-  const onDragEnd = () => { setDragId(null); setDragOverId(null); };
 
   const accessColor = TRUST_COLORS[trustMode] || 'var(--text-secondary)';
   const accessLabel = TRUST_LABELS[trustMode] || trustMode;
@@ -176,8 +118,12 @@ export function EnvironmentRail({
   const runningCount = subAgents.filter((a) => a.status === 'running').length;
   const waitingCount = subAgents.filter((a) => a.status === 'idle').length;
   const totalAgents = subAgents.length;
-  const hasPendingWork = !clean;
-  const hasActiveAgents = runningCount > 0;
+  const hasAnyAgents = totalAgents > 0;
+  const hasProject = Boolean(workingDir);
+  const hasChanges = hasProject && fileCount > 0;
+  const hasPendingWork = hasChanges;
+  const hasRunningAgents = runningCount > 0;
+  const activeWorkState = useMemo(() => getActiveWorkState(subAgents), [subAgents]);
 
   useEffect(() => {
     if (hasPendingWork) {
@@ -186,10 +132,10 @@ export function EnvironmentRail({
   }, [hasPendingWork]);
 
   useEffect(() => {
-    if (hasActiveAgents) {
+    if (hasRunningAgents) {
       setCollapsed((prev) => (prev.agents ? { ...prev, agents: false } : prev));
     }
-  }, [hasActiveAgents]);
+  }, [hasRunningAgents]);
 
   // Per-section definitions. Body content is computed inline so each section can
   // own its visual logic without leaking concerns across the rail.
@@ -197,8 +143,8 @@ export function EnvironmentRail({
     const defs: Record<SectionId, { title: string; icon: React.ReactNode; body: React.ReactNode; summary: React.ReactNode }> = {
       git: {
         title: 'Git',
-        icon: <GitBranch size={16} />,
-        summary: clean ? <span className="env-clean">Clean</span> : (
+        icon: <GitBranch size={16} aria-hidden="true" />,
+        summary: !hasProject ? <span className="env-clean">No project</span> : !hasChanges ? <span className="env-clean">Clean</span> : (
           <span className="env-change-count">{fileCount} file{fileCount !== 1 ? 's' : ''}</span>
         ),
         body: (
@@ -207,13 +153,15 @@ export function EnvironmentRail({
               className="env-card-row env-card-row-button"
               type="button"
               onClick={onReviewChanges}
-              disabled={clean}
               aria-label="Review changes"
+              title={!hasProject ? 'Open a project to review changes' : !hasChanges ? 'Review clean working tree' : 'Review changed files'}
             >
-              <ListPlus size={18} className="env-card-row-icon" />
+              <ListPlus size={18} className="env-card-row-icon" aria-hidden="true" />
               <span className="env-card-row-main">Changes</span>
               <span className="env-card-row-meta">
-                {clean ? (
+                {!hasProject ? (
+                  <span className="env-clean">No project</span>
+                ) : !hasChanges ? (
                   <span className="env-clean">Clean</span>
                 ) : (
                   <>
@@ -224,23 +172,15 @@ export function EnvironmentRail({
               </span>
             </button>
             <div className="env-card-row env-card-row-static">
-              <Laptop size={18} className="env-card-row-icon" />
-              <span className="env-card-row-main">Local</span>
-            </div>
-            <div className="env-card-row env-card-row-static">
-              <GitBranch size={18} className="env-card-row-icon" />
+              <GitBranch size={18} className="env-card-row-icon" aria-hidden="true" />
               <span className="env-card-row-main">{branch || 'No branch'}</span>
-            </div>
-            <div className="env-card-row env-card-row-static">
-              <Send size={18} className="env-card-row-icon" />
-              <span className="env-card-row-main">Commit or push</span>
             </div>
           </>
         ),
       },
       agents: {
         title: 'Agents',
-        icon: <Bot size={16} />,
+        icon: <Bot size={16} aria-hidden="true" />,
         summary: totalAgents === 0 ? <span className="env-clean">None</span> : (
           <span className="env-change-count">
             {runningCount} working · {waitingCount} waiting
@@ -252,16 +192,16 @@ export function EnvironmentRail({
             type="button"
             onClick={onFocusAgents}
             disabled={totalAgents === 0}
-            aria-label="Focus on sub-agents"
+            aria-label="Focus on agent work"
           >
-            <Bot size={18} className="env-card-row-icon" />
-            <span className="env-card-row-main">Sub-agents</span>
+            <Bot size={18} className="env-card-row-icon" aria-hidden="true" />
+            <span className="env-card-row-main">Agent work</span>
             <span className="env-card-row-meta">
               {totalAgents === 0 ? (
                 <span className="env-clean">None</span>
               ) : (
                 <>
-                  {runningCount > 0 && <Loader size={12} className="env-agents-spin" />}
+                  {runningCount > 0 && <Loader size={12} className="env-agents-spin" aria-hidden="true" />}
                   <span className="env-change-count">
                     {runningCount} working · {waitingCount} waiting
                   </span>
@@ -273,11 +213,11 @@ export function EnvironmentRail({
       },
       access: {
         title: 'Access',
-        icon: TRUST_ICONS[trustMode] || <Shield size={16} />,
+        icon: TRUST_ICONS[trustMode] || <Shield size={16} aria-hidden="true" />,
         summary: <span className="env-access" style={{ color: accessColor }}>{accessLabel}</span>,
         body: (
           <div className="env-card-row env-card-row-static">
-            {TRUST_ICONS[trustMode] || <Shield size={18} className="env-card-row-icon" />}
+            {TRUST_ICONS[trustMode] || <Shield size={18} className="env-card-row-icon" aria-hidden="true" />}
             <span className="env-card-row-main">Trust mode</span>
             <span className="env-access" style={{ color: accessColor }}>{accessLabel}</span>
           </div>
@@ -285,9 +225,34 @@ export function EnvironmentRail({
       },
       progress: {
         title: 'Progress',
-        icon: <CircleGauge size={16} />,
-        summary: null,
-        body: (
+        icon: <CircleGauge size={16} aria-hidden="true" />,
+        summary: activeWorkState ? <span className="env-change-count">{activeWorkState.workflowLabel}</span> : null,
+        body: activeWorkState ? (
+          <div className="env-workflow" role="status" aria-live="polite" aria-label={`${activeWorkState.workflowLabel} active work progress`}>
+            <div className="env-workflow-title">{activeWorkState.workflowLabel}</div>
+            {(activeWorkState.currentTask || activeWorkState.modelProvider || activeWorkState.latestArtifact) && (
+              <div
+                className="env-workflow-meta"
+                role="group"
+                aria-label={[
+                  activeWorkState.currentTask ? `Current task: ${activeWorkState.currentTask}` : null,
+                  activeWorkState.modelProvider ? `Model: ${activeWorkState.modelProvider}` : null,
+                  activeWorkState.latestArtifact ? `Latest ${activeWorkState.latestArtifact}` : null,
+                ].filter(Boolean).join('. ')}
+              >
+                {[activeWorkState.currentTask, activeWorkState.modelProvider, activeWorkState.latestArtifact].filter(Boolean).join(' · ')}
+              </div>
+            )}
+            <div className="env-workflow-steps" role="list" aria-label={`${activeWorkState.workflowLabel} steps`}>
+              {activeWorkState.steps.map((step) => (
+                <div key={step.id} className="env-workflow-step" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'running' ? 'step' : undefined}>
+                  <span className={`active-work-strip-dot ${step.status}`} aria-hidden="true" />
+                  <span className={`active-work-strip-step ${step.status}`}>{step.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
           <div className="env-card-section-empty">
             No active run progress.
           </div>
@@ -295,7 +260,7 @@ export function EnvironmentRail({
       },
       sources: {
         title: 'Sources',
-        icon: <FileSearch size={16} />,
+        icon: <FileSearch size={16} aria-hidden="true" />,
         summary: null,
         body: (
           <div className="env-card-section-empty">
@@ -305,7 +270,12 @@ export function EnvironmentRail({
       },
     };
     return defs;
-  }, [branch, fileCount, additions, deletions, clean, totalAgents, runningCount, waitingCount, trustMode, accessLabel, accessColor, onReviewChanges, onFocusAgents]);
+  }, [branch, fileCount, additions, deletions, hasChanges, hasProject, totalAgents, runningCount, waitingCount, trustMode, accessLabel, accessColor, activeWorkState, onReviewChanges, onFocusAgents]);
+
+  const sectionIds = useMemo(() => {
+    if (hasAnyAgents) return DEFAULT_ORDER;
+    return DEFAULT_ORDER.filter((id) => id !== 'agents' && id !== 'progress');
+  }, [hasAnyAgents]);
 
   return (
     <aside className={`env-rail ${variant === 'panel' ? 'env-rail-panel' : ''} ${variant === 'floating' ? 'env-rail-floating' : ''} ${variant === 'rail' ? 'right-panel-overlay' : ''}`} data-right-panel="visible" aria-label={variant === 'rail' ? 'Right panel' : 'Super panel'}>
@@ -326,7 +296,7 @@ export function EnvironmentRail({
                 title="Hide Super panel"
                 aria-label="Hide Super panel"
               >
-                <X size={16} />
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
           )}
@@ -339,7 +309,7 @@ export function EnvironmentRail({
                 title="Hide right panel (⇧⌘S)"
                 aria-label="Hide right panel"
               >
-                <PanelRightClose size={17} />
+                <PanelRightClose size={17} aria-hidden="true" />
               </button>
             </div>
           )}
@@ -356,7 +326,7 @@ export function EnvironmentRail({
                 title="Hide right panel (⇧⌘S)"
                 aria-label="Hide right panel"
               >
-                <PanelRightClose size={14} />
+                <PanelRightClose size={14} aria-hidden="true" />
                 <span>Hide</span>
                 <kbd className="right-panel-kbd" aria-hidden="true">⇧⌘S</kbd>
               </button>
@@ -366,17 +336,14 @@ export function EnvironmentRail({
         </div>
 
         <div className="env-card-sections">
-          {order.map((id) => {
+          {sectionIds.map((id) => {
             const def = sectionDefs[id];
             const isCollapsed = !!collapsed[id];
-            const isDragOver = dragOverId === id && dragId && dragId !== id;
+            const sectionBodyId = `env-section-body-${variant}-${id}`;
             return (
               <div
                 key={id}
-                className={`env-section ${isDragOver ? 'env-section-drop-target' : ''} ${dragId === id ? 'env-section-dragging' : ''}`}
-                onDragOver={onDragOver(id)}
-                onDragLeave={onDragLeave(id)}
-                onDrop={onDrop(id)}
+                className="env-section"
               >
                 <div className="env-section-header">
                   <button
@@ -384,25 +351,28 @@ export function EnvironmentRail({
                     className="env-section-toggle"
                     onClick={() => toggleCollapse(id)}
                     aria-expanded={!isCollapsed}
+                    aria-controls={sectionBodyId}
                   >
                     <span className="env-section-toggle-icon">
-                      {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      {isCollapsed ? <ChevronRight size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
                     </span>
-                    <span
-                      className="env-section-icon"
-                      draggable
-                      onDragStart={onDragStart(id)}
-                      onDragEnd={onDragEnd}
-                      title="Drag to reorder"
-                      aria-label={`Drag ${def.title} section`}
-                    >
+                    <span className="env-section-icon" aria-hidden="true">
                       {def.icon}
                     </span>
                     <span className="env-section-title">{def.title}</span>
                     <span className="env-section-summary">{def.summary}</span>
                   </button>
                 </div>
-                {!isCollapsed && <div className="env-section-body">{def.body}</div>}
+                {!isCollapsed && (
+                  <div
+                    id={sectionBodyId}
+                    className="env-section-body"
+                    role="region"
+                    aria-label={`${def.title} details`}
+                  >
+                    {def.body}
+                  </div>
+                )}
               </div>
             );
           })}

@@ -6,6 +6,7 @@ import { join, basename, dirname, extname, isAbsolute, resolve, relative, parse 
 import { execFileSync, spawn } from 'child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
+import { homedir } from 'os';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef, getConfigPath } from './config';
 import type { StoredMCPServer, StoredProvider } from './config';
 import { testProviderConnection, fetchProviderModels } from './providers';
@@ -32,12 +33,11 @@ import {
 import { routeRequest, routeWithAutoRouter } from './router';
 import type { RouteDecision } from './router';
 import { configureAutoRouter, getAutoRouterState, clearRouterCache, getAvailableCandidates, checkRouterHealth, generateSessionTitleWithClassifier } from './autoRouter';
-import { recordRoutingDecision, recordOutcome, getRoutingEvents, getLearningSummary, suggestThresholdAdjustment, getModelSuccessRates } from './routerLearning';
+import { recordRoutingDecision, recordOutcome, getRoutingEvents, getAllRoutingEvents, importRoutingEvents, getLearningSummary, suggestThresholdAdjustment, getModelSuccessRates } from './routerLearning';
 import { recordUsage, checkBudget, getAllUsageSummaries } from './usageTracker';
 import { orchestrationInstruction, orchestrationTraceSteps, runOrchestratorPipeline } from './orchestrator';
 import type { ProjectProfile } from './projectProfile';
-import { appendRunStep, completeHarnessRun, createHarnessRun } from './runTrace';
-import type { HarnessRun, HarnessRunStep } from './runTrace';
+import { appendRunStep, completeHarnessRun, createHarnessRun, type HarnessRun, type HarnessRunStep, type RunSteeringAction, type ValidationProofCommand, type WorkProductArtifact } from './runTrace';
 import { createSession as createTermSession, getHistory as getTermHistory, runCommand as runTermCommand, cancelCommand as cancelTermCommand, getEntry as getTermEntry } from './terminalSessions';
 import * as git from './git';
 import { capturePreview, checkServerHealth } from './browserPreview';
@@ -88,6 +88,146 @@ function estimateUsageForTexts(modelId: string, inputText: string, outputText: s
     outputTokens,
     tokenCount: inputTokens + outputTokens,
     cost,
+  };
+}
+
+interface ProviderRateLimitCheck {
+  allowed: boolean;
+  warn?: boolean;
+  reason?: string;
+  remainingRequests?: number;
+  remainingTokens?: number;
+  resetSeconds?: number;
+}
+
+const providerRateLimitWindows = new Map<string, Array<{ at: number; tokens: number }>>();
+const providerRateLimitEvents: Array<{
+  providerId: string;
+  timestamp: string;
+  action: 'warn' | 'block';
+  reason: string;
+  estimatedTokens: number;
+  remainingRequests?: number;
+  remainingTokens?: number;
+  resetSeconds?: number;
+}> = [];
+const PROVIDER_RATE_LIMIT_DIR = join(homedir(), '.openharness', 'provider-rate-limits');
+const PROVIDER_RATE_LIMIT_EVENTS_PATH = join(PROVIDER_RATE_LIMIT_DIR, 'events.json');
+
+function loadProviderRateLimitEvents() {
+  if (!existsSync(PROVIDER_RATE_LIMIT_EVENTS_PATH)) return;
+  try {
+    const parsed = JSON.parse(readFileSync(PROVIDER_RATE_LIMIT_EVENTS_PATH, 'utf-8'));
+    if (!Array.isArray(parsed)) return;
+    providerRateLimitEvents.splice(0, providerRateLimitEvents.length, ...parsed
+      .filter((event: any) => event && typeof event.providerId === 'string' && (event.action === 'warn' || event.action === 'block'))
+      .slice(-80));
+  } catch {
+    // Ignore malformed telemetry; future events will rewrite the bounded file.
+  }
+}
+
+function persistProviderRateLimitEvents() {
+  try {
+    if (!existsSync(PROVIDER_RATE_LIMIT_DIR)) mkdirSync(PROVIDER_RATE_LIMIT_DIR, { recursive: true });
+    writeFileSync(PROVIDER_RATE_LIMIT_EVENTS_PATH, JSON.stringify(providerRateLimitEvents.slice(-80), null, 2), 'utf-8');
+  } catch {
+    // Telemetry persistence should never block a model request.
+  }
+}
+
+function rememberProviderRateLimitEvent(event: (typeof providerRateLimitEvents)[number]) {
+  providerRateLimitEvents.push(event);
+  if (providerRateLimitEvents.length > 80) providerRateLimitEvents.splice(0, providerRateLimitEvents.length - 80);
+  persistProviderRateLimitEvents();
+}
+
+loadProviderRateLimitEvents();
+
+function checkAndRecordProviderRateLimit(providerId: string, estimatedTokens: number): ProviderRateLimitCheck {
+  const limit = (appConfig.providerRateLimits || []).find((entry) => entry.providerId === providerId)
+    || (appConfig.providerRateLimits || []).find((entry) => entry.providerId === '*');
+  if (!limit || limit.onExceeded === 'allow') return { allowed: true };
+
+  const now = Date.now();
+  const windowMs = 60_000;
+  const existing = (providerRateLimitWindows.get(providerId) || []).filter((entry) => now - entry.at < windowMs);
+  const currentTokens = existing.reduce((sum, entry) => sum + entry.tokens, 0);
+  const nextRequests = existing.length + 1;
+  const nextTokens = currentTokens + Math.max(0, estimatedTokens);
+  const exceeded: string[] = [];
+  if (limit.maxRequestsPerMinute > 0 && nextRequests > limit.maxRequestsPerMinute) {
+    exceeded.push(`requests (${nextRequests}/${limit.maxRequestsPerMinute} per minute)`);
+  }
+  if (limit.maxTokensPerMinute > 0 && nextTokens > limit.maxTokensPerMinute) {
+    exceeded.push(`tokens (${nextTokens}/${limit.maxTokensPerMinute} per minute)`);
+  }
+
+  const resetSeconds = existing.length > 0 ? Math.max(1, Math.ceil((windowMs - (now - existing[0].at)) / 1000)) : 60;
+  const remainingRequests = limit.maxRequestsPerMinute > 0 ? Math.max(0, limit.maxRequestsPerMinute - nextRequests) : undefined;
+  const remainingTokens = limit.maxTokensPerMinute > 0 ? Math.max(0, limit.maxTokensPerMinute - nextTokens) : undefined;
+
+  if (exceeded.length > 0) {
+    const reason = `Provider rate limit exceeded for ${providerId}: ${exceeded.join(', ')}`;
+    const action = limit.onExceeded === 'block' ? 'block' : 'warn';
+    rememberProviderRateLimitEvent({
+      providerId,
+      timestamp: new Date(now).toISOString(),
+      action,
+      reason,
+      estimatedTokens: Math.max(0, estimatedTokens),
+      remainingRequests,
+      remainingTokens,
+      resetSeconds,
+    });
+    const result = {
+      allowed: limit.onExceeded !== 'block',
+      warn: limit.onExceeded === 'warn',
+      reason,
+      remainingRequests,
+      remainingTokens,
+      resetSeconds,
+    };
+    if (result.allowed) providerRateLimitWindows.set(providerId, [...existing, { at: now, tokens: Math.max(0, estimatedTokens) }]);
+    return result;
+  }
+
+  providerRateLimitWindows.set(providerId, [...existing, { at: now, tokens: Math.max(0, estimatedTokens) }]);
+  return { allowed: true, remainingRequests, remainingTokens, resetSeconds };
+}
+
+function getProviderRateLimitStatus() {
+  const now = Date.now();
+  const windowMs = 60_000;
+  const providerIds = new Set<string>([
+    ...Array.from(providerRateLimitWindows.keys()),
+    ...(appConfig.providerRateLimits || []).map((limit) => limit.providerId),
+  ]);
+  const providers = Array.from(providerIds).map((providerId) => {
+    const window = (providerRateLimitWindows.get(providerId) || []).filter((entry) => now - entry.at < windowMs);
+    providerRateLimitWindows.set(providerId, window);
+    const limit = (appConfig.providerRateLimits || []).find((entry) => entry.providerId === providerId)
+      || (providerId !== '*' ? (appConfig.providerRateLimits || []).find((entry) => entry.providerId === '*') : undefined);
+    const tokensUsed = window.reduce((sum, entry) => sum + entry.tokens, 0);
+    const oldest = window[0]?.at;
+    const resetSeconds = oldest ? Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000)) : 60;
+    return {
+      providerId,
+      configured: !!limit,
+      action: limit?.onExceeded || 'allow',
+      requestsUsed: window.length,
+      tokensUsed,
+      maxRequestsPerMinute: limit?.maxRequestsPerMinute || 0,
+      maxTokensPerMinute: limit?.maxTokensPerMinute || 0,
+      remainingRequests: limit?.maxRequestsPerMinute ? Math.max(0, limit.maxRequestsPerMinute - window.length) : null,
+      remainingTokens: limit?.maxTokensPerMinute ? Math.max(0, limit.maxTokensPerMinute - tokensUsed) : null,
+      resetSeconds,
+    };
+  });
+  return {
+    windowSeconds: 60,
+    providers,
+    recentEvents: providerRateLimitEvents.slice(-20).reverse(),
   };
 }
 
@@ -276,6 +416,25 @@ interface MessageRow {
   runTrace?: HarnessRun;
 }
 
+const STEERING_ACTIONS: RunSteeringAction[] = [
+  'flag-assumption',
+  'add-note',
+  'redirect',
+  'pause',
+  'cancel',
+  'request-proof',
+  'approve-artifact',
+  'needs-revision',
+];
+
+function isRunSteeringAction(value: unknown): value is RunSteeringAction {
+  return typeof value === 'string' && STEERING_ACTIONS.includes(value as RunSteeringAction);
+}
+
+function isRunSteeringTarget(value: unknown): value is 'orchestrator' | 'agent' {
+  return value === 'orchestrator' || value === 'agent';
+}
+
 interface ToolCallRow {
   id: string;
   name: string;
@@ -289,6 +448,100 @@ interface SideChatRequestContext {
   includeMainChat?: boolean;
   mainSessionId?: string;
   mainMessages?: Array<{ role?: string; content?: string; timestamp?: string }>;
+}
+
+type ActiveRunSteeringTarget = 'orchestrator' | 'agent';
+
+interface ActiveRunSteering {
+  runId: string;
+  sessionId: string;
+  controller: AbortController;
+  orchestratorNotes: string[];
+  agentNotes: string[];
+  requestedPause: boolean;
+  requestedCancel: boolean;
+  pendingRedirect: boolean;
+  updatedAt: number;
+}
+
+const activeRunSteering: Map<string, ActiveRunSteering> = new Map();
+
+function registerActiveRunSteering(runId: string, sessionId: string, controller: AbortController): ActiveRunSteering {
+  const state: ActiveRunSteering = {
+    runId,
+    sessionId,
+    controller,
+    orchestratorNotes: [],
+    agentNotes: [],
+    requestedPause: false,
+    requestedCancel: false,
+    pendingRedirect: false,
+    updatedAt: Date.now(),
+  };
+  activeRunSteering.set(runId, state);
+  return state;
+}
+
+function removeActiveRunSteering(runId: string): void {
+  activeRunSteering.delete(runId);
+}
+
+function getActiveRunSteering(runId: string): ActiveRunSteering | undefined {
+  return activeRunSteering.get(runId);
+}
+
+function buildSteeringContext(notes: string[], target: ActiveRunSteeringTarget, prefix = true): string {
+  if (!notes.length) return '';
+  const intro = target === 'agent' ? 'Agent steering notes' : 'Orchestrator steering notes';
+  const header = prefix ? `## ${intro}` : `### ${intro}`;
+  return [
+    header,
+    ...notes.map((note) => `- ${note}`),
+    '',
+    'Apply these notes to this run before finalizing the next safe phase.',
+  ].join('\n');
+}
+
+function takeSteeringNotes(runId: string, target: ActiveRunSteeringTarget): string[] {
+  const state = activeRunSteering.get(runId);
+  if (!state) return [];
+  const notes = target === 'agent' ? state.agentNotes : state.orchestratorNotes;
+  if (notes.length === 0) return [];
+  state.updatedAt = Date.now();
+  const drained = notes.splice(0, notes.length);
+  return drained;
+}
+
+function addSteeringNote(runId: string, target: ActiveRunSteeringTarget, note: string): void {
+  const state = activeRunSteering.get(runId);
+  if (!state) return;
+  const normalized = note.trim().slice(0, 1400);
+  if (!normalized) return;
+  if (target === 'agent') {
+    state.agentNotes.push(normalized);
+  } else {
+    state.orchestratorNotes.push(normalized);
+  }
+  state.updatedAt = Date.now();
+}
+
+function setRunSteeringCancelState(runId: string, action: RunSteeringAction): void {
+  const state = activeRunSteering.get(runId);
+  if (!state) return;
+  if (action === 'pause') {
+    state.requestedPause = true;
+    state.controller.abort();
+    addSteeringNote(runId, 'orchestrator', 'pause requested');
+  } else if (action === 'cancel') {
+    state.requestedCancel = true;
+    state.controller.abort();
+    addSteeringNote(runId, 'orchestrator', 'cancel requested');
+  }
+  if (action === 'redirect') {
+    state.pendingRedirect = true;
+    addSteeringNote(runId, 'orchestrator', 'redirect requested');
+  }
+  state.updatedAt = Date.now();
 }
 
 // ── Config ─────────────────────────────────────────────
@@ -768,6 +1021,154 @@ app.delete('/api/sessions/:id', (req, res) => {
   res.status(204).end();
 });
 
+app.post('/api/sessions/:sessionId/runs/:runId/steering', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const action = req.body?.action;
+  const noteRaw = req.body?.note;
+  const note = typeof noteRaw === 'string' ? noteRaw.trim() : undefined;
+  const targetRaw = req.body?.target;
+  const target = isRunSteeringTarget(targetRaw) ? targetRaw : undefined;
+  const runId = req.params.runId;
+
+  if (!isRunSteeringAction(action)) {
+    return res.status(400).json({ error: 'Invalid steering action' });
+  }
+
+  const resolvedTarget = target || 'orchestrator';
+  if (action === 'pause' || action === 'cancel' || action === 'redirect') {
+    setRunSteeringCancelState(runId, action);
+  }
+
+  if (action === 'pause' || action === 'cancel' || action === 'redirect') {
+    if (note) {
+      addSteeringNote(runId, resolvedTarget, note);
+    }
+  } else {
+    const actionFallbackNotes: Record<RunSteeringAction, string> = {
+      'flag-assumption': 'Flag assumption for next phase',
+      'add-note': note || 'Additional steering note for next phase',
+      redirect: '',
+      pause: '',
+      cancel: '',
+      'request-proof': 'Request proof for current response',
+      'approve-artifact': 'Approve generated artifact and continue',
+      'needs-revision': 'Needs revision before continuing',
+    };
+    const text = actionFallbackNotes[action] || '';
+    if (text) addSteeringNote(runId, resolvedTarget, note || text);
+  }
+
+  const steeringStep = {
+    type: 'steering',
+    action,
+    source: 'user',
+    target: target || undefined,
+    note: note || undefined,
+    createdAt: new Date().toISOString(),
+  } as HarnessRunStep;
+
+  let updatedRun: HarnessRun | null = null;
+  let touched = false;
+
+  session.messages = session.messages.map((message) => {
+    if (!message.runTrace || message.runTrace.id !== runId) return message;
+    const nextRun = message.runTrace;
+    appendRunStep(nextRun, steeringStep);
+    if (!updatedRun) updatedRun = nextRun;
+    touched = true;
+    return { ...message, runTrace: nextRun };
+  });
+
+  if (!touched || !updatedRun) {
+    return res.status(404).json({ error: 'Run not found' });
+  }
+
+  session.updatedAt = new Date().toISOString();
+  sessionStore.saveSession(session);
+  res.status(201).json({ ok: true, run: updatedRun });
+});
+
+app.post('/api/sessions/:sessionId/validation-proof-artifacts', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const proofText = typeof req.body?.proofText === 'string' ? req.body.proofText.trim() : '';
+  if (!proofText) return res.status(400).json({ error: 'Validation proof text is required' });
+
+  const workspace = typeof req.body?.workingDir === 'string' && req.body.workingDir.trim()
+    ? req.body.workingDir.trim()
+    : session.workingDir || 'unknown';
+  const capturedAt = new Date().toISOString();
+  const commands: ValidationProofCommand[] = Array.isArray(req.body?.commands)
+    ? req.body.commands.map((item: any, index: number) => ({
+      id: typeof item?.id === 'string' && item.id.trim() ? item.id.trim() : `command-${index + 1}`,
+      command: typeof item?.command === 'string' ? item.command : 'unknown command',
+      status: item?.status === 'passed' || item?.status === 'failed' || item?.status === 'running' ? item.status : 'failed',
+      ...(typeof item?.exitCode === 'number' ? { exitCode: item.exitCode } : {}),
+      ...(typeof item?.duration === 'number' ? { duration: item.duration } : {}),
+      ...(typeof item?.outputTail === 'string' ? { outputTail: item.outputTail.slice(-1200) } : {}),
+    }))
+    : [];
+
+  const passed = commands.filter((command) => command.status === 'passed').length;
+  const failed = commands.filter((command) => command.status === 'failed').length;
+  const running = commands.filter((command) => command.status === 'running').length;
+  const summary = `${passed} passed, ${failed} failed, ${running} running`;
+  const artifact: WorkProductArtifact = {
+    id: uuid(),
+    type: 'validation_proof',
+    title: failed > 0 ? 'Validation Proof - attention needed' : 'Validation Proof',
+    createdAt: capturedAt,
+    summary,
+    data: {
+      workspace,
+      sessionId: session.id,
+      capturedAt,
+      commands,
+      rawMarkdown: proofText,
+    },
+  };
+
+  const messageId = uuid();
+  const run = createHarnessRun({
+    sessionId: session.id,
+    userMessageId: messageId,
+    role: 'reviewer',
+    requestedModel: 'openharness-validation-proof',
+    effectiveModel: 'openharness-validation-proof',
+    providerId: 'openharness',
+  });
+  appendRunStep(run, {
+    type: 'orchestration',
+    mode: 'direct',
+    label: 'Validation proof captured',
+    detail: 'Review Changes saved command results as a replayable session artifact.',
+  });
+  appendRunStep(run, { type: 'artifact', artifact });
+  appendRunStep(run, { type: 'final_answer', chars: proofText.length });
+  completeHarnessRun(run, failed > 0 ? 'error' : 'complete');
+
+  const message: MessageRow = {
+    id: messageId,
+    role: 'assistant',
+    content: proofText,
+    timestamp: capturedAt,
+    runTrace: run,
+  };
+  session.messages.push(message);
+  session.updatedAt = capturedAt;
+  sessionStore.saveSession(session);
+  res.status(201).json({ ok: true, message, artifact });
+});
+
 // ── Config endpoints ───────────────────────────────────
 
 app.get('/api/config', (_req, res) => {
@@ -815,6 +1216,32 @@ app.put('/api/config', (req, res) => {
       : [];
     appConfig.favoriteModels = [...new Set(favoriteModels)];
   }
+  if (updates.modelBudgets !== undefined) {
+    appConfig.modelBudgets = Array.isArray(updates.modelBudgets)
+      ? updates.modelBudgets
+        .map((entry: any) => ({
+          modelId: typeof entry?.modelId === 'string' ? entry.modelId.trim() : '',
+          maxInputTokens: Math.max(0, Number(entry?.maxInputTokens) || 0),
+          maxOutputTokens: Math.max(0, Number(entry?.maxOutputTokens) || 0),
+          maxCost: Math.max(0, Number(entry?.maxCost) || 0),
+          period: entry?.period === 'daily' || entry?.period === 'weekly' || entry?.period === 'monthly' ? entry.period : 'monthly',
+          onExceeded: entry?.onExceeded === 'block' || entry?.onExceeded === 'warn' || entry?.onExceeded === 'allow' ? entry.onExceeded : 'warn',
+        }))
+        .filter((entry: any) => entry.modelId)
+      : [];
+  }
+  if (updates.providerRateLimits !== undefined) {
+    appConfig.providerRateLimits = Array.isArray(updates.providerRateLimits)
+      ? updates.providerRateLimits
+        .map((entry: any) => ({
+          providerId: typeof entry?.providerId === 'string' ? entry.providerId.trim() : '',
+          maxRequestsPerMinute: Math.max(0, Number(entry?.maxRequestsPerMinute) || 0),
+          maxTokensPerMinute: Math.max(0, Number(entry?.maxTokensPerMinute) || 0),
+          onExceeded: entry?.onExceeded === 'block' || entry?.onExceeded === 'warn' || entry?.onExceeded === 'allow' ? entry.onExceeded : 'warn',
+        }))
+        .filter((entry: any) => entry.providerId)
+      : [];
+  }
   if (updates.autoRouter !== undefined) {
     (appConfig as any).autoRouter = updates.autoRouter;
     configureAutoRouter(appConfig);
@@ -859,8 +1286,7 @@ app.get('/api/router/health', async (_req, res) => {
 
 // ── Usage Tracking ────────────────────────────────
 app.get('/api/usage', (_req, res) => {
-  const budgets: any[] = []; // loaded from config if configured
-  res.json(getAllUsageSummaries(budgets));
+  res.json(getAllUsageSummaries(appConfig.modelBudgets || []));
 });
 
 app.post('/api/usage/record', (req, res) => {
@@ -883,8 +1309,11 @@ app.get('/api/usage/check', (req, res) => {
   const estimatedOutput = parseInt(String(req.query.estimatedOutput || '0'), 10);
   const estimatedCost = parseFloat(String(req.query.estimatedCost || '0'));
   if (!modelId) return res.status(400).json({ error: 'modelId required' });
-  const budgets: any[] = []; // loaded from config if configured
-  res.json(checkBudget(modelId, budgets, estimatedInput, estimatedOutput, estimatedCost));
+  res.json(checkBudget(modelId, appConfig.modelBudgets || [], estimatedInput, estimatedOutput, estimatedCost));
+});
+
+app.get('/api/providers/rate-limits/status', (_req, res) => {
+  res.json(getProviderRateLimitStatus());
 });
 // ── Provider endpoints ─────────────────────────────────
 
@@ -897,6 +1326,54 @@ app.get('/api/router/learning/events', (req, res) => {
   const sessionId = req.query.sessionId as string | undefined;
   const limit = parseInt(String(req.query.limit || '100'), 10);
   res.json(getRoutingEvents(sessionId, limit));
+});
+
+app.get('/api/router/learning/export', (_req, res) => {
+  const events = getAllRoutingEvents();
+  const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
+  res.json({
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    summary: getLearningSummary(),
+    eventCount: events.length,
+    productionEventCount: events.length - benchmarkEventCount,
+    benchmarkEventCount,
+    events,
+  });
+});
+
+app.post('/api/router/learning/import', (req, res) => {
+  const body = req.body || {};
+  const dryRun = body.dryRun === true || req.query.dryRun === 'true';
+  const datasetKind = body.datasetKind === 'benchmark' || req.query.datasetKind === 'benchmark' ? 'benchmark' : 'production';
+  const schemaVersion = typeof body.schemaVersion === 'number'
+    ? body.schemaVersion
+    : typeof body.fullExport?.schemaVersion === 'number'
+      ? body.fullExport.schemaVersion
+      : null;
+  const importSource = Array.isArray(body)
+    ? 'raw-array'
+    : Array.isArray(body.events)
+      ? 'events'
+      : Array.isArray(body.fullExport?.events)
+        ? 'fullExport.events'
+        : Array.isArray(body.recentEvents)
+          ? 'recentEvents'
+          : 'none';
+  const warnings = schemaVersion != null && schemaVersion !== 1
+    ? [`Unsupported schemaVersion ${schemaVersion}; importing recognized event fields only.`]
+    : [];
+  const events = Array.isArray(body)
+    ? body
+    : Array.isArray(body.events)
+    ? body.events
+    : Array.isArray(body.fullExport?.events)
+      ? body.fullExport.events
+      : Array.isArray(body.recentEvents)
+        ? body.recentEvents
+        : [];
+  if (!Array.isArray(events)) return res.status(400).json({ error: 'events array required' });
+  res.json({ ok: true, ...importRoutingEvents(events, { dryRun, datasetKind }), importSource, schemaVersion, warnings });
 });
 
 app.get('/api/router/adherence/events', (req, res) => {
@@ -2371,19 +2848,26 @@ app.post('/api/dialog/open-folder', (_req, res) => {
 });
 
 
-function writeSSE(res: express.Response, event: string, data: unknown) {
-  res.write(`event: ${event}
+function writeSSE(res: express.Response, event: string, data: unknown): boolean {
+  if (res.writableEnded || (res as any).destroyed) return false;
+  try {
+    return res.write(`event: ${event}
 data: ${JSON.stringify(data)}
 
 `);
+  } catch (err: any) {
+    console.warn('[sse] write skipped:', err?.message || err);
+    return false;
+  }
 }
 
-async function streamTextSSE(res: express.Response, event: string, text: string, chunkSize = 72) {
+async function streamTextSSE(res: express.Response, event: string, text: string, chunkSize = 72): Promise<boolean> {
   const chunks = text.match(new RegExp(`[\\s\\S]{1,${chunkSize}}`, 'g')) || [];
   for (const chunk of chunks) {
-    writeSSE(res, event, { text: chunk });
+    if (!writeSSE(res, event, { text: chunk })) return false;
     await new Promise((resolve) => setTimeout(resolve, 12));
   }
+  return true;
 }
 
 function maybeEmitThinkingSSE(res: express.Response, assistantId: string, chars: number, state: { lastChars: number; lastAt: number }, message = 'Thinking live', preview?: string) {
@@ -2497,6 +2981,7 @@ function buildRunDebugBundle(sessionId: string, messageId: string) {
   };
 }
 
+
 function buildRunDebugBundleByRunId(runId: string) {
   for (const session of sessionStore.loadAllSessions()) {
     const message = session.messages.find((item) => item.runTrace?.id === runId);
@@ -2530,6 +3015,7 @@ function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
     case 'route': return `Routing to ${step.role}`;
     case 'auto_router': return 'Auto-router is choosing a model';
     case 'prompt_built': return 'Building the model prompt';
+    case 'steering': return `Steering: ${step.action}`;
     case 'model_request': return `Waiting for ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Using ${step.name}` : `Finished ${step.name}`;
     case 'model_text': return 'Receiving response text';
@@ -2817,6 +3303,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   });
   run.effectiveModel = effectiveModel;
   run.role = route.role;
+  registerActiveRunSteering(run.id, session.id, requestController);
   Object.assign(sseContext, {
     runId: run.id,
     routeMode: route.mode,
@@ -2827,6 +3314,8 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     classifierModel: route.routerData?.classifierModel ?? null,
     candidateScores: route.routerData?.candidateScores,
   });
+
+  const takeRunSteeringNotes = (target: ActiveRunSteeringTarget) => takeSteeringNotes(run.id, target);
   writeSSE(res, 'run_start', run);
 
   // Outer try/catch ensures a persisted assistant error on any unhandled failure
@@ -2927,6 +3416,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
         signal: requestController.signal,
         tools: orchestrationTools,
         invokeTool: (toolName, args, workingDir) => invokeMCPTool(toolName, args as Record<string, any>, orchestrationToolServerMap, workingDir),
+        takeSteeringNotes: takeRunSteeringNotes,
       });
 
       // Emit per-phase run steps
@@ -2949,27 +3439,31 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       // pipeline produces a complete synthesis, so chunk it at the SSE layer
       // instead of dropping it into the UI all at once.
       const finalText = orchResult.finalText || '(no output)';
+      if (!orchResult.ok) run.status = 'error';
+      emitRunStep(res, run, { type: 'final_answer', chars: finalText.length });
+      persistAssistantMessage(session, assistantId, finalText, run);
       await streamTextSSE(res, 'orchestration_text', finalText);
 
       // Write full response
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: finalText });
-
-      emitRunStep(res, run, { type: 'final_answer', chars: finalText.length });
-      if (!orchResult.ok) run.status = 'error';
-      persistAssistantMessage(session, assistantId, finalText, run);
     } catch (err: any) {
       console.error('[orchestrator] pipeline error:', err);
       const orchErrorContent = `Orchestration failed: ${err?.message || err}`;
-      writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: orchErrorContent });
       run.status = 'error';
       emitVisibleStep({ type: 'error', message: err?.message || 'Orchestration failed' });
       persistAssistantError(session, assistantId, orchErrorContent, run);
+      writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: orchErrorContent });
     }
   } else if (!resolved) {
     streamNoProviderConfigured(res, assistantId, session, run);
   } else {
     writeSSE(res, 'thinking', { id: assistantId, chars: 24, message: `Waiting on ${effectiveModel}` });
-    await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel, sideChatPromptContext);
+    const directSteeringContext = [
+      buildSteeringContext(takeRunSteeringNotes('orchestrator'), 'orchestrator', true),
+      buildSteeringContext(takeRunSteeringNotes('agent'), 'agent', true),
+    ].filter(Boolean).join('\n\n');
+    const directContext = [sideChatPromptContext, directSteeringContext].filter(Boolean).join('\n\n') || undefined;
+    await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel, directContext, requestController.signal);
   }
 
   completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
@@ -2980,8 +3474,17 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   res.end();
   } catch (err: any) {
     console.error('[messages] unhandled error:', err);
-    const errorContent = `Error: ${err?.message || err}`;
+    const runSteering = getActiveRunSteering(run.id);
+    const errorMessage = err?.name === 'AbortError'
+      ? (runSteering?.requestedCancel
+        ? 'Run cancelled by user.'
+        : runSteering?.requestedPause
+          ? 'Run paused by user.'
+          : 'Request was aborted.')
+      : err?.message;
+    const errorContent = `Error: ${errorMessage || err}`;
     completeHarnessRun(run, 'error');
+    persistAssistantError(session, assistantId, errorContent, run);
     if (!res.writableEnded) {
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: errorContent });
       writeSSE(res, 'run_complete', run);
@@ -2989,8 +3492,10 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       streamFinished = true;
       res.end();
     }
-    persistAssistantError(session, assistantId, errorContent, run);
+  } finally {
+    removeActiveRunSteering(run.id);
   }
+  
 });
 
 // ── MCP tool helpers for chat ──────────────────────────
@@ -3359,6 +3864,7 @@ async function streamWithNativeAdapter(
   assistantId: string,
   session: SessionRow,
   run?: HarnessRun,
+  abortSignal?: AbortSignal,
 ) {
   try {
     const MAX_TOOL_ROUNDS = 6;
@@ -3397,8 +3903,11 @@ async function streamWithNativeAdapter(
       const roundToolCalls: { id: string; name: string; arguments: string }[] = [];
       let abort = false;
       const thinkingSseState = { lastChars: 0, lastAt: 0 };
+      const requestSignal = abortSignal
+        ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
+        : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
 
-      for await (const event of streamWithAdapter(provider, request)) {
+      for await (const event of streamWithAdapter(provider, request, requestSignal)) {
         if (event.type === 'text_delta') {
           roundContent += event.text;
           // Only stream text on the last round — intermediate text is
@@ -3524,8 +4033,10 @@ async function streamWithNativeAdapter(
     session.updatedAt = new Date().toISOString();
     sessionStore.saveSession(session);
   } catch (err: any) {
-    const message = err?.name === 'TimeoutError' || err?.name === 'AbortError'
-      ? `Model request timed out after ${Math.round(MODEL_REQUEST_TIMEOUT_MS / 1000)}s`
+      const message = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+      ? err?.name === 'AbortError'
+        ? 'Model request was aborted by user request'
+        : `Model request timed out after ${Math.round(MODEL_REQUEST_TIMEOUT_MS / 1000)}s`
       : err?.message || 'Model request failed';
     if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message }); }
     res.write('event: error\ndata: ' + JSON.stringify({ error: message }) + '\n\n');
@@ -3545,6 +4056,7 @@ async function streamModel(
   routeOverride?: RouteDecision,
   systemTaskContext?: string,
   propagateProviderErrors = false,
+  abortSignal?: AbortSignal,
 ) {
   const providerStartedAt = Date.now();
   // ── Model-aware prompt building ─────────────────────
@@ -3707,6 +4219,99 @@ async function streamModel(
     console.log(`[ctx] ${effectiveModel}: kept ${ctx.keptCount}/${messages.length} msgs, ${ctx.compressedCount} compressed, budget ${ctx.tokensUsed}/${ctx.budget.availableForHistory} tokens`);
   }
 
+  const estimatedOutputTokens = promptResult.generationConfig.max_tokens || 0;
+  const estimatedCost = estimateCostForRanking(effectiveModel, ctx.tokensUsed, estimatedOutputTokens).total;
+  const budgetCheck = checkBudget(effectiveModel, appConfig.modelBudgets || [], ctx.tokensUsed, estimatedOutputTokens, estimatedCost);
+  if (!budgetCheck.allowed) {
+    const message = budgetCheck.reason || `Budget exceeded for ${effectiveModel}`;
+    recordRoutingAdherenceEvent({
+      kind: 'error',
+      phase: 'provider-stream',
+      sessionId: session.id,
+      runId: run?.id,
+      routeMode: route.mode,
+      role: classifiedRole,
+      complexity: route.complexity,
+      selectedModel: effectiveModel,
+      providerId,
+      classifierModel: route.routerData?.classifierModel ?? null,
+      candidateScores: route.routerData?.candidateScores,
+      promptHash: currentPromptHash,
+      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+      elapsedMs: Date.now() - providerStartedAt,
+      error: message,
+      lastEvent: 'budget_check',
+      retryable: false,
+      fallbackAttempted: propagateProviderErrors,
+    });
+    if (run) {
+      run.status = 'error';
+      emitRunStep(res, run, { type: 'error', message });
+    }
+    if (propagateProviderErrors) throw new Error(message);
+    writeSSE(res, 'error', { error: message });
+    persistAssistantError(session, assistantId, `Budget blocked this model call. ${message}`, run);
+    return { inputTokens: ctx.tokensUsed, outputTokens: 0, tokenCount: ctx.tokensUsed, cost: 0 };
+  }
+  if (budgetCheck.warn && run) {
+    emitRunStep(res, run, {
+      type: 'orchestration',
+      mode: route.mode,
+      label: 'Budget warning',
+      detail: budgetCheck.reason || `Budget warning for ${effectiveModel}`,
+    });
+  }
+
+  const providerRateLimit = checkAndRecordProviderRateLimit(providerId, ctx.tokensUsed + estimatedOutputTokens);
+  if (providerRateLimit.remainingRequests !== undefined) {
+    res.setHeader('X-RateLimit-Remaining-Requests', String(providerRateLimit.remainingRequests));
+  }
+  if (providerRateLimit.remainingTokens !== undefined) {
+    res.setHeader('X-RateLimit-Remaining-Tokens', String(providerRateLimit.remainingTokens));
+  }
+  if (providerRateLimit.resetSeconds !== undefined) {
+    res.setHeader('X-RateLimit-Reset', String(providerRateLimit.resetSeconds));
+  }
+  if (!providerRateLimit.allowed) {
+    const message = providerRateLimit.reason || `Provider rate limit exceeded for ${providerId}`;
+    recordRoutingAdherenceEvent({
+      kind: 'error',
+      phase: 'provider-stream',
+      sessionId: session.id,
+      runId: run?.id,
+      routeMode: route.mode,
+      role: classifiedRole,
+      complexity: route.complexity,
+      selectedModel: effectiveModel,
+      providerId,
+      classifierModel: route.routerData?.classifierModel ?? null,
+      candidateScores: route.routerData?.candidateScores,
+      promptHash: currentPromptHash,
+      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+      elapsedMs: Date.now() - providerStartedAt,
+      error: message,
+      lastEvent: 'provider_rate_limit',
+      retryable: true,
+      fallbackAttempted: propagateProviderErrors,
+    });
+    if (run) {
+      run.status = 'error';
+      emitRunStep(res, run, { type: 'error', message });
+    }
+    if (propagateProviderErrors) throw new Error(message);
+    writeSSE(res, 'error', { error: message });
+    persistAssistantError(session, assistantId, `Provider rate limit blocked this model call. ${message}`, run);
+    return { inputTokens: ctx.tokensUsed, outputTokens: 0, tokenCount: ctx.tokensUsed, cost: 0 };
+  }
+  if (providerRateLimit.warn && run) {
+    emitRunStep(res, run, {
+      type: 'orchestration',
+      mode: route.mode,
+      label: 'Provider rate-limit warning',
+      detail: providerRateLimit.reason || `Provider rate-limit warning for ${providerId}`,
+    });
+  }
+
   // ── Native-adapter branch for Anthropic / Gemini ──
   // The OpenAI-shaped tool loop below assumes Bearer auth, /v1/chat/completions,
   // and OpenAI-style tool_call SSE. Anthropic + Google use different shapes, so
@@ -3730,6 +4335,7 @@ async function streamModel(
         assistantId,
         session,
         run,
+        abortSignal,
       );
     } catch (err: any) {
       recordRoutingAdherenceEvent({
@@ -3785,6 +4391,10 @@ async function streamModel(
         });
       }
 
+      const requestSignal = abortSignal
+        ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
+        : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
+
       const response = await fetch(chatURL, {
         method: 'POST',
         headers: {
@@ -3793,7 +4403,7 @@ async function streamModel(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
+        signal: requestSignal,
       });
 
       if (!response.ok) {
@@ -3938,14 +4548,16 @@ async function streamModel(
         };
         const forcedResponse = await fetch(chatURL, {
           method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + apiKey,
-            'x-api-key': apiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(forcedBody),
-          signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
-        });
+        headers: {
+          'Authorization': 'Bearer ' + apiKey,
+          'x-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(forcedBody),
+        signal: abortSignal
+          ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
+          : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
+      });
         if (forcedResponse.ok) {
           const forcedToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
           const forcedResult = await parseStreamForContentAndTools(forcedResponse, res, assistantId, true, forcedToolNames);
@@ -4007,7 +4619,9 @@ async function streamModel(
     sessionStore.saveSession(session);
     return estimateUsageForTexts(effectiveModel, serializeUsageInput(apiMessages), finalContent);
   } catch (err: any) {
-    const errorMessage = err?.message || 'Model request failed';
+    const errorMessage = err?.name === 'AbortError'
+      ? 'Model request was aborted by user request'
+      : err?.message || 'Model request failed';
     recordRoutingAdherenceEvent({
       kind: err?.name === 'TimeoutError' ? 'timeout' : err?.name === 'AbortError' ? 'abort' : 'error',
       phase: 'provider-stream',
@@ -4029,8 +4643,8 @@ async function streamModel(
       fallbackAttempted: false,
     });
     if (propagateProviderErrors) throw err;
-    if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: err.message }); }
-    res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
+    if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: errorMessage }); }
+    res.write('event: error\ndata: ' + JSON.stringify({ error: errorMessage }) + '\n\n');
     persistAssistantError(session, assistantId, `Error: ${errorMessage}`, run);
   }
 }
@@ -4506,6 +5120,24 @@ app.get('/api/bench/runs/:id', (req, res) => {
   res.json({ ...run, previousDelta: benchRuns.getPreviousRunDelta(run) });
 });
 
+app.post('/api/bench/runs/:id/proof-review', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+  const run = benchRuns.getBenchRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Bench run not found' });
+  const status = req.body?.status === 'approved' || req.body?.status === 'needs-attention' || req.body?.status === 'unreviewed'
+    ? req.body.status
+    : 'unreviewed';
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 2000) : undefined;
+  run.proofReview = {
+    status,
+    ...(note ? { note } : {}),
+    reviewedAt: new Date().toISOString(),
+  };
+  benchRuns.saveBenchRun(run);
+  res.json({ ...run, previousDelta: benchRuns.getPreviousRunDelta(run) });
+});
+
 app.get('/api/bench/runs/:id/export', (req, res) => {
   const format = req.query.format as string || 'json';
   if (format === 'csv') {
@@ -4960,6 +5592,24 @@ app.get('/api/evals/reports/:id', (req, res) => {
   res.json(report);
 });
 
+app.post('/api/evals/reports/:id/proof-review', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+  const report = evals.getReport(req.params.id);
+  if (!report) return res.status(404).json({ error: 'Report not found' });
+  const status = req.body?.status === 'approved' || req.body?.status === 'needs-attention' || req.body?.status === 'unreviewed'
+    ? req.body.status
+    : 'unreviewed';
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 2000) : undefined;
+  report.proofReview = {
+    status,
+    ...(note ? { note } : {}),
+    reviewedAt: new Date().toISOString(),
+  };
+  evals.saveReport(report);
+  res.json(report);
+});
+
 app.get('/api/evals/reports/:id/recommendation-report', (req, res) => {
   const markdown = evals.exportEvalRecommendationMarkdown(req.params.id);
   if (!markdown) return res.status(404).json({ error: 'Report not found' });
@@ -5014,11 +5664,12 @@ app.get('/api/runs/:runId/debug-bundle', (req, res) => {
 });
 
 app.post('/api/evals/run', async (req, res) => {
-  const { name, promptIds, modelIds, workingDir } = req.body as {
+  const { name, promptIds, modelIds, workingDir, packContext } = req.body as {
     name?: string;
     promptIds: string[];
     modelIds: string[];
     workingDir?: string;
+    packContext?: import('./evals').EvalReport['packContext'];
   };
 
   if (!promptIds?.length || !modelIds?.length) {
@@ -5032,6 +5683,14 @@ app.post('/api/evals/run', async (req, res) => {
     name || `Eval ${new Date().toLocaleDateString()}`,
     promptIds,
     modelIds,
+    packContext && typeof packContext.packId === 'string' && typeof packContext.packName === 'string'
+      ? {
+        packId: packContext.packId,
+        packName: packContext.packName,
+        evalIds: Array.isArray(packContext.evalIds) ? packContext.evalIds.filter((id): id is string => typeof id === 'string') : [],
+        matchedEvalIds: Array.isArray(packContext.matchedEvalIds) ? packContext.matchedEvalIds.filter((id): id is string => typeof id === 'string') : [],
+      }
+      : undefined,
   );
 
   // Return immediately with the report ID
@@ -5834,6 +6493,7 @@ async function streamModelWithFallback(
   routeOverride: RouteDecision | undefined,
   overrideModelId?: string,
   systemTaskContext?: string,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   // Collect all providers that can serve the effective model
   const effectiveModel = overrideModelId || run?.effectiveModel || getActiveModel();
@@ -5894,11 +6554,14 @@ async function streamModelWithFallback(
         : p.providerId === resolveProviderForModel(appConfig.autoRouter?.defaultModel || '')?.providerId
           ? appConfig.autoRouter?.defaultModel
           : overrideModelId;
-      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, modelForAttempt, run, routeOverride, systemTaskContext, true);
+      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, modelForAttempt, run, routeOverride, systemTaskContext, true, abortSignal);
       // If here, streaming succeeded
       return;
     } catch (err: any) {
-      lastError = err?.message || "Unknown error";
+      lastError = err?.message || 'Unknown error';
+      if (abortSignal?.aborted) {
+        throw err;
+      }
       console.error(`[fallback] provider ${p.providerId} failed: ${lastError}`);
     }
   }

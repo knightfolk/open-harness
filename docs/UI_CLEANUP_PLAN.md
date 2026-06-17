@@ -1,5 +1,7 @@
 # OpenHarness UI Cleanup Plan
 
+Status: detailed declutter reference for `docs/PREMIER_HARNESS_KICKOFF.md`. Use `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` for closeout evidence.
+
 ## Goal
 
 Make OpenHarness feel calmer, simpler, and easier to read before adding more features. The app should keep its power, but the default screen should feel like a clean assistant workspace instead of a cockpit.

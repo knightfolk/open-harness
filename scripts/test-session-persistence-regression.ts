@@ -33,16 +33,45 @@ const canceledSession: PersistedSession = {
   updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
   messages: [
     {
-      id: 'asst-2',
-      role: 'assistant',
-      content: '[canceled by user]',
-      timestamp: new Date(Date.now() - 4.9 * 60 * 1000).toISOString(),
-    },
-    {
       id: 'user-2',
       role: 'user',
       content: 'This session was interrupted',
       timestamp: new Date(Date.now() - 4.8 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'asst-2',
+      role: 'assistant',
+      content: '[canceled by user]',
+      timestamp: new Date(Date.now() - 4.7 * 60 * 1000).toISOString(),
+    },
+  ],
+};
+
+const retryAfterInterruptedId = `persistence-regression-retry-after-interrupted-${Date.now()}`;
+const retryAfterInterruptedSession: PersistedSession = {
+  id: retryAfterInterruptedId,
+  title: 'Regression test - retry after old interrupted marker',
+  workingDir: null,
+  createdAt: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
+  updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+  messages: [
+    {
+      id: 'user-old',
+      role: 'user',
+      content: 'First attempt',
+      timestamp: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'assistant-old',
+      role: 'assistant',
+      content: 'Run interrupted: OpenHarness recovered this session because no assistant response was saved after your last message. Please retry the request.',
+      timestamp: new Date(Date.now() - 7 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'user-new',
+      role: 'user',
+      content: 'Retry that should still be flagged when no newer assistant exists',
+      timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
     },
   ],
 };
@@ -50,10 +79,12 @@ const canceledSession: PersistedSession = {
 try {
   saveSession(testSession);
   saveSession(canceledSession);
+  saveSession(retryAfterInterruptedSession);
 
   const backdate = new Date(Date.now() - 60 * 1000);
   utimesSync(join(SESSIONS_DIR, `${testSessionId}.json`), backdate, backdate);
   utimesSync(join(SESSIONS_DIR, `${canceledSessionId}.json`), backdate, backdate);
+  utimesSync(join(SESSIONS_DIR, `${retryAfterInterruptedId}.json`), backdate, backdate);
 
   const flagged = scanForLatestUserOnlySessions();
   const found = flagged.find(f => f.id === testSessionId);
@@ -64,11 +95,23 @@ try {
   const canceledFound = flagged.find(f => f.id === canceledSessionId);
   assert.equal(!!canceledFound, false, 'Session with canceled marker should NOT be flagged');
 
+  const retryAfterInterruptedFound = flagged.find(f => f.id === retryAfterInterruptedId);
+  assert.equal(
+    !!retryAfterInterruptedFound,
+    true,
+    'A newer user retry after an old interrupted marker should still be flagged',
+  );
+
   const repair = repairLatestUserOnlySessions();
   assert.equal(
     repair.repaired.some((s) => s.id === testSessionId),
     true,
     'Latest-user-only test session should be repaired with a visible assistant marker',
+  );
+  assert.equal(
+    repair.repaired.some((s) => s.id === retryAfterInterruptedId),
+    true,
+    'Retry-after-interrupted session should also be repaired',
   );
   const repairedScan = scanForLatestUserOnlySessions();
   assert.equal(
@@ -87,7 +130,9 @@ try {
   console.log('  Canceled session correctly exempted');
 
   const realFlagged = flagged.filter(
-    f => !f.id.startsWith('persistence-regression-test-') && !f.id.startsWith('persistence-regression-canceled-'),
+    f => !f.id.startsWith('persistence-regression-test-')
+      && !f.id.startsWith('persistence-regression-canceled-')
+      && !f.id.startsWith('persistence-regression-retry-after-interrupted-'),
   );
   if (realFlagged.length > 0) {
     console.log(`\n  WARNING: ${realFlagged.length} real session(s) flagged as latest-user-only:`);
@@ -100,6 +145,7 @@ try {
 } finally {
   try { unlinkSync(join(SESSIONS_DIR, `${testSessionId}.json`)); } catch { /* ignore */ }
   try { unlinkSync(join(SESSIONS_DIR, `${canceledSessionId}.json`)); } catch { /* ignore */ }
+  try { unlinkSync(join(SESSIONS_DIR, `${retryAfterInterruptedId}.json`)); } catch { /* ignore */ }
 }
 
 const startupRepairDir = mkdtempSync(join(tmpdir(), 'openharness-session-startup-repair-'));

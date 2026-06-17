@@ -82,6 +82,17 @@ export interface EvalReport {
   createdAt: string;
   completedAt?: string;
   summary?: EvalSummary;
+  packContext?: {
+    packId: string;
+    packName: string;
+    evalIds: string[];
+    matchedEvalIds: string[];
+  };
+  proofReview?: {
+    status: 'unreviewed' | 'approved' | 'needs-attention';
+    note?: string;
+    reviewedAt: string;
+  };
 }
 
 export interface EvalSummary {
@@ -97,6 +108,10 @@ export interface EvalRecommendation {
   reportId: string;
   reportName: string;
   generatedAt: string;
+  proofReviewStatus: 'unreviewed' | 'approved' | 'needs-attention';
+  proofTrusted: boolean;
+  proofReviewedAt?: string;
+  proofReviewNote?: string;
 }
 
 // ── Storage ────────────────────────────────────────────
@@ -365,8 +380,8 @@ export function loadReport(id: string): EvalReport | null {
   return null;
 }
 
-export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number }> {
-  const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number }>();
+export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview'] }> {
+  const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview'] }>();
 
   for (const dir of REPORTS_DIRS) {
     if (!existsSync(dir)) continue;
@@ -381,6 +396,7 @@ export function listReports(): Array<{ id: string; name: string; status: string;
           createdAt: report.createdAt,
           completedAt: report.completedAt,
           total: report.total,
+          proofReview: report.proofReview,
         });
       } catch {
         // ignore malformed report files
@@ -465,6 +481,10 @@ export function getLatestEvalRecommendations(): EvalRecommendation[] {
     reportId: latest.id,
     reportName: latest.name,
     generatedAt: latest.completedAt || latest.createdAt,
+    proofReviewStatus: latest.proofReview?.status || 'unreviewed',
+    proofTrusted: latest.proofReview?.status === 'approved',
+    ...(latest.proofReview?.reviewedAt ? { proofReviewedAt: latest.proofReview.reviewedAt } : {}),
+    ...(latest.proofReview?.note ? { proofReviewNote: latest.proofReview.note } : {}),
   }));
 }
 
@@ -485,17 +505,39 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
   if (report.completedAt) lines.push(`- Completed: ${report.completedAt}`);
   lines.push(`- Runs: ${report.completed}/${report.total}`);
   lines.push(`- Best model: ${summary.bestModel || 'n/a'}`);
+  if (report.proofReview) {
+    lines.push(`- Proof review: ${report.proofReview.status}`);
+    lines.push(`- Proof reviewed at: ${report.proofReview.reviewedAt}`);
+    if (report.proofReview.note) lines.push(`- Proof review note: ${report.proofReview.note}`);
+  } else {
+    lines.push('- Proof review: unreviewed');
+  }
+  if (report.packContext) {
+    lines.push('');
+    lines.push('## Pack Context');
+    lines.push('');
+    lines.push(`- Pack: ${report.packContext.packName}`);
+    lines.push(`- Pack ID: \`${report.packContext.packId}\``);
+    lines.push(`- Declared eval IDs: ${report.packContext.evalIds.length}`);
+    lines.push(`- Installed eval IDs selected: ${report.packContext.matchedEvalIds.length}/${report.packContext.evalIds.length}`);
+    if (report.packContext.matchedEvalIds.length > 0) {
+      lines.push(`- Selected eval IDs: ${report.packContext.matchedEvalIds.map((id) => `\`${id}\``).join(', ')}`);
+    }
+  }
   lines.push('');
 
   lines.push('## Role Recommendations');
   lines.push('');
+  lines.push(`Recommendation trust: ${report.proofReview?.status === 'approved' ? 'approved proof; may be used as routing evidence' : 'proof not approved; review before applying role or router changes'}`);
+  lines.push('');
   if (summary.recommendations.length === 0) {
     lines.push('No recommendations were generated.');
   } else {
-    lines.push('| Role | Model | Reason |');
-    lines.push('| --- | --- | --- |');
+    lines.push('| Role | Model | Proof | Reason |');
+    lines.push('| --- | --- | --- | --- |');
+    const proofLabel = report.proofReview?.status === 'approved' ? 'approved' : report.proofReview?.status === 'needs-attention' ? 'needs attention' : 'unreviewed';
     for (const rec of summary.recommendations) {
-      lines.push(`| ${markdownEscape(rec.role)} | ${markdownEscape(rec.modelId)} | ${markdownEscape(rec.reason)} |`);
+      lines.push(`| ${markdownEscape(rec.role)} | ${markdownEscape(rec.modelId)} | ${proofLabel} | ${markdownEscape(rec.reason)} |`);
     }
   }
   lines.push('');
@@ -584,7 +626,12 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
 
 const activeRuns = new Map<string, EvalReport>();
 
-export function createReport(name: string, promptIds: string[], modelIds: string[]): EvalReport {
+export function createReport(
+  name: string,
+  promptIds: string[],
+  modelIds: string[],
+  packContext?: EvalReport['packContext'],
+): EvalReport {
   const total = promptIds.length * modelIds.length;
   const report: EvalReport = {
     id: uuid(),
@@ -595,6 +642,7 @@ export function createReport(name: string, promptIds: string[], modelIds: string
     completed: 0,
     results: [],
     createdAt: new Date().toISOString(),
+    packContext,
   };
   activeRuns.set(report.id, report);
   saveReport(report);

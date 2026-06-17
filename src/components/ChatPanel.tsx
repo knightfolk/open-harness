@@ -1,12 +1,14 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Send, Paperclip, Image, AtSign, Command } from 'lucide-react';
-import type { Message, SubAgent } from '../types';
+import type { HarnessRun, Message, RunSteeringAction } from '../types';
+import type { SubAgent } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { shortModelName } from '../utils/modelDisplay';
 import { SmartWelcome } from './SmartWelcome';
 import type { ProjectProfile } from '../types';
 import { EnvironmentRail } from './EnvironmentRail';
+import { getActiveWorkState, type ActiveWorkState } from '../utils/agentWorkState';
 
 interface Props {
   messages: Message[];
@@ -23,27 +25,19 @@ interface Props {
   onFocusAgents: () => void;
   environmentOpen: boolean;
   onEnvironmentOpenChange: (open: boolean) => void;
+  onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;
 }
 
-const SUPER_WIDTH_KEY = 'openharness.chat-super.width.v1';
+const CHAT_SUPER_WIDTH = 330;
 
-function loadSuperWidth() {
-  try {
-    const raw = localStorage.getItem(SUPER_WIDTH_KEY);
-    const width = raw ? Number(raw) : 330;
-    return Number.isFinite(width) ? Math.min(520, Math.max(260, width)) : 330;
-  } catch {
-    return 330;
-  }
-}
-
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, environmentOpen, onEnvironmentOpenChange }: Props) {
+export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, environmentOpen, onEnvironmentOpenChange, onRunSteer }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
-  const [superWidth, setSuperWidth] = useState(loadSuperWidth);
   const [inputHeight, setInputHeight] = useState(112);
+  const activeWorkState = useMemo(() => getActiveWorkState(subAgents), [subAgents]);
   const superHidden = !environmentOpen;
+  const superWidth = CHAT_SUPER_WIDTH;
   const userScrolledUpRef = useRef(false);
   const previousMessageCountRef = useRef(0);
   const previousLastContentLengthRef = useRef(0);
@@ -96,32 +90,6 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
     onEnvironmentOpenChange(false);
   }, [onEnvironmentOpenChange]);
 
-  const startResizeSuper = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = superWidth;
-    const onMove = (moveEvent: MouseEvent) => {
-      const next = Math.min(520, Math.max(260, startWidth - (moveEvent.clientX - startX)));
-      setSuperWidth(next);
-      try { localStorage.setItem(SUPER_WIDTH_KEY, String(next)); } catch { /* ignore */ }
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      document.body.classList.remove('is-resizing-panel');
-    };
-    document.body.classList.add('is-resizing-panel');
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [superWidth]);
-
-  useEffect(() => {
-    if (!isTyping) return;
-    const width = rootRef.current?.clientWidth || window.innerWidth;
-    if (width < 940) return;
-    onEnvironmentOpenChange(true);
-  }, [isTyping, onEnvironmentOpenChange]);
-
   return (
     <div ref={rootRef} className={`chat-panel-root ${superHidden ? 'has-hidden-super' : 'has-floating-super'}`} style={{ '--floating-super-width': `${superWidth}px`, '--chat-input-height': `${inputHeight}px` } as CSSProperties}>
       <div className="messages" ref={scrollRef} onScroll={handleScroll}>
@@ -138,6 +106,7 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
             onRunCommand={handleRunCommand}
             onCompareModel={handleCompareModel}
             onProposePatch={onProposePatch}
+            onRunSteer={onRunSteer}
           />
         ))}
         {showTypingPlaceholder && (
@@ -148,10 +117,10 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
               </div>
               <div className="message-body">
                 <div className="message-sender">{assistantName}</div>
-                <div className="typing-indicator">
-                  <div className="typing-dot" />
-                  <div className="typing-dot" />
-                  <div className="typing-dot" />
+                <div className="typing-indicator" role="status" aria-live="polite" aria-label={`${assistantName} is typing`}>
+                  <div className="typing-dot" aria-hidden="true" />
+                  <div className="typing-dot" aria-hidden="true" />
+                  <div className="typing-dot" aria-hidden="true" />
                 </div>
               </div>
             </div>
@@ -159,12 +128,22 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
         )}
       </div>
       {userScrolledUp && (
-        <button className="scroll-to-bottom-pill" onClick={() => { setUserScrolledUp(false); scrollToBottom(); }}>
-          ↓ New messages below
+        <button
+          className="scroll-to-bottom-pill"
+          type="button"
+          onClick={() => { setUserScrolledUp(false); scrollToBottom(); }}
+          aria-label="Scroll to new messages"
+        >
+          <span aria-hidden="true">↓</span> New messages below
         </button>
       )}
+      {activeWorkState && (
+        <ActiveWorkStrip
+          state={activeWorkState}
+          onOpenDetails={onFocusAgents}
+        />
+      )}
       <div className={`floating-super-panel ${superHidden ? 'hidden' : ''}`} style={{ width: superWidth }} aria-hidden={superHidden}>
-        <div className="floating-super-resizer" onMouseDown={startResizeSuper} role="separator" aria-orientation="vertical" aria-label="Resize Environment panel" />
         <EnvironmentRail
           workingDir={workingDir || null}
           trustMode={trustMode}
@@ -176,6 +155,48 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
         />
       </div>
       <ChatInputInline onSend={onSendMessage} disabled={isTyping} onHeightChange={setInputHeight} />
+    </div>
+  );
+}
+
+function ActiveWorkStrip({ state, onOpenDetails }: { state: ActiveWorkState; onOpenDetails: () => void }) {
+  if (state.steps.length === 0) return null;
+  const metadata = [state.currentTask, state.modelProvider, state.latestArtifact].filter(Boolean).join(' · ');
+  const metadataLabel = [
+    state.currentTask ? `Current task: ${state.currentTask}` : null,
+    state.modelProvider ? `Model: ${state.modelProvider}` : null,
+    state.latestArtifact ? `Latest ${state.latestArtifact}` : null,
+  ].filter(Boolean).join('. ');
+  const labelParts = [
+    state.workflowLabel,
+    state.currentTask ? `Current task: ${state.currentTask}` : null,
+    state.modelProvider ? `Model: ${state.modelProvider}` : null,
+    state.latestArtifact ? `Latest ${state.latestArtifact}` : null,
+    'Open Agent detail',
+  ].filter(Boolean);
+
+  return (
+    <div className="active-work-strip-host" role="status" aria-live="polite" aria-label={`${state.workflowLabel} active work progress`}>
+      <button
+        className="active-work-strip"
+        type="button"
+        onClick={onOpenDetails}
+        title="Open Agent detail"
+        aria-label={labelParts.join('. ')}
+      >
+        <span className="active-work-strip-title">{state.workflowLabel}</span>
+        <span className="active-work-strip-body" role="list" aria-label={`${state.workflowLabel} steps`}>
+          {state.steps.map((step, index) => (
+            <span key={step.id} className="active-work-strip-segment" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'running' ? 'step' : undefined}>
+              <span className={`active-work-strip-dot ${step.status}`} aria-hidden="true" />
+              <span className={`active-work-strip-step ${step.status}`}>{step.label}</span>
+              {index < state.steps.length - 1 ? <span className="active-work-strip-separator" aria-hidden="true">›</span> : null}
+            </span>
+          ))}
+        </span>
+        {metadata && <span className="active-work-strip-meta" role="group" aria-label={metadataLabel}>{metadata}</span>}
+        <span className="active-work-strip-action">Agent detail</span>
+      </button>
     </div>
   );
 }
@@ -229,22 +250,23 @@ function ChatInputInline({ onSend, disabled, onHeightChange }: { onSend: (msg: s
             ref={textareaRef}
             className="input-textarea"
             placeholder="Ask anything... (Enter to send)"
+            aria-label="Chat message"
             value={value}
             onChange={(e) => handleChange(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
             disabled={disabled}
           />
-          <button className="input-send" onClick={handleSend} disabled={!value.trim() || disabled}>
-            <Send size={16} />
+          <button className="input-send" type="button" onClick={handleSend} disabled={!value.trim() || disabled} aria-label="Send message">
+            <Send size={16} aria-hidden="true" />
           </button>
         </div>
         <div className="input-bottom">
           <div className="input-attachments">
-            <button className="input-attachment-btn" title="Attach file"><Paperclip size={14} /></button>
-            <button className="input-attachment-btn" title="Attach image"><Image size={14} /></button>
-            <button className="input-attachment-btn" title="Mention skill"><AtSign size={14} /></button>
-            <button className="input-attachment-btn" title="Run command"><Command size={14} /></button>
+            <button className="input-attachment-btn" type="button" title="Attach file" aria-label="Attach file"><Paperclip size={14} aria-hidden="true" /></button>
+            <button className="input-attachment-btn" type="button" title="Attach image" aria-label="Attach image"><Image size={14} aria-hidden="true" /></button>
+            <button className="input-attachment-btn" type="button" title="Mention skill" aria-label="Mention skill"><AtSign size={14} aria-hidden="true" /></button>
+            <button className="input-attachment-btn" type="button" title="Run command" aria-label="Run command"><Command size={14} aria-hidden="true" /></button>
           </div>
           <div className="input-hint">{value.length > 0 ? `${value.length} chars` : 'Shift+Enter for new line'}</div>
         </div>

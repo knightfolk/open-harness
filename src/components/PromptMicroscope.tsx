@@ -106,13 +106,13 @@ export function PromptMicroscope({ runTrace }: Props) {
 
   return (
     <div className="prompt-microscope">
-      <button className="pm-toggle" onClick={() => setExpanded(!expanded)}>
-        {expanded ? <EyeOff size={12} /> : <Eye size={12} />}
+      <button className="pm-toggle" type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} prompt microscope for route, prompt, tool, and model evidence`}>
+        {expanded ? <EyeOff size={12} aria-hidden="true" /> : <Eye size={12} aria-hidden="true" />}
         <span>Prompt microscope</span>
-        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        {expanded ? <ChevronDown size={11} aria-hidden="true" /> : <ChevronRight size={11} aria-hidden="true" />}
         {totalRedactions > 0 && (
           <span className="pm-redact-pill" title={`${totalRedactions} secret(s) redacted`}>
-            <ShieldCheck size={10} /> {totalRedactions}
+            <ShieldCheck size={10} aria-hidden="true" /> {totalRedactions}
           </span>
         )}
       </button>
@@ -186,34 +186,34 @@ export function PromptMicroscope({ runTrace }: Props) {
 
           {/* Auto-router */}
           {autoRouterStep && (
-            <div className="pm-section">
+            <div className="pm-section" role="group" aria-label={`Auto-Router decision: selected ${autoRouterStep.modelId}, score ${autoRouterStep.score.toFixed(2)}, ${autoRouterDecisionLabel({ fallback: autoRouterStep.fallback, cached: autoRouterStep.cached })}`}>
               <div className="pm-section-header">
-                <Cpu size={12} />
+                <Cpu size={12} aria-hidden="true" />
                 <span>Auto-Router</span>
               </div>
-              <div className="pm-section-body">
-                <div className="pm-row">
+              <div className="pm-section-body" role="list" aria-label="Auto-Router selected model and decision evidence">
+                <div className="pm-row" role="listitem" aria-label={`Selected model ${autoRouterStep.modelId}`}>
                   <span className="pm-key">Selected model</span>
                   <span className="pm-value">{autoRouterStep.modelId}</span>
                 </div>
-                <div className="pm-row">
+                <div className="pm-row" role="listitem" aria-label={`Decision ${autoRouterDecisionLabel({ fallback: autoRouterStep.fallback, cached: autoRouterStep.cached })}`}>
                   <span className="pm-key">Decision</span>
                   <span className="pm-value">{autoRouterDecisionLabel({ fallback: autoRouterStep.fallback, cached: autoRouterStep.cached })}</span>
                 </div>
-                <div className="pm-row">
+                <div className="pm-row" role="listitem" aria-label={`Router reason: ${autoRouterStep.reason}`}>
                   <span className="pm-key">Reason</span>
                   <span className="pm-value">{autoRouterStep.reason}</span>
                 </div>
-                <div className="pm-row">
+                <div className="pm-row" role="listitem" aria-label={`Classifier model ${autoRouterStep.classifierModel || 'unavailable'}`}>
                   <span className="pm-key">Classifier</span>
                   <span className="pm-value">{autoRouterStep.classifierModel || 'unavailable'}</span>
                 </div>
-                <div className="pm-row">
+                <div className="pm-row" role="listitem" aria-label={`Selected score ${autoRouterStep.score.toFixed(2)}${autoRouterStep.cached ? ', cached' : ''}`}>
                   <span className="pm-key">Score</span>
                   <span className="pm-value">{autoRouterStep.score.toFixed(2)}{autoRouterStep.cached ? ' · cached' : ''}</span>
                 </div>
                 {autoRouterStep.stages?.heuristic && (
-                  <div className="pm-row">
+                  <div className="pm-row" role="listitem" aria-label={`Heuristic route ${autoRouterStep.stages.heuristic.mode}, ${autoRouterStep.stages.heuristic.role}, ${autoRouterStep.stages.heuristic.complexity}`}>
                     <span className="pm-key">Heuristic route</span>
                     <span className="pm-value">
                       {autoRouterStep.stages.heuristic.mode} · {autoRouterStep.stages.heuristic.role} · {autoRouterStep.stages.heuristic.complexity}
@@ -221,35 +221,35 @@ export function PromptMicroscope({ runTrace }: Props) {
                   </div>
                 )}
                 {autoRouterStep.stages?.policy && (
-                  <div className="pm-row">
+                  <div className="pm-row" role="listitem" aria-label={`Policy gate ${autoRouterStep.stages.policy}`}>
                     <span className="pm-key">Policy gate</span>
                     <span className="pm-value">{autoRouterStep.stages.policy}</span>
                   </div>
                 )}
                 {autoRouterStep.stages?.signal && (
-                  <div className="pm-row pm-row-block">
+                  <div className="pm-row pm-row-block" role="listitem" aria-label="Route input features used by Auto-Router">
                     <span className="pm-key">Route input features</span>
                     <pre className="pm-pre">{JSON.stringify(autoRouterStep.stages.signal, null, 2)}</pre>
                   </div>
                 )}
-                <div className="pm-row">
+                <div className="pm-row" role="listitem" aria-label={`Routing feedback guidance: ${ROUTING_FEEDBACK_GUIDANCE}`}>
                   <span className="pm-key">Feedback</span>
                   <span className="pm-value">{ROUTING_FEEDBACK_GUIDANCE}</span>
                 </div>
                 {autoRouterScores.length > 0 ? (
-                  <div className="pm-row pm-row-block">
+                  <div className="pm-row pm-row-block" role="listitem" aria-label={`${autoRouterScores.length} Auto-Router candidate scores, including selected model ${autoRouterStep.modelId}`}>
                     <span className="pm-key">Candidate scores</span>
-                    <div className="pm-score-list">
+                    <div className="pm-score-list" role="list" aria-label="Ranked Auto-Router selected model and rejected alternatives">
                       {autoRouterScores.map(([model, score]) => (
-                        <div key={model} className="pm-score-row">
-                          <span className="pm-score-model">{model}</span>
+                        <div key={model} className="pm-score-row" role="listitem" aria-label={`${model === autoRouterStep.modelId ? 'Selected model' : 'Rejected alternative'} ${model}, classifier score ${score.toFixed(2)}`}>
+                          <span className="pm-score-model">{model}{model === autoRouterStep.modelId ? ' · selected' : ''}</span>
                           <span className="pm-score-value">{score.toFixed(2)}</span>
                         </div>
                       ))}
                     </div>
                   </div>
                 ) : (
-                  <div className="pm-row">
+                  <div className="pm-row" role="listitem" aria-label={`Candidate scores unavailable: ${candidateScoresUnavailableLabel({ fallback: autoRouterStep.fallback })}`}>
                     <span className="pm-key">Candidate scores</span>
                     <span className="pm-value">{candidateScoresUnavailableLabel({ fallback: autoRouterStep.fallback })}</span>
                   </div>
@@ -260,28 +260,28 @@ export function PromptMicroscope({ runTrace }: Props) {
 
           {/* Route decision */}
           {routeStep && (
-            <div className="pm-section">
+            <div className="pm-section" role="group" aria-label={`Route decision: ${routeStep.role} role uses ${routeStep.model}`}>
               <div className="pm-section-header">
-                <Cpu size={12} />
+                <Cpu size={12} aria-hidden="true" />
                 <span>Route Decision</span>
               </div>
-              <div className="pm-section-body">
-                <div className="pm-row">
+              <div className="pm-section-body" role="list" aria-label="Heuristic route decision evidence">
+                <div className="pm-row" role="listitem" aria-label={`Role ${routeStep.role}`}>
                   <span className="pm-key">Role</span>
                   <span className="pm-value">{routeStep.role}</span>
                 </div>
-                <div className="pm-row">
+                <div className="pm-row" role="listitem" aria-label={`Route model ${routeStep.model}`}>
                   <span className="pm-key">Model</span>
                   <span className="pm-value">{routeStep.model}</span>
                 </div>
                 {routeStep.reason && (
-                  <div className="pm-row">
+                  <div className="pm-row" role="listitem" aria-label={`Route reason: ${routeStep.reason}`}>
                     <span className="pm-key">Reason</span>
                     <span className="pm-value">{routeStep.reason}</span>
                   </div>
                 )}
                 {routeStep.stages?.heuristic && (
-                  <div className="pm-row">
+                  <div className="pm-row" role="listitem" aria-label={`Heuristic route ${routeStep.stages.heuristic.mode}, ${routeStep.stages.heuristic.role}, ${routeStep.stages.heuristic.complexity}`}>
                     <span className="pm-key">Heuristic route</span>
                     <span className="pm-value">
                       {routeStep.stages.heuristic.mode} · {routeStep.stages.heuristic.role} · {routeStep.stages.heuristic.complexity}
@@ -289,13 +289,13 @@ export function PromptMicroscope({ runTrace }: Props) {
                   </div>
                 )}
                 {routeStep.stages?.policy && (
-                  <div className="pm-row">
+                  <div className="pm-row" role="listitem" aria-label={`Policy gate ${routeStep.stages.policy}`}>
                     <span className="pm-key">Policy gate</span>
                     <span className="pm-value">{routeStep.stages.policy}</span>
                   </div>
                 )}
                 {routeStep.stages?.signal && (
-                  <div className="pm-row pm-row-block">
+                  <div className="pm-row pm-row-block" role="listitem" aria-label="Route input features used by heuristic router">
                     <span className="pm-key">Route input features</span>
                     <pre className="pm-pre">{JSON.stringify(routeStep.stages.signal, null, 2)}</pre>
                   </div>
@@ -425,14 +425,14 @@ export function PromptMicroscope({ runTrace }: Props) {
 
           {/* Run metadata */}
           <div className="pm-section">
-            <div className="pm-section-body pm-meta">
-              <div className="pm-row">
-                <span className="pm-key">Debug bundle</span>
-                <button className="pm-action-btn" onClick={handleExportDebugBundle} title="Export run replay and support data">
-                  <Download size={12} />
+              <div className="pm-section-body pm-meta">
+                <div className="pm-row">
+                  <span className="pm-key">Debug bundle</span>
+                <button className="pm-action-btn" type="button" onClick={handleExportDebugBundle} title="Export run replay and support data" aria-label={`Export debug bundle for run ${runTrace.id.slice(0, 8)}`}>
+                  <Download size={12} aria-hidden="true" />
                   <span>{exportStatus || 'Export'}</span>
                 </button>
-              </div>
+                </div>
               <div className="pm-row">
                 <span className="pm-key">Run ID</span>
                 <span className="pm-value pm-mono">{runTrace.id.slice(0, 8)}</span>

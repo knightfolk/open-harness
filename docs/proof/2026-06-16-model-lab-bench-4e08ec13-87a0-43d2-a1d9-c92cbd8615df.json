@@ -1,0 +1,194 @@
+{
+  "id": "4e08ec13-87a0-43d2-a1d9-c92cbd8615df",
+  "name": "assisted export regression",
+  "status": "running",
+  "taskIds": [
+    "task"
+  ],
+  "modelIds": [
+    "fallback-model"
+  ],
+  "results": [
+    {
+      "taskId": "task",
+      "taskName": "Task",
+      "modelId": "fallback-model",
+      "providerId": "provider",
+      "status": "assisted",
+      "prompt": "Prompt",
+      "response": "## Delivered\n\n### Assistance\nOpenHarness generated a deterministic fallback scaffold because the selected model did not create artifact files.\n\n### Implementation\nCreated a runnable browser game artifact and validation passed.",
+      "responseLength": 226,
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "status": "complete"
+        }
+      ],
+      "validationResults": [
+        {
+          "command": "synthetic",
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "",
+          "findings": [],
+          "durationMs": 1,
+          "passed": true
+        }
+      ],
+      "validationPassed": true,
+      "wallMs": 12000,
+      "scores": {
+        "usedTools": false,
+        "answeredUser": true,
+        "referencedRealFiles": false,
+        "avoidedHallucinatedPaths": true,
+        "producedSummary": false,
+        "latencyMs": 12000,
+        "toolCount": 0,
+        "overallScore": 7,
+        "validationPassed": true,
+        "validationScore": 2,
+        "styleScore": 2,
+        "breakdown": {
+          "structural": 3,
+          "runtime": 2,
+          "style": 2,
+          "total": 7,
+          "weakestSignal": {
+            "id": "real-files",
+            "label": "Referenced real files",
+            "category": "structural",
+            "passed": false,
+            "score": 0,
+            "maxScore": 1.5
+          },
+          "signals": [
+            {
+              "id": "answered-user",
+              "label": "Answered user",
+              "category": "structural",
+              "passed": true,
+              "score": 2,
+              "maxScore": 2
+            },
+            {
+              "id": "real-files",
+              "label": "Referenced real files",
+              "category": "structural",
+              "passed": false,
+              "score": 0,
+              "maxScore": 1.5
+            },
+            {
+              "id": "no-missing-paths",
+              "label": "Avoided missing paths",
+              "category": "structural",
+              "passed": true,
+              "score": 1,
+              "maxScore": 1
+            },
+            {
+              "id": "validation-commands",
+              "label": "Validation commands",
+              "category": "runtime",
+              "passed": true,
+              "score": 2,
+              "maxScore": 2
+            },
+            {
+              "id": "tool-use",
+              "label": "Used tools",
+              "category": "runtime",
+              "passed": false,
+              "score": 0,
+              "maxScore": 1.5
+            },
+            {
+              "id": "summary",
+              "label": "Produced summary",
+              "category": "style",
+              "passed": false,
+              "score": 0,
+              "maxScore": 0.8
+            },
+            {
+              "id": "latency",
+              "label": "Responsive latency",
+              "category": "style",
+              "passed": true,
+              "score": 0.5,
+              "maxScore": 0.5
+            },
+            {
+              "id": "tool-efficiency",
+              "label": "Tool efficiency",
+              "category": "style",
+              "passed": false,
+              "score": 0,
+              "maxScore": 0.2
+            },
+            {
+              "id": "no-preamble",
+              "label": "No preamble leakage",
+              "category": "style",
+              "passed": true,
+              "score": 0.5,
+              "maxScore": 0.5
+            },
+            {
+              "id": "answer-shape",
+              "label": "Human-facing answer shape",
+              "category": "style",
+              "passed": true,
+              "score": 0.5,
+              "maxScore": 0.5
+            },
+            {
+              "id": "bounded-length",
+              "label": "Bounded output length",
+              "category": "style",
+              "passed": true,
+              "score": 0.5,
+              "maxScore": 0.5
+            },
+            {
+              "id": "model-authored-delivery",
+              "label": "Model-authored delivery",
+              "category": "runtime",
+              "passed": false,
+              "score": 0,
+              "maxScore": 1
+            }
+          ]
+        },
+        "resolvedStatus": "assisted",
+        "stepCount": 4,
+        "tokenCount": 600,
+        "costEstimate": 0.001,
+        "assistedByFallback": true
+      },
+      "startedAt": "2026-06-16T18:19:07.242Z",
+      "completedAt": "2026-06-16T18:19:07.242Z",
+      "assistedByFallback": true,
+      "traceProof": {
+        "mode": "execute",
+        "role": "coder",
+        "complexity": "medium",
+        "routeSource": "heuristic",
+        "selectedModel": "fallback-model",
+        "providerId": "provider",
+        "modelRequests": 2,
+        "toolCalls": 1,
+        "validationChecks": 1,
+        "assistedByFallback": true,
+        "summary": "execute/coder · heuristic · 2 model requests · 1 tool call · 1 validation check · assisted fallback",
+        "warnings": [
+          "Result was assisted by OpenHarness fallback."
+        ]
+      }
+    }
+  ],
+  "total": 1,
+  "completed": 0,
+  "createdAt": "2026-06-16T18:19:07.242Z"
+}

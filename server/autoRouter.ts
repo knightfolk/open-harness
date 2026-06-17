@@ -119,26 +119,61 @@ let candidateDiagnostics: AutoRouterCandidateDiagnostic[] = [];
 const decisionCache = new Map<string, { decision: AutoRouterDecision; expiresAt: number }>();
 const CACHE_MAX_ENTRIES = 256;
 
+function normalizeRecommendationModelKey(modelId: string): string {
+  return modelId.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function recommendationMatchesCandidate(recModelId: string, candidateModelId: string): boolean {
+  const recKey = normalizeRecommendationModelKey(recModelId);
+  const candidateKey = normalizeRecommendationModelKey(candidateModelId);
+  return recKey === candidateKey || candidateKey.endsWith(recKey) || recKey.endsWith(candidateKey);
+}
+
 function annotateCandidatesWithEvalRecommendations(
   candidates: AutoRouterCandidate[],
 ): AutoRouterCandidate[] {
   const recommendations = getLatestEvalRecommendations();
   if (recommendations.length === 0) return candidates;
 
-  const byModel = new Map<string, Array<{ role: string; reason: string }>>();
+  const recs = recommendations
+    .filter((rec) => rec.modelId && rec.role && rec.reason)
+    .map((rec) => ({
+      modelId: rec.modelId,
+      role: rec.role,
+      reason: rec.reason,
+      proofReviewStatus: rec.proofReviewStatus || 'unreviewed',
+      proofTrusted: rec.proofTrusted === true,
+    }));
+  if (recs.length === 0) return candidates;
+
+  const byModel = new Map<string, Array<{ role: string; reason: string; proofReviewStatus: string; proofTrusted: boolean }>>();
   for (const rec of recommendations) {
     if (!rec.modelId || !rec.role || !rec.reason) continue;
     if (!byModel.has(rec.modelId)) byModel.set(rec.modelId, []);
-    byModel.get(rec.modelId)!.push({ role: rec.role, reason: rec.reason });
+    byModel.get(rec.modelId)!.push({
+      role: rec.role,
+      reason: rec.reason,
+      proofReviewStatus: rec.proofReviewStatus || 'unreviewed',
+      proofTrusted: rec.proofTrusted === true,
+    });
   }
 
   return candidates.map((candidate) => {
-    const recs = byModel.get(candidate.modelId);
-    if (!recs || recs.length === 0) return candidate;
+    const matchingRecs = [
+      ...(byModel.get(candidate.modelId) || []),
+      ...recs.filter((rec) => rec.modelId !== candidate.modelId && recommendationMatchesCandidate(rec.modelId, candidate.modelId)),
+    ];
+    if (matchingRecs.length === 0) return candidate;
 
     const base = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
-    const evalLine = recs.map((r) => `${r.role}: ${r.reason}`).join(' | ');
-    const merged = `${base} Eval recommendation: ${evalLine}`;
+    const evalLine = matchingRecs.map((r) => {
+      if (r.proofTrusted) return `${r.role} (approved proof): ${r.reason}`;
+      if (r.proofReviewStatus === 'needs-attention') return `${r.role} (proof needs attention; do not trust yet): ${r.reason}`;
+      return `${r.role} (proof unreviewed; verify before trusting): ${r.reason}`;
+    }).join(' | ');
+    const trustedCount = matchingRecs.filter((r) => r.proofTrusted).length;
+    const label = trustedCount === matchingRecs.length ? 'Eval-backed recommendation' : 'Eval evidence caution';
+    const merged = `${base} ${label}: ${evalLine}`;
 
     return {
       ...candidate,

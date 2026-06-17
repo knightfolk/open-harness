@@ -26,7 +26,7 @@ export const mockPlan: Plan = {
     { id: '1', step: 'Explore current project state and understand existing code', status: 'completed' },
     { id: '2', step: 'Design polished modern UI inspired by Codex Desktop', status: 'completed' },
     { id: '3', step: 'Implement all features with full Codex Desktop parity', status: 'in_progress' },
-    { id: '4', step: 'Add sub-agent tracking section with hide/show toggle', status: 'pending' },
+    { id: '4', step: 'Add Agent Work visibility with a quiet detail entry point', status: 'pending' },
     { id: '5', step: 'Polish styling, animations, and final QA', status: 'pending' },
   ],
 };
@@ -129,7 +129,7 @@ export const createMockMessages = (): Message[] => [
   {
     id: uid(),
     role: 'user',
-    content: 'Build me a modern terminal UI that looks like Codex Desktop. It should support every feature and have a sub-agent tracking section that can be hidden.',
+    content: 'Build me a modern terminal UI that looks like Codex Desktop. It should support every feature and make active agent work visible without turning the default chat into a dashboard.',
     timestamp: new Date(Date.now() - 300000),
     status: 'complete',
   },
@@ -140,9 +140,9 @@ export const createMockMessages = (): Message[] => [
 
 Here's my plan:
 1. **Scaffold** a React + TypeScript + Vite project
-2. **Design** the layout with sidebar, chat area, and collapsible sub-agent panel
+2. **Design** the layout with sidebar, chat area, active-work strip, and right-hand Agent detail
 3. **Implement** all Codex Desktop features: chat, code blocks, terminal output, file diffs, plan tracking, memory, skills, and plugins
-4. **Add** sub-agent tracking with a hide/show toggle
+4. **Add** Agent Work visibility with quiet detail and steering entry points
 5. **Polish** with smooth animations and a cohesive dark theme
 
 Let me get started.`,
@@ -176,7 +176,7 @@ Let me get started.`,
 // src/App.tsx
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [panelView, setPanelView] = useState<PanelView>('sub-agents');
+  const [agentDetailOpen, setAgentDetailOpen] = useState(false);
 
   return (
     <div className="app-layout">
@@ -185,7 +185,7 @@ function App() {
         <TopBar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <div className="content-area">
           <ChatView />
-          <RightPanel view={panelView} />
+          {agentDetailOpen && <AgentFocusPanel />}
         </div>
       </main>
     </div>
@@ -193,14 +193,14 @@ function App() {
 }
 \`\`\`
 
-The design uses a **three-panel layout**:
-- **Left sidebar**: Session history, skills, memory, and settings
+The design uses a **chat-first workspace**:
+- **Left sidebar**: Projects, sessions, and active agent work under the current thread
 - **Center**: Chat interface with markdown rendering and code highlighting
-- **Right panel**: Collapsible sub-agent tracker, plan progress, terminal output
+- **Right detail**: Opens only when selected work needs inspection or steering
 
 ::code-comment{title="[P2] Off-by-one" body="Loop iterates past the end when length is 0." file="/src/components/ChatView.tsx" start=42 priority=2}
 
-I've also implemented the sub-agent tracking panel with real-time status updates, progress bars, and token usage tracking. The panel smoothly slides in and out.`,
+I've also implemented the agent detail inspector with real run steps, artifacts, steering controls, and token usage tracking.`,
     timestamp: new Date(Date.now() - 180000),
     status: 'streaming',
     toolCalls: [

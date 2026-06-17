@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap, FileText, Play, RefreshCw } from 'lucide-react';
-import type { Message, ToolCall, ProjectProfile, WorkProductArtifact } from '../types';
+import { useId, useMemo, useState } from 'react';
+import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap, FileText, Play, RefreshCw, Download } from 'lucide-react';
+import type { HarnessRun, Message, ToolCall, ProjectProfile, RunSteeringAction, WorkProductArtifact } from '../types';
 import { ToolCallComponent } from './ToolCall';
 import { NextBestActions } from './NextBestActions';
 import { ConfidenceMeter } from './ConfidenceMeter';
@@ -8,8 +8,25 @@ import { PromptMicroscope } from './PromptMicroscope';
 import { ArtifactDrawer } from './ArtifactDrawer';
 import { analyzeConfidence, deriveNextActions } from '../utils/runSignals';
 import { MarkdownContent } from './MarkdownContent';
+import * as api from '../utils/api';
 
 type TeamPlanArtifact = Extract<WorkProductArtifact, { type: 'team_plan' }>;
+
+function runReplaySummary(message: Message): string | null {
+  const steps = message.runTrace?.steps || [];
+  if (steps.length === 0) return null;
+  const artifacts = steps.filter((step) => step.type === 'artifact').length;
+  const tools = steps.filter((step) => step.type === 'tool_call').length;
+  const steering = steps.filter((step) => step.type === 'steering').length;
+  const hasFinal = steps.some((step) => step.type === 'final_answer');
+  return [
+    `${steps.length} event${steps.length === 1 ? '' : 's'}`,
+    tools > 0 ? `${tools} tool${tools === 1 ? '' : 's'}` : null,
+    artifacts > 0 ? `${artifacts} artifact${artifacts === 1 ? '' : 's'}` : null,
+    steering > 0 ? `${steering} steering` : null,
+    hasFinal ? 'final answer captured' : 'in progress',
+  ].filter(Boolean).join(' · ');
+}
 
 function looksLikeUnifiedDiff(text: string): boolean {
   if (!text) return false;
@@ -46,6 +63,7 @@ interface Props {
   onRunCommand?: (command: string) => void;
   onCompareModel?: () => void;
   onProposePatch?: (diffText: string, explanation?: string) => void;
+  onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;
 }
 
 const avatarIcons = {
@@ -84,6 +102,10 @@ function stripThinking(content: string): string {
     .trimStart();
 }
 
+function safeDomId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
 function toolVerb(status: ToolCall['status']) {
   if (status === 'running') return 'using';
   if (status === 'error') return 'had trouble with';
@@ -92,6 +114,7 @@ function toolVerb(status: ToolCall['status']) {
 
 function ToolCallSummary({ toolCalls }: { toolCalls: ToolCall[] }) {
   const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
   const uniqueTools = useMemo(() => {
     const map = new Map<string, ToolCall>();
     for (const tool of toolCalls) map.set(tool.id, tool);
@@ -106,14 +129,21 @@ function ToolCallSummary({ toolCalls }: { toolCalls: ToolCall[] }) {
 
   return (
     <div className={`tool-summary ${primaryStatus}`}>
-      <button className="tool-summary-button" onClick={() => setExpanded((value) => !value)}>
-        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        <Wrench size={13} />
+      <button
+        className="tool-summary-button"
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        aria-label={`${expanded ? 'Hide' : 'Show'} tool details`}
+      >
+        {expanded ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+        <Wrench size={13} aria-hidden="true" />
         <span>{label}</span>
         {errors > 0 && <span className="tool-summary-error">{errors} failed</span>}
       </button>
       {expanded && (
-        <div className="tool-summary-details">
+        <div id={detailsId} className="tool-summary-details" role="region" aria-label="Tool details">
           {uniqueTools.map((tool) => (
             <div key={tool.id} className="tool-summary-item">
               <span>{toolVerb(tool.status)} {tool.name}</span>
@@ -185,46 +215,54 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtif
   const deltas = summarizeList(artifact.data.participantDeltas, 3);
 
   return (
-    <div className="team-plan-card">
+    <div
+      className="team-plan-card"
+      role="group"
+      aria-label={`Team plan artifact ${artifact.title}: ${participants.length} participant${participants.length === 1 ? '' : 's'}, ${completedParticipants} complete, ${artifact.data.executionPhases.length} execution phase${artifact.data.executionPhases.length === 1 ? '' : 's'}, ${artifact.data.validation.length} validation expectation${artifact.data.validation.length === 1 ? '' : 's'}`}
+    >
       <div className="team-plan-card-header">
         <div className="team-plan-card-title">
-          <FileText size={14} />
+          <FileText size={14} aria-hidden="true" />
           <span>{artifact.title}</span>
         </div>
         {onPromote && (
-          <div className="team-plan-card-actions">
+          <div className="team-plan-card-actions" role="group" aria-label={`Team plan actions for ${artifact.title}`}>
             <button
               className="btn btn-secondary btn-small team-plan-promote-btn"
+              type="button"
               onClick={() => onPromote(revisionPromptFromTeamPlan(artifact))}
               title="Ask Planning Room to revise only changed sections"
+              aria-label={`Revise team plan ${artifact.title}; ask Planning Room to update only changed sections while preserving accepted plan structure`}
             >
-              <RefreshCw size={12} />
+              <RefreshCw size={12} aria-hidden="true" />
               Revise
             </button>
             <button
               className="btn btn-secondary btn-small team-plan-promote-btn"
+              type="button"
               onClick={() => onPromote(executionPromptFromTeamPlan(artifact))}
               title="Start an execute-mode run from this team plan"
+              aria-label={`Execute team plan ${artifact.title}; start implementation from this plan and require validation proof`}
             >
-              <Play size={12} />
+              <Play size={12} aria-hidden="true" />
               Execute
             </button>
           </div>
         )}
       </div>
 
-      <div className="team-plan-recommendation">{artifact.data.recommendation}</div>
+      <div className="team-plan-recommendation" aria-label={`Team plan recommendation: ${artifact.data.recommendation}`}>{artifact.data.recommendation}</div>
 
-      <div className="team-plan-meta">
-        <span>{participants.length} participant{participants.length === 1 ? '' : 's'}</span>
-        <span>{completedParticipants}/{participants.length} complete</span>
-        <span>{artifact.data.executionPhases.length} phase{artifact.data.executionPhases.length === 1 ? '' : 's'}</span>
+      <div className="team-plan-meta" role="list" aria-label={`Team plan summary for ${artifact.title}`}>
+        <span role="listitem">{participants.length} participant{participants.length === 1 ? '' : 's'}</span>
+        <span role="listitem">{completedParticipants}/{participants.length} complete</span>
+        <span role="listitem">{artifact.data.executionPhases.length} phase{artifact.data.executionPhases.length === 1 ? '' : 's'}</span>
       </div>
 
       {participants.length > 0 && (
-        <div className="team-plan-participants">
+        <div className="team-plan-participants" role="list" aria-label={`Team plan participants for ${artifact.title}`}>
           {participants.map((participant) => (
-            <span key={participant.modelId} className={`team-plan-participant ${participant.status}`}>
+            <span key={participant.modelId} role="listitem" aria-label={`${participant.modelId}: ${participant.status}`} className={`team-plan-participant ${participant.status}`}>
               {participant.modelId}
             </span>
           ))}
@@ -233,7 +271,7 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtif
 
       <div className="team-plan-grid">
         {phases.length > 0 && (
-          <div className="team-plan-section">
+          <div className="team-plan-section" role="group" aria-label={`Execution phases for team plan ${artifact.title}`}>
             <div className="team-plan-section-label">Phases</div>
             <ol>
               {phases.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
@@ -241,7 +279,7 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtif
           </div>
         )}
         {validation.length > 0 && (
-          <div className="team-plan-section">
+          <div className="team-plan-section" role="group" aria-label={`Validation expectations for team plan ${artifact.title}`}>
             <div className="team-plan-section-label">Validation</div>
             <ul>
               {validation.map((item) => <li key={item}>{item}</li>)}
@@ -249,7 +287,7 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtif
           </div>
         )}
         {risks.length > 0 && (
-          <div className="team-plan-section">
+          <div className="team-plan-section" role="group" aria-label={`Risks for team plan ${artifact.title}`}>
             <div className="team-plan-section-label">Risks</div>
             <ul>
               {risks.map((item) => <li key={item}>{item}</li>)}
@@ -257,7 +295,7 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtif
           </div>
         )}
         {deltas.length > 0 && (
-          <div className="team-plan-section">
+          <div className="team-plan-section" role="group" aria-label={`Participant deltas for team plan ${artifact.title}`}>
             <div className="team-plan-section-label">Deltas</div>
             <ul>
               {deltas.map((item) => <li key={item}>{item}</li>)}
@@ -269,12 +307,15 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtif
   );
 }
 
-export function MessageBubble({ message, assistantName, projectProfile, onSendMessage, onRunCommand, onCompareModel, onProposePatch }: Props) {
+export function MessageBubble({ message, assistantName, projectProfile, onSendMessage, onRunCommand, onCompareModel, onProposePatch, onRunSteer }: Props) {
   const visibleContent = stripThinking(message.content);
   const isStreaming = message.status === 'streaming';
   const isAssistant = message.role === 'assistant';
   const showThinkingStatus = isAssistant && isStreaming && !!message.thinkingChars;
   const showTypingIndicator = isStreaming && !showThinkingStatus && !visibleContent.trim();
+  const [showDetails, setShowDetails] = useState(false);
+  const [replayExportStatus, setReplayExportStatus] = useState<string | null>(null);
+  const detailsRegionId = `message-details-${safeDomId(message.id)}`;
 
   // Compute delight signals for assistant messages
   const confidenceSignals = useMemo(
@@ -294,6 +335,43 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
     () => isAssistant && !isStreaming ? latestTeamPlanArtifact(message) : null,
     [isAssistant, isStreaming, message],
   );
+  const replaySummary = useMemo(
+    () => isAssistant && !isStreaming ? runReplaySummary(message) : null,
+    [isAssistant, isStreaming, message],
+  );
+  const hiddenDetailSummary = useMemo(() => {
+    const items = [
+      (message.toolCalls?.length || 0) > 0 ? 'tool details' : null,
+      confidenceSignals ? 'confidence' : null,
+      teamPlanArtifact ? 'team plan' : null,
+      message.runTrace ? 'prompt microscope' : null,
+      nextActions.length > 0 ? 'next actions' : null,
+    ].filter(Boolean);
+    return items.length > 0 ? items.join(', ') : 'message details';
+  }, [message.toolCalls, message.runTrace, confidenceSignals, teamPlanArtifact, nextActions]);
+
+  const handleExportReplay = async () => {
+    if (!message.runTrace?.id) return;
+    try {
+      await api.downloadRunDebugBundle(message.runTrace.id);
+      setReplayExportStatus('Exported');
+      window.setTimeout(() => setReplayExportStatus(null), 2000);
+    } catch {
+      setReplayExportStatus('Export failed');
+      window.setTimeout(() => setReplayExportStatus(null), 3000);
+    }
+  };
+
+  const hasHiddenDetails = useMemo(
+    () => (
+      (message.toolCalls?.length || 0) > 0 ||
+      !!confidenceSignals ||
+      !!teamPlanArtifact ||
+      message.runTrace != null ||
+      nextActions.length > 0
+    ),
+    [message, confidenceSignals, teamPlanArtifact, nextActions],
+  );
 
   return (
     <div className={`message-wrapper ${message.role} ${message.transient ? 'transient-agent' : ''} ${message.agentRole ? `agent-${message.agentRole}` : ''} ${message.status === 'error' ? 'error' : ''}`}>
@@ -308,36 +386,26 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
             <span className="timestamp">
               {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
-            {/* Confidence badge inline with sender */}
-            {confidenceSignals && (
-              <ConfidenceMeter signals={confidenceSignals} />
-            )}
           </div>
           <div className="message-content">
             {showThinkingStatus && (
-              <div className="message-thinking-status">
+              <div className="message-thinking-status" role="status" aria-live="polite">
                 <div className="message-thinking-line">
                   <Brain size={13} />
                   <span>{message.thinkingStatus || 'Thinking live'}</span>
                   <span className="message-thinking-count">{message.thinkingChars!.toLocaleString()} chars</span>
                 </div>
-                {message.thinkingPreview && (
-                  <div className="message-thinking-preview">{message.thinkingPreview}</div>
-                )}
               </div>
             )}
             <MarkdownContent content={visibleContent} />
             {showTypingIndicator && (
-              <div className="typing-indicator">
-                <div className="typing-dot" />
-                <div className="typing-dot" />
-                <div className="typing-dot" />
+              <div className="typing-indicator" role="status" aria-live="polite" aria-label="Assistant is typing">
+                <div className="typing-dot" aria-hidden="true" />
+                <div className="typing-dot" aria-hidden="true" />
+                <div className="typing-dot" aria-hidden="true" />
               </div>
             )}
           </div>
-          {!isStreaming && message.toolCalls && message.toolCalls.length > 0 && (
-            <ToolCallSummary toolCalls={message.toolCalls} />
-          )}
 
           {/* Surface a one-click "Review patch" button when the assistant
               message contains a unified diff. Routes to the Patch Review
@@ -346,19 +414,69 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
             <div className="message-patch-action">
               <button
                 className="btn btn-secondary btn-small"
+                type="button"
                 onClick={() => onProposePatch(extractedDiff.diff, message.content.slice(0, 200))}
                 title="Send this diff to the Patch Review panel"
+                aria-label="Review patch from this message"
               >
-                <span style={{ fontSize: 11 }}>🩹</span> Review patch
+                <span style={{ fontSize: 11 }} aria-hidden="true">🩹</span> Review patch
+              </button>
+            </div>
+          )}
+
+          {isAssistant && !isStreaming && message.runTrace && (
+            <div className="message-patch-action">
+              <button
+                className="btn btn-secondary btn-small"
+                type="button"
+                onClick={handleExportReplay}
+                title="Export this run's replay, prompts, routing, artifacts, and proof bundle"
+                aria-label="Export this run's replay bundle"
+              >
+                <Download size={12} aria-hidden="true" />
+                {replayExportStatus || 'Export replay'}
+              </button>
+            </div>
+          )}
+
+          {isAssistant && !isStreaming && replaySummary && (
+            <div className="message-replay-summary">
+              <span>Run replay</span>
+              <span>{replaySummary}</span>
+            </div>
+          )}
+
+          {isAssistant && !isStreaming && (
+            <ArtifactDrawer message={message} onSendMessage={onSendMessage} onRunSteer={onRunSteer} />
+          )}
+
+          {isAssistant && !isStreaming && hasHiddenDetails && (
+            <div className="message-action-row">
+              <button
+                className="message-details-toggle"
+                type="button"
+                onClick={() => setShowDetails((prev) => !prev)}
+                title={showDetails ? 'Hide message details' : 'Show message details'}
+                aria-expanded={showDetails}
+                aria-controls={detailsRegionId}
+                aria-label={`${showDetails ? 'Hide' : 'Show'} ${hiddenDetailSummary}`}
+              >
+                {showDetails ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
+                <span>{showDetails ? 'Hide details' : 'Details'}</span>
               </button>
             </div>
           )}
 
           {/* ── Delight features for completed assistant messages ── */}
-          {isAssistant && !isStreaming && (
-            <>
-              {/* Artifact drawer */}
-              <ArtifactDrawer message={message} />
+          {isAssistant && !isStreaming && showDetails && (
+            <div id={detailsRegionId} className="message-details-region" role="region" aria-label="Message details">
+              {!isStreaming && message.toolCalls && message.toolCalls.length > 0 && (
+                <ToolCallSummary toolCalls={message.toolCalls} />
+              )}
+
+              {confidenceSignals && (
+                <ConfidenceMeter signals={confidenceSignals} />
+              )}
 
               {teamPlanArtifact && (
                 <TeamPlanArtifactCard
@@ -379,10 +497,10 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
                   onCompareModel={onCompareModel}
                   onProposePatch={onProposePatch}
                   messageContent={visibleContent}
-                  collapseAt={2}
+                  collapseAt={1}
                 />
               )}
-            </>
+            </div>
           )}
         </div>
       </div>

@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import * as api from '../utils/api';
-import { LatestUpdatesPanel } from './LatestUpdatesPanel';
 
 interface Props {
   workingDir: string | null;
@@ -93,9 +92,11 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
         borderBottom: '1px solid var(--border-primary)',
       }}>
         <button
+          type="button"
           onClick={handleHealthCheck}
           disabled={checking}
           title="Health check"
+          aria-label="Run browser health check"
           style={{
             width: 22, height: 22, borderRadius: '50%', border: 'none',
             background: health?.reachable ? 'var(--accent-success)' :
@@ -104,10 +105,11 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
             fontSize: 10, color: '#fff',
           }}
         >
-          {checking ? '...' : health?.reachable ? '✓' : health ? '✗' : '?'}
+          <span aria-hidden="true">{checking ? '...' : health?.reachable ? '✓' : health ? '✗' : '?'}</span>
         </button>
         <input
           value={url}
+          aria-label="Browser preview URL"
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handlePreview()}
           style={{
@@ -118,8 +120,10 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
           }}
         />
         <button
+          type="button"
           onClick={handlePreview}
           disabled={loading}
+          aria-label={`Preview ${url}`}
           style={{
             background: 'var(--accent-primary)', color: '#fff', border: 'none',
             borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer',
@@ -128,8 +132,10 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
           {loading ? '...' : 'Preview'}
         </button>
         <button
+          type="button"
           onClick={handleDeepCapture}
           disabled={deepLoading}
+          aria-label={`Deep capture ${url}`}
           style={{
             background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-primary)',
             borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer',
@@ -140,14 +146,21 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
       </div>
 
       {/* Quick URLs */}
-      <div style={{
-        display: 'flex', gap: 4, padding: '4px 10px',
-        borderBottom: '1px solid var(--border-primary)', background: 'var(--bg-secondary)',
-      }}>
+      <div
+        role="group"
+        aria-label="Quick browser preview URLs"
+        style={{
+          display: 'flex', gap: 4, padding: '4px 10px',
+          borderBottom: '1px solid var(--border-primary)', background: 'var(--bg-secondary)',
+        }}
+      >
         {quickUrls.map(qu => (
           <button
             key={qu}
+            type="button"
             onClick={() => setUrl(qu)}
+            aria-label={`Use ${qu}`}
+            aria-pressed={url === qu}
             style={{
               background: url === qu ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
               color: url === qu ? '#fff' : 'var(--text-tertiary)',
@@ -161,17 +174,21 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
       </div>
 
       {/* Browser viewport */}
-      <div style={{
-        flex: 1, background: '#1a1a2e', display: 'flex',
-        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        position: 'relative', overflow: 'auto',
-      }}>
+      <div
+        role="region"
+        aria-label={`Browser preview for ${url}`}
+        style={{
+          flex: 1, background: '#1a1a2e', display: 'flex',
+          flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          position: 'relative', overflow: 'auto',
+        }}
+      >
         {loading && (
           <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>
-            <div className="typing-indicator">
-              <div className="typing-dot" />
-              <div className="typing-dot" />
-              <div className="typing-dot" />
+            <div className="typing-indicator" role="status" aria-live="polite" aria-label="Browser preview is loading">
+              <div className="typing-dot" aria-hidden="true" />
+              <div className="typing-dot" aria-hidden="true" />
+              <div className="typing-dot" aria-hidden="true" />
             </div>
           </div>
         )}
@@ -179,13 +196,13 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
         {preview?.screenshotBase64 && (
           <img
             src={`data:image/png;base64,${preview.screenshotBase64}`}
-            alt="Preview"
+            alt={`Browser preview screenshot for ${url}`}
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
           />
         )}
 
         {preview && !preview.screenshotBase64 && preview.errors.length === 0 && (
-          <div style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>
+          <div role="status" aria-live="polite" style={{ textAlign: 'center', color: 'var(--text-tertiary)' }}>
             <div style={{ fontSize: 14, marginBottom: 4 }}>
               {preview.title || url}
             </div>
@@ -194,20 +211,38 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
         )}
 
         {preview?.errors && preview.errors.length > 0 && (
-          <div style={{ textAlign: 'center', padding: 20 }}>
+          <div role="alert" style={{ textAlign: 'center', padding: 20 }}>
             {preview.errors.map((err, i) => (
               <div key={i} style={{
                 color: err.type === 'error' ? 'var(--accent-error)' : 'var(--accent-warning)',
                 fontSize: 12, marginBottom: 4,
               }}>
-                {err.type === 'error' ? '⚠️' : '⚡'} {err.message}
+                <span aria-hidden="true">{err.type === 'error' ? '⚠️' : '⚡'}</span> {err.message}
               </div>
             ))}
           </div>
         )}
 
         {!preview && !loading && (
-          <LatestUpdatesPanel action={{ label: 'Preview localhost:5173', onClick: handlePreview }} />
+          <div role="status" aria-live="polite" style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: 20 }}>
+            <div style={{ fontSize: 13, marginBottom: 8 }}>No browser preview yet</div>
+            <button
+              type="button"
+              onClick={handlePreview}
+              aria-label={`Preview ${url}`}
+              style={{
+                background: 'var(--accent-primary)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                padding: '6px 10px',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              Preview {url}
+            </button>
+          </div>
         )}
       </div>
 
@@ -223,7 +258,9 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
           )}
           {onAskAboutScreenshot && preview.screenshotBase64 && (
             <button
+              type="button"
               onClick={() => onAskAboutScreenshot(preview.screenshotBase64!, url)}
+              aria-label="Ask AI about this browser screenshot"
               style={{
                 background: 'var(--accent-primary)', color: '#fff', border: 'none',
                 borderRadius: 3, padding: '2px 8px', fontSize: 10, cursor: 'pointer',
@@ -233,7 +270,9 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
             </button>
           )}
           <button
+            type="button"
             onClick={handleDeepCapture}
+            aria-label={`Deep capture ${url}`}
             style={{
               background: 'none', border: '1px solid var(--border-primary)',
               borderRadius: 3, padding: '2px 8px', fontSize: 10,

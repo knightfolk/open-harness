@@ -55,6 +55,8 @@ export interface RoutingEvent {
   outcome: 'success' | 'failure' | 'ambiguous' | null;
   /** Human-readable note about the outcome */
   outcomeNote?: string;
+  /** Whether the event should influence production learning summaries */
+  datasetKind?: 'production' | 'benchmark';
 }
 
 export interface TaskTypeModelSuccess {
@@ -79,6 +81,18 @@ export interface LearningSummary {
   byRole: Record<string, TaskTypeRoutingSummary>;
   byComplexity: Record<string, TaskTypeRoutingSummary>;
   bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
+}
+
+export interface RoutingImportResult {
+  total: number;
+  imported: number;
+  skippedExisting: number;
+  rejected: number;
+  dryRun?: boolean;
+  importSource?: string;
+  schemaVersion?: number | null;
+  warnings?: string[];
+  datasetKind?: 'production' | 'benchmark';
 }
 
 // ── Storage ────────────────────────────────────────────
@@ -192,6 +206,54 @@ function bestByTaskType(taskTypeSummary: Record<string, TaskTypeRoutingSummary>)
   }).filter((row) => row.model !== 'unknown');
 }
 
+function normalizeOutcome(value: unknown): RoutingEvent['outcome'] {
+  return value === 'success' || value === 'failure' || value === 'ambiguous' ? value : null;
+}
+
+function normalizeDatasetKind(value: unknown): 'production' | 'benchmark' {
+  return value === 'benchmark' ? 'benchmark' : 'production';
+}
+
+function productionEvents(events: RoutingEvent[]): RoutingEvent[] {
+  return events.filter((event) => event.datasetKind !== 'benchmark');
+}
+
+function normalizeImportedEvent(value: unknown, datasetKind: 'production' | 'benchmark' = 'production'): RoutingEvent | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Record<string, unknown>;
+  const id = typeof input.id === 'string' ? input.id.trim() : '';
+  const timestamp = typeof input.timestamp === 'string' ? input.timestamp.trim() : '';
+  const selectedModel = typeof input.selectedModel === 'string' ? input.selectedModel.trim() : '';
+  if (!id || !timestamp || Number.isNaN(Date.parse(timestamp)) || !selectedModel) return null;
+
+  const candidateScores = input.candidateScores && typeof input.candidateScores === 'object' && !Array.isArray(input.candidateScores)
+    ? Object.fromEntries(Object.entries(input.candidateScores as Record<string, unknown>)
+      .filter(([, score]) => Number.isFinite(Number(score)))
+      .map(([model, score]) => [model, Number(score)]))
+    : {};
+
+  return {
+    id,
+    timestamp,
+    sessionId: typeof input.sessionId === 'string' ? input.sessionId : 'imported',
+    taskHash: typeof input.taskHash === 'string' ? input.taskHash : '',
+    selectedModel,
+    score: Number.isFinite(Number(input.score)) ? Number(input.score) : 0,
+    candidateScores,
+    wasFallback: Boolean(input.wasFallback),
+    wasCached: Boolean(input.wasCached),
+    classifierModel: typeof input.classifierModel === 'string' ? input.classifierModel : null,
+    surface: typeof input.surface === 'string' ? input.surface : 'imported',
+    complexity: typeof input.complexity === 'string' ? input.complexity : 'unknown',
+    taskType: typeof input.taskType === 'string' ? input.taskType : 'unknown',
+    role: typeof input.role === 'string' ? input.role : 'unknown',
+    userTurns: Number.isFinite(Number(input.userTurns)) ? Number(input.userTurns) : 0,
+    outcome: normalizeOutcome(input.outcome),
+    outcomeNote: typeof input.outcomeNote === 'string' ? input.outcomeNote : undefined,
+    datasetKind: normalizeDatasetKind(input.datasetKind || datasetKind),
+  };
+}
+
 
 // ── Public API ─────────────────────────────────────────
 
@@ -206,6 +268,7 @@ export function recordRoutingDecision(event: Omit<RoutingEvent, 'outcome' | 'out
     ...event,
     id,
     outcome: null,
+    datasetKind: 'production',
   };
   // Avoid writing full task text by default (stripping in non-dev mode)
   appendFileSync(eventsPath(), JSON.stringify(record) + '\n', 'utf-8');
@@ -251,6 +314,71 @@ export function getRoutingEvents(sessionId?: string, limit = 100): RoutingEvent[
 }
 
 /**
+ * Get every persisted routing event, newest first. Used for full evidence export.
+ */
+export function getAllRoutingEvents(): RoutingEvent[] {
+  return readEvents(eventsPath())
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
+/**
+ * Merge imported routing events without overwriting local records.
+ */
+export function importRoutingEvents(rawEvents: unknown[], options: { dryRun?: boolean; datasetKind?: 'production' | 'benchmark' } = {}): RoutingImportResult {
+  ensureDir();
+  const path = eventsPath();
+  const existing = readEvents(path);
+  const seenIds = new Set(existing.map((event) => event.id));
+  const toImport: RoutingEvent[] = [];
+  let skippedExisting = 0;
+  let rejected = 0;
+
+  const datasetKind = normalizeDatasetKind(options.datasetKind);
+
+  for (const raw of rawEvents) {
+    const event = normalizeImportedEvent(raw, datasetKind);
+    if (!event) {
+      rejected += 1;
+      continue;
+    }
+    if (seenIds.has(event.id)) {
+      skippedExisting += 1;
+      continue;
+    }
+    seenIds.add(event.id);
+    toImport.push(event);
+  }
+
+  if (options.dryRun) {
+    return {
+      total: rawEvents.length,
+      imported: toImport.length,
+      skippedExisting,
+      rejected,
+      dryRun: true,
+      datasetKind,
+    };
+  }
+
+  if (toImport.length > 0) {
+    const merged = [...existing, ...toImport]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    writeFileSync(path, merged.map((event) => JSON.stringify(event)).join('\n') + '\n', 'utf-8');
+  } else if (!existsSync(path)) {
+    writeFileSync(path, '', 'utf-8');
+  }
+
+  return {
+    total: rawEvents.length,
+    imported: toImport.length,
+    skippedExisting,
+    rejected,
+    dryRun: false,
+    datasetKind,
+  };
+}
+
+/**
  * Compute historical success rates per model, used by
  * the auto-router to adjust candidate ordering and scoring.
  */
@@ -258,7 +386,7 @@ export function getModelSuccessRates(): Record<string, { total: number; success:
   const path = eventsPath();
   if (!existsSync(path)) return {};
 
-  const events = readEvents(path);
+  const events = productionEvents(readEvents(path));
 
   const stats: Record<string, { total: number; success: number }> = {};
 
@@ -343,7 +471,7 @@ export function getLearningSummary() {
   }
 
   const rates = getModelSuccessRates();
-  const events = readEvents(path).filter((event) => event.outcome !== null);
+  const events = productionEvents(readEvents(path)).filter((event) => event.outcome !== null);
   const byTaskType = buildTaskTypeSummary(events);
   const byRole = buildRoleSummary(events);
   const byComplexity = buildComplexitySummary(events);

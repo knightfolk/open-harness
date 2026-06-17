@@ -25,6 +25,7 @@ export function getAdapter(provider: StoredProvider): ProviderAdapter | null {
 export async function* streamWithAdapter(
   provider: StoredProvider,
   request: ProviderChatRequest,
+  signal?: AbortSignal,
 ): AsyncGenerator<ProviderEvent> {
   const adapter = getAdapter(provider);
   if (!adapter) {
@@ -35,6 +36,7 @@ export async function* streamWithAdapter(
   const options: ProviderStreamOptions = {
     baseURL: provider.baseURL,
     apiKey: provider.apiKey,
+    signal,
   };
 
   yield* adapter.streamChat(request, options);

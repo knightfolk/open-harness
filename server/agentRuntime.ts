@@ -28,6 +28,7 @@ export interface BackgroundAgentRequest {
   modelId?: string;
   workingDir?: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
   onStep?: (step: HarnessRunStep) => void;
   tools?: AgentToolDefinition[];
   invokeTool?: (toolName: string, args: Record<string, unknown>, workingDir?: string) => Promise<unknown>;
@@ -56,8 +57,18 @@ export interface BackgroundAgentHandle {
 }
 
 const ACTIVE: Map<string, BackgroundAgentHandle> = new Map();
-const AGENT_REQUEST_TIMEOUT_MS = 90_000;
+const AGENT_REQUEST_TIMEOUT_MS = 180_000;
+const MIN_AGENT_REQUEST_TIMEOUT_MS = 5_000;
+const MAX_AGENT_REQUEST_TIMEOUT_MS = 180_000;
 const MAX_AGENT_TOOL_ROUNDS = 6;
+
+function normalizeAgentTimeout(timeoutMs: number | undefined): number {
+  if (!Number.isFinite(timeoutMs)) return AGENT_REQUEST_TIMEOUT_MS;
+  return Math.max(
+    MIN_AGENT_REQUEST_TIMEOUT_MS,
+    Math.min(MAX_AGENT_REQUEST_TIMEOUT_MS, Math.round(Number(timeoutMs))),
+  );
+}
 
 export interface AgentToolDefinition {
   type?: string;
@@ -297,6 +308,12 @@ export function startBackgroundAgent(
 
   const id = uuid();
   const controller = new AbortController();
+  const requestTimeoutMs = normalizeAgentTimeout(req.timeoutMs);
+  let requestTimedOut = false;
+  const timeout = setTimeout(() => {
+    requestTimedOut = true;
+    controller.abort();
+  }, requestTimeoutMs);
   if (req.signal) {
     req.signal.addEventListener('abort', () => controller.abort());
   }
@@ -357,7 +374,23 @@ export function startBackgroundAgent(
       const text = choice?.message?.content || data.content?.[0]?.text || '';
       artifact.response = typeof text === 'string' ? text : JSON.stringify(text);
     } catch (err: any) {
-      if (controller.signal.aborted) {
+      if (requestTimedOut) {
+        artifact.status = 'error';
+        artifact.error = 'Agent request timed out';
+        recordRoutingAdherenceEvent({
+          kind: 'timeout',
+          phase: 'agent-request',
+          runId: id,
+          role: profile.preferredRole,
+          selectedModel: modelId,
+          providerId: provider.providerId,
+          promptHash: hashPrompt(req.prompt),
+          timeoutMs: requestTimeoutMs,
+          elapsedMs: Date.now() - new Date(startedAt).getTime(),
+          error: artifact.error,
+          retryable: true,
+        });
+      } else if (controller.signal.aborted) {
         artifact.status = 'cancelled';
         artifact.error = 'Agent request aborted';
         recordRoutingAdherenceEvent({
@@ -368,7 +401,7 @@ export function startBackgroundAgent(
           selectedModel: modelId,
           providerId: provider.providerId,
           promptHash: hashPrompt(req.prompt),
-          timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+          timeoutMs: requestTimeoutMs,
           elapsedMs: Date.now() - new Date(startedAt).getTime(),
           error: 'Agent request aborted',
           retryable: true,
@@ -384,7 +417,7 @@ export function startBackgroundAgent(
           selectedModel: modelId,
           providerId: provider.providerId,
           promptHash: hashPrompt(req.prompt),
-          timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+          timeoutMs: requestTimeoutMs,
           elapsedMs: Date.now() - new Date(startedAt).getTime(),
           error: artifact.error,
           retryable: true,
@@ -394,6 +427,7 @@ export function startBackgroundAgent(
       artifact.completedAt = new Date().toISOString();
       artifact.durationMs = new Date(artifact.completedAt).getTime() - new Date(startedAt).getTime();
       ACTIVE.delete(id);
+      clearTimeout(timeout);
     }
     return artifact;
   })();
@@ -436,6 +470,12 @@ export async function runAgentPhase(
 
   const id = uuid();
   const controller = new AbortController();
+  const requestTimeoutMs = normalizeAgentTimeout(req.timeoutMs);
+  let requestTimedOut = false;
+  const timeout = setTimeout(() => {
+    requestTimedOut = true;
+    controller.abort();
+  }, requestTimeoutMs);
   if (req.signal) {
     req.signal.addEventListener('abort', () => controller.abort());
   }
@@ -470,7 +510,7 @@ export async function runAgentPhase(
 
     for (let round = 0; round < maxToolRounds; round++) {
       req.onStep?.({ type: 'model_request', round: round + 1, model: modelId });
-      const modelResponse = await callAgentModel(provider, modelId, messages, profile.temperature, controller.signal, agentTools);
+      const modelResponse = await callAgentModel(provider, modelId, messages, profile.temperature, controller.signal, agentTools, requestTimeoutMs);
       const text = modelResponse.text;
       if (text) req.onStep?.({ type: 'model_text', chars: text.length });
       const parsed = parseToolCallMarkup(text, knownToolNames);
@@ -575,7 +615,7 @@ export async function runAgentPhase(
             `Produce the final answer now from the evidence already gathered.`,
           ].join('\n'),
         },
-      ], profile.temperature, controller.signal, []);
+      ], profile.temperature, controller.signal, [], requestTimeoutMs);
       const finalText = finalResponse.text;
       if (finalText) req.onStep?.({ type: 'model_text', chars: finalText.length });
       artifact.response = stripAgentToolMarkup(finalText, knownToolNames);
@@ -588,7 +628,23 @@ export async function runAgentPhase(
         : 'Agent completed without producing a final answer';
     }
   } catch (err: any) {
-    if (controller.signal.aborted) {
+    if (requestTimedOut) {
+      artifact.status = 'error';
+      artifact.error = 'Agent request timed out';
+      recordRoutingAdherenceEvent({
+        kind: 'timeout',
+        phase: 'agent-request',
+        runId: id,
+        role: profile.preferredRole,
+        selectedModel: modelId,
+        providerId: provider.providerId,
+        promptHash: hashPrompt(req.prompt),
+        timeoutMs: requestTimeoutMs,
+        elapsedMs: Date.now() - new Date(startedAt).getTime(),
+        error: artifact.error,
+        retryable: true,
+      });
+    } else if (controller.signal.aborted) {
       artifact.status = 'cancelled';
       artifact.error = 'Agent request aborted';
       recordRoutingAdherenceEvent({
@@ -599,7 +655,7 @@ export async function runAgentPhase(
         selectedModel: modelId,
         providerId: provider.providerId,
         promptHash: hashPrompt(req.prompt),
-        timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+        timeoutMs: requestTimeoutMs,
         elapsedMs: Date.now() - new Date(startedAt).getTime(),
         error: 'Agent request aborted',
         retryable: true,
@@ -615,7 +671,7 @@ export async function runAgentPhase(
         selectedModel: modelId,
         providerId: provider.providerId,
         promptHash: hashPrompt(req.prompt),
-        timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+        timeoutMs: requestTimeoutMs,
         elapsedMs: Date.now() - new Date(startedAt).getTime(),
         error: artifact.error,
         retryable: true,
@@ -624,6 +680,7 @@ export async function runAgentPhase(
   } finally {
     artifact.completedAt = new Date().toISOString();
     artifact.durationMs = new Date(artifact.completedAt).getTime() - new Date(startedAt).getTime();
+    clearTimeout(timeout);
   }
 
   return artifact;
@@ -636,9 +693,10 @@ async function callAgentModel(
   temperature: number,
   signal: AbortSignal,
   tools: AgentToolDefinition[] = [],
+  timeoutMs = AGENT_REQUEST_TIMEOUT_MS,
 ): Promise<AgentModelResponse> {
   if (provider.providerType === 'anthropic' || provider.providerType === 'google') {
-    return callNativeAgentModel(provider, modelId, messages, temperature, signal, tools);
+    return callNativeAgentModel(provider, modelId, messages, temperature, signal, tools, timeoutMs);
   }
 
   const url = buildChatURL(provider);
@@ -647,7 +705,7 @@ async function callAgentModel(
     headers['Authorization'] = `Bearer ${provider.apiKey}`;
     headers['x-api-key'] = provider.apiKey;
   }
-  const timeoutSignal = AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const combinedSignal = signal.aborted ? signal : AbortSignal.any([signal, timeoutSignal]);
   const providerTools = toProviderTools(tools);
   const body: any = {
@@ -686,6 +744,7 @@ async function callNativeAgentModel(
   temperature: number,
   signal: AbortSignal,
   tools: AgentToolDefinition[] = [],
+  timeoutMs = AGENT_REQUEST_TIMEOUT_MS,
 ): Promise<AgentModelResponse> {
   const adapter = getAdapter({
     id: 'agent-runtime',
@@ -697,7 +756,7 @@ async function callNativeAgentModel(
   });
   if (!adapter) throw new Error(`No adapter found for provider type: ${provider.providerType}`);
 
-  const timeoutSignal = AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const combinedSignal = signal.aborted ? signal : AbortSignal.any([signal, timeoutSignal]);
   const bareModelId = modelId.includes(':') ? modelId.split(':').slice(1).join(':') : modelId;
   let text = '';

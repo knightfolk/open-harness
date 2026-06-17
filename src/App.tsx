@@ -1,14 +1,16 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRunStep, ProjectProfile, SidebarTab, ThinkingEffort } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRun, HarnessRunStep, ProjectProfile, SidebarTab, ThinkingEffort, RunSteeringAction } from './types';
 import type { PanelId } from './types/layout';
 import { ALL_PANELS } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
 import { StatusBar } from './components/StatusBar';
+import { AgentFocusPanel } from './components/AgentFocusPanel';
 import { useLayoutState } from './components/layout/useLayoutState';
 import * as api from './utils/api';
 import { normalizeThinkingEffort } from './utils/modelCapabilities';
+import { pickActiveRunAndPhases } from './utils/agentWorkState';
 import {
   applyTheme,
   getInstalledThemePluginManifests,
@@ -32,6 +34,7 @@ const SIDEBAR_WIDTH_KEY = 'openharness.sidebar.width.v1';
 const PINNED_TOOLS_KEY = 'openharness.pinned-tools.v1';
 const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
 const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
+const THEME_TEXTURE_OPACITY_OVERRIDE_KEY = 'openharness.theme.texture-opacity-override.v1';
 
 function loadSidebarWidth() {
   try {
@@ -47,7 +50,8 @@ function loadPinnedTools(): PanelId[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(PINNED_TOOLS_KEY) || '[]');
     const knownPanels = new Set<string>(ALL_PANELS);
-    return Array.isArray(parsed) ? parsed.filter((id): id is PanelId => typeof id === 'string' && knownPanels.has(id)) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is PanelId => typeof id === 'string' && knownPanels.has(id));
   } catch {
     return [];
   }
@@ -55,7 +59,9 @@ function loadPinnedTools(): PanelId[] {
 
 function loadEnvironmentOpen() {
   try {
-    return localStorage.getItem(ENVIRONMENT_HIDDEN_KEY) !== 'true';
+    const raw = localStorage.getItem(ENVIRONMENT_HIDDEN_KEY);
+    if (raw === null) return true;
+    return raw !== 'true';
   } catch {
     return true;
   }
@@ -63,10 +69,29 @@ function loadEnvironmentOpen() {
 
 function loadClickyEnabled() {
   try {
-    return localStorage.getItem(CLICKY_ENABLED_KEY) !== 'false';
+    return localStorage.getItem(CLICKY_ENABLED_KEY) === 'true';
   } catch {
-    return true;
+    return false;
   }
+}
+
+function clampThemeTextureOpacity(value: number) {
+  return Math.min(0.18, Math.max(0, value));
+}
+
+function loadThemeTextureOpacityOverride(): number | null {
+  try {
+    const raw = localStorage.getItem(THEME_TEXTURE_OPACITY_OVERRIDE_KEY);
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? clampThemeTextureOpacity(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyThemeTextureOpacityOverride(value: number) {
+  document.documentElement.style.setProperty('--theme-texture-opacity', String(clampThemeTextureOpacity(value)));
 }
 
 function describeRunStep(step: HarnessRunStep): string {
@@ -76,6 +101,7 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'artifact': return `Created artifact: ${step.artifact.title}`;
     case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
     case 'auto_router': return describeAutoRouterRunStep(step);
+    case 'steering': return `Steering applied: ${step.action}${step.target ? ` (${step.target})` : ''}${step.note ? ` · ${step.note}` : ''}`;
     case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
     case 'model_text': return `Received ${step.chars} characters from model`;
@@ -126,13 +152,122 @@ function isVisibleOrchestrationPhase(label: string): boolean {
 function parsePhaseDetail(detail?: string): { model?: string; status?: SubAgent['status']; durationMs?: number } {
   if (!detail) return {};
   const model = detail.match(/\bmodel=([^\s]+)/)?.[1];
-  const rawStatus = detail.match(/\bstatus=(complete|error|running|idle)\b/)?.[1] as SubAgent['status'] | undefined;
+  const rawStatus = detail.match(/\bstatus=(complete|error|running|idle|blocked)\b/)?.[1] as SubAgent['status'] | undefined;
   const durationMs = Number(detail.match(/\bduration=(\d+)ms\b/)?.[1]);
   return {
     model,
     status: rawStatus,
     durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
   };
+}
+
+function buildSubAgentsFromLoadedMessages(rawMessages: api.MessageInfo[]): SubAgent[] {
+  type LoadedRun = { run: api.HarnessRun; sourceTime: number };
+  const latestRunsById = new Map<string, LoadedRun>();
+
+  rawMessages.forEach((message) => {
+    const run = message.runTrace;
+    if (!run) return;
+    const sourceTime = new Date(message.timestamp).getTime();
+    const normalizedSourceTime = Number.isFinite(sourceTime) ? sourceTime : 0;
+    const existing = latestRunsById.get(run.id);
+    if (!existing || normalizedSourceTime >= existing.sourceTime) {
+      latestRunsById.set(run.id, { run, sourceTime: normalizedSourceTime });
+    }
+  });
+
+  if (latestRunsById.size === 0) return [];
+
+  const agents: SubAgent[] = [];
+
+  Array.from(latestRunsById.values())
+    .sort((a, b) => b.sourceTime - a.sourceTime)
+    .forEach(({ run }) => {
+      const startedAt = new Date(run.startedAt);
+      const completedAt = run.completedAt ? new Date(run.completedAt) : undefined;
+      const runStatus: SubAgent['status'] = run.status === 'error' ? 'error' : run.status === 'running' ? 'running' : 'complete';
+      const runSteps = run.steps || [];
+      const runModel = run.effectiveModel || run.requestedModel || 'Auto';
+      const runTask = runSteps.length ? describeRunStep(runSteps[runSteps.length - 1]) : `Run ${run.role}`;
+      const normalizedStartTime = Number.isFinite(startedAt.getTime()) ? startedAt : new Date();
+      const normalizedCompletedAt = completedAt && Number.isFinite(completedAt.getTime()) ? completedAt : undefined;
+      const runStartMs = normalizedStartTime.getTime();
+      const runMessages = runSteps.map((step, index) => ({
+        id: `${run.id}:trace-step:${index}`,
+        role: 'system' as const,
+        content: describeRunStep(step),
+        timestamp: new Date(runStartMs + index),
+        status: 'complete' as const,
+      }));
+
+      const runAgent: SubAgent = {
+        id: run.id,
+        name: `${run.role} run`,
+        model: runModel,
+        status: runStatus,
+        task: runTask,
+        progress: runStatus === 'running' ? 90 : 100,
+        startTime: normalizedStartTime,
+        endTime: normalizedCompletedAt,
+        tokensUsed: run.context.tokensUsed,
+        messages: runMessages,
+        runTrace: run,
+      };
+      agents.push(runAgent);
+
+      const phaseTrace = runSteps
+        .filter((step): step is Extract<HarnessRunStep, { type: 'orchestration' }> => step.type === 'orchestration' && isVisibleOrchestrationPhase(step.label));
+
+      const phasesById = new Map<string, SubAgent>();
+      phaseTrace.forEach((step, index) => {
+        const phaseId = orchestrationAgentId(run.id, step.label);
+        const detail = parsePhaseDetail(step.detail);
+        const phaseIsLast = index === phaseTrace.length - 1;
+        const inferredStatus: SubAgent['status'] = detail.status
+          || (run.status === 'error'
+            ? (phaseIsLast ? 'error' : 'complete')
+            : run.status === 'running'
+              ? (phaseIsLast ? 'running' : 'complete')
+              : 'complete');
+        const phaseRunModel = detail.model || runModel;
+        const phaseStart = new Date(runStartMs + index + 1);
+        const phaseMessage = {
+          id: `${run.id}:phase-step:${phaseId}`,
+          role: 'system' as const,
+          content: describeRunStep(step),
+          timestamp: phaseStart,
+          status: 'complete' as const,
+        };
+        const previous = phasesById.get(phaseId);
+        const durationMs = detail.durationMs;
+        const baseAgent: SubAgent = {
+          id: phaseId,
+          name: step.label,
+          model: phaseRunModel,
+          status: inferredStatus,
+          task: step.detail || describeRunStep(step),
+          progress: inferredStatus === 'running' ? 80 : inferredStatus === 'error' || inferredStatus === 'blocked' || inferredStatus === 'complete' ? 100 : 0,
+          startTime: phaseStart,
+          endTime: durationMs != null ? new Date(phaseStart.getTime() + durationMs) : normalizedCompletedAt,
+          messages: [phaseMessage],
+          runTrace: run,
+        };
+        phasesById.set(phaseId, previous ? {
+          ...baseAgent,
+          status: inferredStatus,
+          task: step.detail || describeRunStep(step),
+          progress: inferredStatus === 'running' ? 80 : inferredStatus === 'error' || inferredStatus === 'blocked' || inferredStatus === 'complete' ? 100 : 0,
+          model: phaseRunModel,
+          messages: [...(previous.messages || []), phaseMessage],
+          endTime: durationMs != null ? new Date(phaseStart.getTime() + durationMs)
+            : previous.endTime,
+        } : baseAgent);
+      });
+
+      phasesById.forEach((phase) => agents.push(phase));
+    });
+
+  return agents;
 }
 
 function runStepMeansWork(step: HarnessRunStep): boolean {
@@ -186,6 +321,7 @@ function App() {
   const [clickyEnabled, setClickyEnabled] = useState(loadClickyEnabled);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const savedProofMessageIdsRef = useRef(new Set<string>());
   const [workingDir, setWorkingDir] = useState<string | null>(null);
   const [projectProfile, setProjectProfile] = useState<ProjectProfile | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -199,10 +335,12 @@ function App() {
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [roleAssignments, setRoleAssignments] = useState<CodingRoleAssignment[]>(DEFAULT_ROLE_ASSIGNMENTS);
   const [activeTheme, setActiveTheme] = useState('midnight');
+  const [textureOpacityOverride, setTextureOpacityOverride] = useState<number | null>(loadThemeTextureOpacityOverride);
   const [, setInstalledThemeManifests] = useState<string[]>([]);
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
+  const [providerRateLimitStatus, setProviderRateLimitStatus] = useState<api.ProviderRateLimitStatus | null>(null);
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
   const [contextWarning, setContextWarning] = useState<string | null>(null);
   const [trustMode, setTrustMode] = useState('workspace-write');
@@ -213,11 +351,22 @@ function App() {
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [reviewFlyoutOpen, setReviewFlyoutOpen] = useState(false);
+  const [reviewFlyoutTab, setReviewFlyoutTab] = useState<'summary' | 'files' | 'patches' | 'validate' | 'commit'>('summary');
   const [focusedSubAgentId, setFocusedSubAgentId] = useState<string | null>(null);
+  const [agentFocusOpen, setAgentFocusOpen] = useState(false);
   const [lastAutoRouterStep, setLastAutoRouterStep] = useState<Extract<HarnessRunStep, { type: 'auto_router' }> | null>(null);
-  const { layout, togglePanel, removePanel, swapPanels, resetLayout, addPanel } = useLayoutState();
+  const { layout, togglePanel, removePanel, resetLayout, addPanel } = useLayoutState();
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
+  const enabledModelsForPanels = useMemo(() => providers.flatMap((provider) =>
+    provider.configured
+      ? provider.models.filter((model) => model.enabled).map((model) => ({
+          ...model,
+          providerId: provider.id,
+          providerName: provider.name,
+        }))
+      : []
+  ), [providers]);
 
   // Listen for Electron IPC events (snap zones, menu actions)
   useEffect(() => {
@@ -245,6 +394,7 @@ function App() {
         setMessages([]);
         setLastAutoRouterStep(null);
         setSubAgents([]);
+        setFocusedSubAgentId(null);
       }
       if (action === 'open-folder' && path) {
         const session = await api.createSession(basename(path), path);
@@ -262,6 +412,7 @@ function App() {
         setMessages([]);
         setLastAutoRouterStep(null);
         setSubAgents([]);
+        setFocusedSubAgentId(null);
       }
     });
   }, []);
@@ -395,6 +546,30 @@ function App() {
     })();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const status = await api.getProviderRateLimitStatus();
+        if (!cancelled) setProviderRateLimitStatus(status);
+      } catch {
+        if (!cancelled) setProviderRateLimitStatus(null);
+      }
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (textureOpacityOverride !== null) {
+      applyThemeTextureOpacityOverride(textureOpacityOverride);
+    }
+  }, [activeTheme, textureOpacityOverride]);
+
   // ── Provider / model handlers ──────────────────────
   const handleSelectModel = useCallback((modelId: string) => {
     const oldCtx = modelContextWindows.get(activeModel) || 0;
@@ -481,9 +656,25 @@ function App() {
 
   const handleSelectTheme = useCallback((themeId: string) => {
     const resolvedThemeId = applyTheme(themeId);
+    if (textureOpacityOverride !== null) {
+      applyThemeTextureOpacityOverride(textureOpacityOverride);
+    }
     setActiveTheme(resolvedThemeId);
     api.updateConfig({ activeTheme: resolvedThemeId }).catch(() => {});
-  }, []);
+  }, [textureOpacityOverride]);
+
+  const handleTextureOpacityOverrideChange = useCallback((value: number | null) => {
+    if (value === null) {
+      try { localStorage.removeItem(THEME_TEXTURE_OPACITY_OVERRIDE_KEY); } catch { /* ignore */ }
+      setTextureOpacityOverride(null);
+      applyTheme(activeTheme);
+      return;
+    }
+    const next = clampThemeTextureOpacity(value);
+    try { localStorage.setItem(THEME_TEXTURE_OPACITY_OVERRIDE_KEY, String(next)); } catch { /* ignore */ }
+    setTextureOpacityOverride(next);
+    applyThemeTextureOpacityOverride(next);
+  }, [activeTheme]);
 
   const handleThemePluginManifestsChange = useCallback((themeManifests: string[]) => {
     const normalized = [...new Set(themeManifests
@@ -604,7 +795,7 @@ function App() {
         setActiveSessionId(list[0].id);
         setWorkingDir(list[0].workingDir);
         const detail = await api.getSession(list[0].id);
-        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
+        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
       } catch (err) {
         console.error('Failed to load sessions:', err);
       } finally {
@@ -616,15 +807,16 @@ function App() {
   const handleSelectSession = useCallback(async (id: string) => {
     if (id === activeSessionId) return;
     setActiveSessionId(id);
-    setSubAgents([]);
     try {
       const detail = await api.getSession(id);
       setWorkingDir(detail.workingDir || null);
-      applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
+      applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
     } catch (err) {
       console.error('Failed to load session:', err);
       setMessages([]);
       setLastAutoRouterStep(null);
+      setSubAgents([]);
+      setFocusedSubAgentId(null);
     }
   }, [activeSessionId]);
 
@@ -650,8 +842,7 @@ function App() {
         setActiveSessionId(next.id);
         setWorkingDir(next.workingDir || null);
         const detail = await api.getSession(next.id);
-        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
-        setSubAgents([]);
+        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
       }
     } catch (err) {
       console.error('Failed to delete session:', err);
@@ -681,8 +872,7 @@ function App() {
         setActiveSessionId(next.id);
         setWorkingDir(next.workingDir || null);
         const detail = await api.getSession(next.id);
-        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep);
-        setSubAgents([]);
+        applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
       }
     } catch (err) {
       console.error('Failed to delete project sessions:', err);
@@ -707,6 +897,7 @@ function App() {
       setMessages([]);
       setLastAutoRouterStep(null);
       setSubAgents([]);
+      setFocusedSubAgentId(null);
     } catch (err) {
       console.error('Failed to create session:', err);
     }
@@ -734,6 +925,7 @@ function App() {
       setMessages([]);
       setLastAutoRouterStep(null);
       setSubAgents([]);
+      setFocusedSubAgentId(null);
     } catch (err) {
       console.error('Failed to open folder:', err);
     }
@@ -923,13 +1115,14 @@ function App() {
               : [...existing, nextTool];
             return { ...nextMessage, toolCalls };
           }));
-          if (step.type === 'orchestration' && isVisibleOrchestrationPhase(step.label)) {
+        if (step.type === 'orchestration' && isVisibleOrchestrationPhase(step.label)) {
             const phase = parsePhaseDetail(step.detail);
             const phaseId = orchestrationAgentId(runId, step.label);
             setSubAgents((prev) => {
               const existing = prev.find((a) => a.id === phaseId);
-              const nextStatus = phase.status || existing?.status || 'idle';
-              const nextAgent: SubAgent = {
+            const nextStatus = phase.status || existing?.status || 'idle';
+            const isTerminalPhase = nextStatus === 'complete' || nextStatus === 'error' || nextStatus === 'blocked';
+            const nextAgent: SubAgent = {
                 ...(existing || {
                   id: phaseId,
                   name: step.label,
@@ -940,12 +1133,12 @@ function App() {
                 model: phase.model || existing?.model || 'Auto',
                 status: nextStatus,
                 task: step.detail || stepText,
-                progress: nextStatus === 'complete' || nextStatus === 'error'
-                  ? 100
-                  : nextStatus === 'running'
-                    ? Math.min(90, (existing?.progress || 10) + 20)
+                progress: nextStatus === 'running'
+                  ? Math.min(90, (existing?.progress || 10) + 20)
+                  : isTerminalPhase
+                    ? 100
                     : existing?.progress || 0,
-                endTime: nextStatus === 'complete' || nextStatus === 'error' ? new Date() : existing?.endTime,
+                endTime: isTerminalPhase ? new Date() : existing?.endTime,
                 messages: [
                   ...(existing?.messages || []),
                   { id: uid(), role: 'system', content: stepText, timestamp: new Date(), status: 'complete' as const },
@@ -975,10 +1168,10 @@ function App() {
           setSubAgents((prev) => prev.map((a) => a.id === runId ? {
             ...a,
             task: stepText,
-            status: step.type === 'error' ? 'error' : a.status,
-            progress: step.type === 'final_answer' ? 95 : Math.min(90, (a.progress || 5) + 10),
-            messages: [...(a.messages || []), { id: uid(), role: 'system', content: stepText, timestamp: new Date(), status: 'complete' }],
-            runTrace: a.runTrace ? { ...a.runTrace, steps: [...a.runTrace.steps, step] } : undefined,
+                status: step.type === 'error' ? 'error' : a.status,
+                progress: step.type === 'final_answer' ? 95 : Math.min(90, (a.progress || 5) + 10),
+                messages: [...(a.messages || []), { id: uid(), role: 'system', content: stepText, timestamp: new Date(), status: 'complete' }],
+                runTrace: a.runTrace ? { ...a.runTrace, steps: [...a.runTrace.steps, step] } : undefined,
           } : a));
         },
         onRunComplete: (run) => {
@@ -1067,6 +1260,16 @@ function App() {
     await handleSendMessage(text);
   }, [handleSendMessage]);
 
+  const openReviewChanges = useCallback((tab: 'summary' | 'files' | 'patches' | 'validate' | 'commit' = 'summary') => {
+    setReviewFlyoutTab(tab);
+    setReviewFlyoutOpen(true);
+  }, []);
+
+  const closeReviewChanges = useCallback(() => {
+    setReviewFlyoutOpen(false);
+    setReviewFlyoutTab('summary');
+  }, []);
+
   const handleReviewDiff = useCallback(async (diffText: string) => {
     await handleSendMessage(`Review this diff and provide feedback:\n\`\`\`diff\n${diffText.slice(0, 5000)}\n\`\`\``);
   }, [handleSendMessage]);
@@ -1093,11 +1296,11 @@ function App() {
         explanation: explanation?.trim() || undefined,
       });
       setPendingPatchProposalId(res.id);
-      addPanel("patches");
+      openReviewChanges('patches');
     } catch (err: any) {
       console.error("[proposePatch] failed:", err?.message || err);
     }
-  }, [workingDir, activeSessionId, ensureSession, addPanel]);
+  }, [workingDir, activeSessionId, ensureSession, openReviewChanges]);
 
   // Race-safe clear: if a different id is now pending (e.g. the user
   // clicked Propose patch on file B while file A's effect was still
@@ -1159,6 +1362,85 @@ function App() {
     }
   }, [activeModel, ensureSession, isTyping, modelContextWindows]);
 
+  const handleRunSteer = useCallback(async (
+    runId: string,
+    action: RunSteeringAction,
+    target: 'orchestrator' | 'agent' = 'orchestrator',
+    note?: string,
+  ): Promise<HarnessRun | null> => {
+    if (!activeSessionId) return null;
+    const trimmedNote = note?.trim();
+    if (action === 'add-note' && !trimmedNote) return null;
+    try {
+      const savedRun = await api.sendRunSteering(activeSessionId, runId, action, {
+        target,
+        note: trimmedNote,
+      });
+      if (savedRun) {
+        const savedSteeringStep = savedRun.steps
+          .slice()
+          .reverse()
+          .find((step): step is Extract<HarnessRunStep, { type: 'steering' }> => step.type === 'steering');
+        const stepText = savedSteeringStep ? describeRunStep(savedSteeringStep) : 'Steering saved';
+        setSubAgents((prev) => prev.map((agent) => {
+          if (!agent.runTrace || agent.runTrace.id !== runId) return agent;
+          return {
+            ...agent,
+            task: stepText,
+            messages: [...(agent.messages || []), { id: uid(), role: 'system', content: stepText, timestamp: new Date(), status: 'complete' }],
+            runTrace: savedRun,
+          };
+        }));
+        setMessages((prev) => prev.map((message) =>
+          message.runTrace?.id === runId ? { ...message, runTrace: savedRun } : message
+        ));
+      }
+      return savedRun;
+    } catch (err) {
+      console.error('Failed to send run steering:', err);
+      return null;
+    }
+  }, [activeSessionId]);
+
+  const handleProofArtifactSaved = useCallback((message: api.MessageInfo) => {
+    if (messages.some((item) => item.id === message.id)) return;
+    if (savedProofMessageIdsRef.current.has(message.id)) return;
+    savedProofMessageIdsRef.current.add(message.id);
+    const mapped = mapApiMessage(message);
+    const savedSessionId = mapped.runTrace?.sessionId || activeSessionId;
+    const proofArtifact = mapped.runTrace?.steps
+      .filter((step): step is Extract<HarnessRunStep, { type: 'artifact' }> => step.type === 'artifact')
+      .map((step) => step.artifact)
+      .find((artifact) => artifact.type === 'validation_proof');
+    const proofPreview = proofArtifact
+      ? `${proofArtifact.title}: ${proofArtifact.summary}`
+      : mapped.content.slice(0, 120);
+    setMessages((prev) => {
+      if (prev.some((item) => item.id === mapped.id)) return prev;
+      return [...prev, mapped];
+    });
+    if (savedSessionId) {
+      setSessions((prev) => prev.map((session) => (
+        session.id === savedSessionId
+          ? {
+            ...session,
+            preview: proofPreview,
+            updatedAt: message.timestamp,
+            messageCount: session.messageCount + 1,
+          }
+          : session
+      )));
+    }
+    const savedMessageRouterStep = latestAutoRouterStep([mapped]);
+    if (savedMessageRouterStep) setLastAutoRouterStep(savedMessageRouterStep);
+    if (mapped.runTrace) {
+      setSubAgents((prev) => {
+        if (prev.some((agent) => agent.id === mapped.runTrace!.id)) return prev;
+        return [...prev, ...buildSubAgentsFromLoadedMessages([message])];
+      });
+    }
+  }, [activeSessionId, messages]);
+
 
   const handleTrustModeChange = useCallback((mode: string) => {
     setTrustMode(mode);
@@ -1173,8 +1455,6 @@ function App() {
     collect(layout);
     return set;
   }, [layout]);
-
-  const bottomBarOpen = visiblePanels.has('terminal');
 
   const startResizeSidebar = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1195,14 +1475,6 @@ function App() {
     window.addEventListener('mouseup', onUp);
   }, [sidebarWidth]);
 
-  const handleToggleBottomBar = useCallback(() => {
-    if (visiblePanels.has('terminal')) {
-      removePanel('terminal');
-    } else {
-      addPanel('terminal');
-    }
-  }, [visiblePanels, removePanel, addPanel]);
-
   // Compute enabled tool count: 3 built-in + MCP tools from running servers
   const builtinToolCount = trustMode === "chat-only" ? 0 : trustMode === "read-only" ? 2 : 3;
   const mcpToolCount = mcpStatus
@@ -1212,10 +1484,43 @@ function App() {
 
   const msgCount = messages.length;
   const sessionTitle = sessions.find((s) => s.id === activeSessionId)?.title || 'OpenHarness';
-  const runningModel = subAgents.find((a) => a.status === 'running')?.model || null;
+  const runningModel = subAgents.find((a) => a.status === 'running' || a.status === 'blocked')?.model || null;
+  const terminalPanelOpen = visiblePanels.has('terminal');
+  const recentRateLimitEvent = providerRateLimitStatus?.recentEvents.find((event) => {
+    const timestamp = Date.parse(event.timestamp);
+    return Number.isFinite(timestamp) && Date.now() - timestamp < 10 * 60 * 1000;
+  }) || null;
+  const exhaustedRateLimitProvider = providerRateLimitStatus?.providers.find((provider) =>
+    provider.configured &&
+    provider.action !== 'allow' &&
+    (provider.remainingRequests === 0 || provider.remainingTokens === 0)
+  ) || null;
+  const providerRateLimitWarning = recentRateLimitEvent
+    ? {
+        severity: recentRateLimitEvent.action,
+        providerId: recentRateLimitEvent.providerId,
+        label: `${recentRateLimitEvent.action.toUpperCase()} ${recentRateLimitEvent.providerId}`,
+        detail: recentRateLimitEvent.reason,
+        resetSeconds: recentRateLimitEvent.resetSeconds,
+      }
+    : exhaustedRateLimitProvider
+      ? {
+          severity: exhaustedRateLimitProvider.action === 'block' ? 'block' as const : 'warn' as const,
+          providerId: exhaustedRateLimitProvider.providerId,
+          label: `Limit reached ${exhaustedRateLimitProvider.providerId}`,
+          detail: 'Configured provider rate limit is exhausted in the current rolling window.',
+          resetSeconds: exhaustedRateLimitProvider.resetSeconds,
+        }
+      : null;
+  const shouldShowStatusBar = Boolean(
+    contextWarning ||
+    terminalPanelOpen ||
+    runningModel ||
+    providerRateLimitWarning ||
+    subAgents.some((agent) => agent.status === 'running' || agent.status === 'blocked' || agent.status === 'error'),
+  );
   const focusSubAgentInPanel = (agentId: string | null) => {
-    if (agentId) setFocusedSubAgentId(agentId);
-    addPanel('sub-agents');
+    openAgentFocusPanel(agentId);
   };
   const togglePinnedTool = useCallback((id: PanelId) => {
     setPinnedTools((prev) => {
@@ -1228,6 +1533,22 @@ function App() {
     setEnvironmentOpen(open);
     try { localStorage.setItem(ENVIRONMENT_HIDDEN_KEY, open ? 'false' : 'true'); } catch { /* ignore */ }
   }, []);
+  const openAgentFocusPanel = useCallback((agentId: string | null) => {
+    if (agentId) setFocusedSubAgentId(agentId);
+    setAgentFocusOpen(true);
+    if (environmentOpen) setChatEnvironmentOpen(false);
+  }, [environmentOpen, setChatEnvironmentOpen]);
+  const closeAgentFocusPanel = useCallback(() => {
+    setAgentFocusOpen(false);
+    setFocusedSubAgentId(null);
+  }, []);
+
+  useEffect(() => {
+    if (agentFocusOpen && subAgents.length === 0) {
+      closeAgentFocusPanel();
+    }
+  }, [agentFocusOpen, subAgents, closeAgentFocusPanel]);
+
   const handleClickyEnabledChange = useCallback((enabled: boolean) => {
     setClickyEnabled(enabled);
     try { localStorage.setItem(CLICKY_ENABLED_KEY, enabled ? 'true' : 'false'); } catch { /* ignore */ }
@@ -1281,11 +1602,9 @@ function App() {
           visiblePanels={visiblePanels}
           onTogglePanel={togglePanel}
           onResetLayout={resetLayout}
+          activeModel={activeModel}
           sessionTitle={sessionTitle}
           workingDir={workingDir}
-          onOpenFolder={() => addPanel('files')}
-          bottomBarOpen={bottomBarOpen}
-          onToggleBottomBar={handleToggleBottomBar}
           environmentOpen={environmentOpen}
           onToggleEnvironment={() => setChatEnvironmentOpen(!environmentOpen)}
           pinnedTools={pinnedTools}
@@ -1305,42 +1624,59 @@ function App() {
             <>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, position: 'relative' }}>
               <>
-                  <LayoutEngine
-                    layout={layout}
-                    onRemovePanel={removePanel}
-                    onSwapPanels={swapPanels}
-                    subAgents={subAgents}
-                    plan={null}
-                    fileChanges={[]}
-                    terminalCommands={[]}
-                    focusedSubAgentId={focusedSubAgentId}
-                    messages={messages}
-                    isTyping={isTyping}
-                    onSendMessage={handleSendMessage}
-                    activeModel={activeModel}
-                    workingDir={workingDir}
-                    projectProfile={projectProfile}
-                    sessionId={activeSessionId}
-                    pendingPatchProposalId={pendingPatchProposalId}
-                    clearPendingPatchProposalId={clearPendingPatchProposalId}
-                    onSendToChat={handleSendToChat}
-                    onReviewDiff={handleReviewDiff}
-                    onProposePatch={handleProposePatch}
-                    onExplainChange={handleExplainChange}
-                    onAskAboutScreenshot={handleAskAboutScreenshot}
-                    onCompareModel={handleCompareModel}
-                    onReviewChanges={() => setReviewFlyoutOpen(true)}
-                    onFocusAgents={() => {
-                      const next = subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
-                      focusSubAgentInPanel(next);
-                    }}
-                    trustMode={trustMode}
-                    models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
-                    pinnedTools={pinnedTools}
-                    onOpenPinnedTool={addPanel}
-                    environmentOpen={environmentOpen}
-                    onEnvironmentOpenChange={setChatEnvironmentOpen}
-                  />
+                <LayoutEngine
+                  layout={layout}
+                  onRemovePanel={removePanel}
+                  subAgents={subAgents}
+                  plan={null}
+                  fileChanges={[]}
+                  terminalCommands={[]}
+                  focusedSubAgentId={focusedSubAgentId}
+                  messages={messages}
+                  isTyping={isTyping}
+                  onSendMessage={handleSendMessage}
+                  activeModel={activeModel}
+                  workingDir={workingDir}
+                  projectProfile={projectProfile}
+                  sessionId={activeSessionId}
+                  pendingPatchProposalId={pendingPatchProposalId}
+                  clearPendingPatchProposalId={clearPendingPatchProposalId}
+                  onSendToChat={handleSendToChat}
+                  onReviewDiff={handleReviewDiff}
+                  onProposePatch={handleProposePatch}
+                  onExplainChange={handleExplainChange}
+                  onAskAboutScreenshot={handleAskAboutScreenshot}
+                  onCompareModel={handleCompareModel}
+                  onReviewChanges={() => openReviewChanges('summary')}
+                  onFocusAgents={() => {
+                    const activeRun = pickActiveRunAndPhases(subAgents)?.run.id;
+                    const next = activeRun || subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
+                    if (!next) return;
+                    focusSubAgentInPanel(next);
+                  }}
+                  onFocusSubAgent={(agentId: string) => focusSubAgentInPanel(agentId)}
+                  trustMode={trustMode}
+                  models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
+                  enabledModels={enabledModelsForPanels}
+                  onApplyRoleRecommendation={handleAssignRoleModel}
+                  pinnedTools={pinnedTools}
+                  onOpenPinnedTool={addPanel}
+                  environmentOpen={environmentOpen}
+                  onEnvironmentOpenChange={setChatEnvironmentOpen}
+                  onRunSteer={handleRunSteer}
+                />
+
+                {agentFocusOpen && (
+                  <div className="agent-focus-overlay">
+                    <AgentFocusPanel
+                      agents={subAgents}
+                      focusedId={focusedSubAgentId}
+                      onFocus={openAgentFocusPanel}
+                      onExit={closeAgentFocusPanel}
+                      onRunSteer={handleRunSteer}
+                    />
+                  </div>
+                )}
               </>
             </div>
           </>
@@ -1348,42 +1684,45 @@ function App() {
         </div>
 
         {/* Enhanced Status Bar */}
-        <StatusBar
-          activeModel={activeModel}
-          providerName={activeModel.toLowerCase() === 'auto'
-            ? 'Router'
-            : providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
-          activeProviderId={providers.find(p => p.models?.some(m => m.id === activeModel))?.id}
-          activeProviderAccessMode={providers.find(p => p.models?.some(m => m.id === activeModel))?.accessMode}
-          activeProviderPlanId={providers.find(p => p.models?.some(m => m.id === activeModel))?.planId}
-          thinkingEffort={thinkingEffort}
-          connected={providers.some(p => p.configured)}
-          messageCount={msgCount}
-          workingDir={workingDir}
-          models={Array.from(modelContextWindows.entries()).map(([id, ctx]) => {
-            const prov = providers.find(p => p.models?.some(m => m.id === id));
-            return {
-              id,
-              name: id,
-              providerName: prov?.name || 'Unknown',
-              providerId: prov?.id,
-              accessMode: prov?.accessMode,
-              planId: prov?.planId,
-              contextWindow: ctx,
-            };
-          })}
-          onModelChange={handleSelectModel}
-          onThinkingEffortChange={handleThinkingEffortChange}
-          favoriteModelIds={favoriteModelIds}
-          onToggleFavoriteModel={handleToggleFavoriteModel}
-          enabledToolCount={enabledToolCount}
-          configuredProviderCount={providers.filter(p => p.configured).length}
-          trustMode={trustMode}
-          onTrustModeChange={handleTrustModeChange}
-          runningModel={runningModel}
-          autoRouterStep={lastAutoRouterStep}
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
+        {shouldShowStatusBar && (
+          <StatusBar
+            activeModel={activeModel}
+            providerName={activeModel.toLowerCase() === 'auto'
+              ? 'Router'
+              : providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
+            activeProviderId={providers.find(p => p.models?.some(m => m.id === activeModel))?.id}
+            activeProviderAccessMode={providers.find(p => p.models?.some(m => m.id === activeModel))?.accessMode}
+            activeProviderPlanId={providers.find(p => p.models?.some(m => m.id === activeModel))?.planId}
+            thinkingEffort={thinkingEffort}
+            connected={providers.some(p => p.configured)}
+            messageCount={msgCount}
+            workingDir={workingDir}
+            models={Array.from(modelContextWindows.entries()).map(([id, ctx]) => {
+              const prov = providers.find(p => p.models?.some(m => m.id === id));
+              return {
+                id,
+                name: id,
+                providerName: prov?.name || 'Unknown',
+                providerId: prov?.id,
+                accessMode: prov?.accessMode,
+                planId: prov?.planId,
+                contextWindow: ctx,
+              };
+            })}
+            onModelChange={handleSelectModel}
+            onThinkingEffortChange={handleThinkingEffortChange}
+            favoriteModelIds={favoriteModelIds}
+            onToggleFavoriteModel={handleToggleFavoriteModel}
+            enabledToolCount={enabledToolCount}
+            configuredProviderCount={providers.filter(p => p.configured).length}
+            trustMode={trustMode}
+            onTrustModeChange={handleTrustModeChange}
+            runningModel={runningModel}
+            autoRouterStep={lastAutoRouterStep}
+            providerRateLimitWarning={providerRateLimitWarning}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
       </main>
 
       {/* Context Window Warning Toast */}
@@ -1456,10 +1795,12 @@ function App() {
         <ReviewChangesFlyout
           workingDir={workingDir}
           _sessionId={activeSessionId}
-          onClose={() => setReviewFlyoutOpen(false)}
+          onClose={closeReviewChanges}
+          initialTab={reviewFlyoutTab}
           onReviewDiff={handleReviewDiff}
           onProposePatch={handleProposePatch}
           onExplainChange={handleExplainChange}
+          onProofArtifactSaved={handleProofArtifactSaved}
         />
         </Suspense>
       )}
@@ -1475,6 +1816,7 @@ function App() {
         roleAssignments={roleAssignments}
         roleThinking={roleThinking}
         activeTheme={activeTheme}
+        textureOpacityOverride={textureOpacityOverride}
         personalityText={personalityText}
         mcpServers={mcpServers}
         mcpStatus={mcpStatus}
@@ -1491,6 +1833,7 @@ function App() {
         onAssignRoleModel={handleAssignRoleModel}
         onAssignRoleThinking={handleAssignRoleThinking}
         onSelectTheme={handleSelectTheme}
+        onTextureOpacityOverrideChange={handleTextureOpacityOverrideChange}
         onThemePluginManifestsChange={handleThemePluginManifestsChange}
         onRemoveTheme={handleRemoveTheme}
         onPersonalityChange={handlePersonalityChange}
@@ -1528,10 +1871,18 @@ function applyLoadedMessages(
   rawMessages: api.MessageInfo[],
   setMessages: (messages: Message[]) => void,
   setLastAutoRouterStep: (step: Extract<HarnessRunStep, { type: 'auto_router' }> | null) => void,
+  setSubAgents: (agents: SubAgent[]) => void,
+  setFocusedSubAgentId?: (agentId: string | null) => void,
 ) {
   const mapped = rawMessages.map(mapApiMessage);
   setMessages(mapped);
   setLastAutoRouterStep(latestAutoRouterStep(mapped));
+  const restoredAgents = buildSubAgentsFromLoadedMessages(rawMessages);
+  setSubAgents(restoredAgents);
+  if (setFocusedSubAgentId) {
+    const runningAgent = restoredAgents.find((agent) => agent.status === 'running' || agent.status === 'blocked')?.id;
+    setFocusedSubAgentId(runningAgent || restoredAgents[0]?.id || null);
+  }
 }
 
 // ── Snap Zone Overlay (FancyZones-style) ──

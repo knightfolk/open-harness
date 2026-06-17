@@ -33,8 +33,10 @@ function defaultSessionsDir(): string {
   return join(homedir(), '.openharness', 'sessions');
 }
 
-export function hasCanceledMarker(session: PersistedSession): boolean {
+export function hasCanceledMarker(session: PersistedSession, afterTimestampMs = Number.NEGATIVE_INFINITY): boolean {
   for (const msg of session.messages || []) {
+    const msgTimestampMs = new Date(msg.timestamp).getTime();
+    if (Number.isFinite(msgTimestampMs) && msgTimestampMs <= afterTimestampMs) continue;
     if (msg.role === 'assistant' && msg.runTrace) {
       const run = msg.runTrace;
       if (run.status === 'error') {
@@ -76,7 +78,6 @@ export function scanForLatestUserOnlySessions(options: LatestUserOnlyScanOptions
 
       const session = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedSession;
       if (!session.messages || session.messages.length === 0) continue;
-      if (hasCanceledMarker(session)) continue;
 
       const sorted = [...session.messages].sort(
         (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
@@ -86,6 +87,7 @@ export function scanForLatestUserOnlySessions(options: LatestUserOnlyScanOptions
 
       const lastTimestampMs = new Date(last.timestamp).getTime();
       if (!Number.isFinite(lastTimestampMs) || now - lastTimestampMs < thresholdMs) continue;
+      if (hasCanceledMarker(session, lastTimestampMs)) continue;
 
       const assistantExists = sorted.some(
         (m) => m.role === 'assistant' && new Date(m.timestamp).getTime() > lastTimestampMs,
@@ -120,7 +122,8 @@ export function repairLatestUserOnlySessions(options: LatestUserOnlyScanOptions 
     const filePath = join(sessionsDir, `${item.id}.json`);
     try {
       const session = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedSession;
-      if (hasCanceledMarker(session)) {
+      const lastTimestampMs = new Date(item.lastTimestamp).getTime();
+      if (hasCanceledMarker(session, Number.isFinite(lastTimestampMs) ? lastTimestampMs : undefined)) {
         skipped.push(item);
         continue;
       }

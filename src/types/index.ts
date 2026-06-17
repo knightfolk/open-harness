@@ -161,6 +161,23 @@ export interface ComparisonArtifactData {
   rawJudgeMarkdown: string;
 }
 
+export interface ValidationProofCommand {
+  id: string;
+  command: string;
+  status: 'running' | 'passed' | 'failed';
+  exitCode?: number;
+  duration?: number;
+  outputTail?: string;
+}
+
+export interface ValidationProofArtifactData {
+  workspace: string;
+  sessionId: string;
+  capturedAt: string;
+  commands: ValidationProofCommand[];
+  rawMarkdown: string;
+}
+
 export type WorkProductArtifact =
   | {
   id: string;
@@ -193,9 +210,18 @@ export type WorkProductArtifact =
   createdAt: string;
   summary: string;
   data: ComparisonArtifactData;
+}
+  | {
+  id: string;
+  type: 'validation_proof';
+  title: string;
+  createdAt: string;
+  summary: string;
+  data: ValidationProofArtifactData;
 };
 
 export type HarnessRunStep =
+  | { type: 'steering'; action: RunSteeringAction; target?: 'orchestrator' | 'agent'; source: 'user'; note?: string; createdAt: string }
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
   | { type: 'artifact'; artifact: WorkProductArtifact }
@@ -222,6 +248,16 @@ export type HarnessRunStep =
       reasons: Record<string, string>;
       suggestion: string;
     };
+
+export type RunSteeringAction =
+  | 'flag-assumption'
+  | 'add-note'
+  | 'redirect'
+  | 'pause'
+  | 'cancel'
+  | 'request-proof'
+  | 'approve-artifact'
+  | 'needs-revision';
 
 export interface ToolCall {
   id: string;
@@ -293,7 +329,7 @@ export interface SubAgent {
   id: string;
   name: string;
   model: string;
-  status: 'idle' | 'running' | 'complete' | 'error';
+  status: 'idle' | 'running' | 'complete' | 'error' | 'blocked';
   task: string;
   progress?: number;
   startTime: Date;
@@ -379,7 +415,6 @@ export interface Session {
 
 export type ThemeMode = 'dark' | 'light';
 export type SidebarTab = 'chat' | 'projects';
-export type PanelView = 'none' | 'sub-agents' | 'plan' | 'terminal';
 
 // ── Terminal Session Types ──────────────────────────
 

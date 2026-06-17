@@ -21,11 +21,17 @@ export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompar
   if (collapsed) {
     return (
       <div className="next-best-actions collapsed">
-        <button className="nba-expand-btn" onClick={() => setCollapsed(false)}>
+        <button
+          className="nba-expand-btn"
+          type="button"
+          onClick={() => setCollapsed(false)}
+          aria-expanded={false}
+          aria-label={`Show ${actions.length} suggested action${actions.length === 1 ? '' : 's'}`}
+        >
           <span className="nba-expand-label">Actions</span>
-          <span className="nba-expand-count">{actions.length}</span>
+          <span className="nba-expand-count" aria-hidden="true">{actions.length}</span>
         </button>
-        <button className="nba-dismiss-inline" onClick={() => setDismissed(true)} title="Dismiss">×</button>
+        <button className="nba-dismiss-inline" type="button" onClick={() => setDismissed(true)} title="Dismiss" aria-label="Dismiss suggested actions">×</button>
       </div>
     );
   }
@@ -34,13 +40,18 @@ export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompar
     <div className="next-best-actions">
       <div className="nba-header">
         <span className="nba-label">Next actions</span>
-        <button className="nba-dismiss" onClick={() => setDismissed(true)} title="Dismiss">×</button>
+        {collapseAt > 0 && (
+          <button className="nba-collapse" type="button" onClick={() => setCollapsed(true)} title="Collapse suggested actions" aria-label="Collapse suggested actions">Collapse</button>
+        )}
+        <button className="nba-dismiss" type="button" onClick={() => setDismissed(true)} title="Dismiss" aria-label="Dismiss suggested actions">×</button>
       </div>
-      <div className="nba-strip">
+      <div className="nba-strip" role="group" aria-label="Suggested actions">
         {actions.map((action) => (
           <button
             key={action.id}
             className="nba-chip"
+            type="button"
+            aria-label={`Suggested action: ${action.label}`}
             onClick={() => {
               switch (action.action) {
                 case 'send-message':
@@ -79,7 +90,7 @@ export function NextBestActions({ actions, onSendMessage, onRunCommand, onCompar
               }
             }}
           >
-            <span className="nba-chip-icon">{action.icon}</span>
+            <span className="nba-chip-icon" aria-hidden="true">{action.icon}</span>
             <span className="nba-chip-label">{action.label}</span>
           </button>
         ))}

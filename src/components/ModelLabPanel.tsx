@@ -6,6 +6,8 @@ interface Props {
   models: Array<{ id: string; name: string }>;
 }
 
+const HISTORY_VISIBLE_LIMIT = 20;
+
 export function ModelLabPanel({ workingDir, models }: Props) {
   const [prompts, setPrompts] = useState<api.PromptCase[]>([]);
   const [reports, setReports] = useState<api.EvalReportSummary[]>([]);
@@ -19,6 +21,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [runName, setRunName] = useState('');
+  const [preparedPackRun, setPreparedPackRun] = useState<{ packId: string; packName: string; evalIds: string[]; matchedEvalIds: string[] } | null>(null);
   const [includePlanningRoomBaseline, setIncludePlanningRoomBaseline] = useState(false);
   const [running, setRunning] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -26,18 +29,20 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const [tab, setTab] = useState<'configure' | 'results' | 'history' | 'tasks' | 'bench' | 'packs'>('configure');
   const [loading, setLoading] = useState(true);
   const [diagnostic, setDiagnostic] = useState<{ tone: 'error' | 'warning' | 'info'; title: string; detail: string } | null>(null);
+  const [providerHealthSignal, setProviderHealthSignal] = useState<ProviderHealthSignal | null>(null);
 
   // Load data
   useEffect(() => {
     (async () => {
       try {
-        const [p, r, t, s, b, plugins] = await Promise.all([
+        const [p, r, t, s, b, plugins, health] = await Promise.all([
           api.getEvalPrompts(),
           api.getEvalReports(),
           api.getTasks().catch(() => []),
           api.getTaskSuites().catch(() => []),
           api.getBenchRuns().catch(() => []),
           api.getPromptPlugins(workingDir).catch(() => null),
+          api.getProviderHealth().catch(() => null),
         ]);
         setPrompts(p);
         setReports(r);
@@ -45,6 +50,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
         setSuites(s);
         setBenchRuns(b);
         setPromptPlugins(plugins);
+        setProviderHealthSignal(summarizeProviderHealth(health));
       } catch (err) {
         console.error('Failed to load Model Lab data:', err);
         setDiagnostic({
@@ -158,6 +164,51 @@ export function ModelLabPanel({ workingDir, models }: Props) {
     setSelectedTaskIds(new Set(tasks.map(t => t.id)));
   }, [tasks]);
 
+  const prepareSmallEvalProofRun = useCallback(() => {
+    const prompt = prompts[0];
+    const model = models[0];
+    if (!prompt || !model) {
+      setDiagnostic({
+        tone: 'warning',
+        title: 'No eval proof preset available',
+        detail: 'Add at least one eval prompt and one enabled model before preparing a small proof run.',
+      });
+      return;
+    }
+    setPreparedPackRun(null);
+    setSelectedPromptIds(new Set([prompt.id]));
+    setSelectedModelIds(new Set([model.id]));
+    setRunName(`Proof eval - ${prompt.name} - ${model.name}`);
+    setTab('configure');
+    setDiagnostic({
+      tone: 'info',
+      title: 'Small eval proof prepared',
+      detail: `Selected 1 prompt and 1 model. Review provider/budget cautions, then run the eval when ready.`,
+    });
+  }, [prompts, models]);
+
+  const prepareSmallBenchProofRun = useCallback(() => {
+    const task = tasks[0];
+    const model = models[0];
+    if (!task || !model) {
+      setDiagnostic({
+        tone: 'warning',
+        title: 'No bench proof preset available',
+        detail: 'Add at least one harness task and one enabled model before preparing a small bench proof run.',
+      });
+      return;
+    }
+    setSelectedTaskIds(new Set([task.id]));
+    setSelectedModelIds(new Set([model.id]));
+    setRunName(`Proof bench - ${task.name} - ${model.name}`);
+    setTab('tasks');
+    setDiagnostic({
+      tone: 'info',
+      title: 'Small bench proof prepared',
+      detail: `Selected 1 task and 1 model. Review provider/budget cautions, then run the bench when ready.`,
+    });
+  }, [tasks, models]);
+
   const handleRun = useCallback(async () => {
     if (selectedPromptIds.size === 0 || selectedModelIds.size === 0) return;
     setRunning(true);
@@ -165,10 +216,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
     setTab('results');
     try {
       const result = await api.runEval({
-        name: runName || `Eval ${new Date().toLocaleDateString()}`,
+        name: runName || (preparedPackRun ? `Pack eval - ${preparedPackRun.packName}` : `Eval ${new Date().toLocaleDateString()}`),
         promptIds: Array.from(selectedPromptIds),
         modelIds: Array.from(selectedModelIds),
         workingDir: workingDir || undefined,
+        packContext: preparedPackRun || undefined,
       });
       setActiveRunId(result.id);
       const report = await api.getEvalReport(result.id);
@@ -182,7 +234,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       });
       setRunning(false);
     }
-  }, [selectedPromptIds, selectedModelIds, runName, workingDir]);
+  }, [selectedPromptIds, selectedModelIds, runName, preparedPackRun, workingDir]);
 
   const handleBenchRun = useCallback(async () => {
     if (selectedTaskIds.size === 0 || selectedModelIds.size === 0) return;
@@ -283,7 +335,82 @@ export function ModelLabPanel({ workingDir, models }: Props) {
     }
   }, [selectedReport]);
 
+  const handleExportBenchRun = useCallback(async () => {
+    if (!selectedBenchRun) return;
+    try {
+      const json = await api.exportBenchRun(selectedBenchRun.id, 'json');
+      downloadText(`openharness-bench-${selectedBenchRun.id}.json`, json, 'application/json');
+    } catch (err) {
+      setDiagnostic({
+        tone: 'error',
+        title: 'Could not export bench run',
+        detail: err instanceof Error ? err.message : 'The bench run JSON could not be downloaded.',
+      });
+    }
+  }, [selectedBenchRun]);
+
+  const handleSaveEvalProofReview = useCallback(async (status: api.ProofReviewState['status'], note?: string) => {
+    if (!selectedReport) return;
+    try {
+      setSelectedReport(await api.saveEvalProofReview(selectedReport.id, { status, note }));
+    } catch (err) {
+      setDiagnostic({
+        tone: 'error',
+        title: 'Could not save eval proof review',
+        detail: err instanceof Error ? err.message : 'The proof review decision could not be saved.',
+      });
+    }
+  }, [selectedReport]);
+
+  const handleSaveBenchProofReview = useCallback(async (status: api.ProofReviewState['status'], note?: string) => {
+    if (!selectedBenchRun) return;
+    try {
+      setSelectedBenchRun(await api.saveBenchProofReview(selectedBenchRun.id, { status, note }));
+    } catch (err) {
+      setDiagnostic({
+        tone: 'error',
+        title: 'Could not save bench proof review',
+        detail: err instanceof Error ? err.message : 'The proof review decision could not be saved.',
+      });
+    }
+  }, [selectedBenchRun]);
+
   const categories = [...new Set(prompts.map(p => p.category))];
+  const modelLabTabs: Array<{ id: typeof tab; label: string; ariaLabel: string }> = [
+    { id: 'configure', label: 'Eval', ariaLabel: 'Show Model Lab eval setup and provider-call proof preparation' },
+    { id: 'tasks', label: 'Tasks', ariaLabel: 'Show Model Lab bench task selection and proof-run preparation' },
+    { id: 'bench', label: 'Bench', ariaLabel: 'Show Model Lab bench rankings, proof review, and exports' },
+    { id: 'packs', label: 'Packs', ariaLabel: 'Show Model Lab prompt packs and pack evidence exports' },
+    { id: 'results', label: 'Results', ariaLabel: 'Show Model Lab eval recommendations, proof review, and exports' },
+    { id: 'history', label: 'History', ariaLabel: 'Show Model Lab saved eval and bench proof history' },
+  ];
+  const tabPanelProps = (id: typeof tab) => ({
+    id: `model-lab-panel-${id}`,
+    role: 'tabpanel' as const,
+    'aria-labelledby': `model-lab-tab-${id}`,
+    tabIndex: 0,
+  });
+  const handleModelLabTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, currentTab: typeof tab) => {
+    const currentIndex = modelLabTabs.findIndex((item) => item.id === currentTab);
+    if (currentIndex < 0) return;
+    const lastIndex = modelLabTabs.length - 1;
+    const nextIndex = event.key === 'ArrowRight'
+      ? (currentIndex + 1) % modelLabTabs.length
+      : event.key === 'ArrowLeft'
+        ? (currentIndex - 1 + modelLabTabs.length) % modelLabTabs.length
+        : event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? lastIndex
+            : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const nextTab = modelLabTabs[nextIndex].id;
+    setTab(nextTab);
+    requestAnimationFrame(() => {
+      document.getElementById(`model-lab-tab-${nextTab}`)?.focus();
+    });
+  };
 
   if (loading) {
     return (
@@ -296,20 +423,35 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '6px 10px', background: 'var(--bg-tertiary)',
-        borderBottom: '1px solid var(--border-primary)',
-      }}>
+      <div
+        role="tablist"
+        aria-label="Model Lab sections"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '6px 10px', background: 'var(--bg-tertiary)',
+          borderBottom: '1px solid var(--border-primary)',
+        }}
+      >
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>
           Model Lab
         </span>
-        <button onClick={() => setTab('configure')} style={tabBtnStyle(tab === 'configure')}>Eval</button>
-        <button onClick={() => setTab('tasks')} style={tabBtnStyle(tab === 'tasks')}>Tasks</button>
-        <button onClick={() => setTab('bench')} style={tabBtnStyle(tab === 'bench')}>Bench</button>
-        <button onClick={() => setTab('packs')} style={tabBtnStyle(tab === 'packs')}>Packs</button>
-        <button onClick={() => setTab('results')} style={tabBtnStyle(tab === 'results')}>Results</button>
-        <button onClick={() => setTab('history')} style={tabBtnStyle(tab === 'history')}>History</button>
+        {modelLabTabs.map((item) => (
+          <button
+            key={item.id}
+            id={`model-lab-tab-${item.id}`}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.id}
+            aria-controls={`model-lab-panel-${item.id}`}
+            tabIndex={tab === item.id ? 0 : -1}
+            aria-label={item.ariaLabel}
+            onClick={() => setTab(item.id)}
+            onKeyDown={(event) => handleModelLabTabKeyDown(event, item.id)}
+            style={tabBtnStyle(tab === item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
@@ -319,7 +461,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 
         {/* ── Eval Configure Tab ── */}
         {tab === 'configure' && (
-          <div style={{ padding: 10 }}>
+          <div {...tabPanelProps('configure')} style={{ padding: 10 }}>
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Run Name</label>
               <input
@@ -328,20 +470,43 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 placeholder={`Eval ${new Date().toLocaleDateString()}`}
                 style={inputStyle}
               />
+              <button type="button" onClick={prepareSmallEvalProofRun} style={{ ...smallBtnStyle, marginTop: 6 }}>
+                Prepare smallest eval proof
+              </button>
+              <div style={{ color: 'var(--text-tertiary)', fontSize: 10, lineHeight: 1.4, marginTop: 6 }}>
+                Proof gate: run the prepared 1x1 eval, review the proof state in Results, export the proof brief/report, then apply only approved recommendations.
+              </div>
             </div>
 
             {/* Prompt Selection */}
-            <div style={{ marginBottom: 16 }}>
+            <div
+              style={{ marginBottom: 16 }}
+              role="group"
+              aria-label={`${selectedPromptIds.size} of ${prompts.length} eval prompt${prompts.length === 1 ? '' : 's'} selected for Model Lab provider-call runs`}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <label style={labelStyle}>Prompts ({selectedPromptIds.size} selected)</label>
-                <button onClick={selectAllPrompts} style={linkBtnStyle}>Select all</button>
+                <div style={labelStyle}>Prompts ({selectedPromptIds.size} selected)</div>
+                <button
+                  type="button"
+                  onClick={selectAllPrompts}
+                  style={linkBtnStyle}
+                  aria-label={`Select all ${prompts.length} eval prompt${prompts.length === 1 ? '' : 's'} for Model Lab provider-call runs`}
+                >
+                  Select all
+                </button>
               </div>
               {categories.map(cat => (
                 <div key={cat} style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 4, textTransform: 'capitalize' }}>{cat}</div>
                   {prompts.filter(p => p.category === cat).map(p => (
                     <label key={p.id} style={checkboxRowStyle(selectedPromptIds.has(p.id))}>
-                      <input type="checkbox" checked={selectedPromptIds.has(p.id)} onChange={() => togglePrompt(p.id)} style={{ marginTop: 2 }} />
+                      <input
+                        type="checkbox"
+                        checked={selectedPromptIds.has(p.id)}
+                        onChange={() => togglePrompt(p.id)}
+                        style={{ marginTop: 2 }}
+                        aria-label={`${selectedPromptIds.has(p.id) ? 'Deselect' : 'Select'} eval prompt ${p.name} for Model Lab provider-call runs`}
+                      />
                       <div>
                         <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{p.name}</div>
                         <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 1 }}>{p.prompt.slice(0, 80)}...</div>
@@ -355,27 +520,45 @@ export function ModelLabPanel({ workingDir, models }: Props) {
             {/* Model Selection */}
             <ModelSelection models={models} selected={selectedModelIds} onToggle={toggleModel} onSelectAll={selectAllModels} />
 
+            <MatrixRunCaution
+              kind="eval"
+              selectedItems={selectedPromptIds.size}
+              selectedModels={selectedModelIds.size}
+              providerHealthSignal={providerHealthSignal}
+            />
+
+            <div style={{ color: 'var(--accent-warning)', fontSize: 10, lineHeight: 1.4, marginBottom: 8 }}>
+              Provider-spend guard: Run Eval can call configured model providers. Prepare selections freely, but start proof runs only after provider-budget approval.
+            </div>
+
             <button
+              type="button"
               onClick={handleRun}
               disabled={running || selectedPromptIds.size === 0 || selectedModelIds.size === 0}
               style={runBtnStyle(running || selectedPromptIds.size === 0 || selectedModelIds.size === 0)}
+              title={matrixRunApprovalTitle('eval', selectedPromptIds.size, selectedModelIds.size)}
+              aria-label={matrixRunApprovalTitle('eval', selectedPromptIds.size, selectedModelIds.size)}
             >
-              {running ? 'Running...' : `Run Eval (${selectedPromptIds.size} × ${selectedModelIds.size} = ${selectedPromptIds.size * selectedModelIds.size})`}
+              {running ? 'Running...' : matrixRunApprovalLabel('eval', selectedPromptIds.size, selectedModelIds.size)}
             </button>
           </div>
         )}
 
         {/* ── Tasks Tab ── */}
         {tab === 'tasks' && (
-          <div style={{ padding: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-                Harness Tasks ({tasks.length})
-              </span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={handleSeedTasks} style={smallBtnStyle}>Seed fixtures</button>
+          <div {...tabPanelProps('tasks')} style={{ padding: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Harness Tasks ({tasks.length})
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button type="button" onClick={prepareSmallBenchProofRun} style={smallBtnStyle}>Prepare proof run</button>
+                  <button type="button" onClick={handleSeedTasks} style={smallBtnStyle}>Seed fixtures</button>
+                </div>
               </div>
-            </div>
+              <div style={{ color: 'var(--text-tertiary)', fontSize: 10, lineHeight: 1.4, marginBottom: 10 }}>
+                Proof gate: run the prepared bench proof, review failures and weakest signals, export the proof brief/JSON, then use it as routing evidence instead of trusting raw rankings.
+              </div>
 
             {tasks.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>
@@ -384,14 +567,30 @@ export function ModelLabPanel({ workingDir, models }: Props) {
             ) : (
               <>
                 {/* Task selection for bench run */}
-                <div style={{ marginBottom: 12 }}>
+                <div
+                  style={{ marginBottom: 12 }}
+                  role="group"
+                  aria-label={`${selectedTaskIds.size} of ${tasks.length} bench task${tasks.length === 1 ? '' : 's'} selected for Model Lab provider-call runs`}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <label style={labelStyle}>Select tasks for bench ({selectedTaskIds.size})</label>
-                    <button onClick={selectAllTasks} style={linkBtnStyle}>Select all</button>
+                    <div style={labelStyle}>Select tasks for bench ({selectedTaskIds.size})</div>
+                    <button
+                      type="button"
+                      onClick={selectAllTasks}
+                      style={linkBtnStyle}
+                      aria-label={`Select all ${tasks.length} bench task${tasks.length === 1 ? '' : 's'} for Model Lab provider-call runs`}
+                    >
+                      Select all
+                    </button>
                   </div>
                   {tasks.map(t => (
                     <label key={t.id} style={checkboxRowStyle(selectedTaskIds.has(t.id))}>
-                      <input type="checkbox" checked={selectedTaskIds.has(t.id)} onChange={() => toggleTask(t.id)} />
+                      <input
+                        type="checkbox"
+                        checked={selectedTaskIds.has(t.id)}
+                        onChange={() => toggleTask(t.id)}
+                        aria-label={`${selectedTaskIds.has(t.id) ? 'Deselect' : 'Select'} bench task ${t.name} for Model Lab provider-call runs`}
+                      />
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: 12 }}>{t.name}</span>
@@ -441,12 +640,27 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                   </div>
                 </label>
 
+                <MatrixRunCaution
+                  kind="bench"
+                  selectedItems={selectedTaskIds.size}
+                  selectedModels={selectedModelIds.size}
+                  extraRuns={includePlanningRoomBaseline ? selectedTaskIds.size : 0}
+                  providerHealthSignal={providerHealthSignal}
+                />
+
+                <div style={{ color: 'var(--accent-warning)', fontSize: 10, lineHeight: 1.4, marginBottom: 8 }}>
+                  Provider-spend guard: Run Bench can call configured model providers for every selected task/model pair. Prepare proof runs freely, but launch only after provider-budget approval.
+                </div>
+
                 <button
+                  type="button"
                   onClick={handleBenchRun}
                   disabled={running || selectedTaskIds.size === 0 || selectedModelIds.size === 0}
                   style={runBtnStyle(running || selectedTaskIds.size === 0 || selectedModelIds.size === 0)}
+                  title={matrixRunApprovalTitle('bench', selectedTaskIds.size, selectedModelIds.size, includePlanningRoomBaseline ? selectedTaskIds.size : 0)}
+                  aria-label={matrixRunApprovalTitle('bench', selectedTaskIds.size, selectedModelIds.size, includePlanningRoomBaseline ? selectedTaskIds.size : 0)}
                 >
-                  {running ? 'Running...' : `Run Bench (${selectedTaskIds.size} tasks × ${selectedModelIds.size} models = ${selectedTaskIds.size * selectedModelIds.size})`}
+                  {running ? 'Running...' : matrixRunApprovalLabel('bench', selectedTaskIds.size, selectedModelIds.size, includePlanningRoomBaseline ? selectedTaskIds.size : 0)}
                 </button>
               </>
             )}
@@ -455,12 +669,34 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 
         {/* ── Prompt Packs Tab ── */}
         {tab === 'packs' && (
-          <PromptPacksTab registry={promptPlugins} onPrepare={handlePreparePromptPluginRoots} onImportSkill={handleImportPromptSkill} />
+          <div {...tabPanelProps('packs')}>
+            <PromptPacksTab
+              registry={promptPlugins}
+              prompts={prompts}
+              onPrepare={handlePreparePromptPluginRoots}
+              onImportSkill={handleImportPromptSkill}
+              onSelectEvalIds={(evalIds, pack) => {
+                const available = new Set(prompts.map((prompt) => prompt.id));
+                const matched = evalIds.filter((id) => available.has(id));
+                setPreparedPackRun({ packId: pack.id, packName: pack.name, evalIds, matchedEvalIds: matched });
+                setSelectedPromptIds(new Set(matched));
+                if (matched.length > 0) setRunName(`Pack eval - ${pack.name}`);
+                setTab('configure');
+                setDiagnostic({
+                  tone: matched.length > 0 ? 'info' : 'warning',
+                  title: matched.length > 0 ? 'Pack eval prompts selected' : 'Pack has no matching eval prompts',
+                  detail: matched.length > 0
+                    ? `${pack.name}: selected ${matched.length}/${evalIds.length} eval prompt${matched.length === 1 ? '' : 's'} for the next Model Lab run.`
+                    : `${pack.name}: the pack declares ${evalIds.length} eval id${evalIds.length === 1 ? '' : 's'}, but none match the installed eval prompt suite.`,
+                });
+              }}
+            />
+          </div>
         )}
 
         {/* ── Bench Results Tab ── */}
         {tab === 'bench' && (
-          <div style={{ padding: 10 }}>
+          <div {...tabPanelProps('bench')} style={{ padding: 10 }}>
             {!selectedBenchRun ? (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>
                 No bench results yet. Select tasks and run a bench.
@@ -468,13 +704,29 @@ export function ModelLabPanel({ workingDir, models }: Props) {
             ) : (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {selectedBenchRun.name}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {selectedBenchRun.name}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => downloadText(`openharness-bench-proof-${selectedBenchRun.id}.md`, buildBenchProofBrief(selectedBenchRun))}
+                        style={smallBtnStyle}
+                      >
+                        Export proof brief
+                      </button>
+                      <button onClick={handleExportBenchRun} style={smallBtnStyle}>Export JSON</button>
+                    </div>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
                     {runProgressLabel(selectedBenchRun.status, selectedBenchRun.completed, selectedBenchRun.total, 'tasks')}
                     {selectedBenchRun.completedAt && ` · ${new Date(selectedBenchRun.completedAt).toLocaleTimeString()}`}
                   </div>
+                  {selectedBenchRun.summary ? (
+                    <div style={{ fontSize: 10, color: selectedBenchRun.proofReview?.status === 'approved' ? 'var(--accent-success)' : 'var(--accent-warning)', marginTop: 4 }}>
+                      Ranking trust: {selectedBenchRun.proofReview?.status === 'approved' ? 'approved proof; safe to use as routing evidence' : 'proof not approved yet; export for review, not automatic role/router changes'}
+                    </div>
+                  ) : null}
                   {(selectedBenchRun.status === 'running' || selectedBenchRun.status === 'error') && (
                     <div style={{ height: 3, background: 'var(--bg-tertiary)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
                       <div style={{
@@ -489,6 +741,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 {selectedBenchRun.previousDelta && (
                   <BenchDeltaCallout delta={selectedBenchRun.previousDelta} />
                 )}
+                <BenchProofReviewCallout run={selectedBenchRun} onSaveReview={handleSaveBenchProofReview} />
 
                 {/* Bench Summary */}
                 {selectedBenchRun.summary && (
@@ -598,7 +851,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 
         {/* ── Eval Results Tab ── */}
         {tab === 'results' && (
-          <div style={{ padding: 10 }}>
+          <div {...tabPanelProps('results')} style={{ padding: 10 }}>
             {!selectedReport ? (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>
                 No results yet. Configure and run an eval.
@@ -608,12 +861,25 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{selectedReport.name}</div>
-                    <button onClick={handleExportEvalReport} style={smallBtnStyle}>Export report</button>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => downloadText(`openharness-eval-proof-${selectedReport.id}.md`, buildEvalProofBrief(selectedReport, preparedPackRun))}
+                        style={smallBtnStyle}
+                      >
+                        Export proof brief
+                      </button>
+                      <button onClick={handleExportEvalReport} style={smallBtnStyle}>Export report</button>
+                    </div>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
                     {runProgressLabel(selectedReport.status, selectedReport.completed, selectedReport.total, 'runs')}
                     {selectedReport.completedAt && ` · ${new Date(selectedReport.completedAt).toLocaleTimeString()}`}
                   </div>
+                  {selectedReport.summary?.recommendations.length ? (
+                    <div style={{ fontSize: 10, color: selectedReport.proofReview?.status === 'approved' ? 'var(--accent-success)' : 'var(--accent-warning)', marginTop: 4 }}>
+                      Recommendation trust: {selectedReport.proofReview?.status === 'approved' ? 'approved proof; safe to use as routing evidence' : 'proof not approved yet; export for review, not automatic role/router changes'}
+                    </div>
+                  ) : null}
                   {(selectedReport.status === 'running' || selectedReport.status === 'error') && (
                     <div style={{ height: 3, background: 'var(--bg-tertiary)', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
                       <div style={{
@@ -659,6 +925,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                     )}
                   </div>
                 )}
+                <EvalProofReviewCallout report={selectedReport} onSaveReview={handleSaveEvalProofReview} />
 
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                   <thead>
@@ -696,13 +963,27 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 
         {/* ── History Tab ── */}
         {tab === 'history' && (
-          <div style={{ padding: 10 }}>
+          <div {...tabPanelProps('history')} style={{ padding: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
               Eval Reports
             </div>
             {reports.length === 0 && <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>No eval runs yet.</div>}
-            {reports.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map(r => (
-              <div key={r.id} onClick={() => handleSelectReport(r.id)} style={historyItemStyle}>
+            {reports.length > HISTORY_VISIBLE_LIMIT && (
+              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 6 }}>
+                Showing latest {HISTORY_VISIBLE_LIMIT} of {reports.length} eval reports.
+              </div>
+            )}
+            {reports
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .slice(0, HISTORY_VISIBLE_LIMIT)
+              .map(r => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => handleSelectReport(r.id)}
+                aria-label={`Open eval report ${r.name}`}
+                style={historyItemStyle}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
                   <span style={{
@@ -714,15 +995,32 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {r.total} runs · {new Date(r.createdAt).toLocaleString()}
                 </div>
-              </div>
+                <div style={{ fontSize: 10, color: proofReviewHistoryColor(r.proofReview), marginTop: 2 }}>
+                  {proofReviewHistoryLabel(r.proofReview)}
+                </div>
+              </button>
             ))}
 
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 8 }}>
               Bench Runs
             </div>
             {benchRuns.length === 0 && <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>No bench runs yet.</div>}
-            {benchRuns.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map(r => (
-              <div key={r.id} onClick={() => handleSelectBenchRun(r.id)} style={historyItemStyle}>
+            {benchRuns.length > HISTORY_VISIBLE_LIMIT && (
+              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 6 }}>
+                Showing latest {HISTORY_VISIBLE_LIMIT} of {benchRuns.length} bench runs.
+              </div>
+            )}
+            {benchRuns
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .slice(0, HISTORY_VISIBLE_LIMIT)
+              .map(r => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => handleSelectBenchRun(r.id)}
+                aria-label={`Open bench run ${r.name}`}
+                style={historyItemStyle}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
                   <span style={{
@@ -734,7 +1032,10 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {r.total} tasks · {new Date(r.createdAt).toLocaleString()}
                 </div>
-              </div>
+                <div style={{ fontSize: 10, color: proofReviewHistoryColor(r.proofReview), marginTop: 2 }}>
+                  {proofReviewHistoryLabel(r.proofReview)}
+                </div>
+              </button>
             ))}
           </div>
         )}
@@ -755,7 +1056,10 @@ function ModelLabDiagnostic({ diagnostic, onDismiss }: {
       ? 'var(--accent-warning)'
       : 'var(--accent-primary)';
   return (
-    <div style={{
+    <div
+      role={diagnostic.tone === 'error' ? 'alert' : 'status'}
+      aria-live={diagnostic.tone === 'error' ? 'assertive' : 'polite'}
+      style={{
       margin: 10,
       padding: 10,
       borderRadius: 6,
@@ -769,7 +1073,14 @@ function ModelLabDiagnostic({ diagnostic, onDismiss }: {
           <div style={{ color, fontWeight: 700, marginBottom: 3 }}>{diagnostic.title}</div>
           <div style={{ color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{diagnostic.detail}</div>
         </div>
-        <button onClick={onDismiss} style={{ ...linkBtnStyle, color: 'var(--text-tertiary)' }}>Dismiss</button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          style={{ ...linkBtnStyle, color: 'var(--text-tertiary)' }}
+          aria-label={`Dismiss Model Lab message: ${diagnostic.title}`}
+        >
+          Dismiss
+        </button>
       </div>
     </div>
   );
@@ -779,6 +1090,208 @@ function runProgressLabel(status: string, completed: number, total: number, unit
   if (status === 'running') return `Running... ${completed}/${total}`;
   if (status === 'error') return `Error after ${completed}/${total} ${unit}`;
   return `${completed} ${unit} completed`;
+}
+
+function downloadText(filename: string, content: string, type = 'text/markdown') {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function proofReviewHistoryLabel(review?: api.ProofReviewState): string {
+  if (review?.status === 'approved') return 'proof approved';
+  if (review?.status === 'needs-attention') return 'proof needs attention';
+  return 'proof unreviewed';
+}
+
+function proofReviewHistoryColor(review?: api.ProofReviewState): string {
+  if (review?.status === 'approved') return 'var(--accent-success)';
+  if (review?.status === 'needs-attention') return 'var(--accent-warning)';
+  return 'var(--text-tertiary)';
+}
+
+function buildEvalProofBrief(
+  report: api.EvalReport,
+  preparedPackRun?: { packId: string; packName: string; evalIds: string[]; matchedEvalIds: string[] } | null,
+): string {
+  const summary = report.summary;
+  const byModel = summary ? Object.entries(summary.byModel) : [];
+  const failed = report.results.filter((result) => result.status !== 'ok');
+  const weakest = averageBreakdown(report.results).weakestSignal;
+  const promptIds = Array.from(new Set(report.results.map((result) => result.promptId)));
+  const packContext = report.packContext || preparedPackRun;
+  return [
+    '# Model Lab Eval Proof Brief',
+    '',
+    `Run: ${report.name}`,
+    `Report id: ${report.id}`,
+    `Status: ${report.status}`,
+    `Created: ${report.createdAt}`,
+    `Completed: ${report.completedAt || 'not complete'}`,
+    `Progress: ${report.completed}/${report.total}`,
+    `Proof review: ${report.proofReview?.status || 'unreviewed'}${report.proofReview?.reviewedAt ? ` at ${report.proofReview.reviewedAt}` : ''}`,
+    ...(report.proofReview?.note ? [`Proof review note: ${report.proofReview.note}`] : []),
+    ...(packContext ? [
+      '',
+      '## Pack execution context',
+      '',
+      `Pack: ${packContext.packName}`,
+      `Pack id: ${packContext.packId}`,
+      `Declared eval ids: ${packContext.evalIds.length}`,
+      `Installed eval ids selected: ${packContext.matchedEvalIds.length}/${packContext.evalIds.length}`,
+      `Executed prompt ids in report: ${promptIds.join(', ') || 'none recorded'}`,
+    ] : []),
+    '',
+    '## Summary',
+    '',
+    `Best model: ${summary?.bestModel || 'not available'}`,
+    `Weakest signal: ${weakest.label} (${weakest.score}/${weakest.maxScore})`,
+    `Failures: ${failed.length}/${report.results.length}`,
+    '',
+    '## Model results',
+    '',
+    ...(byModel.length > 0
+      ? byModel.map(([modelId, data]) => `- ${modelId}: score ${data.avgScore}/10, latency ${(data.avgLatencyMs / 1000).toFixed(1)}s, tools ${data.avgToolCount}`)
+      : ['- No summary by model recorded.']),
+    '',
+    '## Recommendations',
+    '',
+    `Recommendation trust: ${report.proofReview?.status === 'approved' ? 'approved proof; may be used as routing evidence' : 'proof not approved; review before applying role or router changes'}`,
+    ...(summary?.recommendations?.length
+      ? summary.recommendations.map((rec) => `- ${rec.role}: ${rec.modelId} - ${rec.reason}`)
+      : ['- No recommendations recorded.']),
+    '',
+    '## Failed or weak rows',
+    '',
+    ...report.results
+      .filter((result) => result.status !== 'ok' || !result.scores.breakdown?.weakestSignal?.passed)
+      .slice(0, 12)
+      .map((result) => `- ${result.modelId} / ${result.promptName}: ${result.status}, score ${result.scores.overallScore}/10, weakest ${result.scores.breakdown?.weakestSignal?.label || 'none'}`),
+    '',
+    '## Evidence available',
+    '',
+    '- Inspectable output evidence in Model Lab includes response excerpts, failed/weak signals, and tool calls.',
+    '- Export report provides the recommendation-oriented markdown artifact.',
+  ].join('\n');
+}
+
+function buildBenchProofBrief(run: api.BenchRun): string {
+  const summary = run.summary;
+  const byModel = summary ? Object.entries(summary.byModel) : [];
+  const failed = run.results.filter((result) => result.status === 'error' || result.status === 'validation-failed' || !result.validationPassed);
+  const validationPasses = run.results.filter((result) => result.validationPassed).length;
+  const traceWarnings = run.results.flatMap((result) => result.traceProof?.warnings || []);
+  return [
+    '# Model Lab Bench Proof Brief',
+    '',
+    `Run: ${run.name}`,
+    `Run id: ${run.id}`,
+    `Status: ${run.status}`,
+    `Created: ${run.createdAt}`,
+    `Completed: ${run.completedAt || 'not complete'}`,
+    `Progress: ${run.completed}/${run.total}`,
+    `Proof review: ${run.proofReview?.status || 'unreviewed'}${run.proofReview?.reviewedAt ? ` at ${run.proofReview.reviewedAt}` : ''}`,
+    ...(run.proofReview?.note ? [`Proof review note: ${run.proofReview.note}`] : []),
+    '',
+    '## Summary',
+    '',
+    `Best model: ${summary?.bestModel || 'not available'}`,
+    `Ranking trust: ${run.proofReview?.status === 'approved' ? 'approved proof; may be used as routing evidence' : 'proof not approved; review before applying role or router changes'}`,
+    `Best model reason: ${summary?.bestModelReason || 'not available'}`,
+    `Validation passes: ${validationPasses}/${run.results.length}`,
+    `Failures or validation failures: ${failed.length}/${run.results.length}`,
+    `Regression flags: ${summary?.regressionFlags.length || 0}`,
+    '',
+    '## Model results',
+    '',
+    ...(byModel.length > 0
+      ? byModel.map(([modelId, data]) => [
+        `- ${modelId}: ${data.resolved} resolved, ${data.partial} partial, ${data.unresolved} unresolved, ${data.assisted || 0} assisted`,
+        `  Score ${data.avgScore}/10, validation ${data.avgValidationScore}/2, latency ${(data.avgLatencyMs / 1000).toFixed(1)}s, cost $${data.avgCost.toFixed(6)}, value ${data.valueScore}`,
+      ].join('\n'))
+      : ['- No summary by model recorded.']),
+    '',
+    '## Failed or weak rows',
+    '',
+    ...(failed.length > 0
+      ? failed.slice(0, 12).map((result) => `- ${result.taskName} / ${result.modelId}: ${result.status}, validation ${result.validationPassed ? 'pass' : 'fail'}, score ${result.scores.overallScore}/10${firstValidationFinding(result) ? `, finding: ${firstValidationFinding(result)}` : ''}`)
+      : ['- No failed rows recorded.']),
+    '',
+    '## Trace warnings',
+    '',
+    ...(traceWarnings.length > 0
+      ? [...new Set(traceWarnings)].slice(0, 12).map((warning) => `- ${warning}`)
+      : ['- No trace warnings recorded.']),
+    '',
+    '## Evidence available',
+    '',
+    '- Inspectable bench evidence in Model Lab includes prompts, trace proof, rubric coverage, validation output, and response excerpts.',
+    '- Export JSON provides the full machine-readable bench artifact.',
+  ].join('\n');
+}
+
+function buildPromptPackEvidenceBrief(
+  pack: api.PromptPluginRegistry['packs'][number],
+  plugins: api.PromptPluginSummary[],
+  prompts: api.PromptCase[],
+): string {
+  const installedPromptIds = new Set(prompts.map((prompt) => prompt.id));
+  const evals = plugins.flatMap((plugin) =>
+    plugin.evals.map((ev) => ({
+      pluginId: plugin.id,
+      id: ev.id,
+      minimumScore: ev.minimumScore,
+      installed: installedPromptIds.has(ev.id),
+    }))
+  );
+  const installed = evals.filter((ev) => ev.installed);
+  const blockedPlugins = plugins.filter((plugin) => plugin.status !== 'ready' || plugin.trust === 'blocked');
+  return [
+    '# Prompt Pack Evidence Brief',
+    '',
+    `Pack: ${pack.name}`,
+    `Pack id: ${pack.id}`,
+    `Trust: ${pack.trust}`,
+    `Sources: ${pack.sources.join(', ') || 'none recorded'}`,
+    `Manifest count: ${pack.pluginCount}`,
+    `Plugin ids: ${pack.pluginIds.join(', ') || 'none recorded'}`,
+    '',
+    '## Eval coverage',
+    '',
+    `Declared eval ids: ${evals.length}`,
+    `Installed eval prompts: ${installed.length}/${evals.length}`,
+    '',
+    ...(evals.length > 0
+      ? evals.map((ev) => `- ${ev.id}: ${ev.installed ? 'installed' : 'missing'}; minimum score ${ev.minimumScore}; plugin ${ev.pluginId}`)
+      : ['- No eval IDs declared by this pack.']),
+    '',
+    '## Manifest health',
+    '',
+    ...(plugins.length > 0
+      ? plugins.map((plugin) => [
+        `- ${plugin.name} (${plugin.id})`,
+        `  Status: ${plugin.status}; trust: ${plugin.trust}; version: ${plugin.version}`,
+        `  Sections: ${plugin.sections.length}; evals: ${plugin.evals.length}; path: ${plugin.path}`,
+        plugin.issues.length > 0 ? `  Issues: ${plugin.issues.join('; ')}` : '',
+      ].filter(Boolean).join('\n'))
+      : ['- No plugin manifests matched this pack in the current registry.']),
+    '',
+    '## Risks',
+    '',
+    ...(blockedPlugins.length > 0
+      ? blockedPlugins.map((plugin) => `- ${plugin.id}: ${plugin.status}/${plugin.trust}${plugin.issues.length ? ` - ${plugin.issues.join('; ')}` : ''}`)
+      : ['- No blocked or invalid plugin manifests detected for this pack.']),
+    '',
+    '## Next proof action',
+    '',
+    installed.length > 0
+      ? `Run Model Lab Eval with the ${installed.length} installed prompt id${installed.length === 1 ? '' : 's'} selected from this pack, then export the eval proof brief.`
+      : 'Add or install matching eval prompt cases before claiming this pack has runnable proof.',
+  ].join('\n');
 }
 
 function averageBreakdown(results: Array<{ scores: api.EvalScores }>): api.EvalScoreBreakdown {
@@ -850,6 +1363,134 @@ function BenchDeltaCallout({ delta }: { delta: NonNullable<api.BenchRun['previou
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
         vs {delta.previousRunName} · validation {formatSigned(delta.avgValidationDelta)} · style {formatSigned(delta.avgStyleDelta)}
+      </div>
+    </div>
+  );
+}
+
+function EvalProofReviewCallout({ report, onSaveReview }: { report: api.EvalReport; onSaveReview: (status: api.ProofReviewState['status'], note?: string) => void }) {
+  const failed = report.results.filter((result) => result.status !== 'ok');
+  const complete = report.status === 'complete' && report.completed === report.total;
+  const weakest = averageBreakdown(report.results).weakestSignal;
+  const packContext = report.packContext;
+  const needsAttention = !complete || failed.length > 0 || !weakest.passed;
+  const checklist = [
+    complete ? `Complete run: ${report.completed}/${report.total}` : `Incomplete run: ${report.completed}/${report.total}`,
+    failed.length === 0 ? 'No failed eval rows' : `${failed.length} failed eval row${failed.length === 1 ? '' : 's'}`,
+    weakest.passed ? `Weakest signal still passing: ${weakest.label}` : `Weakest signal needs review: ${weakest.label}`,
+    packContext ? `Pack provenance saved: ${packContext.packName}` : 'No pack provenance on this run',
+    'Export proof brief and recommendation report before applying role/router changes',
+  ];
+  return (
+    <ProofReviewCallout
+      title={needsAttention ? 'Eval proof needs review' : 'Eval proof ready for review'}
+      tone={needsAttention ? 'warning' : 'success'}
+      checklist={checklist}
+      review={report.proofReview}
+      onSaveReview={onSaveReview}
+    />
+  );
+}
+
+function BenchProofReviewCallout({ run, onSaveReview }: { run: api.BenchRun; onSaveReview: (status: api.ProofReviewState['status'], note?: string) => void }) {
+  const complete = run.status === 'complete' && run.completed === run.total;
+  const validationFailures = run.results.filter((result) => !result.validationPassed);
+  const traceWarnings = run.results.flatMap((result) => result.traceProof?.warnings || []);
+  const regressions = run.summary?.regressionFlags || [];
+  const needsAttention = !complete || validationFailures.length > 0 || traceWarnings.length > 0 || regressions.length > 0;
+  const checklist = [
+    complete ? `Complete bench: ${run.completed}/${run.total}` : `Incomplete bench: ${run.completed}/${run.total}`,
+    validationFailures.length === 0 ? 'Validation passed for every result row' : `${validationFailures.length} validation issue${validationFailures.length === 1 ? '' : 's'} need review`,
+    traceWarnings.length === 0 ? 'No trace warnings recorded' : `${traceWarnings.length} trace warning${traceWarnings.length === 1 ? '' : 's'} recorded`,
+    regressions.length === 0 ? 'No regression flags recorded' : `${regressions.length} regression flag${regressions.length === 1 ? '' : 's'} recorded`,
+    'Export proof brief and JSON before trusting model rankings',
+  ];
+  return (
+    <ProofReviewCallout
+      title={needsAttention ? 'Bench proof needs review' : 'Bench proof ready for review'}
+      tone={needsAttention ? 'warning' : 'success'}
+      checklist={checklist}
+      review={run.proofReview}
+      onSaveReview={onSaveReview}
+    />
+  );
+}
+
+function ProofReviewCallout({
+  title,
+  tone,
+  checklist,
+  review,
+  onSaveReview,
+}: {
+  title: string;
+  tone: 'success' | 'warning';
+  checklist: string[];
+  review?: api.ProofReviewState;
+  onSaveReview: (status: api.ProofReviewState['status'], note?: string) => void;
+}) {
+  const [note, setNote] = useState(review?.note || '');
+  useEffect(() => {
+    setNote(review?.note || '');
+  }, [review?.note, review?.status, review?.reviewedAt]);
+  const color = tone === 'success' ? 'var(--accent-success)' : 'var(--accent-warning)';
+  return (
+    <div role="group" aria-label={title} style={{ marginBottom: 12, padding: 8, borderRadius: 6, background: 'var(--bg-secondary)', border: `1px solid ${color}` }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>
+        {title}
+      </div>
+      <div role="list" aria-label={`${title} checklist`} style={{ display: 'grid', gap: 3 }}>
+        {checklist.map((item) => (
+          <div key={item} role="listitem" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>- {item}</div>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-primary)' }}>
+        <div role="status" aria-live="polite" style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 5 }}>
+          Review state: <span style={{ color: review?.status === 'approved' ? 'var(--accent-success)' : review?.status === 'needs-attention' ? 'var(--accent-warning)' : 'var(--text-secondary)', fontWeight: 700 }}>
+            {review?.status || 'unreviewed'}
+          </span>
+          {review?.reviewedAt ? ` · ${new Date(review.reviewedAt).toLocaleString()}` : ''}
+        </div>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>
+            Proof review note
+          </span>
+          <textarea
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="Optional proof review note"
+            style={{ width: '100%', minHeight: 54, resize: 'vertical', borderRadius: 6, border: '1px solid var(--border-primary)', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 11, padding: 6 }}
+          />
+        </label>
+        <div role="group" aria-label="Proof review actions" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+          <button
+            type="button"
+            style={smallBtnStyle}
+            title="Mark this proof as approved so it can be used as trusted routing or role evidence"
+            aria-label="Mark proof approved for trusted routing or role evidence"
+            onClick={() => onSaveReview('approved', note)}
+          >
+            Mark approved
+          </button>
+          <button
+            type="button"
+            style={smallBtnStyle}
+            title="Mark this proof as needing attention so it is blocked from trusted routing or role use"
+            aria-label="Mark proof as needing attention and block trusted routing or role use"
+            onClick={() => onSaveReview('needs-attention', note)}
+          >
+            Needs attention
+          </button>
+          <button
+            type="button"
+            style={smallBtnStyle}
+            title="Clear this proof review and return it to unreviewed"
+            aria-label="Clear proof review and return to unreviewed"
+            onClick={() => onSaveReview('unreviewed', note)}
+          >
+            Clear review
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1108,6 +1749,55 @@ function TraceProofBlock({ trace }: { trace?: api.BenchRunResult['traceProof'] }
   );
 }
 
+interface ProviderHealthSignal {
+  tracked: number;
+  failing: number;
+  stale: number;
+  latestChecked?: string;
+  maxLatencyMs?: number;
+  errors: string[];
+}
+
+function summarizeProviderHealth(raw: unknown): ProviderHealthSignal | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as any;
+  const historyMap = value.history && typeof value.history === 'object'
+    ? value.history
+    : value.providers && Array.isArray(value.providers)
+      ? Object.fromEntries(value.providers.map((provider: any) => [provider.providerId || provider.providerName || 'provider', provider.latest ? [provider.latest] : []]))
+      : value;
+  const entries = Object.entries(historyMap)
+    .filter(([, history]) => Array.isArray(history)) as Array<[string, any[]]>;
+  if (entries.length === 0) return null;
+
+  let failing = 0;
+  let stale = 0;
+  let latestChecked: string | undefined;
+  let maxLatencyMs: number | undefined;
+  const errors: string[] = [];
+
+  for (const [providerId, history] of entries) {
+    const latest = history.at(-1);
+    if (!latest) {
+      stale += 1;
+      continue;
+    }
+    const ok = latest.ok === true || latest.status === 'ok';
+    const timestamp = latest.timestamp || latest.lastChecked;
+    const ageMs = timestamp ? Date.now() - new Date(timestamp).getTime() : Number.POSITIVE_INFINITY;
+    const isStale = latest.stale === true || ageMs > 6 * 60 * 60 * 1000;
+    if (!ok) failing += 1;
+    if (isStale) stale += 1;
+    if (timestamp && (!latestChecked || timestamp > latestChecked)) latestChecked = timestamp;
+    const latencyMs = typeof latest.latencyMs === 'number' ? latest.latencyMs : latest.lastLatencyMs;
+    if (typeof latencyMs === 'number') maxLatencyMs = Math.max(maxLatencyMs || 0, latencyMs);
+    const error = latest.error || latest.lastError;
+    if (error) errors.push(`${providerId}: ${String(error).slice(0, 90)}`);
+  }
+
+  return { tracked: entries.length, failing, stale, latestChecked, maxLatencyMs, errors: errors.slice(0, 3) };
+}
+
 function EvidenceBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginTop: 8 }}>
@@ -1174,10 +1864,33 @@ function formatSigned(n: number): string {
   return `${n >= 0 ? '+' : ''}${n}`;
 }
 
-function PromptPacksTab({ registry, onPrepare, onImportSkill }: {
+const modelLabPackGuidance = [
+  {
+    label: 'Calibration',
+    title: 'Open-source calibration pass',
+    body: 'Start with the cheapest strong local or open candidates, then run the same prompt pack across coder, reviewer, and summarizer roles before changing defaults.',
+    proof: 'Best for proving a model is safe to promote without accidentally rewarding one lucky prompt.',
+  },
+  {
+    label: 'Comparison',
+    title: 'Frontier comparison pass',
+    body: 'Keep the matrix tight: current default, one premium challenger, and one low-cost challenger on identical prompts. Export the report before applying role changes.',
+    proof: 'Best for showing whether a premium model earns its spend instead of merely feeling more polished.',
+  },
+  {
+    label: 'Router',
+    title: 'Auto-router trust pass',
+    body: 'Use pack results to compare task fit, then check Agent Roles and Auto-Router for eval-backed cues before trusting dynamic routing in daily work.',
+    proof: 'Best for turning Model Lab results into routing behavior the user can understand and reverse.',
+  },
+];
+
+function PromptPacksTab({ registry, prompts, onPrepare, onImportSkill, onSelectEvalIds }: {
   registry: api.PromptPluginRegistry | null;
+  prompts: api.PromptCase[];
   onPrepare: () => void;
   onImportSkill: (sourcePath: string) => Promise<void>;
+  onSelectEvalIds: (evalIds: string[], pack: api.PromptPluginRegistry['packs'][number]) => void;
 }) {
   const [sourcePath, setSourcePath] = useState('');
   const [importing, setImporting] = useState(false);
@@ -1185,6 +1898,13 @@ function PromptPacksTab({ registry, onPrepare, onImportSkill }: {
   const plugins = registry?.plugins || [];
   const packs = registry?.packs || [];
   const roots = registry?.roots || [];
+  const promptIds = new Set(prompts.map((prompt) => prompt.id));
+  const packPlugins = (pack: api.PromptPluginRegistry['packs'][number]) => plugins.filter((plugin) =>
+    pack.pluginIds.includes(plugin.id) || plugin.packs.some((pluginPack) => pluginPack.id === pack.id)
+  );
+  const packEvalIds = (pack: api.PromptPluginRegistry['packs'][number]) => Array.from(new Set(
+    packPlugins(pack).flatMap((plugin) => plugin.evals.map((ev) => ev.id))
+  ));
   const importSkill = async () => {
     if (!sourcePath.trim()) return;
     setImporting(true);
@@ -1207,20 +1927,56 @@ function PromptPacksTab({ registry, onPrepare, onImportSkill }: {
             Read-only manifests for route, model, and output-contract experiments.
           </div>
         </div>
-        <button onClick={onPrepare} style={smallBtnStyle}>Prepare folders</button>
+        <button
+          type="button"
+          onClick={onPrepare}
+          style={smallBtnStyle}
+          aria-label="Prepare Model Lab prompt pack folders"
+        >
+          Prepare folders
+        </button>
       </div>
 
       <div style={{ marginBottom: 12, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
         <div style={sectionLabelStyle}>Registry roots</div>
         {roots.length === 0 ? (
-          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>No registry roots loaded.</div>
+          <div role="status" aria-live="polite" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>No registry roots loaded.</div>
         ) : roots.map((root) => (
           <div key={root.path} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 10 }}>
-            <span style={{ color: root.exists ? 'var(--accent-success)' : 'var(--text-tertiary)', width: 54 }}>{root.exists ? 'Ready' : 'Missing'}</span>
+            <span
+              style={{ color: root.exists ? 'var(--accent-success)' : 'var(--text-tertiary)', width: 54 }}
+              aria-label={`${root.location} prompt pack registry root ${root.exists ? 'ready' : 'missing'} at ${root.path}`}
+            >
+              {root.exists ? 'Ready' : 'Missing'}
+            </span>
             <span style={{ color: 'var(--text-secondary)', width: 54, textTransform: 'capitalize' }}>{root.location}</span>
             <span style={{ color: 'var(--text-tertiary)', fontFamily: 'SF Mono, Menlo, Consolas, monospace', wordBreak: 'break-all' }}>{root.path}</span>
           </div>
         ))}
+      </div>
+
+      <div style={{ marginBottom: 12, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
+        <div style={sectionLabelStyle}>Calibration and comparison packs</div>
+        <div style={{ marginBottom: 8, fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+          Use prompt packs as repeatable proof runs: calibrate cheaper candidates first, compare frontier models second, then apply only the role or router changes the report supports.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8 }}>
+          {modelLabPackGuidance.map((card) => (
+            <div key={card.title} style={{ padding: 8, border: '1px solid var(--border-primary)', borderRadius: 6, background: 'var(--bg-primary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                <span style={{ padding: '2px 5px', borderRadius: 999, background: 'var(--accent-primary-muted)', color: 'var(--accent-primary)', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  {card.label}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{card.title}</span>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{card.body}</div>
+              <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-tertiary)', lineHeight: 1.35 }}>{card.proof}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-tertiary)' }}>
+          Loaded registry signal: {packs.length} pack{packs.length === 1 ? '' : 's'} across {plugins.length} manifest{plugins.length === 1 ? '' : 's'}.
+        </div>
       </div>
 
       <div style={{ marginBottom: 12, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
@@ -1231,13 +1987,20 @@ function PromptPacksTab({ registry, onPrepare, onImportSkill }: {
             onChange={(event) => setSourcePath(event.target.value)}
             onKeyDown={(event) => event.key === 'Enter' && importSkill()}
             placeholder="/path/to/skill-folder or /path/to/SKILL.md"
+            aria-label="Skill folder or SKILL.md path to import as a Model Lab prompt pack"
             style={inputStyle}
           />
-          <button onClick={importSkill} disabled={importing || !sourcePath.trim()} style={smallBtnStyle}>
+          <button
+            type="button"
+            onClick={importSkill}
+            disabled={importing || !sourcePath.trim()}
+            style={smallBtnStyle}
+            aria-label="Import skill as a Model Lab prompt pack"
+          >
             {importing ? 'Importing...' : 'Import'}
           </button>
         </div>
-        {importError && <div style={{ marginTop: 6, fontSize: 10, color: 'var(--accent-error)' }}>{importError}</div>}
+        {importError && <div role="alert" style={{ marginTop: 6, fontSize: 10, color: 'var(--accent-error)' }}>{importError}</div>}
       </div>
 
       {packs.length > 0 && (
@@ -1256,6 +2019,43 @@ function PromptPacksTab({ registry, onPrepare, onImportSkill }: {
                 <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)' }}>
                   {pack.sources.join(', ')}
                 </div>
+                {(() => {
+                  const evalIds = packEvalIds(pack);
+                  const matched = evalIds.filter((id) => promptIds.has(id));
+                  return (
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-primary)' }}>
+                      <div style={{ fontSize: 10, color: matched.length > 0 ? 'var(--accent-success)' : 'var(--text-tertiary)' }}>
+                        Eval evidence: {matched.length}/{evalIds.length} prompt id{evalIds.length === 1 ? '' : 's'} installed
+                      </div>
+                      {evalIds.length > 0 && (
+                        <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {evalIds.slice(0, 5).map((id) => (
+                            <span key={id} style={{ ...tagStyle, color: promptIds.has(id) ? 'var(--accent-success)' : 'var(--text-tertiary)' }}>{id}</span>
+                          ))}
+                          {evalIds.length > 5 && <span style={tagStyle}>+{evalIds.length - 5}</span>}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        style={{ ...smallBtnStyle, marginTop: 6, width: '100%' }}
+                        disabled={evalIds.length === 0}
+                        onClick={() => onSelectEvalIds(evalIds, pack)}
+                        title={evalIds.length > 0 ? 'Select matching eval prompts for a Model Lab run' : 'This pack does not declare eval prompts yet'}
+                        aria-label={`Prepare eval run from ${pack.name} prompt pack with ${matched.length} installed prompt${matched.length === 1 ? '' : 's'} out of ${evalIds.length}`}
+                      >
+                        Prepare eval run from pack
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...smallBtnStyle, marginTop: 6, width: '100%' }}
+                        onClick={() => downloadText(`openharness-pack-evidence-${pack.id}.md`, buildPromptPackEvidenceBrief(pack, packPlugins(pack), prompts))}
+                        aria-label={`Export evidence brief for ${pack.name} prompt pack`}
+                      >
+                        Export pack evidence brief
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -1264,7 +2064,7 @@ function PromptPacksTab({ registry, onPrepare, onImportSkill }: {
 
       <div style={sectionLabelStyle}>Manifests ({plugins.length})</div>
       {plugins.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>
+        <div role="status" aria-live="polite" style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>
           No prompt plugin manifests found.
         </div>
       ) : plugins.map((plugin) => (
@@ -1308,7 +2108,7 @@ function TrustPill({ trust }: { trust: api.PromptPluginSummary['trust'] }) {
     : trust === 'blocked'
       ? { background: 'rgba(239,68,68,0.14)', color: 'var(--accent-error)' }
       : { background: 'rgba(245,158,11,0.14)', color: 'var(--accent-warning)' };
-  return <span style={{ ...pillStyle, ...colors }}>{trust}</span>;
+  return <span style={{ ...pillStyle, ...colors }} aria-label={`Prompt pack trust: ${trust}`}>{trust}</span>;
 }
 
 function StatusPill({ status }: { status: api.PromptPluginSummary['status'] }) {
@@ -1317,7 +2117,7 @@ function StatusPill({ status }: { status: api.PromptPluginSummary['status'] }) {
     : status === 'blocked'
       ? { background: 'rgba(239,68,68,0.14)', color: 'var(--accent-error)' }
       : { background: 'rgba(245,158,11,0.14)', color: 'var(--accent-warning)' };
-  return <span style={{ ...pillStyle, ...colors }}>{status}</span>;
+  return <span style={{ ...pillStyle, ...colors }} aria-label={`Prompt pack manifest status: ${status}`}>{status}</span>;
 }
 
 function ModelSelection({ models, selected, onToggle, onSelectAll }: {
@@ -1326,20 +2126,139 @@ function ModelSelection({ models, selected, onToggle, onSelectAll }: {
   onToggle: (id: string) => void;
   onSelectAll: () => void;
 }) {
+  const modelGroupLabel = `${selected.size} of ${models.length} Model Lab provider-call candidate${models.length === 1 ? '' : 's'} selected`;
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ marginBottom: 16 }} role="group" aria-label={modelGroupLabel}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <label style={labelStyle}>Models ({selected.size} selected)</label>
-        <button onClick={onSelectAll} style={linkBtnStyle}>Select all</button>
+        <div style={labelStyle}>Models ({selected.size} selected)</div>
+        <button
+          type="button"
+          onClick={onSelectAll}
+          style={linkBtnStyle}
+          aria-label={`Select all ${models.length} Model Lab provider-call candidate${models.length === 1 ? '' : 's'}`}
+        >
+          Select all
+        </button>
       </div>
       {models.map(m => (
         <label key={m.id} style={checkboxRowStyle(selected.has(m.id))}>
-          <input type="checkbox" checked={selected.has(m.id)} onChange={() => onToggle(m.id)} />
+          <input
+            type="checkbox"
+            checked={selected.has(m.id)}
+            onChange={() => onToggle(m.id)}
+            aria-label={`${selected.has(m.id) ? 'Deselect' : 'Select'} ${m.name} for Model Lab provider-call runs`}
+          />
           <span style={{ color: 'var(--text-primary)' }}>{m.name}</span>
         </label>
       ))}
     </div>
   );
+}
+
+function MatrixRunCaution({
+  kind,
+  selectedItems,
+  selectedModels,
+  extraRuns = 0,
+  providerHealthSignal,
+}: {
+  kind: 'eval' | 'bench';
+  selectedItems: number;
+  selectedModels: number;
+  extraRuns?: number;
+  providerHealthSignal?: ProviderHealthSignal | null;
+}) {
+  const totalRuns = selectedItems * selectedModels + extraRuns;
+  if (totalRuns === 0) return null;
+  const tone = totalRuns >= 20 ? 'high' : totalRuns >= 8 ? 'medium' : 'low';
+  const border = tone === 'high' ? 'var(--accent-error)' : tone === 'medium' ? 'var(--accent-warning)' : 'var(--border-primary)';
+  const title = tone === 'high'
+    ? 'Large background run'
+    : tone === 'medium'
+      ? 'Moderate background run'
+      : 'Small background run';
+  const unit = kind === 'eval' ? 'prompt/model call' : 'task/model run';
+  const advisoryLabel = `${title}: ${totalRuns} ${unit}${totalRuns === 1 ? '' : 's'}. Provider rate-limit and metered billing caution.`;
+  return (
+    <div
+      role={tone === 'high' ? 'alert' : 'status'}
+      aria-live={tone === 'high' ? 'assertive' : 'polite'}
+      aria-label={advisoryLabel}
+      style={{
+      margin: '10px 0',
+      padding: '9px 10px',
+      borderRadius: 6,
+      border: `1px solid ${border}`,
+      background: tone === 'low'
+        ? 'var(--bg-secondary)'
+        : tone === 'medium'
+          ? 'color-mix(in srgb, var(--accent-warning) 10%, var(--bg-secondary))'
+          : 'color-mix(in srgb, var(--accent-error) 8%, var(--bg-secondary))',
+      color: 'var(--text-secondary)',
+      fontSize: 11,
+      lineHeight: 1.4,
+    }}>
+      <div style={{
+        color: tone === 'high' ? 'var(--accent-error)' : tone === 'medium' ? 'var(--accent-warning)' : 'var(--text-primary)',
+        fontWeight: 800,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 3,
+      }}>
+        {title}: {totalRuns} {unit}{totalRuns === 1 ? '' : 's'}
+      </div>
+      <div>
+        Model Lab runs execute in the background and can hit provider rate limits or metered billing.
+        Start with a small matrix, prefer subscription/low-cost candidates for sweeps, and reserve premium models for final comparisons.
+      </div>
+      {providerHealthSignal && (
+        <div style={{
+          marginTop: 8,
+          paddingTop: 8,
+          borderTop: '1px solid var(--border-primary)',
+          display: 'grid',
+          gap: 3,
+        }}>
+          <div style={{ color: providerHealthSignal.failing > 0 ? 'var(--accent-error)' : providerHealthSignal.stale > 0 ? 'var(--accent-warning)' : 'var(--text-secondary)', fontWeight: 700 }}>
+            Provider health: {providerHealthSignal.tracked} tracked
+            {providerHealthSignal.failing > 0 ? ` · ${providerHealthSignal.failing} failing` : ''}
+            {providerHealthSignal.stale > 0 ? ` · ${providerHealthSignal.stale} stale` : ''}
+            {typeof providerHealthSignal.maxLatencyMs === 'number' ? ` · slowest ${providerHealthSignal.maxLatencyMs}ms` : ''}
+          </div>
+          {providerHealthSignal.latestChecked && (
+            <div style={{ color: 'var(--text-tertiary)' }}>Latest health check: {new Date(providerHealthSignal.latestChecked).toLocaleString()}</div>
+          )}
+          {providerHealthSignal.errors.length > 0 && (
+            <div style={{ color: 'var(--accent-error)' }}>{providerHealthSignal.errors.join(' · ')}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function matrixRunCount(selectedItems: number, selectedModels: number, extraRuns = 0): number {
+  return selectedItems * selectedModels + extraRuns;
+}
+
+function matrixRunApprovalLabel(kind: 'eval' | 'bench', selectedItems: number, selectedModels: number, extraRuns = 0): string {
+  const totalRuns = matrixRunCount(selectedItems, selectedModels, extraRuns);
+  if (totalRuns === 0) return kind === 'eval' ? 'Run Eval' : 'Run Bench';
+  const unit = kind === 'eval' ? 'call' : 'run';
+  const base = kind === 'eval' ? 'Run Eval after approval' : 'Run Bench after approval';
+  return `${base} (${totalRuns} ${unit}${totalRuns === 1 ? '' : 's'})`;
+}
+
+function matrixRunApprovalTitle(kind: 'eval' | 'bench', selectedItems: number, selectedModels: number, extraRuns = 0): string {
+  const totalRuns = matrixRunCount(selectedItems, selectedModels, extraRuns);
+  const label = kind === 'eval' ? 'Eval' : 'Bench';
+  if (totalRuns === 0) {
+    return `Select at least one ${kind === 'eval' ? 'prompt' : 'task'} and one model before running ${label}.`;
+  }
+  const matrix = kind === 'eval'
+    ? `${selectedItems} prompt${selectedItems === 1 ? '' : 's'} by ${selectedModels} model${selectedModels === 1 ? '' : 's'}`
+    : `${selectedItems} task${selectedItems === 1 ? '' : 's'} by ${selectedModels} model${selectedModels === 1 ? '' : 's'}${extraRuns ? ` plus ${extraRuns} Planning Room baseline run${extraRuns === 1 ? '' : 's'}` : ''}`;
+  return `Provider-budget approval required before running ${label}. This selection may call configured providers for ${totalRuns} ${kind === 'eval' ? 'prompt/model call' : 'task/model run'}${totalRuns === 1 ? '' : 's'}: ${matrix}.`;
 }
 
 // ── Style helpers ──────────────────────────────────────
@@ -1434,9 +2353,13 @@ function checkboxRowStyle(active: boolean): React.CSSProperties {
 }
 
 const historyItemStyle: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
   padding: '8px 10px', marginBottom: 4, borderRadius: 6,
   background: 'var(--bg-secondary)', cursor: 'pointer',
   border: '1px solid var(--border-primary)',
+  textAlign: 'left',
+  font: 'inherit',
 };
 
 const thStyle: React.CSSProperties = {

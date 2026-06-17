@@ -126,6 +126,11 @@ export interface BenchRun {
   completedAt?: string;
   summary?: BenchSummary;
   previousDelta?: BenchRunDelta | null;
+  proofReview?: {
+    status: 'unreviewed' | 'approved' | 'needs-attention';
+    note?: string;
+    reviewedAt: string;
+  };
 }
 
 export interface BenchRunDelta {

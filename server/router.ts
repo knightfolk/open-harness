@@ -93,6 +93,10 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   const fileRefs = detectFileReferences(lower);
   const complexitySignals = detectComplexitySignals(content, lower, fileRefs);
   const asksCompare = /\b(compare|versus|vs\.?|which model|model a|model b|judge|evaluate outputs?)\b/.test(intentLower);
+  const asksReadOnlyReport = /\b(?:do not|don't|dont)\s+(?:\w+\s+){0,3}(?:modify|change|edit|write|patch|update)\b/.test(lower)
+    && /\b(?:report|review|qa pass|assess|assessment|verdict|analysis|inspect|readiness|playtest)\b/.test(intentLower)
+    && !/\brun\b[\s\S]{0,80}\b(?:npm run|lint|build|test|tests|typecheck|validate|validation|verify|smoke)\b/.test(intentLower);
+  const asksProductQa = /\b(?:product owner|game state|playtest|readiness verdict|qa pass|prototype milestone|implemented feature map|human playtest|next-iteration|next iteration)\b/.test(intentLower);
   const asksInformationalRunQuestion = /^\s*(?:how|what|where|which)\b[\s\S]{0,120}\brun\b/.test(intentLower);
   const asksInformationalCreationQuestion = /\b(?:how|what|where|which|explain|describe)\b[\s\S]{0,120}\b(?:build|make|create|scaffold|prototype|generate)\b/.test(intentLower);
   const asksExplicitExecution = !asksInformationalRunQuestion && (
@@ -103,9 +107,9 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     || /\bcradle-to-grave\b/.test(intentLower)
     || /\brun\b[\s\S]{0,80}\b(?:npm run|lint|build|test|tests|typecheck|validate|validation|verify|smoke)\b/.test(intentLower)
     || /\brun\b[\s\S]{0,80}\b(?:check|checks|gate|gates)\b/.test(intentLower)
-    || /\bperform\b[\s\S]{0,80}\b(?:test|tests|validation|verification|checks?)\b/.test(intentLower)
+    || (!asksReadOnlyReport && /\bperform\b[\s\S]{0,80}\b(?:test|tests|validation|verification|checks?)\b/.test(intentLower))
   );
-  const asksCreateArtifact = !asksInformationalCreationQuestion && (
+  const asksCreateArtifact = !asksReadOnlyReport && !asksInformationalCreationQuestion && (
     new RegExp(`\\b(?:build|make|create|scaffold|prototype|generate)\\b[\\s\\S]{0,80}${ARTIFACT_NOUN_RE.source}`).test(intentLower)
     || new RegExp(`${ARTIFACT_NOUN_RE.source}[\\s\\S]{0,80}\\b(?:build|made|created|scaffolded|prototyped|generated)\\b`).test(intentLower)
   );
@@ -133,6 +137,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
 
   let mode: OrchestrationMode = 'direct';
   if (asksExecute) mode = 'execute';
+  else if (asksReadOnlyReport && (asksProductQa || asksReview)) mode = 'investigate';
   else if (asksTeamPlan) mode = 'plan';
   else if (asksCompare) mode = 'compare';
   else if (asksProjectOverview) mode = 'investigate';
@@ -144,6 +149,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   else if (mode === 'plan') role = 'planner';
   else if (mode === 'execute') role = asksValidation || asksCreateArtifact ? 'coder' : 'planner';
   else if (asksProjectOverview) role = 'summarizer';
+  else if (asksProductQa) role = 'summarizer';
   else if (/\b(review|audit|inspect|investigate|analy[sz]e|find bugs|security|vuln|performance|bugs?)\b/.test(lower)) role = 'reviewer';
   else if (/\b(plan|roadmap|design|architect|strategy)\b/.test(lower)) role = 'planner';
   else if (/\b(summar|overview|explain|describe)\b/.test(lower)) role = 'summarizer';

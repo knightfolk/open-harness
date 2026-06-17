@@ -94,6 +94,19 @@ Compare-mode reports lead with a verdict and compact model snapshot, then disclo
 
 Direct single-model answers also get a final cleanup pass that removes transcript labels, leading process sections, and internal preamble while preserving normal first-person answers.
 
+## Premier Harness Work
+
+The current premier-harness pass is tracked in [docs/PREMIER_HARNESS_KICKOFF.md](docs/PREMIER_HARNESS_KICKOFF.md) with closeout evidence under [docs/proof/](docs/proof/). The work emphasizes a flatter chat-first default UI, clearer agent work ownership, calmer artifact review, accessible theme texture handling, and model-harness trust surfaces.
+
+Recent trust-surface improvements include:
+
+- Model Library capability scorecards with strengths, weaknesses, fit reasons, cost/context signals, and provider availability.
+- Auto-Router candidate cards and Prompt Microscope route explanations that distinguish selected models from rejected alternatives.
+- Model Lab, Routing Learning, Agent Roles, provider health, budget, and rate-limit controls with clearer proof/review states.
+- Artifact Drawer, Team Plan, and Patch Review validation gates that make plans, artifacts, validation proof, and replay feedback easier to inspect.
+
+Use [docs/PREMIER_HARNESS_PROOF_CHECKLIST.md](docs/PREMIER_HARNESS_PROOF_CHECKLIST.md) and the closeout proof notes before calling the overhaul done. Final release proof still requires the relevant browser/manual proof plus the validation commands listed below.
+
 ## Architecture
 
 ```text

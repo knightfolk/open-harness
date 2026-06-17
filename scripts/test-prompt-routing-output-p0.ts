@@ -143,6 +143,21 @@ function testBoundedReviewRouting() {
   assert.equal(deep.mode, 'investigate');
   assert.equal(deep.role, 'reviewer');
   assert.equal(deep.complexity, 'deep');
+
+  const productOwnerReview = routeRequest(
+    'Review the current Neon Decade Descent game state for a product owner. Cover what appears implemented, what should be validated by a human playtest, and the next three improvements. Keep the answer concise and do not modify files.',
+    'local-model',
+  );
+  assert.equal(productOwnerReview.mode, 'investigate', 'product-owner game review should inspect context');
+  assert.equal(productOwnerReview.role, 'summarizer', 'product-owner game review should synthesize readiness instead of severity-first code review');
+
+  const readOnlyQa = routeRequest(
+    'Perform a long-horizon QA pass on Neon Decade Descent as if preparing it for an expanded prototype milestone. Inspect the project context available to you, but do not modify files. Produce a report with readiness verdict, objective validation checks, and an ordered next-iteration plan.',
+    'local-model',
+  );
+  assert.equal(readOnlyQa.mode, 'investigate', 'read-only QA reports should not route to execute just because they mention validation checks');
+  assert.equal(readOnlyQa.role, 'summarizer', 'read-only product QA should produce a synthesized report');
+  assert.equal(readOnlyQa.needsValidation, true, 'mentioning validation checks should still mark validation relevance');
 }
 
 function testDirectAnswerNoRegression() {

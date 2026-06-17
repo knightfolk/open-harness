@@ -2,7 +2,7 @@ import { Suspense, lazy, useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Wifi, WifiOff, ChevronUp, Cpu, Brain, DollarSign,
-  Check, Search, Shield, Settings, Star, Eye, Wrench, Layers, Terminal,
+  Check, Search, Shield, Settings, Star, Eye, Wrench, Layers, Terminal, AlertTriangle,
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
@@ -44,6 +44,13 @@ interface Props {
   onTrustModeChange?: (mode: string) => void;
   runningModel?: string | null;
   autoRouterStep?: Extract<HarnessRunStep, { type: 'auto_router' }> | null;
+  providerRateLimitWarning?: {
+    severity: 'warn' | 'block';
+    providerId: string;
+    label: string;
+    detail: string;
+    resetSeconds?: number;
+  } | null;
   onOpenSettings?: () => void;
 }
 
@@ -110,6 +117,7 @@ export function StatusBar({
   onTrustModeChange,
   runningModel,
   autoRouterStep,
+  providerRateLimitWarning,
   onOpenSettings,
 }: Props) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -298,6 +306,19 @@ export function StatusBar({
           >
             <Settings size={12} />
           </button>
+          <div className="status-bar-separator" />
+        </>
+      )}
+
+      {providerRateLimitWarning && (
+        <>
+          <div
+            className={`status-bar-item status-bar-rate-limit status-bar-rate-limit-${providerRateLimitWarning.severity}`}
+            title={`${providerRateLimitWarning.detail}${providerRateLimitWarning.resetSeconds != null ? ` Resets in about ${providerRateLimitWarning.resetSeconds}s.` : ''}`}
+          >
+            <AlertTriangle size={12} />
+            <span>{providerRateLimitWarning.label}</span>
+          </div>
           <div className="status-bar-separator" />
         </>
       )}

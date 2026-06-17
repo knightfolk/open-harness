@@ -4,9 +4,11 @@ Purpose: turn OpenHarness from a model chat interface into a local coding harnes
 
 Use this document for work assignment, issue creation, milestone planning, and progress tracking.
 
-## Current Top Priority - Prompt, Routing, and Output
+## Current Top Priority - Premier Harness UI And Agent Control
 
-Use `docs/PROMPT_ROUTING_OUTPUT_ROADMAP.md` as the current implementation roadmap for refining prompt processing, routing decisions, Planning Room model-team output, single-model responses, eval feedback, and native-app presentation.
+Use `docs/PREMIER_HARNESS_KICKOFF.md` as the current implementation roadmap for the chat-first UI and agent-control overhaul. Keep `docs/UI_CLEANUP_PLAN.md` as the detailed declutter reference, and use `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` for closeout proof runs, manual UI review, runtime scenario evidence, and final validation gates.
+
+The prompt/routing/output work in `docs/PROMPT_ROUTING_OUTPUT_ROADMAP.md` remains important, but it is no longer the active top priority while the Premier Harness shell, active-work visibility, right-hand agent detail, steering, calm chat, artifact review, theme textures, and model-harness trust surfaces are being brought into alignment.
 
 ## Source of Truth — Planning Room First
 

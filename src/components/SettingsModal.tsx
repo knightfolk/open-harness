@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'react';
+import { Component, useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent, type ReactNode } from 'react';
 import { ContextBudgetControls } from './ContextBudgetControls';
 import { RoutingLearningPane } from './RoutingLearningPane';
 import {
@@ -7,7 +7,7 @@ import {
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
   Check, ChevronDown, ChevronRight, CheckCircle2, Bot, Container,
   ArrowRight, BookOpen, Search, Sparkles, Zap, FileText, Globe, Layout, Command,
-  Grid, Layers, Eye, Wrench,
+  Grid, Layers, Eye, Wrench, DollarSign,
 } from 'lucide-react';
 import type { ProviderConfig, CodingRoleAssignment, MCPServerItem, Skill, Plugin, MemoryEntry } from '../types';
 import type { ThinkingEffort } from '../types';
@@ -47,6 +47,32 @@ interface SettingsCategory {
   label: string;
   icon: typeof Settings;
   subcategories?: { id: string; label: string }[];
+}
+
+class SettingsPaneErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('[settings-pane] Pane failed to render', error);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="settings-card" style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+          This settings pane did not load.
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+          The rest of Settings is still available. Refresh the app or open another settings section while this pane is repaired.
+        </div>
+      </div>
+    );
+  }
 }
 
 const CATEGORIES: SettingsCategory[] = [
@@ -119,6 +145,7 @@ interface Props {
   roleAssignments: CodingRoleAssignment[];
   roleThinking: Record<string, ThinkingEffort>;
   activeTheme: string;
+  textureOpacityOverride: number | null;
   personalityText: string;
   mcpServers: MCPServerItem[];
   mcpStatus: any[];
@@ -135,6 +162,7 @@ interface Props {
   onAssignRoleModel: (roleId: string, modelId: string) => void;
   onAssignRoleThinking: (roleId: string, effort: ThinkingEffort) => void;
   onSelectTheme: (themeId: string) => void;
+  onTextureOpacityOverrideChange: (value: number | null) => void;
   onThemePluginManifestsChange: (themeManifests: string[]) => void;
   onRemoveTheme: (themeId: string) => void;
   onPersonalityChange: (text: string) => void;
@@ -187,10 +215,12 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
 // ── Main component ─────────────────────────────────────
 export function SettingsModal({
   isOpen, onClose, activeModel, thinkingEffort, providers, roleAssignments, roleThinking, activeTheme,
+  textureOpacityOverride,
   configPath, personalityText, mcpServers, mcpStatus, onAddProvider, onTestProvider,
   onUpdateProvider,
   onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer,
   onSelectModel, onThinkingEffortChange, onToggleProviderModel, onAssignRoleModel, onAssignRoleThinking, onSelectTheme,
+  onTextureOpacityOverrideChange,
   onThemePluginManifestsChange, onRemoveTheme,
   onPersonalityChange,
   onRestartOnboarding,
@@ -257,45 +287,49 @@ export function SettingsModal({
             })}
           </nav>
           <div className="settings-content">
-            {contentKey === 'model' && <ActiveModelPane activeModel={activeModel} thinkingEffort={thinkingEffort} enabledModels={enabledModels} onSelectModel={onSelectModel} onThinkingEffortChange={onThinkingEffortChange} />}
-            {contentKey === 'model-library' && <ModelLibraryPane providers={providers} />}
-            {contentKey === 'providers/manage' && (
-              <ProvidersPane
-                providers={providers}
-                onTest={onTestProvider}
-                onFetch={onFetchModels}
-                onUpdateProvider={onUpdateProvider}
-                onRemove={onRemoveProvider}
-                onToggleModel={onToggleProviderModel}
-                activeModel={activeModel}
-              />
-            )}
-            {contentKey === 'providers/add' && (
-              <AddProviderPane onAdd={onAddProvider} existingIds={providers.map((p) => p.id)}
-                onDone={() => { setSelectedCat('providers'); setSelectedSub('manage'); }} />
-            )}
-            {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} roleThinking={roleThinking} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} onAssignRoleThinking={onAssignRoleThinking} />}
-            {contentKey === 'assistant/clicky' && <ClickySettingsPane enabled={clickyEnabled} onChange={onClickyEnabledChange} />}
-            {contentKey === 'assistant/skills' && <AssistantSkillsPane skills={mockSkills} plugins={mockPlugins} />}
-            {contentKey === 'assistant/memory' && <AssistantMemoryPane entries={mockMemoryEntries} />}
-            {contentKey === 'mcp/docker' && <DockerMCPPane mcpServers={mcpServers} mcpStatus={mcpStatus} onRefresh={onMcpStatusRefresh} />}
-            {contentKey === 'mcp/curated' && <CuratedMCPPane />}
-            {contentKey === 'mcp/custom' && <CustomMCPServersPane mcpServers={mcpServers} onRemove={onRemoveMCPServer} />}
-            {contentKey === 'mcp/add-mcp' && <AddMCPServerPane onAdd={onAddMCPServer} onDone={() => { setSelectedCat('mcp'); setSelectedSub('custom'); }} />}
-            {contentKey === 'onboarding' && <OnboardingPane onRestartOnboarding={onRestartOnboarding} />}
-            {contentKey === 'personality' && <PersonalityPane personalityText={personalityText} onChange={onPersonalityChange} />}
-            {contentKey === 'theme' && (
-              <ThemePane
-                activeTheme={activeTheme}
-                onSelectTheme={onSelectTheme}
-                onThemePluginManifestsChange={onThemePluginManifestsChange}
-                onRemoveTheme={onRemoveTheme}
-              />
-            )}
-            {contentKey === 'routing' && <RoutingLearningPane enabledModels={enabledModels} onApplyRoleRecommendation={onAssignRoleModel} />}
-            {contentKey === 'auto-router' && <AutoRouterPane />}
-            {contentKey === 'chat' && <ChatSettingsPane />}
-            {contentKey === 'about' && <AboutPane configPath={configPath} />}
+            <SettingsPaneErrorBoundary key={contentKey}>
+              {contentKey === 'model' && <ActiveModelPane activeModel={activeModel} thinkingEffort={thinkingEffort} enabledModels={enabledModels} providers={providers} onSelectModel={onSelectModel} onThinkingEffortChange={onThinkingEffortChange} />}
+              {contentKey === 'model-library' && <ModelLibraryPane providers={providers} />}
+              {contentKey === 'providers/manage' && (
+                <ProvidersPane
+                  providers={providers}
+                  onTest={onTestProvider}
+                  onFetch={onFetchModels}
+                  onUpdateProvider={onUpdateProvider}
+                  onRemove={onRemoveProvider}
+                  onToggleModel={onToggleProviderModel}
+                  activeModel={activeModel}
+                />
+              )}
+              {contentKey === 'providers/add' && (
+                <AddProviderPane onAdd={onAddProvider} existingIds={providers.map((p) => p.id)}
+                  onDone={() => { setSelectedCat('providers'); setSelectedSub('manage'); }} />
+              )}
+              {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} roleThinking={roleThinking} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} onAssignRoleThinking={onAssignRoleThinking} />}
+              {contentKey === 'assistant/clicky' && <ClickySettingsPane enabled={clickyEnabled} onChange={onClickyEnabledChange} />}
+              {contentKey === 'assistant/skills' && <AssistantSkillsPane skills={mockSkills} plugins={mockPlugins} />}
+              {contentKey === 'assistant/memory' && <AssistantMemoryPane entries={mockMemoryEntries} />}
+              {contentKey === 'mcp/docker' && <DockerMCPPane mcpServers={mcpServers} mcpStatus={mcpStatus} onRefresh={onMcpStatusRefresh} />}
+              {contentKey === 'mcp/curated' && <CuratedMCPPane />}
+              {contentKey === 'mcp/custom' && <CustomMCPServersPane mcpServers={mcpServers} onRemove={onRemoveMCPServer} />}
+              {contentKey === 'mcp/add-mcp' && <AddMCPServerPane onAdd={onAddMCPServer} onDone={() => { setSelectedCat('mcp'); setSelectedSub('custom'); }} />}
+              {contentKey === 'onboarding' && <OnboardingPane onRestartOnboarding={onRestartOnboarding} />}
+              {contentKey === 'personality' && <PersonalityPane personalityText={personalityText} onChange={onPersonalityChange} />}
+              {contentKey === 'theme' && (
+                <ThemePane
+                  activeTheme={activeTheme}
+                  textureOpacityOverride={textureOpacityOverride}
+                  onSelectTheme={onSelectTheme}
+                  onTextureOpacityOverrideChange={onTextureOpacityOverrideChange}
+                  onThemePluginManifestsChange={onThemePluginManifestsChange}
+                  onRemoveTheme={onRemoveTheme}
+                />
+              )}
+              {contentKey === 'routing' && <RoutingLearningPane enabledModels={enabledModels} onApplyRoleRecommendation={onAssignRoleModel} />}
+              {contentKey === 'auto-router' && <AutoRouterPane />}
+              {contentKey === 'chat' && <ChatSettingsPane />}
+              {contentKey === 'about' && <AboutPane configPath={configPath} />}
+            </SettingsPaneErrorBoundary>
           </div>
         </div>
       </div>
@@ -322,8 +356,9 @@ function ModelAbilityIcons({ modelId, providerId }: { modelId: string; providerI
           key={id}
           className={`model-ability-icon ${active ? 'active' : 'disabled'} ${isAuto ? 'auto' : ''}`}
           title={title}
+          aria-label={`${title}: ${active ? 'available' : 'unavailable'}`}
         >
-          <Icon size={13} />
+          <Icon size={13} aria-hidden="true" />
         </span>
         );
       })}
@@ -539,11 +574,15 @@ function AssistantMemoryPane({ entries }: { entries: MemoryEntry[] }) {
 /*  ACTIVE MODEL                                                       */
 /* ================================================================== */
 
-function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, onSelectModel, onThinkingEffortChange }: any) {
+function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, providers, onSelectModel, onThinkingEffortChange }: any) {
   const current = enabledModels.find((m: any) => m.id === activeModel);
   const effectiveCurrent = current || (activeModel === 'Auto'
     ? { id: 'Auto', name: 'Auto', providerName: 'Router' }
     : null);
+  const activeCard = current ? findModelCatalogCard(current.id, current.providerId) : null;
+  const premiumCostWarning = activeCard && ['premium', 'luxury'].includes(activeCard.relativeCost)
+    ? activeCard.relativeCost
+    : null;
   const supportsThinking = modelSupportsThinking(activeModel, current?.providerId);
   const thinkingTitle = activeModel === 'Auto'
     ? 'Thinking biases Auto toward cheaper or deeper routing.'
@@ -576,8 +615,384 @@ function ActiveModelPane({ activeModel, thinkingEffort, enabledModels, onSelectM
           )}
           <ModelAbilityIcons modelId={activeModel} providerId={current?.providerId} />
         </div>
+        {premiumCostWarning && (
+          <div className={`settings-budget-warning ${premiumCostWarning}`} role="status" aria-label={`${premiumCostWarning === 'luxury' ? 'Luxury-cost' : 'Premium-cost'} model warning for ${activeCard?.displayName || activeModel}`}>
+            <div className="settings-budget-warning-title">
+              <DollarSign size={12} aria-hidden="true" />
+              {premiumCostWarning === 'luxury' ? 'Luxury-cost model selected' : 'Premium-cost model selected'}
+            </div>
+            <div>
+              {activeCard?.displayName || activeModel} is best reserved for high-stakes planning, review, or difficult implementation.
+              Use Auto or a lower-cost worker model for routine chat, long background runs, or bulk tool loops.
+            </div>
+          </div>
+        )}
       </div>
+      <ModelBudgetControls activeModel={activeModel} enabledModels={enabledModels} />
+      <ProviderRateLimitControls providers={providers} />
     </>
+  );
+}
+
+function emptyModelBudget(modelId: string): api.ModelBudget {
+  return {
+    modelId,
+    maxInputTokens: 0,
+    maxOutputTokens: 0,
+    maxCost: 0,
+    period: 'monthly',
+    onExceeded: 'warn',
+  };
+}
+
+function describeModelBudget(budget: api.ModelBudget) {
+  const limits = [
+    budget.maxInputTokens > 0 ? `${budget.maxInputTokens.toLocaleString()} input` : null,
+    budget.maxOutputTokens > 0 ? `${budget.maxOutputTokens.toLocaleString()} output` : null,
+    budget.maxCost > 0 ? `$${budget.maxCost.toFixed(2)}` : null,
+  ].filter(Boolean);
+  return limits.length > 0 ? limits.join(' / ') : 'No active limit yet';
+}
+
+function ModelBudgetControls({ activeModel, enabledModels }: { activeModel: string; enabledModels: any[] }) {
+  const [budgets, setBudgets] = useState<api.ModelBudget[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const configuredModelIds = new Set(enabledModels.map((model) => model.id));
+  const defaultNewModelId = activeModel && activeModel !== 'Auto' ? activeModel : '*';
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getConfig()
+      .then((cfg) => {
+        if (!cancelled) setBudgets(cfg?.modelBudgets || []);
+      })
+      .catch((err) => {
+        if (!cancelled) setMessage(err?.message || 'Could not load model budgets.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const persist = async (nextBudgets: api.ModelBudget[]) => {
+    setSaving(true);
+    setMessage('');
+    try {
+      await api.updateConfig({ modelBudgets: nextBudgets });
+      setBudgets(nextBudgets);
+      setMessage('Budget rules saved.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Could not save budget rules.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateBudget = (index: number, patch: Partial<api.ModelBudget>) => {
+    setBudgets((prev) => prev.map((budget, i) => i === index ? { ...budget, ...patch } : budget));
+  };
+
+  const saveBudgets = () => persist(budgets.filter((budget) => budget.modelId.trim()));
+  const addBudget = () => {
+    const modelId = budgets.some((budget) => budget.modelId === defaultNewModelId)
+      ? '*'
+      : defaultNewModelId;
+    setBudgets((prev) => [...prev, emptyModelBudget(modelId)]);
+  };
+  const removeBudget = (index: number) => setBudgets((prev) => prev.filter((_, i) => i !== index));
+
+  return (
+    <div className="settings-card" style={{ marginTop: 16 }}>
+      <div className="settings-section-header">
+        <div>
+          <div className="settings-section-title">Model Budgets</div>
+          <div className="settings-item-desc">
+            Preflight limits run before provider requests. Use <code>*</code> for a global default, then add model-specific overrides for expensive models.
+          </div>
+        </div>
+        <button className="settings-mini-button" type="button" onClick={addBudget} disabled={loading || saving} aria-label={`Add model budget rule for ${defaultNewModelId === '*' ? 'global default' : defaultNewModelId}`}>
+          <Plus size={11} aria-hidden="true" /> Add budget
+        </button>
+      </div>
+      {loading ? (
+        <div className="settings-item-desc" role="status">Loading budget rules...</div>
+      ) : budgets.length === 0 ? (
+        <div className="settings-budget-warning" role="status" aria-label="No model budget rules configured">
+          <div className="settings-budget-warning-title"><DollarSign size={12} aria-hidden="true" /> No budget rules configured</div>
+          <div>Add a warning or blocking limit before running large Model Lab matrices or premium-model sweeps.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 10 }} role="list" aria-label={`${budgets.length} model budget rule${budgets.length === 1 ? '' : 's'}`}>
+          {budgets.map((budget, index) => {
+            const knownModel = budget.modelId === '*' || configuredModelIds.has(budget.modelId);
+            return (
+              <div key={`${budget.modelId}-${index}`} role="listitem" aria-label={`Model budget rule ${index + 1}: ${budget.onExceeded} when ${budget.modelId || 'missing model'} exceeds ${describeModelBudget(budget)} per ${budget.period}`} style={{ padding: 10, border: '1px solid var(--border-primary)', borderRadius: 10, background: 'var(--bg-secondary)' }}>
+                <div role="group" aria-label={`Model budget rule ${index + 1} identity and action`} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                  <input
+                    className="settings-input"
+                    value={budget.modelId}
+                    onChange={(event) => updateBudget(index, { modelId: event.target.value })}
+                    placeholder="model id or *"
+                    style={{ minWidth: 160, flex: 1 }}
+                    list="settings-budget-models"
+                    aria-label={`Model id for budget rule ${index + 1}`}
+                  />
+                  <select className="settings-select" value={budget.period} onChange={(event) => updateBudget(index, { period: event.target.value as api.ModelBudget['period'] })} aria-label={`Reset period for model budget rule ${index + 1}`}>
+                    <option value="daily">daily</option>
+                    <option value="weekly">weekly</option>
+                    <option value="monthly">monthly</option>
+                  </select>
+                  <select className="settings-select" value={budget.onExceeded} onChange={(event) => updateBudget(index, { onExceeded: event.target.value as api.ModelBudget['onExceeded'] })} aria-label={`Exceeded action for model budget rule ${index + 1}`}>
+                    <option value="warn">warn</option>
+                    <option value="block">block</option>
+                    <option value="allow">allow</option>
+                  </select>
+                  <button className="settings-mini-button" type="button" onClick={() => removeBudget(index)} disabled={saving} title="Remove budget" aria-label={`Remove model budget rule ${index + 1} for ${budget.modelId || 'missing model'}`}>
+                    <Trash2 size={11} aria-hidden="true" />
+                  </button>
+                </div>
+                <div role="group" aria-label={`Model budget thresholds for rule ${index + 1}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
+                  <label className="settings-item-desc">
+                    Input tokens
+                    <input className="settings-input" type="number" min={0} value={budget.maxInputTokens} onChange={(event) => updateBudget(index, { maxInputTokens: Number(event.target.value) || 0 })} aria-label={`Input token limit for model budget rule ${index + 1}`} />
+                  </label>
+                  <label className="settings-item-desc">
+                    Output tokens
+                    <input className="settings-input" type="number" min={0} value={budget.maxOutputTokens} onChange={(event) => updateBudget(index, { maxOutputTokens: Number(event.target.value) || 0 })} aria-label={`Output token limit for model budget rule ${index + 1}`} />
+                  </label>
+                  <label className="settings-item-desc">
+                    Cost USD
+                    <input className="settings-input" type="number" min={0} step="0.01" value={budget.maxCost} onChange={(event) => updateBudget(index, { maxCost: Number(event.target.value) || 0 })} aria-label={`Cost limit in US dollars for model budget rule ${index + 1}`} />
+                  </label>
+                </div>
+                <div role={knownModel ? undefined : 'alert'} style={{ marginTop: 8, fontSize: 11, color: knownModel ? 'var(--text-tertiary)' : 'var(--accent-warning)' }}>
+                  {budget.onExceeded.toUpperCase()} when {budget.modelId || '(missing model)'} exceeds {describeModelBudget(budget)} per {budget.period}.
+                  {!knownModel && ' This model is not currently enabled; the rule will still apply if that id is used.'}
+                </div>
+              </div>
+            );
+          })}
+          <datalist id="settings-budget-models">
+            <option value="*" />
+            {enabledModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+          </datalist>
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 12 }}>
+        <div className="settings-item-desc" role="status">{message || '0 means unlimited for that limit.'}</div>
+        <button className="settings-mini-button" type="button" onClick={saveBudgets} disabled={loading || saving} aria-label={`Save ${budgets.length} model budget rule${budgets.length === 1 ? '' : 's'}`}>
+          {saving ? <Loader size={11} className="spin" aria-hidden="true" /> : <Check size={11} aria-hidden="true" />}
+          Save budgets
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function emptyProviderRateLimit(providerId: string): api.ProviderRateLimit {
+  return {
+    providerId,
+    maxRequestsPerMinute: 0,
+    maxTokensPerMinute: 0,
+    onExceeded: 'warn',
+  };
+}
+
+function describeProviderRateLimit(limit: api.ProviderRateLimit) {
+  const limits = [
+    limit.maxRequestsPerMinute > 0 ? `${limit.maxRequestsPerMinute} req/min` : null,
+    limit.maxTokensPerMinute > 0 ? `${limit.maxTokensPerMinute.toLocaleString()} tokens/min` : null,
+  ].filter(Boolean);
+  return limits.length > 0 ? limits.join(' / ') : 'No active limit yet';
+}
+
+function ProviderRateLimitControls({ providers }: { providers: ProviderConfig[] }) {
+  const [limits, setLimits] = useState<api.ProviderRateLimit[]>([]);
+  const [status, setStatus] = useState<api.ProviderRateLimitStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const configuredProviderIds = new Set(providers.filter((provider) => provider.configured).map((provider) => provider.id));
+  const defaultProviderId = providers.find((provider) => provider.configured)?.id || '*';
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.getConfig(),
+      api.getProviderRateLimitStatus().catch(() => null),
+    ])
+      .then(([cfg, nextStatus]) => {
+        if (!cancelled) {
+          setLimits(cfg?.providerRateLimits || []);
+          setStatus(nextStatus);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setMessage(err?.message || 'Could not load provider rate limits.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const refreshStatus = async () => {
+    try {
+      setStatus(await api.getProviderRateLimitStatus());
+      setMessage('Rate-limit status refreshed.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Could not refresh rate-limit status.');
+    }
+  };
+
+  const persist = async (nextLimits: api.ProviderRateLimit[]) => {
+    setSaving(true);
+    setMessage('');
+    try {
+      await api.updateConfig({ providerRateLimits: nextLimits });
+      setLimits(nextLimits);
+      setStatus(await api.getProviderRateLimitStatus().catch(() => status));
+      setMessage('Provider rate limits saved.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Could not save provider rate limits.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateLimit = (index: number, patch: Partial<api.ProviderRateLimit>) => {
+    setLimits((prev) => prev.map((limit, i) => i === index ? { ...limit, ...patch } : limit));
+  };
+
+  const addLimit = () => {
+    const providerId = limits.some((limit) => limit.providerId === defaultProviderId) ? '*' : defaultProviderId;
+    setLimits((prev) => [...prev, emptyProviderRateLimit(providerId)]);
+  };
+  const removeLimit = (index: number) => setLimits((prev) => prev.filter((_, i) => i !== index));
+  const saveLimits = () => persist(limits.filter((limit) => limit.providerId.trim()));
+
+  return (
+    <div className="settings-card" style={{ marginTop: 16 }}>
+      <div className="settings-section-header">
+        <div>
+          <div className="settings-section-title">Provider Rate Limits</div>
+          <div className="settings-item-desc">
+            Rolling one-minute preflight limits for provider calls. Use <code>*</code> as a global fallback, then add provider-specific overrides where needed.
+          </div>
+        </div>
+        <button className="settings-mini-button" type="button" onClick={addLimit} disabled={loading || saving} aria-label={`Add provider rate-limit rule for ${defaultProviderId === '*' ? 'global default' : defaultProviderId}`}>
+          <Plus size={11} aria-hidden="true" /> Add limit
+        </button>
+      </div>
+      {loading ? (
+        <div className="settings-item-desc" role="status">Loading provider limits...</div>
+      ) : limits.length === 0 ? (
+        <div className="settings-budget-warning" role="status" aria-label="No provider rate limits configured">
+          <div className="settings-budget-warning-title"><Wifi size={12} aria-hidden="true" /> No provider rate limits configured</div>
+          <div>Add a warning or blocking threshold before running broad Model Lab sweeps against metered providers.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 10 }} role="list" aria-label={`${limits.length} provider rate-limit rule${limits.length === 1 ? '' : 's'}`}>
+          {limits.map((limit, index) => {
+            const knownProvider = limit.providerId === '*' || configuredProviderIds.has(limit.providerId);
+            return (
+              <div key={`${limit.providerId}-${index}`} role="listitem" aria-label={`Provider rate-limit rule ${index + 1}: ${limit.onExceeded} when ${limit.providerId || 'missing provider'} exceeds ${describeProviderRateLimit(limit)}`} style={{ padding: 10, border: '1px solid var(--border-primary)', borderRadius: 10, background: 'var(--bg-secondary)' }}>
+                <div role="group" aria-label={`Provider rate-limit rule ${index + 1} identity and action`} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                  <input
+                    className="settings-input"
+                    value={limit.providerId}
+                    onChange={(event) => updateLimit(index, { providerId: event.target.value })}
+                    placeholder="provider id or *"
+                    style={{ minWidth: 160, flex: 1 }}
+                    list="settings-rate-provider-ids"
+                    aria-label={`Provider id for rate-limit rule ${index + 1}`}
+                  />
+                  <select className="settings-select" value={limit.onExceeded} onChange={(event) => updateLimit(index, { onExceeded: event.target.value as api.ProviderRateLimit['onExceeded'] })} aria-label={`Exceeded action for provider rate-limit rule ${index + 1}`}>
+                    <option value="warn">warn</option>
+                    <option value="block">block</option>
+                    <option value="allow">allow</option>
+                  </select>
+                  <button className="settings-mini-button" type="button" onClick={() => removeLimit(index)} disabled={saving} title="Remove provider rate limit" aria-label={`Remove provider rate-limit rule ${index + 1} for ${limit.providerId || 'missing provider'}`}>
+                    <Trash2 size={11} aria-hidden="true" />
+                  </button>
+                </div>
+                <div role="group" aria-label={`Provider rate-limit thresholds for rule ${index + 1}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+                  <label className="settings-item-desc">
+                    Requests per minute
+                    <input className="settings-input" type="number" min={0} value={limit.maxRequestsPerMinute} onChange={(event) => updateLimit(index, { maxRequestsPerMinute: Number(event.target.value) || 0 })} aria-label={`Requests per minute for provider rate-limit rule ${index + 1}`} />
+                  </label>
+                  <label className="settings-item-desc">
+                    Tokens per minute
+                    <input className="settings-input" type="number" min={0} value={limit.maxTokensPerMinute} onChange={(event) => updateLimit(index, { maxTokensPerMinute: Number(event.target.value) || 0 })} aria-label={`Tokens per minute for provider rate-limit rule ${index + 1}`} />
+                  </label>
+                </div>
+                <div role={knownProvider ? undefined : 'alert'} style={{ marginTop: 8, fontSize: 11, color: knownProvider ? 'var(--text-tertiary)' : 'var(--accent-warning)' }}>
+                  {limit.onExceeded.toUpperCase()} when {limit.providerId || '(missing provider)'} exceeds {describeProviderRateLimit(limit)}.
+                  {!knownProvider && ' This provider is not currently configured; the rule will still apply if that id is used.'}
+                </div>
+              </div>
+            );
+          })}
+          <datalist id="settings-rate-provider-ids">
+            <option value="*" />
+            {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+          </datalist>
+        </div>
+      )}
+      {status && (
+        <div role="region" aria-label={`Provider rate-limit rolling status for current ${status.windowSeconds} second window`} style={{ marginTop: 12, padding: 10, border: '1px solid var(--border-primary)', borderRadius: 10, background: 'var(--bg-secondary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <div>
+              <div className="settings-item-label">Rolling status</div>
+              <div className="settings-item-desc">Current {status.windowSeconds}s window plus recent warnings/blocks.</div>
+            </div>
+            <button className="settings-mini-button" type="button" onClick={refreshStatus} disabled={saving} aria-label="Refresh provider rate-limit rolling status">
+              <RefreshCw size={11} aria-hidden="true" /> Refresh
+            </button>
+          </div>
+          {status.providers.length === 0 ? (
+            <div className="settings-item-desc" role="status">No provider calls have been tracked in the current server process.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 6 }} role="list" aria-label="Tracked provider usage in the current rolling window">
+              {status.providers.slice(0, 6).map((providerStatus) => (
+                <div key={providerStatus.providerId} role="listitem" aria-label={`${providerStatus.providerId}: ${providerStatus.requestsUsed}${providerStatus.maxRequestsPerMinute ? ` of ${providerStatus.maxRequestsPerMinute}` : ''} requests, ${providerStatus.tokensUsed.toLocaleString()}${providerStatus.maxTokensPerMinute ? ` of ${providerStatus.maxTokensPerMinute.toLocaleString()}` : ''} tokens, resets in ${providerStatus.resetSeconds} seconds`} style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{providerStatus.providerId}</span>
+                  <span>
+                    {providerStatus.requestsUsed}{providerStatus.maxRequestsPerMinute ? `/${providerStatus.maxRequestsPerMinute}` : ''} req
+                    {' · '}
+                    {providerStatus.tokensUsed.toLocaleString()}{providerStatus.maxTokensPerMinute ? `/${providerStatus.maxTokensPerMinute.toLocaleString()}` : ''} tokens
+                    {' · '}
+                    reset {providerStatus.resetSeconds}s
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {status.recentEvents.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div className="settings-item-label">Recent rate-limit events</div>
+              <div role="list" aria-label="Recent provider rate-limit warning and block events">
+              {status.recentEvents.slice(0, 4).map((event, index) => (
+                <div key={`${event.providerId}-${event.timestamp}-${index}`} role="listitem" style={{ marginTop: 4, fontSize: 11, color: event.action === 'block' ? 'var(--accent-error)' : 'var(--accent-warning)' }}>
+                  {event.action.toUpperCase()} · {event.providerId} · {new Date(event.timestamp).toLocaleTimeString()} · {event.reason}
+                </div>
+              ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 12 }}>
+        <div className="settings-item-desc" role="status">{message || '0 means unlimited for that limit. Limits reset every rolling minute.'}</div>
+        <button className="settings-mini-button" type="button" onClick={saveLimits} disabled={loading || saving} aria-label={`Save ${limits.length} provider rate-limit rule${limits.length === 1 ? '' : 's'}`}>
+          {saving ? <Loader size={11} className="spin" aria-hidden="true" /> : <Check size={11} aria-hidden="true" />}
+          Save limits
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -630,6 +1045,28 @@ function getCatalogAccess(cardId: string, providers: ProviderConfig[]) {
   };
 }
 
+function modelHarnessFit(card: (typeof TOP_MODEL_CATALOG)[number]) {
+  let score = 36;
+  const reasons: string[] = [];
+  if (card.supportsTools) { score += 16; reasons.push('tool-capable'); }
+  if (card.supportsThinking) { score += 12; reasons.push('thinking'); }
+  if (card.supportsImages) { score += 8; reasons.push('vision'); }
+  if (card.contextWindowTokens >= 1_000_000) { score += 12; reasons.push('1M context'); }
+  else if (card.contextWindowTokens >= 200_000) { score += 8; reasons.push('long context'); }
+  if (card.routerCost <= 0.35) { score += 12; reasons.push('cheap router'); }
+  else if (card.routerCost <= 0.8) { score += 8; reasons.push('balanced cost'); }
+  else if (card.routerCost <= 1.15) { score += 4; reasons.push('premium fit'); }
+  if (card.bestFor.length >= 3) score += 5;
+  if (card.weaknesses.length >= 3) score -= 6;
+  if (card.relativeCost === 'luxury') { score -= 8; reasons.push('watch spend'); }
+  const bounded = Math.max(20, Math.min(96, score));
+  return {
+    score: bounded,
+    label: bounded >= 82 ? 'Strong harness fit' : bounded >= 68 ? 'Good fit' : bounded >= 54 ? 'Specialist fit' : 'Use carefully',
+    reasons: reasons.slice(0, 4),
+  };
+}
+
 function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | keyof typeof MODEL_CATEGORY_META>('all');
@@ -670,11 +1107,12 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
 
       <div className="model-library-toolbar">
         <label className="model-library-search">
-          <Search size={14} />
+          <Search size={14} aria-hidden="true" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search models, strengths, providers, comparisons"
+            aria-label="Search model library by model, strength, provider, or comparison"
           />
         </label>
         <select
@@ -682,6 +1120,7 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value as 'all' | keyof typeof MODEL_CATEGORY_META)}
           title="Filter by best-rated category"
+          aria-label="Filter model library by best-rated category"
         >
           <option value="all">All categories</option>
           {Object.entries(MODEL_CATEGORY_META).map(([id, meta]) => (
@@ -690,44 +1129,53 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
         </select>
         <button
           className={`settings-mini-button model-library-access-button ${accessOnly ? 'active' : ''}`}
+          type="button"
           onClick={() => setAccessOnly((prev) => !prev)}
           title="Show enabled models from configured providers"
+          aria-pressed={accessOnly}
+          aria-label={accessOnly ? 'Showing only enabled provider models; show all model library cards' : 'Show only enabled provider models in the model library'}
         >
-          {accessOnly ? <Check size={11} /> : <Bot size={11} />}
+          {accessOnly ? <Check size={11} aria-hidden="true" /> : <Bot size={11} aria-hidden="true" />}
           My Models
         </button>
       </div>
 
-      <div className="model-library-summary">
+      <div className="model-library-summary" role="status" aria-label={`Model library summary: ${TOP_MODEL_CATALOG.length} catalog cards, ${providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length} enabled provider models, updated ${MODEL_CATALOG_UPDATED_AT}`}>
         <div><strong>{TOP_MODEL_CATALOG.length}</strong> catalog cards</div>
         <div><strong>{providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length}</strong> enabled provider models</div>
         <div>Updated {MODEL_CATALOG_UPDATED_AT}</div>
       </div>
 
-      <div className="model-category-legend">
+      <div className="model-category-legend" role="group" aria-label="Model library category filters">
         {Object.entries(MODEL_CATEGORY_META).map(([id, meta]) => (
           <button
             key={id}
             className={`model-category-chip ${categoryFilter === id ? 'active' : ''}`}
+            type="button"
             style={{ ['--category-color' as any]: meta.color, ['--category-bg' as any]: meta.background }}
             onClick={() => setCategoryFilter(categoryFilter === id ? 'all' : id as keyof typeof MODEL_CATEGORY_META)}
             title={`Best-rated category: ${meta.label}`}
+            aria-pressed={categoryFilter === id}
+            aria-label={`${categoryFilter === id ? 'Clear' : 'Apply'} ${meta.label} model category filter`}
           >
             {meta.label}
           </button>
         ))}
       </div>
 
-      <div className="model-library-grid">
+      <div className="model-library-grid" role="list" aria-label={`${filtered.length} model capability scorecard${filtered.length === 1 ? '' : 's'} shown`}>
         {filtered.map((card) => {
           const access = getCatalogAccess(card.id, providers);
           const category = modelBestCategory(card);
           const categoryMeta = MODEL_CATEGORY_META[category];
           const accessClass = access.label.toLowerCase();
+          const fit = modelHarnessFit(card);
           return (
             <article
               key={card.id}
               className="model-card"
+              role="listitem"
+              aria-label={`${card.displayName} capability scorecard. Provider ${card.provider}. ${categoryMeta.label}. Access ${access.label}${access.providerLabel ? ` via ${access.providerLabel}` : ''}. Harness fit ${fit.score} percent, ${fit.label}. Cost ${formatModelCost(card)}. Context ${formatContextWindow(card.contextWindowTokens)}. Tools ${card.supportsTools ? 'yes' : 'basic'}. Vision ${card.supportsImages ? 'yes' : 'no'}.`}
               style={{ ['--model-category-color' as any]: categoryMeta.color, ['--model-category-bg' as any]: categoryMeta.background }}
               title={modelCatalogTooltip(card.id)}
             >
@@ -736,34 +1184,44 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
                   <div className="model-card-provider">{card.provider}</div>
                   <h3>{card.displayName}</h3>
                 </div>
-                <div className={`model-card-access ${accessClass}`}>
+                <div className={`model-card-access ${accessClass}`} aria-label={`Provider access: ${access.label}${access.providerLabel ? ` through ${access.providerLabel}` : ''}`}>
                   {access.label}
                   {access.providerLabel && <span>{access.providerLabel}</span>}
                 </div>
               </div>
               <div className="model-card-category">{categoryMeta.label}</div>
               <p className="model-card-compact">{card.compactDescription}</p>
-              <div className="model-card-metrics">
-                <div><span>Context</span><strong>{formatContextWindow(card.contextWindowTokens)}</strong></div>
-                <div><span>Cost</span><strong>{formatModelCost(card)}</strong></div>
-                <div><span>Tools</span><strong>{card.supportsTools ? 'Yes' : 'Basic'}</strong></div>
-                <div><span>Vision</span><strong>{card.supportsImages ? 'Yes' : 'No'}</strong></div>
+              <div className="model-card-metrics" role="list" aria-label={`${card.displayName} core capability metrics`}>
+                <div role="listitem" aria-label={`Context window ${formatContextWindow(card.contextWindowTokens)}`}><span>Context</span><strong>{formatContextWindow(card.contextWindowTokens)}</strong></div>
+                <div role="listitem" aria-label={`Cost tier ${formatModelCost(card)}`}><span>Cost</span><strong>{formatModelCost(card)}</strong></div>
+                <div role="listitem" aria-label={`Tool capability ${card.supportsTools ? 'supported' : 'basic'}`}><span>Tools</span><strong>{card.supportsTools ? 'Yes' : 'Basic'}</strong></div>
+                <div role="listitem" aria-label={`Vision capability ${card.supportsImages ? 'supported' : 'not supported'}`}><span>Vision</span><strong>{card.supportsImages ? 'Yes' : 'No'}</strong></div>
+              </div>
+              <div className="model-card-scorecard" role="group" aria-label={`${card.displayName} harness fit score ${fit.score} percent: ${fit.label}`}>
+                <div className="model-card-score-main">
+                  <span>Harness fit</span>
+                  <strong>{fit.score}%</strong>
+                  <em>{fit.label}</em>
+                </div>
+                <div className="model-card-score-reasons" role="list" aria-label={`${card.displayName} harness fit reasons`}>
+                  {fit.reasons.map((reason) => <span key={`${card.id}-${reason}`} role="listitem">{reason}</span>)}
+                </div>
               </div>
               <div className="model-card-review">{card.reviewSummary}</div>
               <div className="model-card-columns">
-                <div>
+                <div role="group" aria-label={`${card.displayName} strengths`}>
                   <span>Good at</span>
                   <p>{card.strengths.join(', ')}</p>
                 </div>
-                <div>
+                <div role="group" aria-label={`${card.displayName} weaknesses`}>
                   <span>Bad at</span>
                   <p>{card.weaknesses.join(', ')}</p>
                 </div>
               </div>
-              <div className="model-card-compare">
+              <div className="model-card-compare" aria-label={`${card.displayName} comparable models: ${card.comparableTo.join(', ')}`}>
                 Comparable to: {card.comparableTo.join(', ')}
               </div>
-              <div className="model-card-benchmark">{card.benchmarkHighlights[0]}</div>
+              <div className="model-card-benchmark" aria-label={`${card.displayName} benchmark highlight: ${card.benchmarkHighlights[0]}`}>{card.benchmarkHighlights[0]}</div>
             </article>
           );
         })}
@@ -1466,6 +1924,7 @@ function AddProviderPane({ onAdd, existingIds, onDone }: any) {
 
 
 function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssignRoleModel, onAssignRoleThinking }: any) {
+  const [evalRecommendations, setEvalRecommendations] = useState<api.EvalRecommendation[]>([]);
   const effortCopy: Record<ThinkingEffort, { summary: string; intent: string }> = {
     low: {
       summary: 'Fast and inexpensive',
@@ -1484,6 +1943,52 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
       intent: 'Reserve for the hardest investigations where quality matters more than speed.',
     },
   };
+
+  const evalProofStatusCopy = (recommendation: api.EvalRecommendation) => {
+    if (recommendation.proofReviewStatus === 'approved') return 'Proof approved';
+    if (recommendation.proofReviewStatus === 'needs-attention') return 'Proof needs attention';
+    return 'Proof unreviewed';
+  };
+
+  const evalProofStatusDetail = (recommendation: api.EvalRecommendation) => {
+    const base = recommendation.proofReviewStatus === 'approved'
+      ? 'Human-reviewed evidence supports this recommendation.'
+      : recommendation.proofReviewStatus === 'needs-attention'
+        ? 'Review found issues; do not treat this as a trusted recommendation yet.'
+        : 'Review the Model Lab proof before applying this recommendation.';
+    return recommendation.proofReviewedAt ? `${base} Reviewed ${new Date(recommendation.proofReviewedAt).toLocaleString()}.` : base;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getEvalRecommendations()
+      .then((items) => { if (!cancelled) setEvalRecommendations(items); })
+      .catch(() => { if (!cancelled) setEvalRecommendations([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const enabledModelKeys = useMemo(() => {
+    const keys = new Set<string>();
+    enabledModels.forEach((model: any) => {
+      const normalizedId = String(model.id || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const normalizedName = String(model.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const normalizedProviderModel = `${model.providerId || ''}:${model.id || ''}`.toLowerCase().replace(/[^a-z0-9]+/g, '');
+      if (normalizedId) keys.add(normalizedId);
+      if (normalizedName) keys.add(normalizedName);
+      if (normalizedProviderModel) keys.add(normalizedProviderModel);
+    });
+    return keys;
+  }, [enabledModels]);
+
+  const evalRecommendationByRole = useMemo(() => {
+    const entries = new Map<string, api.EvalRecommendation>();
+    evalRecommendations.forEach((rec) => {
+      const normalized = rec.modelId.toLowerCase().replace(/[^a-z0-9]+/g, '');
+      if (!enabledModelKeys.has(normalized)) return;
+      if (!entries.has(rec.role)) entries.set(rec.role, rec);
+    });
+    return entries;
+  }, [enabledModelKeys, evalRecommendations]);
 
   const modelOptions = (
     <>
@@ -1528,17 +2033,36 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
           <div className="role-recommendation-title">Auto configure from selected plan models</div>
           <div className="role-recommendation-copy">Uses only models enabled under your configured providers and plan choices, then picks the strongest available fit for each agent role.</div>
         </div>
-        <button className="settings-mini-button" onClick={applyRecommendedDefaults} disabled={enabledModels.length === 0}>
-          <Sparkles size={12} /> Auto configure roles
+        <button
+          type="button"
+          className="settings-mini-button"
+          onClick={applyRecommendedDefaults}
+          disabled={enabledModels.length === 0}
+          aria-label="Auto configure agent roles from enabled model recommendations"
+        >
+          <Sparkles size={12} aria-hidden="true" /> Auto configure roles
         </button>
       </div>
-      <div className="role-auto-grid" aria-label="Recommended role models">
+      <div className="role-recommendation-bar">
+        <div>
+          <div className="role-recommendation-title">Eval proof trust</div>
+          <div className="role-recommendation-copy">
+            Approved proof can be applied directly. Unreviewed proof is manual-only and needs human review before changing defaults. Needs-attention proof stays blocked until resolved.
+          </div>
+        </div>
+      </div>
+      <div className="role-auto-grid" role="group" aria-label="Recommended role models">
         {roleAssignments.map((role: CodingRoleAssignment) => {
           const recommended = recommendedRoleModels[role.id];
           const Icon = roleIconMap[role.id] || Bot;
           return (
-            <div key={role.id} className="role-auto-card">
-              <span className="role-auto-icon"><Icon size={13} /></span>
+            <div
+              key={role.id}
+              className="role-auto-card"
+              role="group"
+              aria-label={`${role.name} recommended model: ${recommended ? `${recommended.providerName} ${recommended.name}` : 'no enabled model'}`}
+            >
+              <span className="role-auto-icon"><Icon size={13} aria-hidden="true" /></span>
               <span className="role-auto-text">
                 <span className="role-auto-name">{role.name}</span>
                 <span className="role-auto-model">
@@ -1555,16 +2079,23 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
           const sharedModel = rolesForEffort.length > 0 && rolesForEffort.every((role: CodingRoleAssignment) => role.modelId === rolesForEffort[0].modelId)
             ? rolesForEffort[0].modelId
             : '';
+          const effortTitleId = `agent-role-effort-title-${effort.id}`;
+          const effortIntentId = `agent-role-effort-intent-${effort.id}`;
           return (
-            <section key={effort.id} className="role-effort-section">
+            <section key={effort.id} className="role-effort-section" aria-labelledby={effortTitleId} aria-describedby={effortIntentId}>
               <div className="role-effort-header">
                 <div className="role-effort-title-row">
-                  <span className="role-effort-icon"><Brain size={14} /></span>
+                  <span className="role-effort-icon"><Brain size={14} aria-hidden="true" /></span>
                   <div>
-                    <div className="role-effort-title">{effort.label}</div>
+                    <div className="role-effort-title" id={effortTitleId}>{effort.label}</div>
                     <div className="role-effort-summary">{effortCopy[effort.id].summary}</div>
                   </div>
-                  <span className="role-effort-count">{rolesForEffort.length}</span>
+                  <span
+                    className="role-effort-count"
+                    aria-label={`${rolesForEffort.length} role${rolesForEffort.length === 1 ? '' : 's'} using ${effort.label.toLowerCase()} thinking`}
+                  >
+                    {rolesForEffort.length}
+                  </span>
                 </div>
                 <div className="role-effort-controls">
                   <span>Use model</span>
@@ -1580,7 +2111,7 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
                   </select>
                 </div>
               </div>
-              <div className="role-effort-intent">{effortCopy[effort.id].intent}</div>
+              <div className="role-effort-intent" id={effortIntentId}>{effortCopy[effort.id].intent}</div>
               {recommendedModels[effort.id] && (
                 <div className="role-effort-recommendation">
                   Best available: {recommendedModels[effort.id]?.providerName} — {recommendedModels[effort.id]?.name}
@@ -1588,18 +2119,24 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
               )}
               <div className="role-bucket-list">
                 {rolesForEffort.length === 0 && (
-                  <div className="role-effort-empty">No roles are using {effort.label.toLowerCase()} thinking.</div>
+                  <div className="role-effort-empty" role="status" aria-live="polite">No roles are using {effort.label.toLowerCase()} thinking.</div>
                 )}
                 {rolesForEffort.map((role: CodingRoleAssignment) => {
                   const Icon = roleIconMap[role.id] || Bot;
                   const selectedModel = enabledModels.find((model: any) => model.id === role.modelId);
+                  const evalRecommendation = evalRecommendationByRole.get(role.id);
                   const supportsThinking = modelSupportsThinking(role.modelId, selectedModel?.providerId);
                   const thinkingTitle = role.modelId === 'Auto'
                     ? `${role.name} uses Thinking to bias Auto routing depth and cost.`
                     : `${role.name} thinking effort for this reasoning-capable model.`;
                   return (
-                    <div key={role.id} className="role-bucket-card">
-                      <div className="role-bucket-icon"><Icon size={15} /></div>
+                    <div
+                      key={role.id}
+                      className="role-bucket-card"
+                      role="group"
+                      aria-label={`${role.name}: ${role.description}. Current model ${selectedModel ? `${selectedModel.providerName} ${selectedModel.name}` : role.modelId}. Thinking effort ${roleThinking?.[role.id] || 'medium'}.`}
+                    >
+                      <div className="role-bucket-icon"><Icon size={15} aria-hidden="true" /></div>
                       <div className="role-bucket-body">
                         <div className="role-bucket-topline">
                           <div>
@@ -1622,7 +2159,7 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
                           </select>
                           {supportsThinking && (
                             <label className="settings-thinking-control" title={thinkingTitle}>
-                              <span><Brain size={12} /> Move to</span>
+                              <span><Brain size={12} aria-hidden="true" /> Move to</span>
                               <select className="settings-select" value={roleThinking?.[role.id] || 'medium'} onChange={(e) => onAssignRoleThinking(role.id, e.target.value as ThinkingEffort)} aria-label={`${role.name} thinking effort`}>
                                 {THINKING_EFFORTS.map((option) => (
                                   <option key={option.id} value={option.id}>{option.label}</option>
@@ -1634,6 +2171,36 @@ function AgentRolesPane({ roleAssignments, roleThinking, enabledModels, onAssign
                         {findModelCatalogCard(role.modelId) && (
                           <div className="role-bucket-model-note" title={modelCatalogTooltip(role.modelId)}>
                             {findModelCatalogCard(role.modelId)?.compactDescription}
+                          </div>
+                        )}
+                        {evalRecommendation && (
+                          <div
+                            className="role-eval-recommendation"
+                            role="group"
+                            aria-label={`${role.name} eval recommendation: ${evalRecommendation.modelId}. ${evalProofStatusCopy(evalRecommendation)}. ${evalRecommendation.reason}`}
+                          >
+                            <div>
+                              <span>Eval recommendation · {evalProofStatusCopy(evalRecommendation)}</span>
+                              <strong>{evalRecommendation.modelId}</strong>
+                              <p>{evalRecommendation.reason}</p>
+                              <p className={`eval-proof-status ${evalRecommendation.proofReviewStatus}`}>
+                                {evalProofStatusDetail(evalRecommendation)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="settings-mini-button"
+                              onClick={() => onAssignRoleModel(role.id, evalRecommendation.modelId)}
+                              disabled={evalRecommendation.proofReviewStatus === 'needs-attention'}
+                              aria-label={`${evalRecommendation.proofTrusted ? 'Apply approved' : evalRecommendation.proofReviewStatus === 'needs-attention' ? 'Blocked' : 'Apply manually after review'} eval recommendation for ${role.name}: ${evalRecommendation.modelId}`}
+                              title={evalRecommendation.proofReviewStatus === 'needs-attention'
+                                ? 'Resolve the proof review before applying this recommendation.'
+                                : evalRecommendation.proofTrusted
+                                  ? 'Apply this approved-proof recommendation.'
+                                  : 'Apply manually after reviewing the unapproved proof.'}
+                            >
+                              {evalRecommendation.proofTrusted ? 'Apply' : 'Apply manually'}
+                            </button>
                           </div>
                         )}
                       </div>
@@ -2051,10 +2618,23 @@ function PersonalityPane({ personalityText, onChange }: any) {
 /*  THEME                                                              */
 /* ================================================================== */
 
-function ThemePane({ activeTheme, onSelectTheme, onThemePluginManifestsChange, onRemoveTheme }: any) {
+function textureLabel(recipe?: string, opacity?: number): string {
+  if (!recipe || recipe === 'none' || !opacity) return 'Texture: none';
+  const label = recipe
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+  return `Texture: ${label} · ${Math.round(opacity * 100)}%`;
+}
+
+function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextureOpacityOverrideChange, onThemePluginManifestsChange, onRemoveTheme }: any) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resolvedActiveTheme = resolveThemeId(activeTheme);
   const hasRepair = activeTheme !== resolvedActiveTheme;
+  const activeThemeDetails = getThemeById(resolvedActiveTheme);
+  const baseTextureOpacity = activeThemeDetails?.tokens.effects?.textureOpacity ?? 0;
+  const effectiveTextureOpacity = textureOpacityOverride ?? baseTextureOpacity;
+  const effectiveTexturePercent = Math.round(effectiveTextureOpacity * 100);
   const [importFeedback, setImportFeedback] = useState<{ kind: 'error' | 'success'; message: string; details?: string[] } | null>(null);
   const themeGroups = [
     { mode: 'dark', label: 'Dark themes', themes: getThemesByMode('dark') },
@@ -2125,6 +2705,42 @@ function ThemePane({ activeTheme, onSelectTheme, onThemePluginManifestsChange, o
           onChange={handleImportThemes}
           style={{ display: 'none' }}
         />
+        <div className="settings-card" style={{ marginBottom: 14, padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Texture opacity</div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>
+                {textureOpacityOverride === null
+                  ? `Using ${activeThemeDetails?.label || resolvedActiveTheme} default (${Math.round(baseTextureOpacity * 100)}%).`
+                  : 'Using a custom shell-wide texture intensity.'}
+              </div>
+            </div>
+            <button
+              className="settings-mini-button"
+              disabled={textureOpacityOverride === null}
+              onClick={() => onTextureOpacityOverrideChange(null)}
+            >
+              Reset
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 42px', gap: 10, alignItems: 'center' }}>
+            <input
+              type="range"
+              min={0}
+              max={18}
+              step={1}
+              value={effectiveTexturePercent}
+              onChange={(event) => onTextureOpacityOverrideChange(Number(event.target.value) / 100)}
+              aria-label="Theme texture opacity"
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {effectiveTexturePercent}%
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+            Textures are shell-only. When reduced transparency is requested, textures and blur are disabled and glass surfaces use each theme's solid fallback colors.
+          </div>
+        </div>
         {importFeedback && (
           <div style={{ marginBottom: 12 }}>
             <div style={{ color: importFeedback.kind === 'error' ? 'var(--accent-error)' : 'var(--accent-success)', fontSize: 12 }}>
@@ -2160,7 +2776,10 @@ function ThemePane({ activeTheme, onSelectTheme, onThemePluginManifestsChange, o
                   <div style={{ width: 24, height: 24, borderRadius: 6, background: t.color, flexShrink: 0 }} />
                   <div style={{ textAlign: 'left' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{t.label}</div>
-                    {resolvedActiveTheme === t.id && <div style={{ fontSize: 10, color: 'var(--accent-primary)' }}>Active</div>}
+                    <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
+                      {textureLabel(t.tokens.effects?.textureRecipe, t.tokens.effects?.textureOpacity)}
+                    </div>
+                    {resolvedActiveTheme === t.id && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Active</div>}
                   </div>
                   {!t.tags?.includes('builtin') && (
                     <button
@@ -2422,10 +3041,26 @@ function AutoRouterPane() {
   const [arDefaultModel, setArDefaultModel] = useState('');
   const [arCandidates, setArCandidates] = useState<api.AutoRouterCandidateConfig[]>([]);
   const [configuredCandidates, setConfiguredCandidates] = useState<api.AutoRouterCandidateConfig[]>([]);
+  const [evalRecommendations, setEvalRecommendations] = useState<api.EvalRecommendation[]>([]);
   const [arSaving, setArSaving] = useState(false);
   const [newCandidate, setNewCandidate] = useState<api.AutoRouterCandidateConfig>({
     modelId: '', cost: 0.5, supportsImages: false, supportsThinking: false, card: ''
   });
+
+  const evalProofStatusCopy = (recommendation: api.EvalRecommendation) => {
+    if (recommendation.proofReviewStatus === 'approved') return 'Proof approved';
+    if (recommendation.proofReviewStatus === 'needs-attention') return 'Proof needs attention';
+    return 'Proof unreviewed';
+  };
+
+  const evalProofStatusDetail = (recommendation: api.EvalRecommendation) => {
+    const base = recommendation.proofReviewStatus === 'approved'
+      ? 'Human-reviewed evidence supports this router cue.'
+      : recommendation.proofReviewStatus === 'needs-attention'
+        ? 'Review found issues; do not treat this router cue as trusted yet.'
+        : 'Review the Model Lab proof before trusting this router cue.';
+    return recommendation.proofReviewedAt ? `${base} Reviewed ${new Date(recommendation.proofReviewedAt).toLocaleString()}.` : base;
+  };
 
   // Load router state and candidates on mount
   useEffect(() => {
@@ -2452,6 +3087,9 @@ function AutoRouterPane() {
         setArCandidates(scannedCandidates);
       }
     }).catch(() => {});
+    api.getEvalRecommendations()
+      .then(setEvalRecommendations)
+      .catch(() => setEvalRecommendations([]));
   }, []);
 
   const persistRouterConfig = async (partial: Partial<api.AutoRouterConfig>) => {
@@ -2609,11 +3247,12 @@ function AutoRouterPane() {
                   <div className="settings-item-label">Classifier Model</div>
                   <div className="settings-item-desc">Active candidate used to score task fit before cost and context gates are applied</div>
                 </div>
-                <select
-                  value={arClassifier}
-                  style={{ width: 260, height: 30, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
-                  onChange={async (e) => {
-                    const modelId = e.target.value;
+                            <select
+                              aria-label="Auto-Router classifier model"
+                              value={arClassifier}
+                              style={{ width: 260, height: 30, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                              onChange={async (e) => {
+                                const modelId = e.target.value;
                     setArClassifier(modelId);
                     const merged = await persistRouterConfig({ classifierModel: modelId });
                     setArClassifier(merged.classifierModel);
@@ -2632,11 +3271,12 @@ function AutoRouterPane() {
                   <div className="settings-item-label">Default Model</div>
                   <div className="settings-item-desc">Fallback candidate used when classification fails or no score clears the threshold</div>
                 </div>
-                <select
-                  value={arDefaultModel}
-                  style={{ width: 260, height: 30, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
-                  onChange={async (e) => {
-                    const modelId = e.target.value;
+                            <select
+                              aria-label="Auto-Router default fallback model"
+                              value={arDefaultModel}
+                              style={{ width: 260, height: 30, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
+                              onChange={async (e) => {
+                                const modelId = e.target.value;
                     setArDefaultModel(modelId);
                     const merged = await persistRouterConfig({ defaultModel: modelId });
                     setArDefaultModel(merged.defaultModel);
@@ -2655,10 +3295,11 @@ function AutoRouterPane() {
                   <div className="settings-item-label">Threshold</div>
                   <div className="settings-item-desc">Quality bar (0–1). Higher = safer, lower = cheaper. ({arThreshold.toFixed(2)})</div>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
+                            <input
+                              aria-label="Auto-Router routing threshold"
+                              type="range"
+                              min="0"
+                              max="1"
                   step="0.05"
                   value={arThreshold}
                   style={{ width: 120, accentColor: 'var(--accent-color, #6366f1)' }}
@@ -2674,42 +3315,53 @@ function AutoRouterPane() {
                 The auto-router uses a cheap classifier model to score each candidate on task fitness.
                 The lowest effective-cost candidate above the threshold wins. Effective cost is a preference weight, not a quality score.
               </div>
+              <div className="router-eval-recommendation" style={{ marginBottom: 10 }}>
+                <span>Eval proof trust</span>
+                <p>
+                  Eval-backed router cues show proof status when a recommendation matches an active candidate.
+                  Treat approved proof as trusted, review unreviewed proof manually, and do not trust needs-attention proof until it is resolved.
+                </p>
+              </div>
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
                 gap: 6,
                 marginBottom: 10,
               }}>
-                <div style={{ padding: 8, borderRadius: 6, background: 'var(--bg-secondary, #f3f4f6)' }}>
+                <div role="status" aria-label={`Auto-router catalog contains ${TOP_ROUTER_MODEL_CARDS.length} model capability cards`} style={{ padding: 8, borderRadius: 6, background: 'var(--bg-secondary, #f3f4f6)' }}>
                   <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>Catalog</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{TOP_ROUTER_MODEL_CARDS.length} cards</div>
                 </div>
-                <div style={{ padding: 8, borderRadius: 6, background: 'var(--bg-secondary, #f3f4f6)' }}>
+                <div role="status" aria-label={`Auto-router has ${configuredCandidates.length} configured provider models available to sync`} style={{ padding: 8, borderRadius: 6, background: 'var(--bg-secondary, #f3f4f6)' }}>
                   <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>Configured</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{configuredCandidates.length} models</div>
                 </div>
-                <div style={{ padding: 8, borderRadius: 6, background: 'var(--bg-secondary, #f3f4f6)' }}>
+                <div role="status" aria-label={`Auto-router has ${arCandidates.length} active routed candidates`} style={{ padding: 8, borderRadius: 6, background: 'var(--bg-secondary, #f3f4f6)' }}>
                   <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>Routed</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{arCandidates.length} active</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                 <button
+                  type="button"
                   className="settings-btn"
                   style={{ padding: '5px 9px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                   onClick={syncConfiguredCandidates}
                   disabled={arSaving || configuredCandidates.length === 0}
                   title="Scan configured providers and refresh subscription-aware effective costs"
+                  aria-label="Sync configured provider models into Auto-Router candidates"
                 >
-                  <RefreshCw size={12} /> Sync configured
+                  <RefreshCw size={12} aria-hidden="true" /> Sync configured
                 </button>
                 {configuredAvailable.slice(0, 3).map((candidate) => (
                   <button
                     key={candidate.modelId}
+                    type="button"
                     className="settings-btn"
                     style={{ padding: '5px 9px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--bg-primary)', color: 'var(--text-primary)', cursor: 'pointer' }}
                     onClick={() => addConfiguredCandidate(candidate)}
                     title={`Configured provider model. ${candidate.card}`}
+                    aria-label={`Add configured provider model ${candidate.modelId} as an Auto-Router candidate`}
                   >
                     + Configured: {candidate.modelId}
                   </button>
@@ -2724,16 +3376,27 @@ function AutoRouterPane() {
                 Effective cost includes subscription/prepaid bias. Lower numbers are preferred after the classifier decides which models are good enough.
               </div>
               {arCandidates.length === 0 && (
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic', marginBottom: 8 }}>
+                <div role="status" aria-live="polite" style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic', marginBottom: 8 }}>
                   No candidates configured. Add at least one to enable routing.
                 </div>
               )}
+              <div role="list" aria-label={`${arCandidates.length} Auto-Router candidate${arCandidates.length === 1 ? '' : 's'} configured`}>
               {arCandidates.map((c, i) => {
                 const source = routerCandidateSource(c, configuredCandidates);
                 const isClassifier = normalizeModelKey(c.modelId) === normalizeModelKey(arClassifier);
                 const isDefault = normalizeModelKey(c.modelId) === normalizeModelKey(arDefaultModel);
+                const evalRecommendation = evalRecommendations.find((rec) => {
+                  const candidateKey = normalizeModelKey(c.modelId);
+                  const recKey = normalizeModelKey(rec.modelId);
+                  return candidateKey === recKey || candidateKey.endsWith(recKey) || recKey.endsWith(candidateKey);
+                });
                 return (
-                <div key={c.modelId} title={source.detail} style={{
+                <div
+                  key={c.modelId}
+                  title={source.detail}
+                  role="listitem"
+                  aria-label={`Auto-router candidate ${i + 1}: ${c.modelId}. Source ${source.label}. Effective cost ${c.cost}. Images ${c.supportsImages ? 'supported' : 'not supported'}. Thinking ${c.supportsThinking ? 'supported' : 'not supported'}.${isClassifier ? ' Used as classifier model.' : ''}${isDefault ? ' Used as default fallback model.' : ''}${evalRecommendation ? ` Eval recommendation ${evalProofStatusCopy(evalRecommendation)} for ${evalRecommendation.role}.` : ''}`}
+                  style={{
                   display: 'grid',
                   gridTemplateColumns: 'minmax(0, 1fr) auto',
                   gap: 6,
@@ -2742,21 +3405,38 @@ function AutoRouterPane() {
                   background: 'var(--bg-secondary, #f3f4f6)',
                 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                    <div role="list" aria-label={`${c.modelId} Auto-Router evidence badges`} style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--text-primary)' }}>
                         {c.modelId}
                       </span>
-                      <span style={routerSourceBadgeStyle(source.tone)}>{source.label}</span>
-                      {isClassifier && <span style={routerSourceBadgeStyle('catalog')}>Classifier</span>}
-                      {isDefault && <span style={routerSourceBadgeStyle('custom')}>Default</span>}
-                      {c.supportsImages && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Images</span>}
-                      {c.supportsThinking && <span style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Thinking</span>}
+                      <span role="listitem" aria-label={`${c.modelId} source ${source.label}`} style={routerSourceBadgeStyle(source.tone)}>{source.label}</span>
+                      {isClassifier && <span role="listitem" aria-label={`${c.modelId} is the classifier model`} style={routerSourceBadgeStyle('catalog')}>Classifier</span>}
+                      {isDefault && <span role="listitem" aria-label={`${c.modelId} is the default fallback model`} style={routerSourceBadgeStyle('custom')}>Default</span>}
+                      {evalRecommendation && <span role="listitem" aria-label={`${c.modelId} eval recommendation status: ${evalProofStatusCopy(evalRecommendation)}`} style={routerSourceBadgeStyle(evalRecommendation.proofReviewStatus === 'approved' ? 'ok' : 'custom')}>
+                        {evalRecommendation.proofReviewStatus === 'approved' ? 'Eval-backed' : 'Eval evidence'}
+                      </span>}
+                      {c.supportsImages && <span role="listitem" aria-label={`${c.modelId} supports image inputs`} style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Images</span>}
+                      {c.supportsThinking && <span role="listitem" aria-label={`${c.modelId} supports native thinking`} style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Thinking</span>}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, max-content)) minmax(80px, 120px)', gap: 8, alignItems: 'center', marginTop: 6 }}>
+                    {evalRecommendation && (
+                      <div
+                        className="router-eval-recommendation"
+                        role="group"
+                        aria-label={`Auto-router eval recommendation for ${c.modelId}: suggested for ${evalRecommendation.role}. ${evalProofStatusCopy(evalRecommendation)}. ${evalRecommendation.reason}`}
+                      >
+                        <span>Eval suggests this for {evalRecommendation.role} · {evalProofStatusCopy(evalRecommendation)}</span>
+                        <p>{evalRecommendation.reason}</p>
+                        <p className={`eval-proof-status ${evalRecommendation.proofReviewStatus}`}>
+                          {evalProofStatusDetail(evalRecommendation)}
+                        </p>
+                      </div>
+                    )}
+                    <div role="group" aria-label={`Capability and effective-cost controls for Auto-Router candidate ${c.modelId}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, max-content)) minmax(80px, 120px)', gap: 8, alignItems: 'center', marginTop: 6 }}>
                       <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={c.supportsImages}
+                          aria-label={`${c.modelId} supports images`}
                           style={{ accentColor: 'var(--accent-color, #6366f1)' }}
                           onChange={(e) => updateCandidate(i, { ...c, supportsImages: e.target.checked })}
                         />
@@ -2766,6 +3446,7 @@ function AutoRouterPane() {
                         <input
                           type="checkbox"
                           checked={!!c.supportsThinking}
+                          aria-label={`${c.modelId} supports thinking`}
                           style={{ accentColor: 'var(--accent-color, #6366f1)' }}
                           onChange={(e) => updateCandidate(i, {
                             ...c,
@@ -2778,6 +3459,7 @@ function AutoRouterPane() {
                       <label style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         Cost
                         <input
+                          aria-label={`${c.modelId} effective routing cost`}
                           type="number"
                           step="0.05"
                           min="0"
@@ -2790,7 +3472,7 @@ function AutoRouterPane() {
                       </label>
                     </div>
                     <textarea
-                      aria-label={`${c.modelId} capability card`}
+                      aria-label={`${c.modelId} capability card for classifier routing; describe strengths, weaknesses, and safest task fit`}
                       value={c.card}
                       rows={2}
                       style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, resize: 'vertical', minHeight: 44, fontSize: 11, lineHeight: 1.35, padding: '5px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
@@ -2804,27 +3486,31 @@ function AutoRouterPane() {
                     />
                   </div>
                   <button
+                    type="button"
                     className="settings-btn-icon"
                     style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 2, color: 'var(--text-danger, #ef4444)', lineHeight: 1, alignSelf: 'center' }}
                     onClick={() => removeCandidate(i)}
                     title="Remove candidate"
+                    aria-label={`Remove auto-router candidate ${c.modelId}`}
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={14} aria-hidden="true" />
                   </button>
                 </div>
                 );
               })}
+              </div>
 
               {/* Add candidate form */}
-              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border-color, #e5e7eb)', paddingTop: 8 }}>
+              <div role="group" aria-label="Add a new Auto-Router candidate" style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border-color, #e5e7eb)', paddingTop: 8 }}>
                 <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)' }}>Add Candidate</div>
                 <input
                   placeholder="Model ID (e.g. minimax:MiniMax-M3)"
                   value={newCandidate.modelId}
+                  aria-label="New Auto-Router candidate model id"
                   style={{ fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
                   onChange={(e) => setNewCandidate(enrichRouterCandidate({ ...newCandidate, modelId: e.target.value }))}
                 />
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div role="group" aria-label="New Auto-Router candidate capability flags and effective cost" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input
                     type="number"
                     step="0.1"
@@ -2832,6 +3518,7 @@ function AutoRouterPane() {
                     max="10"
                     placeholder="Effective cost"
                     value={newCandidate.cost}
+                    aria-label="New Auto-Router candidate effective cost"
                     style={{ width: 60, fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
                     onChange={(e) => setNewCandidate({ ...newCandidate, cost: parseFloat(e.target.value) || 0 })}
                   />
@@ -2839,6 +3526,7 @@ function AutoRouterPane() {
                     <input
                       type="checkbox"
                       checked={newCandidate.supportsImages}
+                      aria-label="New Auto-Router candidate supports images"
                       style={{ accentColor: 'var(--accent-color, #6366f1)' }}
                       onChange={(e) => setNewCandidate({ ...newCandidate, supportsImages: e.target.checked })}
                     />
@@ -2848,6 +3536,7 @@ function AutoRouterPane() {
                     <input
                       type="checkbox"
                       checked={!!newCandidate.supportsThinking}
+                      aria-label="New Auto-Router candidate supports thinking"
                       style={{ accentColor: 'var(--accent-color, #6366f1)' }}
                       onChange={(e) => setNewCandidate({
                         ...newCandidate,
@@ -2861,10 +3550,12 @@ function AutoRouterPane() {
                 <input
                   placeholder="Capability card (describe what this model is good/bad at)"
                   value={newCandidate.card}
+                  aria-label="New Auto-Router candidate capability card; describe strengths, weaknesses, and safest task fit"
                   style={{ fontSize: 12, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border-color, #d1d5db)', background: 'var(--bg-primary, #fff)', color: 'var(--text-primary)' }}
                   onChange={(e) => setNewCandidate({ ...newCandidate, card: e.target.value })}
                 />
                 <button
+                  type="button"
                   className="settings-btn"
                   style={{
                     padding: '4px 10px', fontSize: 11, borderRadius: 4,
@@ -2874,8 +3565,9 @@ function AutoRouterPane() {
                   }}
                   onClick={addCandidate}
                   disabled={!newCandidate.modelId.trim()}
+                  aria-label={`Add Auto-Router candidate ${newCandidate.modelId.trim() || 'model'}`}
                 >
-                  <Plus size={12} /> Add
+                  <Plus size={12} aria-hidden="true" /> Add
                 </button>
               </div>
             </div>
@@ -2973,26 +3665,42 @@ function ProviderHealthBadge({
 }) {
   if (!summary) {
     return (
-      <button className="settings-mini-button" onClick={onProbe} disabled={probing} title="Probe this provider for live health and capabilities">
-        {probing ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
+      <button
+        className="settings-mini-button"
+        type="button"
+        onClick={onProbe}
+        disabled={probing}
+        title="Probe this provider for live health and capabilities"
+        aria-label={probing ? 'Provider health probe running' : 'Probe provider health and capabilities; no previous probe summary is available'}
+      >
+        {probing ? <Loader size={11} className="spin" aria-hidden="true" /> : <Wifi size={11} aria-hidden="true" />}
         Probe health
       </button>
     );
   }
   const status = summary.failed ? 'fail' : summary.stale ? 'stale' : 'ok';
+  const healthyCapabilities = summary.latest?.capabilities.filter((c) => c.ok).length ?? 0;
+  const totalCapabilities = summary.latest?.capabilities.length ?? 0;
   const label = summary.failed
     ? `last probe failed${summary.latest?.error ? `: ${summary.latest.error.slice(0, 40)}` : ''}`
     : summary.stale
       ? 'health stale'
-      : `health OK (${summary.latest?.latencyMs ?? 0}ms, ${summary.latest?.capabilities.filter((c) => c.ok).length ?? 0}/${summary.latest?.capabilities.length ?? 0} caps)`;
+      : `health OK (${summary.latest?.latencyMs ?? 0}ms, ${healthyCapabilities}/${totalCapabilities} caps)`;
+  const actionLabel = summary.failed
+    ? `Provider health failed after ${summary.total} probe${summary.total === 1 ? '' : 's'}${summary.latest?.error ? `; latest error ${summary.latest.error.slice(0, 80)}` : ''}. Re-probe provider health and capabilities.`
+    : summary.stale
+      ? `Provider health is stale after ${summary.total} probe${summary.total === 1 ? '' : 's'}. Re-probe provider health and capabilities.`
+      : `Provider health OK after ${summary.total} probe${summary.total === 1 ? '' : 's'}; latest latency ${summary.latest?.latencyMs ?? 0} milliseconds; ${healthyCapabilities} of ${totalCapabilities} capabilities passed. Re-probe provider health and capabilities.`;
   return (
     <button
       className={`settings-mini-button prov-health-badge prov-health-${status}`}
+      type="button"
       onClick={onProbe}
       disabled={probing}
       title={`Total probes: ${summary.total}. Click to re-probe.`}
+      aria-label={probing ? `Provider health re-probe running; previous status was ${label}` : actionLabel}
     >
-      {probing ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
+      {probing ? <Loader size={11} className="spin" aria-hidden="true" /> : <Wifi size={11} aria-hidden="true" />}
       {label}
     </button>
   );

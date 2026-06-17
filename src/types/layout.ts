@@ -1,4 +1,4 @@
-export type PanelId = 'chat' | 'diffs' | 'browser' | 'terminal' | 'sub-agents' | 'files' | 'model-lab' | 'safety' | 'patches';
+export type PanelId = 'chat' | 'browser' | 'terminal' | 'sub-agents' | 'files' | 'model-lab' | 'routing-learning' | 'safety';
 
 /** A layout tree: either a single panel, or a split with direction + children */
 export type LayoutNode = PanelId | SplitNode;
@@ -16,9 +16,6 @@ export interface PanelConfig {
   minSize: number; // min px
 }
 
-export const DEFAULT_LAYOUT: LayoutNode = {
-  direction: 'horizontal',
-  children: ['chat', 'sub-agents'],
-};
+export const DEFAULT_LAYOUT: LayoutNode = 'chat';
 
-export const ALL_PANELS: PanelId[] = ['chat', 'diffs', 'browser', 'terminal', 'sub-agents', 'files', 'model-lab', 'safety', 'patches'];
+export const ALL_PANELS: PanelId[] = ['chat', 'browser', 'terminal', 'files', 'model-lab', 'routing-learning', 'safety'];

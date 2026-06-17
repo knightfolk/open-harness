@@ -9,6 +9,7 @@ const MODE_VALUES: ThemeMode[] = ['dark', 'light', 'high-contrast-dark', 'high-c
 const PROVENANCE_SOURCES = ['builtin', 'local', 'generated', 'community', 'imported-vscode', 'imported-other'] as const;
 const TRUST_VALUES = ['trusted', 'review-required', 'blocked'] as const;
 const TARGET_VALUES = ['app', 'chat', 'sidebar', 'settings', 'right-panel'] as const;
+const TEXTURE_RECIPE_VALUES = ['none', 'paper-grain', 'fine-grid', 'blueprint-grid', 'low-noise-matte', 'soft-glass', 'terminal-scanline'] as const;
 const COLOR_TOKEN_PATTERN = /^(?:#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\([^)\n;]+\)|hsla?\([^)\n;]+\)|var\(--[a-zA-Z0-9_-]+\))$/;
 
 interface ValidationResult {
@@ -204,6 +205,10 @@ function isTarget(value: unknown): value is ThemePluginBackground['target'] {
   return typeof value === 'string' && (TARGET_VALUES as readonly string[]).includes(value);
 }
 
+function isTextureRecipe(value: unknown): boolean {
+  return typeof value === 'string' && (TEXTURE_RECIPE_VALUES as readonly string[]).includes(value);
+}
+
 function validateManifestId(id: string, path: string, result: ValidationResult): void {
   if (!MANIFEST_ID_PATTERN.test(id)) {
     addIfDefined(result.errors, `${path} must match ${MANIFEST_ID_PATTERN}`);
@@ -330,6 +335,21 @@ function validateTokens(tokens: unknown, path: string, result: ValidationResult)
     for (const [key, value] of Object.entries(shadowTokenObj)) {
       if (['sm', 'md', 'lg'].includes(key)) {
         ensureString(value, `${path}.shadow.${key}`, result);
+      }
+    }
+  }
+
+  if ('effects' in tokenObject) {
+    const effectTokenObj = ensureRecord(tokenObject.effects, `${path}.effects`, result);
+    if (effectTokenObj) {
+      for (const [key, value] of Object.entries(effectTokenObj)) {
+        if (key === 'textureRecipe') {
+          if (!isTextureRecipe(value)) {
+            addIfDefined(result.errors, `${path}.effects.textureRecipe must be one of: ${TEXTURE_RECIPE_VALUES.join(', ')}`);
+          }
+        } else if (key === 'textureOpacity') {
+          ensureNonNegativeNumber(value, `${path}.effects.textureOpacity`, 0, 0.18, result);
+        }
       }
     }
   }

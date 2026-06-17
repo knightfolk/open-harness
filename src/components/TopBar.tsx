@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  PanelLeftClose, PanelLeftOpen, RotateCcw, FolderOpen,
-  ChevronDown, Check, Wrench, Terminal,
+  PanelLeftClose, PanelLeftOpen, RotateCcw,
+  ChevronDown, Check, Wrench,
   Heart, Activity,
 } from 'lucide-react';
 import type { PanelId } from '../types/layout';
@@ -14,11 +14,9 @@ interface Props {
   visiblePanels: Set<PanelId>;
   onTogglePanel: (id: PanelId) => void;
   onResetLayout: () => void;
+  activeModel: string;
   sessionTitle: string;
   workingDir: string | null;
-  onOpenFolder: () => void;
-  bottomBarOpen: boolean;
-  onToggleBottomBar: () => void;
   environmentOpen: boolean;
   onToggleEnvironment: () => void;
   pinnedTools: PanelId[];
@@ -27,14 +25,21 @@ interface Props {
 
 export function TopBar({
   sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout,
-  sessionTitle, workingDir, onOpenFolder,
-  bottomBarOpen, onToggleBottomBar,
+  activeModel, sessionTitle, workingDir,
   environmentOpen, onToggleEnvironment,
   pinnedTools, onTogglePinnedTool,
 }: Props) {
+  const modelLabel = activeModel.toLowerCase() === 'auto' ? 'Router' : activeModel;
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const visibleCount = visiblePanels.size;
+  const panelMenuIds = useMemo(() =>
+    ALL_PANELS.filter((id) => id !== 'chat' && id !== 'sub-agents'),
+    [],
+  );
+  const visibleCount = useMemo(() =>
+    panelMenuIds.filter((id) => visiblePanels.has(id)).length,
+    [panelMenuIds, visiblePanels],
+  );
 
   useEffect(() => {
     if (!panelMenuOpen) return;
@@ -47,16 +52,7 @@ export function TopBar({
     return () => document.removeEventListener('mousedown', handler);
   }, [panelMenuOpen]);
 
-  const menuPanelIds = ALL_PANELS
-    .filter((id) => id !== 'chat' && id !== 'terminal')
-    .map((id, index) => ({ id, index }))
-    .sort((a, b) => {
-      const pinnedDelta = Number(pinnedTools.includes(b.id)) - Number(pinnedTools.includes(a.id));
-      return pinnedDelta || a.index - b.index;
-    })
-    .map(({ id }) => id);
-
-  const panelMenuItems = menuPanelIds.map((id) => {
+  const panelMenuItems = useMemo(() => panelMenuIds.map((id) => {
     const Icon = getPanelIcon(id);
     const config = getPanelConfig(id);
     const active = visiblePanels.has(id);
@@ -91,7 +87,7 @@ export function TopBar({
         {active && <Check size={14} className="panel-menu-check" />}
       </button>
     );
-  });
+  }), [panelMenuIds, visiblePanels, pinnedTools, onTogglePanel, onTogglePinnedTool]);
 
   return (
     <div className="top-bar">
@@ -107,21 +103,12 @@ export function TopBar({
           </span>
         )}
       </div>
+      <div className="top-bar-model" title={`Routing via ${activeModel}`}>
+        <span className="top-bar-model-dot" />
+        <span>{modelLabel}</span>
+      </div>
 
       <div className="top-bar-actions">
-        <button className="top-bar-action" onClick={onOpenFolder} title="Open Files panel" aria-label="Open Files panel">
-          <FolderOpen size={16} />
-        </button>
-
-        <button
-          className={'top-bar-action' + (bottomBarOpen ? ' active' : '')}
-          onClick={onToggleBottomBar}
-          title={bottomBarOpen ? 'Hide bottom bar' : 'Show bottom bar (terminal)'}
-          aria-label={bottomBarOpen ? 'Hide bottom bar' : 'Show bottom bar'}
-        >
-          <Terminal size={16} />
-        </button>
-
         <button
           className={'top-bar-action' + (environmentOpen ? ' active' : '')}
           onClick={onToggleEnvironment}

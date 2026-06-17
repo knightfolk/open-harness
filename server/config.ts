@@ -105,6 +105,32 @@ export interface ContextConfig {
   minRecentPairs: number;
 }
 
+export interface ModelBudget {
+  /** Model ID, or "*" for a global default budget */
+  modelId: string;
+  /** Max input tokens per budget period; 0 disables this limit */
+  maxInputTokens: number;
+  /** Max output tokens per budget period; 0 disables this limit */
+  maxOutputTokens: number;
+  /** Max estimated cost per budget period; 0 disables this limit */
+  maxCost: number;
+  /** Budget reset period */
+  period: 'monthly' | 'weekly' | 'daily';
+  /** What to do when the budget is exceeded */
+  onExceeded: 'block' | 'warn' | 'allow';
+}
+
+export interface ProviderRateLimit {
+  /** Provider ID, or "*" for a global default rate limit */
+  providerId: string;
+  /** Maximum provider requests per rolling minute; 0 disables this limit */
+  maxRequestsPerMinute: number;
+  /** Maximum estimated input+output tokens per rolling minute; 0 disables this limit */
+  maxTokensPerMinute: number;
+  /** What to do when the rate limit is exceeded */
+  onExceeded: 'block' | 'warn' | 'allow';
+}
+
 export interface StoredConfig {
   version: number;
   providers: StoredProvider[];
@@ -119,6 +145,8 @@ export interface StoredConfig {
   roleThinking?: Record<string, ThinkingEffort>;
   autoRouter?: AutoRouterConfig;
   contextConfig?: Partial<ContextConfig>;
+  modelBudgets?: ModelBudget[];
+  providerRateLimits?: ProviderRateLimit[];
   trustMode: string; // TrustMode
 }
 
@@ -170,6 +198,8 @@ const DEFAULT_CONFIG: StoredConfig = {
     safetyMargin: 0.05,
     minRecentPairs: 2,
   },
+  modelBudgets: [],
+  providerRateLimits: [],
 };
 
 // ── Read / Write ───────────────────────────────────────
@@ -224,10 +254,53 @@ export function loadConfig(): StoredConfig {
         ...DEFAULT_CONFIG.roleAssignments,
         ...normalizeRoleAssignments(parsed.roleAssignments || {}),
       },
+      modelBudgets: normalizeModelBudgets((parsed as any).modelBudgets),
+      providerRateLimits: normalizeProviderRateLimits((parsed as any).providerRateLimits),
     };
   } catch {
     return cloneDefaultConfig();
   }
+}
+
+function normalizeProviderRateLimits(value: unknown): ProviderRateLimit[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry): ProviderRateLimit | null => {
+      if (!entry || typeof entry !== 'object') return null;
+      const item = entry as any;
+      const providerId = typeof item.providerId === 'string' && item.providerId.trim() ? item.providerId.trim() : '';
+      if (!providerId) return null;
+      const onExceeded = item.onExceeded === 'block' || item.onExceeded === 'warn' || item.onExceeded === 'allow' ? item.onExceeded : 'warn';
+      return {
+        providerId,
+        maxRequestsPerMinute: Math.max(0, Number(item.maxRequestsPerMinute) || 0),
+        maxTokensPerMinute: Math.max(0, Number(item.maxTokensPerMinute) || 0),
+        onExceeded,
+      };
+    })
+    .filter((entry): entry is ProviderRateLimit => !!entry);
+}
+
+function normalizeModelBudgets(value: unknown): ModelBudget[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry): ModelBudget | null => {
+      if (!entry || typeof entry !== 'object') return null;
+      const item = entry as any;
+      const modelId = typeof item.modelId === 'string' && item.modelId.trim() ? item.modelId.trim() : '';
+      if (!modelId) return null;
+      const period = item.period === 'daily' || item.period === 'weekly' || item.period === 'monthly' ? item.period : 'monthly';
+      const onExceeded = item.onExceeded === 'block' || item.onExceeded === 'warn' || item.onExceeded === 'allow' ? item.onExceeded : 'warn';
+      return {
+        modelId,
+        maxInputTokens: Math.max(0, Number(item.maxInputTokens) || 0),
+        maxOutputTokens: Math.max(0, Number(item.maxOutputTokens) || 0),
+        maxCost: Math.max(0, Number(item.maxCost) || 0),
+        period,
+        onExceeded,
+      };
+    })
+    .filter((entry): entry is ModelBudget => !!entry);
 }
 
 export function saveConfig(config: StoredConfig): void {
