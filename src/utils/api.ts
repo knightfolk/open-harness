@@ -2566,8 +2566,19 @@ export interface RouterLearningSummary {
   byPromptStrategyFamily?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
   byPromptStrategyVariant?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
   toolReliability?: ToolReliabilitySummary;
+  toolErrorLedger?: ToolErrorLedgerSummary;
   bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
   bestPromptStrategyVariants?: Array<{ strategyVariant: string; model: string; total: number; success: number; rate: number }>;
+}
+
+export type ToolErrorLiveEvidenceStatus = 'missing_ledger' | 'empty' | 'available';
+
+export interface ToolErrorLedgerSummary {
+  totalErrorEvents: number;
+  persistedLedgerExists: boolean;
+  persistedEventCount: number;
+  logTraceEventCount: number;
+  liveEvidenceStatus: ToolErrorLiveEvidenceStatus;
 }
 
 export interface ToolReliabilityBucket {

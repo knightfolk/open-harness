@@ -2760,3 +2760,11 @@ Phase-mapped manual UI evidence:
 - Remaining gap: a real provider-approved or local runtime tool-error recovery scenario must still create genuine saved-session/log evidence with failed path, later working path, retry distance, session/run ids, and final-answer capture state.
 - Post-restart endpoint proof returned `liveEvidenceStatus: "missing_ledger"`, `persistedLedgerExists: false`, `persistedEventCount: 0`, and `logTraceEventCount: 0` from `/api/router/learning/tool-errors?summaryOnly=true`.
 - Restart reachability after the runtime change returned HTTP 200 for `/api/config` on `3001` and `/` on `5173`, with one OpenHarness Electron main process plus normal helper processes.
+
+## Live tool-error ledger Routing Learning visibility - 2026-06-17
+
+- Routing Learning now shows the live tool-error ledger state as a top-level trust metric and as a Tool Reliability detail card.
+- Markdown evidence briefs now include `Live tool-error ledger status`, persisted ledger existence, persisted row count, log-derived row count, and the same warning when no persisted live ledger exists.
+- `src/utils/api.ts` now types `toolErrorLedger` on `RouterLearningSummary` with `liveEvidenceStatus`, `persistedLedgerExists`, `persistedEventCount`, and `logTraceEventCount`.
+- `npm run test:premier-model-harness` and `npm run test:tool-reliability` passed.
+- Browser refresh is enough because this slice only changed client UI/types and proof docs.

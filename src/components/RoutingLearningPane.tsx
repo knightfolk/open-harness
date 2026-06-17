@@ -48,6 +48,23 @@ function sampleTone(total: number): 'empty' | 'low' | 'ok' {
   return 'ok';
 }
 
+function toolErrorLedgerStatusLabel(status: api.ToolErrorLiveEvidenceStatus | undefined): string {
+  if (status === 'available') return 'Live evidence available';
+  if (status === 'empty') return 'Ledger empty';
+  return 'Missing ledger';
+}
+
+function toolErrorLedgerStatusHelp(summary: api.ToolErrorLedgerSummary | undefined): string {
+  if (!summary) return 'Raw tool-error ledger status is unavailable.';
+  if (summary.liveEvidenceStatus === 'available') {
+    return `${summary.persistedEventCount} persisted and ${summary.logTraceEventCount} log-derived tool-error row${summary.persistedEventCount + summary.logTraceEventCount === 1 ? '' : 's'} available.`;
+  }
+  if (summary.liveEvidenceStatus === 'empty') {
+    return 'The persisted tool-error ledger exists, but no matching recovery rows are available yet.';
+  }
+  return 'No persisted live tool-error ledger exists yet; run a real tool-error recovery scenario before treating recovery memory as closed.';
+}
+
 function eventStatus(event: api.RoutingEvent) {
   if (event.outcome === 'success') return { label: routingOutcomeLabel(event.outcome), icon: CheckCircle2, tone: 'success' };
   if (event.outcome === 'failure') return { label: routingOutcomeLabel(event.outcome), icon: XCircle, tone: 'error' };
@@ -416,6 +433,9 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       toolReliability
         ? `- Average recovery rounds after first tool error: ${toolReliability.avgRecoveryRounds}`
         : '- Average recovery rounds after first tool error: 0',
+      summary?.toolErrorLedger
+        ? `- Live tool-error ledger status: ${summary.toolErrorLedger.liveEvidenceStatus}; persisted ledger exists ${summary.toolErrorLedger.persistedLedgerExists}; persisted rows ${summary.toolErrorLedger.persistedEventCount}; log-derived rows ${summary.toolErrorLedger.logTraceEventCount}. ${toolErrorLedgerStatusHelp(summary.toolErrorLedger)}`
+        : '- Live tool-error ledger status: unavailable.',
       ...(toolReliability?.recoveryPatterns?.length
         ? [
             '- Recurring recovery patterns:',
@@ -656,6 +676,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   const byPromptStrategyFamily = summary?.byPromptStrategyFamily || {};
   const byPromptStrategyVariant = summary?.byPromptStrategyVariant || {};
   const toolReliability = summary?.toolReliability;
+  const toolErrorLedger = summary?.toolErrorLedger;
   const toolRecoveryRate = toolReliability && toolReliability.runsWithToolErrors > 0
     ? toolReliability.recoveredRunsWithToolErrors / toolReliability.runsWithToolErrors
     : 0;
@@ -827,6 +848,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           <span>Tool recovery</span>
           <strong>{toolReliability?.recoveredRunsWithToolErrors || 0}</strong>
           <small>{toolReliability?.runsWithToolErrors ? `${pct(toolRecoveryRate)} of ${toolReliability.runsWithToolErrors} error runs reached final answer` : 'No tool-error recovery data yet'}</small>
+        </div>
+        <div className={`routing-metric-card ${toolErrorLedger?.liveEvidenceStatus === 'available' ? 'ok' : 'low'}`}>
+          <span>Live tool-error ledger</span>
+          <strong>{toolErrorLedgerStatusLabel(toolErrorLedger?.liveEvidenceStatus)}</strong>
+          <small>{toolErrorLedgerStatusHelp(toolErrorLedger)}</small>
         </div>
       </section>
 
@@ -1011,6 +1037,13 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         ) : (
           <>
             <div className="routing-debug-grid">
+              {toolErrorLedger && (
+                <div className={`routing-debug-card ${toolErrorLedger.liveEvidenceStatus === 'available' ? '' : 'low'}`} aria-label={`Live tool-error ledger status: ${toolErrorLedger.liveEvidenceStatus}; persisted rows ${toolErrorLedger.persistedEventCount}; log-derived rows ${toolErrorLedger.logTraceEventCount}`}>
+                  <span>Live ledger status</span>
+                  <strong>{toolErrorLedgerStatusLabel(toolErrorLedger.liveEvidenceStatus)}</strong>
+                  <small>{toolErrorLedgerStatusHelp(toolErrorLedger)}</small>
+                </div>
+              )}
               <div className="routing-debug-card">
                 <span>Traced tool calls</span>
                 <strong>{toolReliability.totalToolCalls}</strong>
