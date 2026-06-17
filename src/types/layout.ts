@@ -1,4 +1,4 @@
-export type PanelId = 'chat' | 'browser' | 'terminal' | 'files' | 'model-lab' | 'routing-learning' | 'safety';
+export type PanelId = 'chat' | 'browser' | 'terminal' | 'files' | 'model-lab' | 'routing-learning' | 'safety' | 'sub-agents';
 
 /** A layout tree: either a single panel, or a split with direction + children */
 export type LayoutNode = PanelId | SplitNode;

@@ -1124,6 +1124,9 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {r.total} runs · {new Date(r.createdAt).toLocaleString()}
                 </div>
+                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                  {r.artifactPath ? `Artifact: ${r.artifactPath}` : 'Artifact: not available'}
+                </div>
                 <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
                   {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
                 </div>
@@ -1160,6 +1163,9 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {r.total} tasks · {new Date(r.createdAt).toLocaleString()}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                  {r.artifactPath ? `Artifact: ${r.artifactPath}` : 'Artifact: not available'}
                 </div>
                 <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
                   {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
@@ -1266,6 +1272,8 @@ function buildEvalProofBrief(
     `Completed: ${report.completedAt || 'not complete'}`,
     `Progress: ${report.completed}/${report.total}`,
     `Proof review: ${report.proofReview?.status || 'unreviewed'}${report.proofReview?.reviewedAt ? ` at ${report.proofReview.reviewedAt}` : ''}`,
+    `Same-model comparison proof status: ${report.proofReview?.status || 'unreviewed'}`,
+    `Comparison artifact path: ${report.artifactPath || 'not available'}`,
     ...(report.proofReview?.note ? [`Proof review note: ${report.proofReview.note}`] : []),
     ...(packContext ? [
       '',
@@ -1338,6 +1346,8 @@ function buildBenchProofBrief(run: api.BenchRun): string {
     `Completed: ${run.completedAt || 'not complete'}`,
     `Progress: ${run.completed}/${run.total}`,
     `Proof review: ${run.proofReview?.status || 'unreviewed'}${run.proofReview?.reviewedAt ? ` at ${run.proofReview.reviewedAt}` : ''}`,
+    `Same-model comparison proof status: ${run.proofReview?.status || 'unreviewed'}`,
+    `Comparison artifact path: ${run.artifactPath || 'not available'}`,
     ...(run.proofReview?.note ? [`Proof review note: ${run.proofReview.note}`] : []),
     '',
     '## Summary',
@@ -1755,8 +1765,17 @@ function summarizeSameModelPromptStrategyComparisons(results: Array<{ modelId: s
 
 function PromptStrategyEvidence({ strategy }: { strategy?: api.PromptStrategyTrace }) {
   if (!strategy) return <span>No prompt strategy trace recorded for this row.</span>;
+  const advisoryPromptTraceLabel = `Prompt strategy ${strategy.id}; source-backed metadata is advisory prompt-contract evidence, not an automatic routing override`;
   return (
-    <div>
+    <div
+      role="list"
+      aria-label={`Prompt strategy ${strategy.id}; source-backed metadata is advisory prompt-contract evidence, not an automatic routing override`}
+      data-advisory-source-label={advisoryPromptTraceLabel}
+    >
+      <div>
+        <span className="pm-score-model">Provenance use</span>
+        <span className="pm-score-value">Advisory prompt-contract evidence, not an automatic routing override</span>
+      </div>
       <div>{strategy.id}</div>
       {strategy.modelMatch && <div>Model match {strategy.modelMatch.source} · {strategy.modelMatch.hint}</div>}
       {strategy.variantId && <div>Variant {strategy.variantId} · task {strategy.taskType || 'unknown'} · role {strategy.role || 'unknown'}</div>}

@@ -1,15 +1,33 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 
 import { loadAllSessions } from './sessionStore';
+import { getProcessLedgerLogsDir } from './processLedger';
 import type { ToolReliabilitySession } from './toolReliability';
 import type { HarnessRun, HarnessRunStep } from './runTrace';
 
-const LOG_TRACE_LOG_DIR = join(homedir(), '.openharness', 'process-ledger', 'logs');
 const MAX_LOG_BYTES_PER_FILE = 512 * 1024;
 const RUN_STEP_MARKER = '[run-step] ';
 const RUN_COMPLETE_MARKER = '[run-complete] ';
+type ToolCallStatus = 'running' | 'complete' | 'error' | 'skipped';
+type ReconstructedRunStep =
+  | {
+      type: 'tool_call';
+      id: string;
+      name: string;
+      status?: ToolCallStatus;
+      model?: string;
+      providerId?: string;
+      round?: number;
+      error?: string;
+      input: unknown;
+      outputPreview?: string;
+      durationMs?: number;
+    }
+  | {
+      type: 'final_answer';
+      chars: number;
+    };
 
 type ParsedEvent = ParsedRunStepEvent | ParsedRunCompleteEvent;
 
@@ -19,7 +37,7 @@ interface ParsedRunStepEvent {
   step: {
     type: 'tool_call' | 'final_answer';
     name?: string;
-    status?: HarnessRunStep['status'];
+    status?: ToolCallStatus;
     model?: string;
     providerId?: string;
     round?: number;
@@ -38,19 +56,7 @@ interface ParsedRunRecord {
   startedAt: string;
   completedAt?: string;
   status: 'running' | 'complete' | 'error';
-  steps: Array<{
-    type: HarnessRunStep['type'];
-    name?: string;
-    input?: unknown;
-    outputPreview?: string;
-    durationMs?: number;
-    status?: HarnessRunStep['status'];
-    error?: string;
-    model?: string;
-    providerId?: string;
-    round?: number;
-    chars?: number;
-  }>;
+  steps: HarnessRunStep[];
   providerId?: string;
   requestedModel?: string;
 }
@@ -123,15 +129,17 @@ function parseLogLine(line: RawLogLine): ParsedEvent | null {
 
 function collectLogLines(): RawLogLine[] {
   const lines: RawLogLine[] = [];
-  let entries: string[] = [];
-  try {
-    entries = readdirSync(LOG_TRACE_LOG_DIR, { withFileTypes: false, recursive: false }).filter((name) => name.endsWith('.log'));
-  } catch {
-    return [];
-  }
+  const logTraceLogDir = getProcessLedgerLogsDir();
+  const entries = (() => {
+    try {
+      return (readdirSync(logTraceLogDir, { withFileTypes: false, recursive: false }) as string[]).filter((name) => name.endsWith('.log'));
+    } catch {
+      return [];
+    }
+  })();
 
   for (const fileName of entries) {
-    const logPath = join(LOG_TRACE_LOG_DIR, fileName);
+    const logPath = join(logTraceLogDir, fileName);
     try {
       if (!existsSync(logPath)) continue;
       const stat = statSync(logPath);
@@ -151,12 +159,13 @@ function collectLogLines(): RawLogLine[] {
 }
 
 function buildRunTrace(record: ParsedRunRecord): HarnessRun {
-  const firstProvider = record.steps.find((step) => step.providerId)?.providerId;
-  const firstModel = record.steps.find((step) => step.model)?.model;
+  const firstToolStep = record.steps.find((step): step is Extract<HarnessRunStep, { type: 'tool_call' }> => step.type === 'tool_call');
+  const firstProvider = firstToolStep?.providerId;
+  const firstModel = firstToolStep?.model;
   const requestedModel = record.requestedModel || firstModel || 'unknown-model';
   return {
     id: record.runId,
-    sessionId: `log-session-${record.runId.slice(0, 12)}`,
+    sessionId: `log-session-${record.runId}`,
     userMessageId: `log-run-${record.runId}`,
     role: 'coder',
     requestedModel,
@@ -231,16 +240,16 @@ export function getToolReliabilitySessions(): ToolReliabilitySession[] {
   return [...savedSessions, ...logSessions];
 }
 
-function toRunTraceStep(step: ParsedRunStepEvent['step']): HarnessRunStep {
+function toRunTraceStep(step: ParsedRunStepEvent['step']): ReconstructedRunStep {
   if (step.type === 'tool_call') {
     return {
       type: 'tool_call',
       id: `log-tool-${step.round ?? 0}-${Math.random().toString(16).slice(2, 10)}`,
       name: step.name || 'unknown',
+      status: step.status,
       input: {},
       outputPreview: undefined,
       durationMs: undefined,
-      status: step.status,
       error: step.error,
       model: step.model,
       providerId: step.providerId,

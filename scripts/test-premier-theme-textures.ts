@@ -114,7 +114,7 @@ for (const expected of [
   'aria-describedby={textureGuidanceId}',
   "const textureGuidanceId = 'theme-texture-opacity-guidance'",
   '<div id={textureGuidanceId}',
-  'Textures are shell-only. When reduced transparency is requested, textures and blur are disabled and glass surfaces use each theme\\'s solid fallback colors.',
+  'Textures are shell-only. When reduced transparency is requested, textures and blur are disabled and glass surfaces use each theme\'s solid fallback colors.',
 ]) {
   assert.ok(
     settings.includes(expected),

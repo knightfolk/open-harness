@@ -87,7 +87,7 @@ const toolReliability = {
       sessionId: 'session-1',
       runId: 'run-1',
       promptStrategyId: 'qwen-xml-code-v1',
-      promptStrategyVariantId: 'qwen-xml-code-v1:qwen-coder-tool-proof',
+      promptStrategyVariantId: 'qwen-coder-tool-proof',
       firstError: {
         model: 'provider:model',
         providerId: 'provider',
@@ -120,7 +120,7 @@ const toolReliability = {
       failedProviderId: 'provider',
       failedTool: 'read_file',
       promptStrategyId: 'qwen-xml-code-v1',
-      promptStrategyVariantId: 'qwen-xml-code-v1:qwen-coder-tool-proof',
+      promptStrategyVariantId: 'qwen-coder-tool-proof',
       outcome: 'recovered_tool_path',
       workedBy: {
         model: 'provider:model',
@@ -164,7 +164,7 @@ const toolReliability = {
       unrecoveredRuns: 0,
       fallbackRecoveryRuns: 0,
       promptStrategies: [{ id: 'qwen-xml-code-v1', runs: 1 }],
-      promptStrategyVariants: [{ id: 'qwen-xml-code-v1:qwen-coder-tool-proof', runs: 1 }],
+      promptStrategyVariants: [{ id: 'qwen-coder-tool-proof', runs: 1 }],
       latestError: 'ENOENT',
       latestTimestamp: '2026-06-17T00:30:00.000Z',
       fixedBy: [
@@ -192,7 +192,7 @@ const toolReliability = {
       unrecoveredRuns: 0,
       fallbackRecoveryRuns: 0,
       promptStrategies: [{ id: 'qwen-xml-code-v1', runs: 1 }],
-      promptStrategyVariants: [{ id: 'qwen-xml-code-v1:qwen-coder-tool-proof', runs: 1 }],
+      promptStrategyVariants: [{ id: 'qwen-coder-tool-proof', runs: 1 }],
       sampleError: 'ENOENT',
       latestTimestamp: '2026-06-17T00:30:00.000Z',
       workedBy: [
@@ -218,7 +218,7 @@ const toolReliability = {
       failedProviderId: 'provider',
       failedTool: 'read_file',
       promptStrategyId: 'qwen-xml-code-v1',
-      promptStrategyVariantId: 'qwen-xml-code-v1:qwen-coder-tool-proof',
+      promptStrategyVariantId: 'qwen-coder-tool-proof',
       outcome: 'recovered_tool_path',
       avoidPath: 'provider:model/read_file',
       preferPath: 'provider:model/list_directory',
@@ -279,9 +279,13 @@ assert.ok(
 );
 assert.equal(payload.summary.toolReliability.outcomeExamples.length, toolReliability.outcomeExamples.length, 'export should include tool reliability outcome evidence in the summary');
 assert.equal(payload.summary.toolReliability.outcomeExamples[0].workedBy?.tool, 'list_directory', 'export should preserve session outcome working-path evidence');
+assert.equal(payload.summary.toolReliability.outcomeExamples[0].workedBy?.providerId, 'provider', 'export should preserve worked-by provider id');
+assert.equal(payload.summary.toolReliability.outcomeExamples[0].failedProviderId, 'provider', 'export should preserve failed provider id for outcome rows');
 assert.equal(payload.summary.toolReliability.outcomeExamples[0].evidenceSource, 'saved_session_trace', 'export should preserve session outcome evidence source');
-assert.equal(payload.summary.toolReliability.outcomeExamples[0].promptStrategyVariantId, 'qwen-xml-code-v1:qwen-coder-tool-proof', 'export should preserve prompt strategy context for tool-error outcomes');
-assert.equal(payload.summary.toolReliability.recoveryExamples[0].promptStrategyVariantId, 'qwen-xml-code-v1:qwen-coder-tool-proof', 'export should preserve prompt strategy context for recovery examples');
+assert.equal(payload.summary.toolReliability.outcomeExamples[0].promptStrategyVariantId, 'qwen-coder-tool-proof', 'export should preserve prompt strategy context for tool-error outcomes');
+assert.equal(payload.summary.toolReliability.recoveryExamples[0].promptStrategyVariantId, 'qwen-coder-tool-proof', 'export should preserve prompt strategy context for recovery examples');
+assert.equal(payload.summary.toolReliability.recoveryPatterns[0].failedProviderId, 'provider', 'export should preserve failed provider id for recovery pattern');
+assert.equal(payload.summary.toolReliability.recoveryPatterns[0].recoveredByProviderId, 'provider', 'export should preserve recovered-by provider id for recovery pattern');
 assert.deepEqual(payload.summary.toolReliability.recoveryPatterns[0].exampleSessionIds, ['session-1'], 'export should preserve recovery-pattern session breadcrumbs');
 assert.deepEqual(payload.summary.toolReliability.recoveryPatterns[0].exampleEvidenceSources, ['saved_session_trace'], 'export should preserve recovery-pattern evidence sources');
 assert.deepEqual(payload.summary.toolReliability.failureMemory[0].exampleSessionIds, ['session-1'], 'export should preserve failure-memory session breadcrumbs');

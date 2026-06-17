@@ -381,7 +381,7 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
       message.runTrace != null ||
       nextActions.length > 0
     ),
-    [message, confidenceSignals, teamPlanArtifact, nextActions],
+    [message, confidenceSignals, teamPlanArtifact, nextActions, hasArtifacts],
   );
 
   return (

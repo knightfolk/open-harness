@@ -621,6 +621,11 @@ export function saveBenchRun(run: BenchRun): void {
   writeFileSync(path, JSON.stringify(redactPersistedValue(run), null, 2), 'utf-8');
 }
 
+export function getBenchArtifactPath(id: string): string | undefined {
+  const path = join(BENCH_DIR, `${id}.json`);
+  return existsSync(path) ? path : undefined;
+}
+
 export function getBenchRun(id: string): BenchRun | null {
   const path = join(BENCH_DIR, `${id}.json`);
   if (!existsSync(path)) return null;
@@ -706,7 +711,7 @@ export function getPreviousRunDelta(run: BenchRun): BenchRunDelta | null {
   };
 }
 
-export function listBenchRuns(): Array<Pick<BenchRun, 'id' | 'name' | 'status' | 'total' | 'completed' | 'createdAt' | 'completedAt' | 'suiteId'>> {
+export function listBenchRuns(): Array<Pick<BenchRun, 'id' | 'name' | 'status' | 'total' | 'completed' | 'createdAt' | 'completedAt' | 'suiteId'> & { artifactPath?: string }> {
   if (!existsSync(BENCH_DIR)) return [];
   const files = readdirSync(BENCH_DIR).filter(f => f.endsWith('.json'));
   return files.map(f => {
@@ -721,6 +726,7 @@ export function listBenchRuns(): Array<Pick<BenchRun, 'id' | 'name' | 'status' |
         createdAt: run.createdAt,
         completedAt: run.completedAt,
         suiteId: run.suiteId,
+        artifactPath: getBenchArtifactPath(run.id),
       };
     } catch {
       return null;

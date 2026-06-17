@@ -75,7 +75,7 @@ for (const expected of [
 
 for (const expected of [
   'Use `docs/PREMIER_HARNESS_KICKOFF.md` as the source of truth',
-  'Use the checklist\\'s `Premier Harness Closeout Evidence` template',
+  'Use the checklist\'s `Premier Harness Closeout Evidence` template',
   'Treat stale, indirect, ambiguous, or partial evidence as not complete',
   'Provider-backed proof run approval needed.',
   'Final closeout gates need approval before running local validation.',

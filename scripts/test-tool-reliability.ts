@@ -1,4 +1,8 @@
 import { strict as assert } from 'node:assert';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { buildRetryReductionRecommendations, buildToolReliabilitySummary, normalizeToolStatus } from '../server/toolReliability';
 import { annotateCandidatesWithToolReliability } from '../server/autoRouter';
 import type { HarnessRun, HarnessRunStep } from '../server/runTrace';
@@ -134,7 +138,7 @@ assert.equal(summary.recoveryExamples[0].evidenceSource, 'saved_session_trace', 
 assert.equal(summary.recoveryExamples[0].sessionId, 'session-1', 'recovery examples should stay tied to the saved session that produced them');
 assert.equal(summary.recoveryExamples[0].runId, 'recovered-run', 'recovery examples should stay tied to the run trace that produced them');
 assert.equal(summary.recoveryExamples[0].promptStrategyId, 'qwen-xml-code-v1', 'recovery examples should preserve prompt strategy context');
-assert.equal(summary.recoveryExamples[0].promptStrategyVariantId, 'qwen-xml-code-v1:qwen-coder-tool-proof', 'recovery examples should preserve prompt strategy variant context');
+assert.equal(summary.recoveryExamples[0].promptStrategyVariantId, 'qwen-coder-tool-proof', 'recovery examples should preserve prompt strategy variant context');
 assert.equal(summary.recoveryExamples[0].firstError.tool, 'read_file', 'recovery example should include the first failed tool');
 assert.equal(summary.recoveryExamples[0].recoveredBy[0].tool, 'list_directory', 'recovery example should include the later successful tool');
 assert.equal(summary.recoveryExamples[0].recoveredBy[0].model, 'primary-model', 'recovery example should include the model that ultimately completed a later tool call');
@@ -149,12 +153,14 @@ assert.equal(summary.outcomeExamples[1].evidenceSource, 'saved_session_trace', '
 assert.equal(summary.outcomeExamples[1].sessionId, 'session-1', 'outcome mining should preserve the saved session id for log/session review');
 assert.equal(summary.outcomeExamples[1].runId, 'recovered-run', 'outcome mining should preserve the run id for log/session review');
 assert.equal(summary.outcomeExamples[1].workedBy?.tool, 'list_directory', 'outcome should record what ultimately worked after the tool error');
-assert.equal(summary.outcomeExamples[1].promptStrategyVariantId, 'qwen-xml-code-v1:qwen-coder-tool-proof', 'outcome should preserve prompt strategy variant context');
+assert.equal(summary.outcomeExamples[1].promptStrategyVariantId, 'qwen-coder-tool-proof', 'outcome should preserve prompt strategy variant context');
 assert.equal(summary.outcomeExamples[1].retryDistance, 1, 'outcome should preserve retry distance from failed tool to working path');
 assert.equal(summary.recoveryPatterns.length, 1, 'should aggregate recurring recovery paths');
 assert.equal(summary.recoveryPatterns[0].failedModel, 'primary-model', 'recovery pattern should include failed model');
 assert.equal(summary.recoveryPatterns[0].failedTool, 'read_file', 'recovery pattern should include failed first tool');
+assert.equal(summary.recoveryPatterns[0].failedProviderId, 'primary-provider', 'recovery pattern should include failed provider');
 assert.equal(summary.recoveryPatterns[0].recoveredByTool, 'list_directory', 'recovery pattern should include the tool that worked later');
+assert.equal(summary.recoveryPatterns[0].recoveredByProviderId, 'primary-provider', 'recovery pattern should include the provider path of the recovered tool');
 assert.equal(summary.recoveryPatterns[0].runs, 1, 'recovery pattern should count matching runs');
 assert.equal(summary.recoveryPatterns[0].finalAnswerRuns, 1, 'recovery pattern should count final-answer recoveries');
 assert.equal(summary.recoveryPatterns[0].avgRecoveryRounds, 1, 'recovery pattern should average retry rounds');
@@ -174,7 +180,7 @@ assert.deepEqual(summary.failureMemory[1].exampleRunIds, ['recovered-run'], 'fai
 assert.deepEqual(summary.failureMemory[1].exampleEvidenceSources, ['saved_session_trace'], 'failure memory should keep the evidence source for session/log inspection');
 assert.deepEqual(summary.failureMemory[1].exampleSessionIds, summary.recoveryPatterns[0].exampleSessionIds, 'failure memory should inherit saved-session breadcrumbs from recovery patterns');
 assert.equal(summary.failureMemory[1].promptStrategies[0].id, 'qwen-xml-code-v1', 'failure memory should preserve prompt strategy context');
-assert.equal(summary.failureMemory[1].promptStrategyVariants[0].id, 'qwen-xml-code-v1:qwen-coder-tool-proof', 'failure memory should preserve prompt strategy variant context');
+assert.equal(summary.failureMemory[1].promptStrategyVariants[0].id, 'qwen-coder-tool-proof', 'failure memory should preserve prompt strategy variant context');
 assert.equal(summary.errorSignatures.length, 2, 'should group recurring tool errors by normalized error signature');
 assert.equal(summary.errorSignatures[0].tool, 'write_file', 'unrecovered signatures should sort first');
 assert.equal(summary.errorSignatures[0].signature, 'permission denied', 'signatures should preserve normalized error causes');
@@ -187,7 +193,7 @@ assert.equal(summary.errorSignatures[1].workedBy[0].avgRetryDistance, 1, 'signat
 assert.deepEqual(summary.errorSignatures[1].exampleSessionIds, ['session-1'], 'signature memory should keep example session ids for saved session inspection');
 assert.deepEqual(summary.errorSignatures[1].exampleRunIds, ['recovered-run'], 'signature memory should keep example run ids for session/log inspection');
 assert.deepEqual(summary.errorSignatures[1].exampleEvidenceSources, ['saved_session_trace'], 'signature memory should keep the evidence source for session/log inspection');
-assert.equal(summary.errorSignatures[1].promptStrategyVariants[0].id, 'qwen-xml-code-v1:qwen-coder-tool-proof', 'signature memory should preserve prompt strategy variant context');
+assert.equal(summary.errorSignatures[1].promptStrategyVariants[0].id, 'qwen-coder-tool-proof', 'signature memory should preserve prompt strategy variant context');
 assert.equal(summary.retryReductionRecommendations.length, 2, 'should derive retry-reduction recommendations from tool-error outcomes');
 assert.equal(summary.retryReductionRecommendations[0].avoidPath, 'primary-model/read_file', 'recommendation should identify the failed first model/tool path');
 assert.equal(summary.retryReductionRecommendations[0].preferPath, 'primary-model/list_directory', 'recommendation should identify the later working model/tool path');
@@ -262,6 +268,7 @@ assert.match(annotatedCandidates[0].card, /2\/3 traced tool calls errored/i, 'ca
 assert.match(annotatedCandidates[0].card, /read_file failed, then list_directory completed/i, 'candidate card should expose the recent recovery path');
 assert.match(annotatedCandidates[0].card, /Repeated recovery patterns/i, 'candidate card should expose recurring recovery patterns');
 assert.match(annotatedCandidates[0].card, /read_file failed, then primary-model\/list_directory worked/i, 'candidate card should show what later worked');
+assert.match(annotatedCandidates[0].card, /read_file failed under primary-provider:primary-model\/read_file; then primary-provider:primary-model\/list_directory worked/i, 'candidate card should expose provider-qualified recovery paths');
 assert.match(annotatedCandidates[0].card, /evidence saved_session_trace, examples session session-1, run recovered-run/i, 'candidate card should expose recovery pattern source, session, and run breadcrumbs');
 assert.match(annotatedCandidates[0].card, /Model failure memory/i, 'candidate card should expose compact failure memory');
 assert.match(annotatedCandidates[0].card, /write_file failed in 1 run/i, 'candidate card should include unrecovered tool failure memory');
@@ -275,13 +282,14 @@ assert.match(annotatedCandidates[0].card, /Retry-reduction recommendations/i, 'c
 assert.match(annotatedCandidates[0].card, /Prompt strategy best practice for qwen-xml-code-v1/i, 'candidate card should expose source-backed prompt strategy best-practice guidance');
 assert.match(annotatedCandidates[0].card, /Eval cue:/i, 'candidate card should expose prompt-strategy evaluation cues');
 assert.match(annotatedCandidates[0].card, /not an automatic routing override/i, 'candidate card should frame prompt best practices as advisory evidence');
-assert.match(annotatedCandidates[0].card, /avoid primary-model\/read_file; prefer primary-model\/list_directory; retry distance 1; avg retry distance 1; evidence saved_session_trace; confidence single_trace from 1 run; supporting sessions session-1; supporting runs recovered-run; tuning action tune_local_router/i, 'candidate card should expose the avoid/prefer path with average retry distance confidence source tuning action and breadcrumbs');
+assert.match(annotatedCandidates[0].card, /first failed primary-provider:primary-model\/read_file, recovered primary-model\/list_directory, prefer after 1 rounds; avg recovery distance 1; evidence saved_session_trace; confidence single_trace from 1 run; supporting sessions session-1; supporting runs recovered-run; tuning action tune_local_router/i, 'candidate card should expose first-failed recovered path with average recovery distance, confidence, source, and breadcrumbs');
 assert.match(annotatedCandidates[0].card, /provider path avoid primary-provider:primary-model\/read_file; provider path prefer primary-provider:primary-model\/list_directory/i, 'candidate card should expose provider-qualified avoid/prefer paths');
 assert.match(annotatedCandidates[0].card, /Session outcomes after tool errors/i, 'candidate card should expose session outcome mining');
 assert.match(annotatedCandidates[0].card, /write_file -> error \(unrecovered_error, retry distance 0\)/i, 'candidate card should include unrecovered outcomes');
 assert.match(annotatedCandidates[0].card, /read_file -> primary-model\/list_directory \(recovered_tool_path, retry distance 1\)/i, 'candidate card should include the working path after an error');
+assert.match(annotatedCandidates[0].card, /primary-provider:primary-model\/read_file -> primary-model\/list_directory/i, 'candidate card should expose provider-qualified outcome failure->recovery path');
 assert.match(annotatedCandidates[0].card, /read_file -> primary-model\/list_directory .*evidence saved_session_trace, session session-1, run recovered-run/i, 'candidate card should expose outcome source, session, and run breadcrumbs');
-assert.match(annotatedCandidates[0].card, /prompt variants qwen-xml-code-v1:qwen-coder-tool-proof/i, 'candidate card should include prompt variant failure memory');
+assert.match(annotatedCandidates[0].card, /prompt variants qwen-coder-tool-proof/i, 'candidate card should include prompt variant failure memory');
 assert.match(annotatedCandidates[0].card, /Specific risky tools for this model/i, 'candidate card should expose model/tool-pair risk evidence');
 assert.match(annotatedCandidates[0].card, /read_file 1\/1 errors/i, 'candidate card should include risky read_file pair evidence');
 assert.match(annotatedCandidates[0].card, /write_file 1\/1 errors/i, 'candidate card should include risky write_file pair evidence');
@@ -317,8 +325,8 @@ assert.equal(summary.byPromptStrategy['qwen-xml-code-v1'].total, 3, 'prompt stra
 assert.equal(summary.byPromptStrategy['qwen-xml-code-v1'].error, 2, 'prompt strategy bucket should preserve tool errors');
 assert.equal(summary.byPromptStrategy['qwen-xml-code-v1'].firstCallErrors, 2, 'prompt strategy bucket should preserve first-call failures');
 assert.equal(summary.byPromptStrategyVariant['qwen-xml-code-v1:qwen-coder-tool-proof'].total, 3, 'strategy variant bucket should aggregate exact role/task prompt contracts');
-assert.equal(summary.byPromptStrategyVariant['qwen-xml-code-v1:qwen-coder-tool-proof'].recoveredRuns, 1, 'strategy variant bucket should preserve recovered runs');
-assert.equal(summary.byPromptStrategyVariant.unknown.total, 3, 'unknown strategy bucket should preserve legacy runs without prompt assembly metadata');
+assert.equal(summary.byPromptStrategyVariant['qwen-xml-code-v1:qwen-coder-tool-proof'].runs, 2, 'strategy variant bucket should preserve recovered run count via run membership');
+assert.ok(!Object.hasOwn(summary.byPromptStrategyVariant, 'unknown'), 'unknown strategy variant bucket should not be present when prompt strategy is inferred for all runs');
 assert.equal(summary.byEvidenceSource.length, 1, 'evidence source summary should aggregate saved trace outcomes');
 assert.equal(summary.byEvidenceSource[0].source, 'saved_session_trace', 'evidence source summary should identify saved session traces');
 assert.equal(summary.byEvidenceSource[0].tuningAction, 'tune_local_router', 'evidence source summary should identify the tuning action for saved traces');
@@ -343,5 +351,51 @@ assert.equal(summary.recentErrors[0].evidenceSource, 'saved_session_trace', 'rec
 assert.equal(summary.recentErrors[1].tool, 'read_file', 'older error should follow newest error');
 assert.equal(normalizeToolStatus({ type: 'tool_call', id: 'legacy', name: 'x', input: {}, durationMs: 1 }), 'complete');
 assert.equal(normalizeToolStatus({ type: 'tool_call', id: 'legacy-running', name: 'x', input: {} }), 'running');
+
+const tempHome = mkdtempSync(join(tmpdir(), 'openharness-tool-reliability-log-trace-'));
+process.env.HOME = tempHome;
+const logTraceModulePath = `${pathToFileURL(join(process.cwd(), 'server/toolReliabilityLogTrace.ts')).href}?probe=${Date.now()}`;
+const { getToolReliabilitySessions } = await import(logTraceModulePath);
+const runTraceLogDir = join(tempHome, '.openharness', 'process-ledger', 'logs');
+mkdirSync(runTraceLogDir, { recursive: true });
+const probeRunId = `probe-run-${Date.now()}`;
+const probeLogPath = join(runTraceLogDir, `${probeRunId}.log`);
+
+try {
+  const probeRunA = `${probeRunId}-a`;
+  const probeRunB = `${probeRunId}-b`;
+  const probeLogLines = [
+    `[run-step] ${JSON.stringify({ runId: probeRunA, step: { type: 'tool_call', name: 'read_file', status: 'error', model: 'qwen3-coder-probe', providerId: 'primary-provider', round: 0, error: 'ENOENT' } })}`,
+    `[run-step] ${JSON.stringify({ runId: probeRunA, step: { type: 'tool_call', name: 'search', status: 'complete', model: 'qwen3-coder-probe', providerId: 'primary-provider', round: 1 } })}`,
+    `[run-step] ${JSON.stringify({ runId: probeRunA, step: { type: 'final_answer', chars: 150 } })}`,
+    `[run-complete] ${JSON.stringify({ runId: probeRunA, status: 'complete' })}`,
+    `[run-step] ${JSON.stringify({ runId: probeRunB, step: { type: 'tool_call', name: 'read_file', status: 'error', model: 'unknown-probe-worker', providerId: 'fallback-provider', round: 0, error: 'permission denied' } })}`,
+    `[run-complete] ${JSON.stringify({ runId: probeRunB, status: 'error' })}`,
+  ].join('\n');
+  writeFileSync(probeLogPath, `${probeLogLines}\n`, 'utf-8');
+
+  const logSessions = getToolReliabilitySessions();
+  const recoveredSession = logSessions.find((session) => session.id === `log-session-${probeRunA}`);
+  const unrecoveredSession = logSessions.find((session) => session.id === `log-session-${probeRunB}`);
+  assert.ok(recoveredSession?.messages?.[0]?.runTrace, 'log reconstruction should produce a recovered run session entry');
+  assert.ok(unrecoveredSession?.messages?.[0]?.runTrace, 'log reconstruction should produce an unrecovered run session entry');
+
+  const logSummary = buildToolReliabilitySummary(logSessions);
+  const recoveredOutcome = logSummary.outcomeExamples.find((item) => item.runId === probeRunA && item.evidenceSource === 'log_trace');
+  const unrecoveredOutcome = logSummary.outcomeExamples.find((item) => item.runId === probeRunB && item.evidenceSource === 'log_trace');
+  assert.equal(recoveredOutcome?.outcome, 'recovered_tool_path', 'log-derived recovered run should produce recovered outcome');
+  assert.equal(recoveredOutcome?.retryDistance, 1, 'log-derived recovered run should capture retry distance');
+  assert.equal(recoveredOutcome?.finalStatus, 'complete', 'recovered log run should preserve final status');
+  assert.equal(unrecoveredOutcome?.outcome, 'unrecovered_error', 'log-derived unrecovered run should produce unrecovered outcome');
+  assert.equal(unrecoveredOutcome?.finalStatus, 'error', 'unrecovered log run should preserve error status');
+  assert.ok(recoveredOutcome?.promptStrategyId, 'log-derived outcomes should retain inferred prompt strategy id');
+  assert.ok(recoveredOutcome?.promptStrategyVariantId, 'log-derived outcomes should retain inferred prompt strategy variant when available');
+  assert.ok(logSummary.recoveryPatterns.some((pattern) => pattern.failedModel === 'qwen3-coder-probe'), 'log traces should create recovery patterns from failed-then-successful tool runs');
+  assert.equal(logSummary.byEvidenceSource.find((item) => item.source === 'log_trace')?.outcomeRuns, 2, 'log trace evidence summary should report outcome run count');
+  assert.ok(logSummary.byEvidenceSource.find((item) => item.source === 'log_trace')?.retryReductionRecommendations >= 1, 'log trace evidence should contribute retry-reduction recommendations');
+  assert.equal(logSummary.byEvidenceSource.find((item) => item.source === 'log_trace')?.tuningAction, 'review_before_tuning', 'log-trace recommendations should require review before tuning');
+} finally {
+  rmSync(tempHome, { recursive: true, force: true });
+}
 
 console.log('Tool reliability tests passed.');

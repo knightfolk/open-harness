@@ -1,4 +1,5 @@
 import type { HarnessRun, HarnessRunStep } from './runTrace';
+import { getPromptStrategySelectionForModel, toPromptStrategyTrace } from './promptStrategies';
 
 export type ToolReliabilityStatus = 'running' | 'complete' | 'error' | 'skipped';
 export type ToolReliabilityEvidenceSource = 'saved_session_trace' | 'log_trace' | 'imported_trace';
@@ -238,7 +239,10 @@ export interface ToolReliabilityAdvice {
 }
 
 export interface ToolReliabilityMessage {
+  id?: string;
   timestamp?: string;
+  role?: 'user' | 'assistant' | 'system';
+  content?: string;
   runTrace?: HarnessRun;
   evidenceSource?: ToolReliabilityEvidenceSource;
 }
@@ -254,6 +258,46 @@ function toolReliabilityEvidenceSource(
   message: ToolReliabilityMessage,
 ): ToolReliabilityEvidenceSource {
   return message.evidenceSource || session.evidenceSource || 'saved_session_trace';
+}
+
+interface ResolvedPromptStrategy {
+  promptStrategyKey: string;
+  promptStrategyVariantId?: string;
+  promptStrategyVariantKey: string;
+}
+
+function resolvePromptStrategyFromRun(run: HarnessRun, promptBuiltStep?: HarnessRunStep & { type: 'prompt_built' }): ResolvedPromptStrategy {
+  const promptStrategy = promptBuiltStep?.assembly?.promptStrategy;
+  if (promptStrategy?.id) {
+    const promptStrategyKey = promptStrategy.id;
+    const promptStrategyVariantId = (promptStrategy as { variantId?: string } | undefined)?.variantId;
+    const promptStrategyVariantKey = promptStrategyVariantId
+      ? `${promptStrategyKey}:${promptStrategyVariantId}`
+      : promptStrategyKey;
+    return {
+      promptStrategyKey,
+      ...(promptStrategyVariantId ? { promptStrategyVariantId } : {}),
+      promptStrategyVariantKey,
+    };
+  }
+
+  const modelId = run.effectiveModel || run.requestedModel || 'unknown';
+  const promptSelection = getPromptStrategySelectionForModel(modelId);
+  const inferredTrace = toPromptStrategyTrace(promptSelection.profile, {
+    role: run.role,
+    hasTools: true,
+    taskDescription: run.role,
+  });
+  const promptStrategyKey = inferredTrace.id || 'unknown';
+  const promptStrategyVariantId = inferredTrace.variantId;
+  const promptStrategyVariantKey = promptStrategyVariantId
+    ? `${promptStrategyKey}:${promptStrategyVariantId}`
+    : promptStrategyKey;
+  return {
+    promptStrategyKey,
+    ...(promptStrategyVariantId ? { promptStrategyVariantId } : {}),
+    promptStrategyVariantKey,
+  };
 }
 
 function emptyToolReliabilityBucket(): ToolReliabilityBucket {
@@ -278,11 +322,10 @@ function emptyToolReliabilityBucket(): ToolReliabilityBucket {
 export function normalizeToolStatus(step: Extract<HarnessRunStep, { type: 'tool_call' }>): ToolReliabilityStatus {
   if (step.status === 'running' || step.status === 'complete' || step.status === 'error' || step.status === 'skipped') return step.status;
   if (typeof step.error === 'string' && step.error.trim()) return 'error';
-  const output = typeof (step as { outputPreview?: string }).outputPreview === 'string'
-    ? (step as { outputPreview?: string }).outputPreview.trim()
-    : '';
+  const outputPreview = typeof step.outputPreview === 'string' ? step.outputPreview : '';
+  const output = outputPreview.trim();
   if (/^error\W/i.test(output)) return 'error';
-  if (/^\{\"?error\"?[:\s]/i.test(output)) return 'error';
+  if (/^\{"?error"?:?\s/i.test(output)) return 'error';
   return step.durationMs == null ? 'running' : 'complete';
 }
 
@@ -437,13 +480,14 @@ export function buildToolReliabilitySummary(sessions: ToolReliabilitySession[]):
       const evidenceSource = toolReliabilityEvidenceSource(session, message);
       const toolSteps = run.steps.filter((step): step is Extract<HarnessRunStep, { type: 'tool_call' }> => step.type === 'tool_call');
       if (toolSteps.length === 0) continue;
-      const promptBuiltStep = run.steps.find((step) => step.type === 'prompt_built');
-      const promptStrategy = promptBuiltStep?.type === 'prompt_built' ? promptBuiltStep.assembly?.promptStrategy : undefined;
-      const promptStrategyKey = promptStrategy?.id || 'unknown';
-      const promptStrategyVariantId = (promptStrategy as { variantId?: string } | undefined)?.variantId;
-      const promptStrategyVariantKey = promptStrategyVariantId
-        ? `${promptStrategyKey}:${promptStrategyVariantId}`
-        : promptStrategyKey;
+      const promptBuiltStep = run.steps.find((step) => step.type === 'prompt_built') as
+        | (Extract<HarnessRunStep, { type: 'prompt_built' }> & { type: 'prompt_built' })
+        | undefined;
+      const {
+        promptStrategyKey,
+        promptStrategyVariantId,
+        promptStrategyVariantKey,
+      } = resolvePromptStrategyFromRun(run, promptBuiltStep);
       summary.runsWithToolCalls += 1;
       const erroredSteps = toolSteps.filter((step) => normalizeToolStatus(step) === 'error');
       const firstToolStep = toolSteps[0];
@@ -491,7 +535,7 @@ export function buildToolReliabilitySummary(sessions: ToolReliabilitySession[]):
           failedProviderId,
           failedTool: firstErrorStep.name || 'unknown',
           promptStrategyId: promptStrategyKey,
-          promptStrategyVariantId: promptStrategyVariantKey,
+          promptStrategyVariantId: promptStrategyVariantId,
           outcome: runRecovered
             ? workedStep
               ? fallbackWorked ? 'fallback_tool_path' : 'recovered_tool_path'
@@ -521,7 +565,7 @@ export function buildToolReliabilitySummary(sessions: ToolReliabilitySession[]):
           sessionId: session.id,
           runId: run.id,
           promptStrategyId: promptStrategyKey,
-          promptStrategyVariantId: promptStrategyVariantKey,
+          promptStrategyVariantId: promptStrategyVariantId,
           firstError: {
             model: failedModel,
             providerId: failedProviderId,
@@ -594,7 +638,7 @@ export function buildToolReliabilitySummary(sessions: ToolReliabilitySession[]):
             providerId,
             tool,
             promptStrategyId: promptStrategyKey,
-            promptStrategyVariantId: promptStrategyVariantKey,
+            promptStrategyVariantId: promptStrategyVariantId,
             round: step.round,
             error: step.error || step.outputPreview,
             timestamp: message.timestamp || run.completedAt || run.startedAt,
@@ -714,7 +758,6 @@ export function buildRetryReductionRecommendations(
   const supportSessionsByPath: Record<string, Set<string>> = {};
   const retryDistanceByPath: Record<string, { total: number; count: number }> = {};
   for (const outcome of outcomes) {
-    const avoidPath = `${outcome.failedModel}/${outcome.failedTool}`;
     const avoidProviderPath = `${outcome.failedProviderId}:${outcome.failedModel}/${outcome.failedTool}`;
     const preferPath = outcome.workedBy
       ? `${outcome.workedBy.model}/${outcome.workedBy.tool}`

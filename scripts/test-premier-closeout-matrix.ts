@@ -318,7 +318,7 @@ for (const [path, text] of [
 }
 
 for (const expected of [
-  'Use the checklist\\'s `Premier Harness Closeout Evidence` template',
+  'Use the checklist\'s `Premier Harness Closeout Evidence` template',
   'Continue filling `docs/proof/2026-06-16-premier-harness-closeout.md`',
   'remaining gaps in the kickoff stop-condition audit',
   'live provider-backed runs, proof-review decisions, browser checks, and final gates remain open',

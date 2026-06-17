@@ -243,7 +243,7 @@ function recoveryPatternLine(candidateModelId: string, summary: ToolReliabilityS
     .slice(0, 2);
   if (patterns.length === 0) return '';
   return ` Repeated recovery patterns: ${patterns.map((pattern) =>
-    `${pattern.failedTool} failed, then ${pattern.recoveredByModel}/${pattern.recoveredByTool} worked in ${pattern.runs} run${pattern.runs === 1 ? '' : 's'} (evidence ${pattern.exampleEvidenceSources?.join(', ') || 'unknown'}, examples session ${pattern.exampleSessionIds?.join(', ') || 'unknown'}, run ${pattern.exampleRunIds.join(', ') || 'unknown'})`
+    `${pattern.failedTool} failed under ${pattern.failedProviderId || 'unknown'}:${pattern.failedModel}/${pattern.failedTool}; then ${pattern.recoveredByProviderId || 'unknown'}:${pattern.recoveredByModel}/${pattern.recoveredByTool} worked in ${pattern.runs} run${pattern.runs === 1 ? '' : 's'} (evidence ${pattern.exampleEvidenceSources?.join(', ') || 'unknown'}, examples session ${pattern.exampleSessionIds?.join(', ') || 'unknown'}, run ${pattern.exampleRunIds.join(', ') || 'unknown'})`
   ).join('; ')}. Prefer the recovered tool path or a cleaner model for similar first-tool choices.`;
 }
 
@@ -274,9 +274,10 @@ function outcomeExampleLine(candidateModelId: string, summary: ToolReliabilitySu
   if (outcomes.length === 0) return '';
   return ` Session outcomes after tool errors: ${outcomes.map((item) => {
     const workedBy = item.workedBy
-      ? `${item.workedBy.model}/${item.workedBy.tool}`
+      ? `${item.workedBy.model || 'unknown'}/${item.workedBy.tool} (via ${item.workedBy.providerId || 'unknown'})`
       : item.finalAnswerCaptured ? 'final answer without later tool' : item.finalStatus;
-    return `${item.failedTool} -> ${workedBy} (${item.outcome}, retry distance ${item.retryDistance}); evidence ${item.evidenceSource}, session ${item.sessionId}, run ${item.runId}`;
+    const failedPath = `${item.failedProviderId || 'unknown'}:${item.failedModel}/${item.failedTool}`;
+    return `${failedPath} -> ${workedBy} (${item.outcome}, retry distance ${item.retryDistance}); evidence ${item.evidenceSource}, session ${item.sessionId}, run ${item.runId}`;
   }).join('; ')}. Use these as avoid/retry-reduction evidence for similar tool-heavy tasks.`;
 }
 
@@ -303,7 +304,7 @@ function retryReductionRecommendationLine(candidateModelId: string, summary: Too
     .slice(0, 2);
   if (recommendations.length === 0) return '';
   return ` Retry-reduction recommendations: ${recommendations.map((item) =>
-    `avoid ${item.avoidPath}; prefer ${item.preferPath}; retry distance ${item.retryDistance}; avg retry distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; session ${item.sessionId}; run ${item.runId}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}`
+    `first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}; recovered ${item.preferPath}; prefer after ${item.retryDistance} rounds; avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; session ${item.sessionId}; run ${item.runId}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; recommendation ${item.recommendation}`
   ).join('; ')}. Prefer these observed working paths before adding more retries.`;
 }
 
@@ -350,10 +351,12 @@ export function annotateCandidatesWithToolReliability(
 
     const recoveryExample = (summary.recoveryExamples || [])
       .find((item) => modelKeysMatch(item.firstError.model, candidate.modelId));
+    const describeRecoverySteps = (step: ToolReliabilitySummary['recoveryExamples'][number]['recoveredBy'][number]) =>
+      `${step.tool} (via ${step.providerId || 'unknown'}:${step.model}, round ${step.round ?? 0})`;
     const recoveryPath = recoveryExample
       ? recoveryExample.recoveredBy.length > 0
-        ? ` Recent recovery path: ${recoveryExample.firstError.tool} failed, then ${recoveryExample.recoveredBy.map((step) => step.tool).join(' -> ')} completed before final answer.`
-        : ` Recent recovery path: ${recoveryExample.firstError.tool} failed, then the run still reached a final answer.`
+        ? ` Recent recovery path: ${recoveryExample.firstError.tool} failed, then ${recoveryExample.recoveredBy.map(describeRecoverySteps).join(' -> ')} completed before final answer (recovery rounds ${recoveryExample.recoveryRounds}).`
+        : ` Recent recovery path: ${recoveryExample.firstError.tool} failed, then the run still reached a final answer (recovery rounds ${recoveryExample.recoveryRounds}).`
       : '';
     const riskyToolPairs = Object.entries(summary.byModelTool || {})
       .filter(([pair, stats]) => modelToolPairMatchesCandidate(pair, candidate.modelId) && stats.error > 0)

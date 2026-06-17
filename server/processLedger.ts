@@ -53,19 +53,27 @@ export interface LogTail {
   tail: string;
 }
 
-const ROOT = join(homedir(), '.openharness', 'process-ledger');
-const LOGS_DIR = join(ROOT, 'logs');
-const LEDGER_PATH = join(ROOT, 'ledger.json');
+const getRoot = () => join(homedir(), '.openharness', 'process-ledger');
+const getLogsDir = () => join(getRoot(), 'logs');
+const getLedgerPath = () => join(getRoot(), 'ledger.json');
+const ensureLedgerDirs = () => {
+  ensureDir(getRoot());
+  ensureDir(getLogsDir());
+};
 
 function ensureDir(dir: string) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
-ensureDir(ROOT);
-ensureDir(LOGS_DIR);
+ensureLedgerDirs();
 
 let ledger: OwnedProcess[] = [];
 let loaded = false;
+let loadedRoot = '';
+
+export function getProcessLedgerLogsDir(): string {
+  return getLogsDir();
+}
 
 function redactText(value: string): string {
   return redactSecrets(value).redacted;
@@ -83,7 +91,15 @@ function redactPersistedValue<T>(value: T): T {
 }
 
 function loadLedger(): void {
+  ensureLedgerDirs();
+  const root = getRoot();
+  if (!loaded || loadedRoot !== root) {
+    loaded = false;
+    loadedRoot = root;
+    ledger = [];
+  }
   if (loaded) return;
+  const LEDGER_PATH = getLedgerPath();
   if (existsSync(LEDGER_PATH)) {
     try {
       ledger = JSON.parse(readFileSync(LEDGER_PATH, 'utf-8')) as OwnedProcess[];
@@ -97,6 +113,8 @@ function loadLedger(): void {
 }
 
 function persistLedger(): void {
+  ensureLedgerDirs();
+  const LEDGER_PATH = getLedgerPath();
   writeFileSync(LEDGER_PATH, JSON.stringify(redactPersistedValue(ledger), null, 2), 'utf-8');
 }
 
@@ -116,7 +134,7 @@ export interface RegisterOptions {
 export function registerProcess(child: ChildProcess, opts: RegisterOptions): OwnedProcess {
   loadLedger();
   const id = uuid();
-  const logFile = join(LOGS_DIR, `${opts.kind}-${id}.log`);
+  const logFile = join(getLogsDir(), `${opts.kind}-${id}.log`);
   const fd = openSync(logFile, opts.appendLog ? 'a' : 'w');
   closeSync(fd);
 
@@ -172,7 +190,7 @@ export function registerProcess(child: ChildProcess, opts: RegisterOptions): Own
 export function registerExternal(opts: RegisterOptions & { pid: number; status?: OwnedProcess['status'] }): OwnedProcess {
   loadLedger();
   const id = uuid();
-  const logFile = join(LOGS_DIR, `${opts.kind}-${id}.log`);
+  const logFile = join(getLogsDir(), `${opts.kind}-${id}.log`);
   const fd = openSync(logFile, 'w');
   closeSync(fd);
 
@@ -470,8 +488,23 @@ export function pruneExited(olderThanMs: number = 7 * 24 * 60 * 60 * 1000): numb
 }
 
 export const PROCESS_LEDGER_CONSTANTS = {
-  ROOT,
-  LOGS_DIR,
-  LEDGER_PATH,
+  get ROOT() {
+    return getRoot();
+  },
+  get LOGS_DIR() {
+    return getLogsDir();
+  },
+  get LEDGER_PATH() {
+    return getLedgerPath();
+  },
+  get root() {
+    return getRoot();
+  },
+  get logsDir() {
+    return getLogsDir();
+  },
+  get ledgerPath() {
+    return getLedgerPath();
+  },
   TAIL_BYTES,
 };

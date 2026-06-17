@@ -36,7 +36,7 @@ const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
 const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
 const THEME_TEXTURE_OPACITY_OVERRIDE_KEY = 'openharness.theme.texture-opacity-override.v1';
 const NARROW_SIDEBAR_AUTO_CLOSE_WIDTH = 640;
-const FORCE_HIDDEN_TOOL_PANELS: PanelId[] = [];
+const FORCE_HIDDEN_TOOL_PANELS: PanelId[] = ['sub-agents'];
 
 function sanitizePinnedTools(value: unknown): PanelId[] {
   const knownPanels = new Set<string>(ALL_PANELS);

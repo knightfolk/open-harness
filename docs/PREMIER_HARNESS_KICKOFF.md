@@ -456,6 +456,19 @@ Done when:
 
 ### Phase 7: Prompt Response And Strategy Database
 
+Current active slice (2026-06-17):
+
+- Make prompt-strategy provenance for same-model, same-task comparisons fully
+  documented and machine-checkable: record compared strategy IDs, variant IDs,
+  proof-review status, and comparison artifact paths when provider-approved
+  Model Lab strategy comparisons are used.
+- Keep tool-reliability evidence source-aware (`saved_session_trace`,
+  `log_trace`, `imported_trace`) and tie first-call tool failures to the later
+  model/provider/tool path that actually recovered the run.
+- Use the same evidence trail for both Routing Learning exports and Auto-Router
+  candidate rows so model and tool suggestions can be tuned from the exact
+  run that proved what worked.
+
 Files:
 
 - `docs/PROMPT_STRATEGY_DATABASE_PLAN.md`

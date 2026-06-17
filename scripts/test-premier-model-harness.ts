@@ -119,10 +119,11 @@ for (const expected of [
   'Check the source mix before changing candidate cards or costs',
   'tuning action ${source.tuningAction}',
   'routerRetryReductionForModel',
-  'Retry reduction: avoid {retryReduction.avoidPath}; prefer {retryReduction.preferPath}; provider path avoid {retryReduction.avoidProviderPath}; provider path prefer {retryReduction.preferProviderPath}; retry distance {retryReduction.retryDistance}; avg retry distance {retryReduction.avgRetryDistance}; source {retryReduction.evidenceSource}; confidence {retryReduction.evidenceConfidence} from {retryReduction.supportRunCount} run',
+  'Retry reduction: first failed {retryReduction.failedProviderId || \'unknown\'}:{retryReduction.avoidPath}; recovered {retryReduction.preferPath}; prefer after {retryReduction.retryDistance} rounds; avg recovery distance {retryReduction.avgRetryDistance}; source {retryReduction.evidenceSource}; confidence {retryReduction.evidenceConfidence} from {retryReduction.supportRunCount} run',
   'supporting sessions {(retryReduction.supportSessionIds || []).join',
   'supporting runs {(retryReduction.supportRunIds || []).join',
-  'aria-label={`Auto-Router retry-reduction recommendation for ${c.modelId}: avoid ${retryReduction.avoidPath}, prefer ${retryReduction.preferPath}, provider path avoid ${retryReduction.avoidProviderPath}, provider path prefer ${retryReduction.preferProviderPath}, source ${retryReduction.evidenceSource}, confidence ${retryReduction.evidenceConfidence} from ${retryReduction.supportRunCount} runs, average retry distance ${retryReduction.avgRetryDistance}, supporting sessions ${(retryReduction.supportSessionIds || []).join',
+  'provider path avoid {retryReduction.avoidProviderPath}; provider path prefer {retryReduction.preferProviderPath}',
+  'aria-label={`Auto-Router retry-reduction recommendation for ${c.modelId}: first failed ${retryReduction.failedProviderId || \'unknown\'}:${retryReduction.avoidPath}, recovered ${retryReduction.preferPath}, prefer after ${retryReduction.retryDistance} rounds, avg recovery distance ${retryReduction.avgRetryDistance}, source ${retryReduction.evidenceSource}, confidence ${retryReduction.evidenceConfidence} from ${retryReduction.supportRunCount} run',
   'Prompt strategy {promptStrategyReliability.strategyId}:',
   'This same evidence is also added to classifier candidate cards for tool-heavy execute scoring.',
   'Prompt strategy best practice for ${selection.profile.id}:',
@@ -274,7 +275,7 @@ for (const expected of [
 }
 
 for (const expected of [
-  'aria-label={`Prompt strategy ${promptStep.assembly.promptStrategy.id}; source-backed metadata is advisory prompt-contract evidence, not an automatic routing override`}',
+  'aria-label={`Prompt strategy ${strategy.id}; source-backed metadata is advisory prompt-contract evidence, not an automatic routing override`}',
   '<span className="pm-score-model">Provenance use</span>',
   '<span className="pm-score-value">Advisory prompt-contract evidence, not an automatic routing override</span>',
   'Best model: ${summary?.bestModel || \'not available\'}',
@@ -288,6 +289,8 @@ for (const expected of [
   '## Model results',
   '## Prompt strategy results',
   'Best prompt strategy: ${summary?.bestPromptStrategy || \'not available\'}',
+  'Same-model comparison proof status: ${report.proofReview?.status || \'unreviewed\'}',
+  'Comparison artifact path: ${report.artifactPath || \'not available\'}',
   'eval cue: ${strategy.bestPractice.evaluationCue}, source: ${strategy.bestPractice.sourceRef}',
   'Recommendation trust: ${report.proofReview?.status === \'approved\' ? \'approved proof; may be used as routing evidence\' : \'proof not approved; review before applying role or router changes\'}',
   '- Inspectable output evidence in Model Lab includes response excerpts, failed/weak signals, and tool calls.',
@@ -299,12 +302,27 @@ for (const expected of [
 }
 
 for (const expected of [
+  '# Model Lab Bench Proof Brief',
+  'Run id: ${run.id}',
+  'Proof review: ${run.proofReview?.status || \'unreviewed\'}',
+  'Comparison artifact path: ${run.artifactPath || \'not available\'}',
+  'Same-model comparison proof status: ${run.proofReview?.status || \'unreviewed\'}',
+  'Ranking trust: ${run.proofReview?.status === \'approved\' ? \'approved proof; may be used as routing evidence\' : \'proof not approved; review before applying role or router changes\'}',
+]) {
+  assert.ok(
+    modelLab.includes(expected),
+    `Model Lab benchmark proof rows should preserve run-level proof status and artifacts: ${expected}`,
+  );
+}
+
+for (const expected of [
   '<span className="pm-score-model">Best practice</span>',
   'promptStep.assembly.promptStrategy.bestPractice.guidance',
   '<span className="pm-score-model">Eval cue</span>',
   'promptStep.assembly.promptStrategy.bestPractice.evaluationCue',
   '<span className="pm-score-model">Source</span>',
   'promptStep.assembly.promptStrategy.bestPractice.sourceRef',
+  'aria-label={`Prompt strategy ${promptStep.assembly.promptStrategy.id}; source-backed metadata is advisory prompt-contract evidence, not an automatic routing override`}',
 ]) {
   assert.ok(
     promptMicroscope.includes(expected),

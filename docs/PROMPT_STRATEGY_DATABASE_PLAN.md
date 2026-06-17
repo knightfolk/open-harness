@@ -311,6 +311,7 @@ reliability by model/provider/tool:
 - Model Lab eval runs can select one or more prompt strategy ids to expand the same prompt/model matrix across prompt contracts.
 - The strategy selector is opt-in and provider-spend guarded: leaving it empty keeps default behavior; selecting strategies multiplies eval rows and persists the selected strategy trace on each result.
 - `test:prompt-strategy-database` now verifies that same-model strategy overrides produce distinct prompt contracts and record the requested strategy id.
+- Same-model comparison strategy id(s), variant id(s), proof review status, and comparison artifact path(s) should be captured when provider-approved Model Lab strategy variants are executed, before model-policy recommendations consume those runs.
 
 ## Prompt strategy outcome summary update - 2026-06-17
 

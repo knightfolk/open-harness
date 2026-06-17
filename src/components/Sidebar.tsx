@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -173,7 +173,7 @@ export function Sidebar({
     <aside
       className="sidebar"
       aria-label="Project and chat navigation"
-      style={width ? { width, minWidth: width, ['--sidebar-width']: `${width}px` } : undefined}
+      style={width ? ({ width, minWidth: width, ['--sidebar-width']: `${width}px` } as CSSProperties & { '--sidebar-width'?: string }) : undefined}
     >
       <div className="sidebar-tabs" role="group" aria-label="Sidebar panels">
         {tabConfig.map(({ key, icon: Icon, label }) => (

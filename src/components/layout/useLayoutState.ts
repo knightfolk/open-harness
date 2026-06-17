@@ -3,6 +3,7 @@ import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
 import { DEFAULT_LAYOUT, ALL_PANELS } from '../../types/layout';
 
 const STORAGE_KEY = 'openharness-layout.v7';
+const FORCE_HIDDEN_PANELS: PanelId[] = ['sub-agents'];
 const KNOWN_PANELS = new Set<string>([
   ...ALL_PANELS,
 ]);
@@ -14,7 +15,7 @@ function loadLayout(): LayoutNode {
     if (raw) {
       const parsed = JSON.parse(raw) as LayoutNode;
       if (validateLayout(parsed)) {
-        const panelsToHide = [...DEFAULT_HIDDEN_PANELS];
+        const panelsToHide = [...DEFAULT_HIDDEN_PANELS, ...FORCE_HIDDEN_PANELS];
         return [...new Set(panelsToHide)].reduce((next, panelId) => {
           const pruned = removePanelFromTree(next, panelId);
           return pruned ?? structuredClone(DEFAULT_LAYOUT);

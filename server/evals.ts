@@ -375,6 +375,14 @@ export function saveReport(report: EvalReport): void {
   writeFileSync(path, JSON.stringify(redactPersistedValue(report), null, 2), 'utf-8');
 }
 
+export function getEvalArtifactPath(id: string): string | undefined {
+  for (const dir of REPORTS_DIRS) {
+    const path = join(dir, `${id}.json`);
+    if (existsSync(path)) return path;
+  }
+  return undefined;
+}
+
 export function loadReport(id: string): EvalReport | null {
   for (const dir of REPORTS_DIRS) {
     const path = join(dir, `${id}.json`);
@@ -384,8 +392,8 @@ export function loadReport(id: string): EvalReport | null {
   return null;
 }
 
-export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview'] }> {
-  const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview'] }>();
+export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview']; artifactPath?: string }> {
+  const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview']; artifactPath?: string }>();
 
   for (const dir of REPORTS_DIRS) {
     if (!existsSync(dir)) continue;
@@ -401,6 +409,7 @@ export function listReports(): Array<{ id: string; name: string; status: string;
           completedAt: report.completedAt,
           total: report.total,
           proofReview: report.proofReview,
+          artifactPath: getEvalArtifactPath(report.id),
         });
       } catch {
         // ignore malformed report files

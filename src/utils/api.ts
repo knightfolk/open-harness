@@ -1781,6 +1781,7 @@ export interface EvalReport {
     matchedEvalIds: string[];
   };
   proofReview?: ProofReviewState;
+  artifactPath?: string;
 }
 
 export interface EvalReportSummary {
@@ -1791,6 +1792,7 @@ export interface EvalReportSummary {
   completedAt?: string;
   total: number;
   proofReview?: ProofReviewState;
+  artifactPath?: string;
 }
 
 export async function getEvalPrompts(): Promise<PromptCase[]> {
@@ -2057,6 +2059,7 @@ export interface BenchRunSummary {
   createdAt: string;
   completedAt?: string;
   suiteId?: string;
+  artifactPath?: string;
 }
 
 export interface ValidationCommandResult {
@@ -2176,6 +2179,7 @@ export interface BenchRun {
     }>;
   } | null;
   proofReview?: ProofReviewState;
+  artifactPath?: string;
 }
 
 export interface ProofReviewState {

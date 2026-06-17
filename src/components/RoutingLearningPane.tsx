@@ -450,7 +450,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         ? [
             '- Retry-reduction recommendations:',
             ...toolReliability.retryReductionRecommendations.slice(0, 5).map((item) =>
-              `- Avoid ${item.avoidPath}; prefer ${item.preferPath}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; ${item.recommendation} Retry distance ${item.retryDistance}; avg retry distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; session ${item.sessionId}; run ${item.runId}`
+              `- first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}, recovered ${item.preferPath}, prefer after ${item.retryDistance} rounds, avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${(item.supportSessionIds || []).join(', ') || item.sessionId}; supporting runs ${(item.supportRunIds || []).join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; session ${item.sessionId}; run ${item.runId}`
             ),
           ]
         : ['- Retry-reduction recommendations: none captured yet.']),
@@ -597,7 +597,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       const result = await api.importRouterLearning(payload, { datasetKind });
       await loadData();
       const importedToolSummary = result.toolReliabilityPreview
-        ? ` Tool-reliability summary was previewed as ${result.toolReliabilityPreview.evidenceSource} only and was not merged into local routing learning state. Not merged into local routing state.`
+        ? `Tool-reliability summary was previewed as ${result.toolReliabilityPreview.evidenceSource} only and was not merged into local routing state. Note: not merged into local routing learning state.`
         : '';
       const importedPromptSummary = result.promptBestPracticePreview
         ? ` Prompt best-practice metadata was previewed as context-only evidence and was not merged into local prompt strategy profiles.`
@@ -1062,9 +1062,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
               <div className="routing-model-list" aria-label="Tool-call retry-reduction recommendations">
                 {toolReliability.retryReductionRecommendations.slice(0, 5).map((item) => (
                   <div key={`${item.runId}:${item.failedTool}:${item.timestamp}:retry-reduction`} className="routing-model-row">
-                    <div className="routing-model-name">Avoid {item.avoidProviderPath || item.avoidPath}</div>
+                    <div className="routing-model-name">
+                      first failed {item.failedProviderId || 'unknown'}:{item.avoidPath}
+                    </div>
                     <div className="routing-model-meta">
-                      Prefer {item.preferProviderPath || item.preferPath} · retry distance {item.retryDistance} · avg {item.avgRetryDistance} · {item.evidenceConfidence} from {item.supportRunCount} run{item.supportRunCount === 1 ? '' : 's'} · {item.outcome.replace(/_/g, ' ')}
+                      recovered {item.preferPath} · prefer after {item.retryDistance} rounds · avg recovery distance {item.avgRetryDistance} · confidence {item.evidenceConfidence} from {item.supportRunCount} run{item.supportRunCount === 1 ? '' : 's'} · {item.outcome.replace(/_/g, ' ')}
                     </div>
                     <div className={`routing-rate ${item.outcome === 'unrecovered_error' ? 'bad' : 'good'}`}>reduce</div>
                     <small>

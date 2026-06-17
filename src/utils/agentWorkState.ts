@@ -3,11 +3,6 @@ import type { HarnessRunStep, SubAgent } from '../types';
 export const PHASE_PREFIX = ':phase:';
 export const DEFAULT_WORKFLOW_STEPS = ['Plan', 'Implement', 'Verify', 'Review', 'Report'];
 export const PLANNING_WORKFLOW_STEPS = ['Draft independently', 'Cross-check', 'Synthesize', 'Ready to execute'];
-const WORKFLOW_STATUS_MARKERS: Array<{ status: WorkStepStatus }> = [
-  { status: 'blocked' },
-  { status: 'error' },
-];
-
 export type WorkStepStatus = 'completed' | 'in_progress' | 'pending' | 'error' | 'blocked';
 
 export type WorkStep = {
@@ -193,14 +188,16 @@ export function buildActiveWorkState(agents: SubAgent[]): ActiveWorkState | null
     if (run.status === 'complete' || index < completedPhases) return { id: label, label, status: 'completed' };
     if (index === activeIndex) {
       const isAttention = blockedIndex === index;
+      if (isAttention) {
+        return { id: `${label}:${index}`, label, status: 'blocked' };
+      }
+      if (inferredAttentionIndex === index || run.status === 'error') {
+        return { id: `${label}:${index}`, label, status: 'error' };
+      }
       return {
         id: `${label}:${index}`,
         label,
-        status: isAttention
-          ? 'blocked'
-          : inferredAttentionIndex === index || run.status === 'error'
-            ? 'error'
-            : 'in_progress',
+        status: 'in_progress',
       };
     }
     return { id: label, label, status: 'pending' };

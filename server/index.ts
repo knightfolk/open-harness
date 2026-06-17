@@ -5216,7 +5216,11 @@ app.get('/api/bench/runs', (_req, res) => {
 app.get('/api/bench/runs/:id', (req, res) => {
   const run = benchRuns.getBenchRun(req.params.id);
   if (!run) return res.status(404).json({ error: 'Bench run not found' });
-  res.json({ ...run, previousDelta: benchRuns.getPreviousRunDelta(run) });
+  res.json({
+    ...run,
+    artifactPath: benchRuns.getBenchArtifactPath(req.params.id),
+    previousDelta: benchRuns.getPreviousRunDelta(run),
+  });
 });
 
 app.post('/api/bench/runs/:id/proof-review', (req, res) => {
@@ -5696,7 +5700,7 @@ app.get('/api/evals/reports', (_req, res) => {
 app.get('/api/evals/reports/:id', (req, res) => {
   const report = evals.getReport(req.params.id);
   if (!report) return res.status(404).json({ error: 'Report not found' });
-  res.json(report);
+  res.json({ ...report, artifactPath: evals.getEvalArtifactPath(req.params.id) });
 });
 
 app.post('/api/evals/reports/:id/proof-review', (req, res) => {

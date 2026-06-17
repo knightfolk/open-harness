@@ -82,6 +82,12 @@ export interface PromptAssemblyTrace {
     reasoningPolicy: string;
     toolPolicy: string;
     outputContract: string;
+    bestPractice?: {
+      guidance: string;
+      rationale: string;
+      evaluationCue: string;
+      sourceRef: string;
+    };
     variantId?: string;
     role?: string;
     taskType?: string;

@@ -35,7 +35,7 @@ export function TopBar({
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const panelMenuIds = useMemo(() =>
-    ALL_PANELS.filter((id) => id !== 'chat'),
+    ALL_PANELS.filter((id) => id !== 'chat' && id !== 'sub-agents'),
     [],
   );
   const visibleCount = useMemo(() =>
