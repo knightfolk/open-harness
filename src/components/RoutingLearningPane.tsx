@@ -345,6 +345,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     const unratedEvents = events.filter((event) => event.outcome === null);
     const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
     const productionEventCount = events.length - benchmarkEventCount;
+    const byEvidenceSource = toolReliability?.byEvidenceSource || [];
     const lines = [
       '# OpenHarness Routing Learning Evidence Brief',
       '',
@@ -446,6 +447,15 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             ),
           ]
         : ['- Tool-error evidence sources: none captured yet.']),
+      '',
+      '## Evidence source recommendations',
+      '',
+      ...(byEvidenceSource.length > 0
+        ? [
+            '- Evidence-source summary:',
+            ...byEvidenceSource.map((item) => `- ${item.source}: ${item.retryReductionRecommendations} recommendation${item.retryReductionRecommendations === 1 ? '' : 's'} from ${item.outcomeRuns} runs (recovered ${item.recoveredRuns}, unrecovered ${item.unrecoveredRuns}); tuning ${item.tuningAction}; avg retry distance ${item.avgRetryDistance}`),
+          ]
+        : ['- Evidence-source summary: no evidence-source rows yet.']),
       ...(toolReliability?.retryReductionRecommendations?.length
         ? [
             '- Retry-reduction recommendations:',
