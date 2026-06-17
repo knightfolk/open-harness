@@ -72,7 +72,7 @@ function assertSourceRegistry() {
   assert.ok(sourceValues.some((source) => /gemini/i.test(source)), 'source registry should include Gemini guidance');
   assert.ok(sourceValues.some((source) => /mistral/i.test(source)), 'source registry should include Mistral guidance');
   assert.ok(sourceValues.some((source) => /function-calling/i.test(source)), 'source registry should include Mistral function-calling guidance');
-  assert.ok(sourceValues.some((source) => /xai/i.test(source)), 'source registry should include xAI guidance');
+  assert.ok(sourceValues.some((source) => /x\.ai|xai/i.test(source)), 'source registry should include xAI guidance');
 }
 
 function assertRepresentativeModelMapping() {
