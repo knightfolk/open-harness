@@ -1078,3 +1078,13 @@ Phase-mapped manual UI evidence:
 - Revise and Execute controls now explain that revision preserves accepted plan structure and execution requires validation proof.
 - Recommendation, participant status, summary metadata, phases, validation expectations, risks, and participant deltas now expose as labelled plan/proof groups.
 - This strengthens the Planning Room handoff requirement that plans, validation expectations, and execution proof be inspectable before work begins. Browser/live Planning Room proof remains pending.
+
+## Post-commit server/runtime relaunch proof — 2026-06-17
+
+- Because the committed tree included server/runtime changes, OpenHarness was relaunched with the repo-native `npm start` launcher.
+- Reachability proof after relaunch:
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+- Startup reported Docker MCP gateway could not start because Docker Desktop is not running, but the OpenHarness server, Vite UI, and config endpoint were reachable.
+- This satisfies the restart/reachability portion for the pushed server/runtime changes. Lint/build/browser/provider proof remains pending.
