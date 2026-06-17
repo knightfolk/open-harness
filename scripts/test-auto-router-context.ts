@@ -1,5 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { createServer } from 'node:http';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { configureAutoRouter, clearRouterCache, getAutoRouterState, getAvailableCandidates, routeTask } from '../server/autoRouter';
 import { getModelConfig } from '../server/modelProfiles';
 import { routeWithAutoRouter } from '../server/router';
@@ -109,6 +112,183 @@ assert.equal((refreshedCandidateCard.match(/Tool quality:/g) || []).length, 1, '
 const refreshedState = getAutoRouterState();
 assert.ok(refreshedState.candidateEvidenceRefreshCount > configuredState.candidateEvidenceRefreshCount, 'route-time candidate evidence refreshes should be visible in router state');
 assert.ok(refreshedState.candidateEvidenceRefreshedAt, 'route-time candidate evidence refresh should preserve a timestamp');
+
+const priorHome = process.env.HOME;
+const tempHome = mkdtempSync(join(tmpdir(), 'openharness-auto-router-eval-'));
+let evalBlockError: Error | undefined;
+try {
+  process.env.HOME = tempHome;
+  const evalReportDir = join(tempHome, '.openharness', 'evals', 'reports');
+  mkdirSync(evalReportDir, { recursive: true });
+  const evalReportId = 'provider-approved-model-lab-strategy-comparison';
+  const evalReportPath = join(evalReportDir, `${evalReportId}.json`);
+  writeFileSync(evalReportPath, JSON.stringify({
+    id: evalReportId,
+    name: 'Provider-approved strategy-comparison proof',
+    status: 'complete',
+    total: 1,
+    completed: 1,
+    results: [],
+    createdAt: '2026-06-17T01:00:00.000Z',
+    completedAt: '2026-06-17T01:00:00.200Z',
+    proofReview: {
+      status: 'approved',
+      reviewedAt: '2026-06-17T01:00:00.300Z',
+      note: 'Approved for routing signal tests.',
+    },
+    summary: {
+      byModel: {
+        'local:phi-4': {
+          avgScore: 9.0,
+          avgLatencyMs: 123,
+          avgToolCount: 2,
+          totalRuns: 6,
+        },
+      },
+      bestModel: 'local:phi-4',
+      byPromptStrategy: {
+        'qwen-xml-code-v1': {
+          family: 'qwen',
+          systemStyle: 'xml-tagged',
+          avgScore: 9.2,
+          avgLatencyMs: 110,
+          avgToolCount: 1,
+          totalRuns: 3,
+          bestModel: 'local:phi-4',
+        },
+        'mistral-structured-purpose-v1:mistral-coder-tool-proof': {
+          family: 'mistral',
+          systemStyle: 'structured',
+          avgScore: 9.8,
+          avgLatencyMs: 130,
+          avgToolCount: 1,
+          totalRuns: 3,
+          bestModel: 'local:phi-4',
+        },
+      },
+    },
+    recommendations: [
+      {
+        role: 'coder',
+        modelId: 'local:phi-4',
+        reason: 'Provider-backed same-model prompt strategy comparison produced the strongest implementation outcomes.',
+        reportId: evalReportId,
+        reportName: 'Provider-approved strategy-comparison proof',
+        generatedAt: '2026-06-17T01:00:00.250Z',
+        proofReviewStatus: 'approved',
+      },
+    ],
+  }, null, 2));
+  configureAutoRouter(config);
+  clearRouterCache();
+  const approvedEvalCandidateCard = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4')?.card || '';
+  assert.match(
+    approvedEvalCandidateCard,
+    /strategy evidence: Prompt strategy comparison: .*provider-approved/i,
+    'approved model lab strategy-comparison evidence should annotate candidate cards',
+  );
+  assert.match(
+    approvedEvalCandidateCard,
+    new RegExp(`Comparison artifact: .*${evalReportId}`, 'i'),
+    'provider-approved comparisons should expose the comparison artifact path',
+  );
+  assert.match(
+    approvedEvalCandidateCard,
+    /Proof review note: Approved for routing signal tests\./i,
+    'approved recommendations should preserve proof review notes in candidate evidence',
+  );
+  const approvedEvalCandidate = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4');
+  assert.ok(approvedEvalCandidate?.evalEvidence && approvedEvalCandidate.evalEvidence.length > 0, 'approved candidate should expose typed eval evidence metadata');
+  assert.ok(
+    approvedEvalCandidate?.evalEvidence?.some((entry) => entry.statusSummary === 'approved'),
+    'approved candidate evidence should include an approved status summary entry',
+  );
+
+  writeFileSync(evalReportPath, JSON.stringify({
+    id: `${evalReportId}-fuzzy`,
+    name: 'Needs-attention strategy-comparison review',
+    status: 'complete',
+    total: 1,
+    completed: 1,
+    results: [],
+    createdAt: '2026-06-17T01:15:00.000Z',
+    completedAt: '2026-06-17T01:15:00.150Z',
+    proofReview: {
+      status: 'needs-attention',
+      reviewedAt: '2026-06-17T01:15:00.160Z',
+      note: 'Potentially over-fitted to this artifact path.',
+    },
+    summary: {
+      byModel: {
+        'phi-4': {
+          avgScore: 8.0,
+          avgLatencyMs: 120,
+          avgToolCount: 2,
+          totalRuns: 4,
+        },
+      },
+      bestModel: 'phi-4',
+      byPromptStrategy: {
+        'qwen-xml-code-v1': {
+          family: 'qwen',
+          systemStyle: 'xml-tagged',
+          avgScore: 9.2,
+          avgLatencyMs: 110,
+          avgToolCount: 1,
+          totalRuns: 3,
+          bestModel: 'phi-4',
+        },
+      },
+    },
+    recommendations: [
+      {
+        role: 'reasoner',
+        modelId: 'phi-4',
+        reason: 'Directly comparable prompt-strategy test on same-model artifacts produced mixed signal.',
+        reportId: `${evalReportId}-fuzzy`,
+        reportName: 'Needs-attention strategy-comparison review',
+        generatedAt: '2026-06-17T01:15:00.130Z',
+        proofReviewStatus: 'needs-attention',
+        comparedPromptStrategies: [
+          {
+            strategy: {
+              strategyId: 'qwen-xml-code-v1',
+              runs: 2,
+              avgScore: 8.2,
+            },
+            status: 'needs-attention',
+          },
+        ],
+      },
+    ],
+  }, null, 2));
+  configureAutoRouter(config);
+  clearRouterCache();
+  const fuzzyEvalCandidateCard = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4')?.card || '';
+  assert.match(
+    fuzzyEvalCandidateCard,
+    /strategy evidence: Prompt strategy comparison: .*needs-attention/i,
+    'fuzzy model-id matching should preserve strategy comparison status and candidate annotation',
+  );
+  assert.match(
+    fuzzyEvalCandidateCard,
+    /proof needs attention; do not trust yet/i,
+    'needs-attention recommendations should remain explicit in candidate evidence',
+  );
+  const fuzzyEvalCandidate = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4');
+  assert.ok(
+    fuzzyEvalCandidate?.evalEvidence?.some((entry) => entry.statusSummary === 'needs-attention'),
+    'fuzzy candidate should expose needs-attention evidence metadata from matching recommendation',
+  );
+} catch (error) {
+  evalBlockError = error as Error;
+} finally {
+  process.env.HOME = priorHome;
+  rmSync(tempHome, { recursive: true, force: true });
+  if (evalBlockError) {
+    throw evalBlockError;
+  }
+}
 
 let classifierRequests = 0;
 const classifierServer = createServer((req, res) => {

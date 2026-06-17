@@ -366,7 +366,15 @@ export interface AutoRouterState {
   threshold: number;
   configuredCandidateCount?: number;
   candidateCount: number;
-  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking?: boolean; contextWindowTokens: number }>;
+  candidates: Array<{
+    modelId: string;
+    cost: number;
+    supportsImages: boolean;
+    supportsThinking?: boolean;
+    toolCallQuality: string;
+    contextWindowTokens: number;
+    evalEvidence?: Array<{ role: string; proofReviewStatus: 'approved' | 'unreviewed' | 'needs-attention'; statusSummary: 'approved' | 'unreviewed' | 'needs-attention' }>;
+  }>;
   unavailableCandidates?: Array<{ modelId: string; available: boolean; reason?: string }>;
   candidateEvidenceRefreshedAt?: string | null;
   candidateEvidenceRefreshCount?: number;

@@ -18,6 +18,7 @@
 import { getProviderForModel, splitModelRef } from './config';
 import { suggestThresholdAdjustment } from './routerLearning';
 import { getLatestEvalRecommendations } from './evals';
+import type { EvalRecommendation } from './evals';
 import { estimateTokens } from './contextManager';
 import { getModelConfig, isReasoningModel } from './modelProfiles';
 import { buildToolReliabilitySummary, type ToolReliabilitySummary } from './toolReliability';
@@ -40,6 +41,12 @@ export interface AutoRouterCandidate {
   toolCallQuality?: 'excellent' | 'good' | 'basic' | 'none';
   /** Short capability description the classifier reads to score this model */
   card: string;
+  /** Optional eval recommendation evidence attached to this candidate card. */
+  evalEvidence?: Array<{
+    role: string;
+    proofReviewStatus: EvalRecommendation['proofReviewStatus'];
+    statusSummary: 'approved' | 'unreviewed' | 'needs-attention';
+  }>;
 }
 
 export interface AutoRouterConfig {
@@ -142,6 +149,20 @@ function annotateCandidatesWithEvalRecommendations(
   const recommendations = getLatestEvalRecommendations();
   if (recommendations.length === 0) return candidates;
 
+  const normalizeComparisons = (comparisons: NonNullable<(typeof recommendations)[number]['comparedPromptStrategies']>) =>
+    comparisons.length === 0
+      ? ''
+      : ` Prompt strategy comparison: ${comparisons
+        .slice(0, 2)
+        .map((comparison) => {
+          const strategyLabel = comparison.variant
+            ? `${comparison.strategy.strategyId}:${comparison.variant.variantId}`
+            : comparison.strategy.strategyId;
+          const status = comparison.status === 'provider-approved' ? 'provider-approved' : comparison.status;
+          return `${strategyLabel} (avg ${comparison.strategy.avgScore.toFixed(1)} from ${comparison.strategy.runs} runs, ${status})`;
+        })
+        .join('; ')}.`;
+
   const recs = recommendations
     .filter((rec) => rec.modelId && rec.role && rec.reason)
     .map((rec) => ({
@@ -150,10 +171,21 @@ function annotateCandidatesWithEvalRecommendations(
       reason: rec.reason,
       proofReviewStatus: rec.proofReviewStatus || 'unreviewed',
       proofTrusted: rec.proofTrusted === true,
+      comparedPromptStrategies: rec.comparedPromptStrategies,
+      comparisonArtifactPath: rec.comparisonArtifactPath,
+      proofReviewNote: rec.proofReviewNote,
     }));
   if (recs.length === 0) return candidates;
 
-  const byModel = new Map<string, Array<{ role: string; reason: string; proofReviewStatus: string; proofTrusted: boolean }>>();
+  const byModel = new Map<string, Array<{
+    role: string;
+    reason: string;
+    proofReviewStatus: string;
+    proofTrusted: boolean;
+    comparedPromptStrategies?: NonNullable<(typeof recs)[number]['comparedPromptStrategies']>;
+    comparisonArtifactPath?: string;
+    proofReviewNote?: string;
+  }>>();
   for (const rec of recommendations) {
     if (!rec.modelId || !rec.role || !rec.reason) continue;
     if (!byModel.has(rec.modelId)) byModel.set(rec.modelId, []);
@@ -162,6 +194,9 @@ function annotateCandidatesWithEvalRecommendations(
       reason: rec.reason,
       proofReviewStatus: rec.proofReviewStatus || 'unreviewed',
       proofTrusted: rec.proofTrusted === true,
+      comparedPromptStrategies: rec.comparedPromptStrategies,
+      comparisonArtifactPath: rec.comparisonArtifactPath,
+      proofReviewNote: rec.proofReviewNote,
     });
   }
 
@@ -178,12 +213,30 @@ function annotateCandidatesWithEvalRecommendations(
       if (r.proofReviewStatus === 'needs-attention') return `${r.role} (proof needs attention; do not trust yet): ${r.reason}`;
       return `${r.role} (proof unreviewed; verify before trusting): ${r.reason}`;
     }).join(' | ');
+    const evalEvidence = matchingRecs.map((r) => ({
+      role: r.role,
+      proofReviewStatus: (r.proofReviewStatus as EvalRecommendation['proofReviewStatus']) || 'unreviewed',
+      statusSummary: r.proofTrusted
+        ? 'approved'
+        : r.proofReviewStatus === 'needs-attention'
+          ? 'needs-attention'
+          : 'unreviewed',
+    }));
+    const strategyEvidence = matchingRecs.map((r) => {
+      const comparisons = normalizeComparisons(r.comparedPromptStrategies || []);
+      const artifact = r.comparisonArtifactPath
+        ? ` Comparison artifact: ${r.comparisonArtifactPath}`
+        : '';
+      const note = r.proofReviewNote ? ` Proof review note: ${r.proofReviewNote}` : '';
+      return `${r.role} strategy evidence:${comparisons}${artifact}${note}`;
+    }).join(' | ');
     const trustedCount = matchingRecs.filter((r) => r.proofTrusted).length;
     const label = trustedCount === matchingRecs.length ? 'Eval-backed recommendation' : 'Eval evidence caution';
-    const merged = `${base} ${label}: ${evalLine}`;
+    const merged = `${base} ${label}: ${evalLine} ${strategyEvidence}`.trim();
 
     return {
       ...candidate,
+      evalEvidence,
       card: merged.length > 360 ? `${merged.slice(0, 357)}…` : merged,
     };
   });
@@ -501,7 +554,15 @@ export function getAutoRouterState(): {
   threshold: number;
   configuredCandidateCount: number;
   candidateCount: number;
-  candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking: boolean; toolCallQuality: string; contextWindowTokens: number }>;
+  candidates: Array<{
+    modelId: string;
+    cost: number;
+    supportsImages: boolean;
+    supportsThinking: boolean;
+    toolCallQuality: string;
+    contextWindowTokens: number;
+    evalEvidence?: Array<{ role: string; proofReviewStatus: EvalRecommendation['proofReviewStatus']; statusSummary: 'approved' | 'unreviewed' | 'needs-attention' }>;
+  }>;
   unavailableCandidates: AutoRouterCandidateDiagnostic[];
   candidateEvidenceRefreshedAt: string | null;
   candidateEvidenceRefreshCount: number;
@@ -534,6 +595,7 @@ export function getAutoRouterState(): {
       supportsThinking: c.supportsThinking === true,
       toolCallQuality: c.toolCallQuality || candidateToolCallQuality(c),
       contextWindowTokens: candidateContextWindow(c),
+      evalEvidence: c.evalEvidence,
     })),
     unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
     candidateEvidenceRefreshedAt,
