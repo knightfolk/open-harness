@@ -61,6 +61,7 @@ import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './ses
 import { runShipReadiness } from './shipReadiness';
 import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './streamCleaner';
 import { getToolReliabilitySummaryCached, getToolReliabilityCacheMeta, invalidateToolReliabilitySummaryCache } from './toolReliabilityStore';
+import { getToolErrorLedgerSummary, getToolErrorLedgerEvents, recordToolErrorRunEvents } from './toolErrorLedger';
 import { buildRouterLearningExportPayload } from './routerLearningExport';
 import { buildRouterLearningImportPreview } from './routerLearningImport';
 
@@ -482,6 +483,7 @@ function emitRunTraceStep(step: HarnessRunStep, runId: string) {
 function completeHarnessRunAndTrace(run: HarnessRun, status: 'complete' | 'error' = 'complete') {
   const completed = completeHarnessRun(run, status);
   emitRunTraceCompletion(completed);
+  recordToolErrorRunEvents(completed);
   return completed;
 }
 
@@ -1393,6 +1395,7 @@ app.get('/api/router/learning', (_req, res) => {
   res.json({
     ...getLearningSummary(),
     toolReliability,
+    toolErrorLedger: getToolErrorLedgerSummary(),
   });
 });
 
@@ -1411,6 +1414,27 @@ app.get('/api/router/learning/export', (_req, res) => {
     toolReliability,
     routerState: getAutoRouterState(),
   }));
+});
+
+app.get('/api/router/learning/tool-errors', (req, res) => {
+  const summaryOnly = req.query.summaryOnly === 'true';
+  const model = req.query.model as string | undefined;
+  const providerId = req.query.providerId as string | undefined;
+  const tool = req.query.tool as string | undefined;
+  const evidenceSource = req.query.evidenceSource as 'saved_session_trace' | 'log_trace' | 'imported_trace' | undefined;
+  const limit = Math.max(1, Math.min(300, parseInt(String(req.query.limit || '80'), 10) || 80));
+
+  const payload = {
+    summary: getToolErrorLedgerSummary({ model, providerId, tool, evidenceSource }),
+    events: summaryOnly ? [] : getToolErrorLedgerEvents({
+      model,
+      providerId,
+      tool,
+      evidenceSource,
+      limit,
+    }),
+  };
+  res.json(payload);
 });
 
 app.get('/api/router/learning/tool-reliability/cache', (_req, res) => {

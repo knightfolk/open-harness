@@ -143,10 +143,11 @@ function dedupe(values: string[]): string[] {
 
 function getEvalDataHomeCandidates(): string[] {
   const homes = new Set<string>();
-  homes.add(homedir());
+  const explicitHome = process.env.HOME || process.env.USERPROFILE;
+  homes.add(explicitHome || homedir());
 
   if (process.platform === 'darwin') {
-    homes.add(join(homedir(), 'Library', 'Application Support', 'Parall', 'Codex Stock'));
+    homes.add(join(explicitHome || homedir(), 'Library', 'Application Support', 'Parall', 'Codex Stock'));
   }
 
   if (process.env.OPENHARNESS_HOME_DIR) {
@@ -164,7 +165,9 @@ function getEvalDirCandidates(...parts: string[]): string[] {
   );
 }
 
-const REPORTS_DIRS = getEvalDirCandidates('evals', 'reports');
+function getReportsDirs(): string[] {
+  return getEvalDirCandidates('evals', 'reports');
+}
 
 function redactPersistedValue<T>(value: T): T {
   if (typeof value === 'string') return redactSecrets(value).redacted as T;
@@ -389,7 +392,7 @@ export function saveReport(report: EvalReport): void {
 }
 
 export function getEvalArtifactPath(id: string): string | undefined {
-  for (const dir of REPORTS_DIRS) {
+  for (const dir of getReportsDirs()) {
     const path = join(dir, `${id}.json`);
     if (existsSync(path)) return path;
   }
@@ -397,7 +400,7 @@ export function getEvalArtifactPath(id: string): string | undefined {
 }
 
 export function loadReport(id: string): EvalReport | null {
-  for (const dir of REPORTS_DIRS) {
+  for (const dir of getReportsDirs()) {
     const path = join(dir, `${id}.json`);
     if (!existsSync(path)) continue;
     return JSON.parse(readFileSync(path, 'utf-8'));
@@ -408,7 +411,7 @@ export function loadReport(id: string): EvalReport | null {
 export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview']; artifactPath?: string }> {
   const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview']; artifactPath?: string }>();
 
-  for (const dir of REPORTS_DIRS) {
+  for (const dir of getReportsDirs()) {
     if (!existsSync(dir)) continue;
     const files = readdirSync(dir).filter(f => f.endsWith('.json'));
     for (const f of files) {
@@ -458,10 +461,11 @@ function reportTimestamp(report: EvalReport): number {
 }
 
 function getPersistedReports(): EvalReport[] {
-  if (!REPORTS_DIRS.some((dir) => existsSync(dir))) return [];
+  const reportsDirs = getReportsDirs();
+  if (!reportsDirs.some((dir) => existsSync(dir))) return [];
 
   const byId = new Map<string, EvalReport>();
-  for (const dir of REPORTS_DIRS) {
+  for (const dir of reportsDirs) {
     for (const report of readReportsFromDir(dir)) {
       const current = byId.get(report.id);
       if (!current || reportTimestamp(report) > reportTimestamp(current)) {
@@ -498,7 +502,10 @@ function getLatestCompletedEvalReport(): EvalReport | null {
 
 export function getLatestEvalRecommendations(): EvalRecommendation[] {
   const latest = getLatestCompletedEvalReport();
-  if (!latest?.summary?.recommendations || latest.summary.recommendations.length === 0) return [];
+  const reportRecommendations = ((latest?.summary?.recommendations || (latest as unknown as { recommendations?: unknown })?.recommendations) as
+    | Array<{ role: string; modelId: string; reason: string }>
+    | undefined) || [];
+  if (reportRecommendations.length === 0) return [];
   const proofStatus = latest.proofReview?.status || 'unreviewed';
   const compareRows = latest.summary.byPromptStrategy || {};
   const comparedPromptStrategies = Object.entries(compareRows)
@@ -535,7 +542,7 @@ export function getLatestEvalRecommendations(): EvalRecommendation[] {
     }));
   const artifactPath = getEvalArtifactPath(latest.id);
 
-  return latest.summary.recommendations.map((rec) => ({
+  return reportRecommendations.map((rec) => ({
     role: rec.role,
     modelId: rec.modelId,
     reason: rec.reason,

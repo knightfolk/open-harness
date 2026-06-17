@@ -20,6 +20,13 @@ Keep `docs/UI_CLEANUP_PLAN.md` as the detailed declutter reference, `docs/HARNES
 
 Closeout evidence should name durable proof artifacts directly. The `Premier Harness Closeout Evidence` template now asks for proof artifact paths, screenshot/artifact paths, runtime trace/export paths, and gate log/artifact paths so final acceptance evidence is findable outside chat.
 
+## Active run start (from this handoff)
+
+- Objective for this turn: continue from `docs/PREMIER_HARNESS_KICKOFF.md` by moving into the first unresolved Phase 7 closeout action and collecting evidence-backed status updates.
+- Next minimal action: execute the proof-readiness suite for prompt/routing memory and then update closeout evidence with real routing-learning outcomes and any real session-based recovery examples.
+- If no new tool-error sessions exist yet, record that gap explicitly and proceed to the next slice without marking routing-memory claims as complete.
+- Keep runtime/process restart actions to runtime-required paths only; this slice is currently docs/tests aligned.
+
 ## Latest Phase 7 Add-on — Prompt Strategy And Routing Memory
 
 Phase 7 now treats prompt strategy and tool reliability as first-class routing

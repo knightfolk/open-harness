@@ -115,21 +115,31 @@ function collectSessionsFingerprint(): ToolReliabilitySourceFingerprint['session
 }
 
 function collectLogFingerprint(): ToolReliabilitySourceFingerprint['logs'] {
-  const logTraceLogDir = getProcessLedgerLogsDir();
+  const logsDir = getProcessLedgerLogsDir();
+  const rootDir = logsDir.replace(/\/logs$/, '');
+  const collectFrom = (dir: string) => {
+    if (!existsSync(dir)) return [];
+    const names = readdirSync(dir).filter((name) => name.endsWith('.log')).sort();
+    return names.map((name) => join(dir, name));
+  };
+
   try {
-    const files = readdirSync(logTraceLogDir).filter((name) => name.endsWith('.log')).sort();
+    const files = [...collectFrom(logsDir), ...collectFrom(rootDir)];
     let latestMtime = 0;
     let totalLogBytes = 0;
-    for (const fileName of files) {
-      const filePath = join(logTraceLogDir, fileName);
-      const stat = safeStat(filePath);
-      if (!stat || !stat.isFile()) continue;
-      latestMtime = Math.max(latestMtime, stat.mtimeMs);
-      totalLogBytes += stat.size;
-    }
+    const fileNames = files
+      .filter((path) => {
+        const stat = safeStat(path);
+        if (!stat || !stat.isFile()) return false;
+        latestMtime = Math.max(latestMtime, stat.mtimeMs);
+        totalLogBytes += stat.size;
+        return true;
+      })
+      .map((path) => path.split(/[/\\]/).pop() || path)
+      .sort();
     return {
-      count: files.length,
-      logFileNames: files.slice(-20),
+      count: fileNames.length,
+      logFileNames: fileNames.slice(-20),
       latestMtimeMs: latestMtime,
       totalLogBytes,
     };
