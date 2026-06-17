@@ -123,6 +123,7 @@ Recent trust-surface improvements include:
 - Tool-call reliability now aggregates per-model/provider/tool outcomes with retry distance and first-call failure signals so routing can prefer lower-friction recovery paths.
 - Auto-Router and Routing Learning now expose evidence-source-tagged avoid/prefer recommendations (`saved_session_trace`, `log_trace`, `imported_trace`) with supporting session/run ids for audit.
 - Routing Learning exports now also include provider-qualified recovery and outcome evidence assertions so exported model/prompt strategy rows can be traced to the exact failing and working model/tool path.
+- Routing Learning brief exports now include an explicit evidence-source coverage summary so reviewers can see at a glance which trace source families are currently represented in routing evidence.
 - Model Lab added frontier vs open-source source filtering for enabled model sets so prompt strategy and routing comparisons can isolate local/open models from hosted frontier providers in the same run.
 
 Use [docs/PREMIER_HARNESS_PROOF_CHECKLIST.md](docs/PREMIER_HARNESS_PROOF_CHECKLIST.md) and the closeout proof notes before calling the overhaul done. Final release proof still requires the relevant browser/manual proof plus the validation commands listed below.
