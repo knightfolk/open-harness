@@ -110,6 +110,9 @@ export const PROMPT_STRATEGY_SOURCES = {
   xaiOverview: 'https://docs.x.ai/overview',
   xaiFunctionCalling: 'https://docs.x.ai/guides/function-calling',
   qwenQuickstart: 'https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html',
+  minimaxPromptingBestPractices: 'https://platform.minimax.io/docs/token-plan/prompting-best-practices',
+  minimaxOpenAIApiCompatibility: 'https://platform.minimax.io/docs/api-reference/text-openai-api',
+  minimaxCodingPlanAgent: 'https://platform.minimax.io/docs/coding-plan/codex-cli',
   llamaPromptFormats: 'https://github.com/meta-llama/llama-models/blob/main/models/llama3_3/prompt_format.md',
   phiPromptTemplate: 'https://huggingface.co/docs/transformers/model_doc/phi3',
   openHarnessGuide: 'docs/MODEL_PROMPTING_GUIDE.md',
@@ -266,6 +269,35 @@ function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracti
         guidance: 'Use compact system directives plus a strict output contract instead of verbose meta-instructions.',
         rationale: 'Template-based chat construction favors clear prompt sections and compact role-facing instructions.',
         evaluationCue: 'Measure direct answer quality and tool-error rates between compact versus verbose output-contract prompts.',
+      },
+      ...common,
+    ];
+  }
+  if (family === 'minimax') {
+    return [
+      {
+        id: 'minimax-task-shape',
+        sourceRef: PROMPT_STRATEGY_SOURCES.minimaxPromptingBestPractices,
+        appliesTo: ['coding', 'tool-use', 'reasoning'],
+        guidance: 'Favor compact task templates with explicit output contract and avoid unnecessary prompt overhead in token-plan workloads.',
+        rationale: 'MiniMax prompting guidance highlights task-specific prompt templates and output ordering for reliable agent outcomes.',
+        evaluationCue: 'Compare direct and compact task templates for first-call success and recovery distance on coding or tool-heavy runs.',
+      },
+      {
+        id: 'minimax-compatibility-boundary',
+        sourceRef: PROMPT_STRATEGY_SOURCES.minimaxOpenAIApiCompatibility,
+        appliesTo: ['tool-use', 'direct'],
+        guidance: 'Keep role + tool-call structure explicit, and preserve the full assistant response in multi-turn conversations.',
+        rationale: 'Compatibility-mode guidance requires role/tool continuity to maintain the reasoning chain across rounds.',
+        evaluationCue: 'Track tool-call failure patterns separately for runs that omit full-turn continuity.',
+      },
+      {
+        id: 'minimax-agent-looping',
+        sourceRef: PROMPT_STRATEGY_SOURCES.minimaxCodingPlanAgent,
+        appliesTo: ['tool-use', 'coding'],
+        guidance: 'Bias tool-call instructions toward reproducible coding-plan patterns when using agentic loops.',
+        rationale: 'MiniMax code-plan guidance targets workflow consistency for autonomous agent loops.',
+        evaluationCue: 'Validate agent-loop reliability with fixed tool schemas before enabling richer prompt variants.',
       },
       ...common,
     ];
@@ -474,7 +506,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     id: 'minimax-long-context-agent-v1',
     family: 'minimax',
     appliesTo: ['minimax', 'm3'],
-    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.minimaxPromptingBestPractices, PROMPT_STRATEGY_SOURCES.minimaxOpenAIApiCompatibility, PROMPT_STRATEGY_SOURCES.minimaxCodingPlanAgent],
     bestPracticeNotes: sourceBackedBestPracticeNotes('minimax'),
     updatedAt: UPDATED_AT,
     systemStyle: 'structured',

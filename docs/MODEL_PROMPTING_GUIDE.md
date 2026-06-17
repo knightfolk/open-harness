@@ -969,6 +969,10 @@ After receiving the tool result, continue with your response.
 - xAI Grok function-calling
   - https://docs.x.ai/overview
   - https://docs.x.ai/guides/function-calling
+- MiniMax prompting + compatibility notes
+  - https://platform.minimax.io/docs/token-plan/prompting-best-practices
+  - https://platform.minimax.io/docs/api-reference/text-openai-api
+  - https://platform.minimax.io/docs/coding-plan/codex-cli
 - Llama prompt format
   - https://github.com/meta-llama/llama-models/blob/main/models/llama3_3/prompt_format.md
   - https://github.com/meta-llama/llama3
