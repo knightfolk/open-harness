@@ -6,6 +6,7 @@ const kickoff = readFileSync('docs/PREMIER_HARNESS_KICKOFF.md', 'utf-8');
 const checklist = readFileSync('docs/PREMIER_HARNESS_PROOF_CHECKLIST.md', 'utf-8');
 const proof = readFileSync('docs/proof/2026-06-16-premier-harness-closeout.md', 'utf-8');
 const nextSession = readFileSync('NEXT_SESSION.md', 'utf-8');
+const stagedToolErrorProof = readFileSync('docs/proof/2026-06-17-routing-learning-staged-tool-error-proof.md', 'utf-8');
 
 assert.ok(
   pkg.scripts['test:premier-no-spend']?.includes('npm run test:premier-live-evidence-guard'),
@@ -46,10 +47,24 @@ for (const expected of [
   'live active-run proof remains pending',
   'recording and next-phase use of a steering note remain pending',
   'live reduced-transparency/reduced-motion browser proof remains pending',
+  'Real provider-approved or local runtime tool-error rows, browser/UI proof, exports, and final gates remain pending.',
 ]) {
   assert.ok(
     proof.includes(expected),
     `Closeout proof should preserve explicit live-evidence gap: ${expected}`,
+  );
+}
+
+for (const expected of [
+  'Status: completed staged no-provider proof',
+  'This proof used a temporary staged `saved_session_trace` ledger row',
+  'The ledger was restored immediately after the endpoint check.',
+  'real provider-approved or local runtime run with genuine tool failure is still pending',
+  'final `check:premier-no-spend`, lint/build, manual/browser evidence, and provider-approved proof are still open',
+]) {
+  assert.ok(
+    stagedToolErrorProof.includes(expected),
+    `Staged proof artifact should preserve staged/not-final live-evidence boundary: ${expected}`,
   );
 }
 
