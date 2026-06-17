@@ -1750,6 +1750,19 @@ export interface EvalSummary {
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
 }
 
+export interface EvalRecommendationPromptStrategyComparison {
+  strategyId: string;
+  variantId?: string;
+  runs: number;
+  avgScore: number;
+}
+
+export interface EvalRecommendationPromptStrategyEntry {
+  strategy: EvalRecommendationPromptStrategyComparison;
+  variant?: EvalRecommendationPromptStrategyComparison;
+  status: 'provider-approved' | 'unreviewed' | 'needs-attention';
+}
+
 export interface EvalRecommendation {
   role: string;
   modelId: string;
@@ -1757,6 +1770,8 @@ export interface EvalRecommendation {
   reportId: string;
   reportName: string;
   generatedAt: string;
+  comparisonArtifactPath?: string;
+  comparedPromptStrategies?: EvalRecommendationPromptStrategyEntry[];
   proofReviewStatus: ProofReviewState['status'];
   proofTrusted: boolean;
   proofReviewedAt?: string;

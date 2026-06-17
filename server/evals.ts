@@ -105,6 +105,13 @@ export interface EvalSummary {
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
 }
 
+export interface EvalRecommendationPromptStrategyComparison {
+  strategyId: string;
+  variantId?: string;
+  runs: number;
+  avgScore: number;
+}
+
 export interface EvalRecommendation {
   role: string;
   modelId: string;
@@ -112,6 +119,12 @@ export interface EvalRecommendation {
   reportId: string;
   reportName: string;
   generatedAt: string;
+  comparisonArtifactPath?: string;
+  comparedPromptStrategies?: Array<{
+    strategy: EvalRecommendationPromptStrategyComparison;
+    variant?: EvalRecommendationPromptStrategyComparison;
+    status: 'provider-approved' | 'unreviewed' | 'needs-attention';
+  }>;
   proofReviewStatus: 'unreviewed' | 'approved' | 'needs-attention';
   proofTrusted: boolean;
   proofReviewedAt?: string;
@@ -486,6 +499,41 @@ function getLatestCompletedEvalReport(): EvalReport | null {
 export function getLatestEvalRecommendations(): EvalRecommendation[] {
   const latest = getLatestCompletedEvalReport();
   if (!latest?.summary?.recommendations || latest.summary.recommendations.length === 0) return [];
+  const proofStatus = latest.proofReview?.status || 'unreviewed';
+  const compareRows = latest.summary.byPromptStrategy || {};
+  const comparedPromptStrategies = Object.entries(compareRows)
+    .map(([key, value]) => {
+      const [strategyId, variantId] = key.split(':');
+      return {
+        strategy: {
+          strategyId,
+          runs: value.totalRuns,
+          avgScore: value.avgScore,
+          ...(value.totalRuns === 0 ? {} : {}),
+        },
+        ...(variantId ? {
+          variant: {
+            strategyId,
+            variantId,
+            runs: value.totalRuns,
+            avgScore: value.avgScore,
+          },
+        } : {}),
+      };
+    })
+    .filter((item) => item.strategy.runs > 1 || item.variant?.runs)
+    .sort((a, b) => b.strategy.avgScore - a.strategy.avgScore)
+    .slice(0, 10)
+    .map((item) => ({
+      strategy: {
+        strategyId: item.strategy.strategyId,
+        runs: item.strategy.runs,
+        avgScore: item.strategy.avgScore,
+      },
+      variant: item.variant,
+      status: proofStatus === 'approved' ? 'provider-approved' as const : proofStatus === 'needs-attention' ? 'needs-attention' as const : 'unreviewed' as const,
+    }));
+  const artifactPath = getEvalArtifactPath(latest.id);
 
   return latest.summary.recommendations.map((rec) => ({
     role: rec.role,
@@ -494,6 +542,8 @@ export function getLatestEvalRecommendations(): EvalRecommendation[] {
     reportId: latest.id,
     reportName: latest.name,
     generatedAt: latest.completedAt || latest.createdAt,
+    comparisonArtifactPath: artifactPath,
+    comparedPromptStrategies,
     proofReviewStatus: latest.proofReview?.status || 'unreviewed',
     proofTrusted: latest.proofReview?.status === 'approved',
     ...(latest.proofReview?.reviewedAt ? { proofReviewedAt: latest.proofReview.reviewedAt } : {}),
@@ -509,6 +559,38 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
   const report = loadReport(reportId) || activeRuns.get(reportId) || null;
   if (!report) return null;
   const summary = report.summary || generateSummary(report.results);
+  const artifactPath = getEvalArtifactPath(report.id);
+  const proofLabel = report.proofReview?.status === 'approved' ? 'approved' : report.proofReview?.status === 'needs-attention' ? 'needs attention' : 'unreviewed';
+  const comparedPromptStrategies = Object.entries(summary.byPromptStrategy || {})
+    .map(([key, value]) => {
+      const [strategyId, variantId] = key.split(':');
+      return {
+        strategy: {
+          strategyId,
+          runs: value.totalRuns,
+          avgScore: value.avgScore,
+        },
+        ...(variantId
+          ? {
+              variant: {
+                strategyId,
+                variantId,
+                runs: value.totalRuns,
+                avgScore: value.avgScore,
+              },
+            }
+          : {}),
+      };
+    })
+    .filter((item) => item.strategy.runs > 1 || item.variant?.runs)
+    .sort((a, b) => b.strategy.avgScore - a.strategy.avgScore)
+    .slice(0, 10)
+    .map((item) => ({
+      strategy: `${item.strategy.strategyId}${item.variant?.variantId ? `:${item.variant.variantId}` : ''}`,
+      avgScore: item.strategy.avgScore.toFixed(1),
+      runs: item.strategy.runs,
+      status: proofLabel,
+    }));
   const lines: string[] = [];
   lines.push(`# Eval Recommendation Report: ${report.name}`);
   lines.push('');
@@ -543,14 +625,22 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
   lines.push('');
   lines.push(`Recommendation trust: ${report.proofReview?.status === 'approved' ? 'approved proof; may be used as routing evidence' : 'proof not approved; review before applying role or router changes'}`);
   lines.push('');
+  if (artifactPath) {
+    lines.push(`- Comparison artifact: ${artifactPath}`);
+  }
   if (summary.recommendations.length === 0) {
     lines.push('No recommendations were generated.');
   } else {
-    lines.push('| Role | Model | Proof | Reason |');
-    lines.push('| --- | --- | --- | --- |');
-    const proofLabel = report.proofReview?.status === 'approved' ? 'approved' : report.proofReview?.status === 'needs-attention' ? 'needs attention' : 'unreviewed';
+    lines.push('| Role | Model | Proof | Top Prompt Strategies | Reason |');
+    lines.push('| --- | --- | --- | --- | --- |');
     for (const rec of summary.recommendations) {
-      lines.push(`| ${markdownEscape(rec.role)} | ${markdownEscape(rec.modelId)} | ${proofLabel} | ${markdownEscape(rec.reason)} |`);
+      const strategyHint = comparedPromptStrategies.length === 0
+        ? 'n/a'
+        : comparedPromptStrategies
+            .slice(0, 3)
+            .map((item) => `${item.strategy} (${item.avgScore}/10, runs:${item.runs}, ${item.status})`)
+            .join('<br>');
+      lines.push(`| ${markdownEscape(rec.role)} | ${markdownEscape(rec.modelId)} | ${proofLabel} | ${markdownEscape(strategyHint)} | ${markdownEscape(rec.reason)} |`);
     }
   }
   lines.push('');
