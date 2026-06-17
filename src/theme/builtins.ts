@@ -153,7 +153,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
       contrastPairs: [
         { foreground: '#e4e4e7', background: '#111113', minimumRatio: 4.5 },
         { foreground: '#a1a1aa', background: '#111113', minimumRatio: 3 },
-        { foreground: '#3f3f46', background: '#27272a', minimumRatio: 3 },
+        { foreground: '#a1a1aa', background: '#27272a', minimumRatio: 3 },
       ],
       reducedMotionSafe: true,
     },
@@ -527,21 +527,21 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
     family: 'Silver',
     group: 'light',
     mode: 'light',
-    color: '#3b82f6',
+    color: '#2563eb',
     tags: ['builtin'],
     quality: {
       contrastPairs: [
         { foreground: '#1e293b', background: '#f4f6f8', minimumRatio: 7 },
         { foreground: '#475569', background: '#edf0f4', minimumRatio: 4.5 },
-        { foreground: '#3b82f6', background: '#f4f6f8', minimumRatio: 4 },
+        { foreground: '#2563eb', background: '#f4f6f8', minimumRatio: 4 },
       ],
       reducedMotionSafe: true,
     },
     tokens: {
       color: {
-        accentPrimary: '#3b82f6',
-        accentPrimaryHover: '#2563eb',
-        accentPrimaryMuted: 'rgba(59, 130, 246, 0.12)',
+        accentPrimary: '#2563eb',
+        accentPrimaryHover: '#1d4ed8',
+        accentPrimaryMuted: 'rgba(37, 99, 235, 0.12)',
         accentSuccess: '#16a34a',
         accentSuccessMuted: 'rgba(22, 163, 74, 0.12)',
         accentWarning: '#d97706',
@@ -550,8 +550,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         accentErrorMuted: 'rgba(220, 38, 38, 0.12)',
         accentInfo: '#6366f1',
         accentInfoMuted: 'rgba(99, 102, 241, 0.12)',
-        focusRing: '#3b82f6',
-        selectionBackground: 'rgba(59, 130, 246, 0.16)',
+        focusRing: '#2563eb',
+        selectionBackground: 'rgba(37, 99, 235, 0.16)',
       },
       surface: {
         primary: '#f4f6f8',
@@ -572,7 +572,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         primary: '#c8d2dc',
         secondary: '#dce3eb',
         accent: '#a8b8c8',
-        focus: '#3b82f6',
+        focus: '#2563eb',
       },
       intent: {
         success: '#16a34a',
@@ -585,7 +585,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         infoMuted: 'rgba(99, 102, 241, 0.12)',
       },
       chat: {
-        userBubble: '#3b82f6',
+        userBubble: '#2563eb',
         userBubbleText: '#ffffff',
         assistantBubble: '#e3e8ee',
         assistantBubbleText: '#1e293b',
@@ -621,21 +621,21 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
     family: 'Sage',
     group: 'light',
     mode: 'light',
-    color: '#10b981',
+    color: '#047857',
     tags: ['builtin'],
     quality: {
       contrastPairs: [
         { foreground: '#1a2e23', background: '#f4f7f5', minimumRatio: 7 },
         { foreground: '#3d5e4a', background: '#edf2ef', minimumRatio: 4.5 },
-        { foreground: '#10b981', background: '#f4f7f5', minimumRatio: 4 },
+        { foreground: '#047857', background: '#f4f7f5', minimumRatio: 4 },
       ],
       reducedMotionSafe: true,
     },
     tokens: {
       color: {
-        accentPrimary: '#10b981',
-        accentPrimaryHover: '#059669',
-        accentPrimaryMuted: 'rgba(16, 185, 129, 0.12)',
+        accentPrimary: '#047857',
+        accentPrimaryHover: '#065f46',
+        accentPrimaryMuted: 'rgba(4, 120, 87, 0.12)',
         accentSuccess: '#16a34a',
         accentSuccessMuted: 'rgba(22, 163, 74, 0.12)',
         accentWarning: '#d97706',
@@ -644,8 +644,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         accentErrorMuted: 'rgba(220, 38, 38, 0.12)',
         accentInfo: '#3b82f6',
         accentInfoMuted: 'rgba(59, 130, 246, 0.12)',
-        focusRing: '#10b981',
-        selectionBackground: 'rgba(16, 185, 129, 0.16)',
+        focusRing: '#047857',
+        selectionBackground: 'rgba(4, 120, 87, 0.16)',
       },
       surface: {
         primary: '#f4f7f5',
@@ -666,7 +666,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         primary: '#c2d4cb',
         secondary: '#d5e2db',
         accent: '#a4c4b2',
-        focus: '#10b981',
+        focus: '#047857',
       },
       intent: {
         success: '#16a34a',
@@ -679,7 +679,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         infoMuted: 'rgba(59, 130, 246, 0.12)',
       },
       chat: {
-        userBubble: '#10b981',
+        userBubble: '#047857',
         userBubbleText: '#ffffff',
         assistantBubble: '#e2ebe6',
         assistantBubbleText: '#1a2e23',
@@ -715,21 +715,21 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
     family: 'Blush',
     group: 'light',
     mode: 'light',
-    color: '#f43f5e',
+    color: '#be123c',
     tags: ['builtin'],
     quality: {
       contrastPairs: [
         { foreground: '#2e1a20', background: '#f9f5f6', minimumRatio: 7 },
         { foreground: '#5e3a44', background: '#f3eeef', minimumRatio: 4.5 },
-        { foreground: '#f43f5e', background: '#f9f5f6', minimumRatio: 4 },
+        { foreground: '#be123c', background: '#f9f5f6', minimumRatio: 4 },
       ],
       reducedMotionSafe: true,
     },
     tokens: {
       color: {
-        accentPrimary: '#f43f5e',
-        accentPrimaryHover: '#e11d48',
-        accentPrimaryMuted: 'rgba(244, 63, 94, 0.12)',
+        accentPrimary: '#be123c',
+        accentPrimaryHover: '#9f1239',
+        accentPrimaryMuted: 'rgba(190, 18, 60, 0.12)',
         accentSuccess: '#16a34a',
         accentSuccessMuted: 'rgba(22, 163, 74, 0.12)',
         accentWarning: '#d97706',
@@ -738,8 +738,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         accentErrorMuted: 'rgba(220, 38, 38, 0.12)',
         accentInfo: '#3b82f6',
         accentInfoMuted: 'rgba(59, 130, 246, 0.12)',
-        focusRing: '#f43f5e',
-        selectionBackground: 'rgba(244, 63, 94, 0.16)',
+        focusRing: '#be123c',
+        selectionBackground: 'rgba(190, 18, 60, 0.16)',
       },
       surface: {
         primary: '#f9f5f6',
@@ -760,7 +760,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         primary: '#d4c4c9',
         secondary: '#e2d7da',
         accent: '#c4a8ae',
-        focus: '#f43f5e',
+        focus: '#be123c',
       },
       intent: {
         success: '#16a34a',
@@ -773,7 +773,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         infoMuted: 'rgba(59, 130, 246, 0.12)',
       },
       chat: {
-        userBubble: '#f43f5e',
+        userBubble: '#be123c',
         userBubbleText: '#ffffff',
         assistantBubble: '#eae2e4',
         assistantBubbleText: '#2e1a20',
@@ -1144,6 +1144,6 @@ export function validateBuiltins(): Array<{ themeId: string; violations: ThemeCo
   });
 }
 
-if (import.meta.env.DEV) {
+if (import.meta.env?.DEV) {
   validateBuiltins();
 }

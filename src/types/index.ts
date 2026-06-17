@@ -69,6 +69,25 @@ export interface PromptAssemblyTrace {
   family: string;
   style: string;
   target: string;
+  promptStrategy?: {
+    id: string;
+    family: string;
+    modelMatch?: {
+      source: string;
+      hint: string;
+    };
+    systemStyle: string;
+    contextOrder: string;
+    examplePolicy: string;
+    reasoningPolicy: string;
+    toolPolicy: string;
+    outputContract: string;
+    variantId?: string;
+    role?: string;
+    taskType?: string;
+    selectionReason?: string;
+    updatedAt: string;
+  };
   outputStyle?: OutputStyleTrace;
   sections: PromptAssemblySection[];
   totalTokenEstimate: number;
@@ -222,13 +241,36 @@ export type WorkProductArtifact =
 
 export type HarnessRunStep =
   | { type: 'steering'; action: RunSteeringAction; target?: 'orchestrator' | 'agent'; source: 'user'; note?: string; createdAt: string }
+  | {
+  type: 'worktree_isolation';
+  status: 'ready' | 'preserved' | 'auto_discarded' | 'unavailable' | 'failed';
+  agent: string;
+  reason: string;
+  worktreeId?: string;
+  path?: string;
+  branch?: string;
+  baseRef?: string;
+  error?: string;
+}
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
   | { type: 'artifact'; artifact: WorkProductArtifact }
   | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace; outputStyle?: OutputStyleTrace }
   | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number>; stages?: RoutingStageTrace }
   | { type: 'model_request'; round: number; model: string }
-  | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
+  | {
+  type: 'tool_call';
+  id: string;
+  name: string;
+  input: unknown;
+  outputPreview?: string;
+  durationMs?: number;
+  status?: 'running' | 'complete' | 'error' | 'skipped';
+  error?: string;
+  model?: string;
+  providerId?: string;
+  round?: number;
+}
   | { type: 'model_text'; chars: number }
   | { type: 'model_thinking'; chars: number; preview?: string; source: 'provider' | 'router' }
   | { type: 'final_answer'; chars: number }

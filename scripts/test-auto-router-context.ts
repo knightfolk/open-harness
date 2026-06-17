@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { createServer } from 'node:http';
-import { configureAutoRouter, clearRouterCache, getAutoRouterState, routeTask } from '../server/autoRouter';
+import { configureAutoRouter, clearRouterCache, getAutoRouterState, getAvailableCandidates, routeTask } from '../server/autoRouter';
 import { getModelConfig } from '../server/modelProfiles';
 import { routeWithAutoRouter } from '../server/router';
 import type { StoredConfig } from '../server/config';
@@ -64,6 +64,8 @@ const configuredState = getAutoRouterState();
 assert.equal(configuredState.configuredCandidateCount, 3, 'router state should report the configured candidate count');
 assert.equal(configuredState.candidateCount, 3, 'all authenticated candidates should be usable');
 assert.deepEqual(configuredState.unavailableCandidates, [], 'usable config should not report dropped candidates');
+assert.ok(configuredState.candidateEvidenceRefreshedAt, 'router state should expose candidate evidence refresh time');
+assert.equal(configuredState.candidateEvidenceRefreshCount, 1, 'configure should build candidate evidence once');
 
 const smallDecision = await routeTask({
   task: 'Rename a variable in one file.',
@@ -101,6 +103,12 @@ const xHighDecision = await routeTask({
 
 assert.equal(xHighDecision?.modelId, 'local:claude-opus-4.8', 'xHigh thinking should prefer premium-weight candidates when available');
 assert.match(xHighDecision?.reason || '', /xHigh thinking/i, 'router reason should identify the xHigh strategy');
+const refreshedCandidateCard = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4')?.card || '';
+assert.equal((refreshedCandidateCard.match(/Native thinking:/g) || []).length, 1, 'candidate evidence refresh should not duplicate normalized capability hints');
+assert.equal((refreshedCandidateCard.match(/Tool quality:/g) || []).length, 1, 'candidate evidence refresh should rebuild from baseline candidates instead of stacking annotations');
+const refreshedState = getAutoRouterState();
+assert.ok(refreshedState.candidateEvidenceRefreshCount > configuredState.candidateEvidenceRefreshCount, 'route-time candidate evidence refreshes should be visible in router state');
+assert.ok(refreshedState.candidateEvidenceRefreshedAt, 'route-time candidate evidence refresh should preserve a timestamp');
 
 let classifierRequests = 0;
 const classifierServer = createServer((req, res) => {

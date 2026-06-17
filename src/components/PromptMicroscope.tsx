@@ -101,6 +101,7 @@ export function PromptMicroscope({ runTrace }: Props) {
   const errorSteps = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'error' }> => s.type === 'error');
   const modelRequests = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'model_request' }> => s.type === 'model_request');
   const toolCalls = runTrace.steps.filter((s): s is Extract<HarnessRunStep, { type: 'tool_call' }> => s.type === 'tool_call');
+  const worktreeIsolation = runTrace.steps.slice().reverse().find((s): s is Extract<HarnessRunStep, { type: 'worktree_isolation' }> => s.type === 'worktree_isolation');
   const totalTokens = estimates?.reduce((sum, s) => sum + s.tokens, 0) ?? 0;
   const totalRedactions = estimates?.reduce((sum, s) => sum + s.redactedHits, 0) ?? 0;
 
@@ -348,6 +349,91 @@ export function PromptMicroscope({ runTrace }: Props) {
                       <span className="pm-key">Renderer</span>
                       <span className="pm-value">{promptStep.assembly.family} · {promptStep.assembly.style} · {promptStep.assembly.target}</span>
                     </div>
+                    {promptStep.assembly.promptStrategy && (
+                      <div className="pm-row pm-row-block">
+                        <span className="pm-key">Prompt strategy</span>
+                        <div className="pm-score-list" role="list" aria-label={`Prompt strategy ${promptStep.assembly.promptStrategy.id}; source-backed metadata is advisory prompt-contract evidence, not an automatic routing override`}>
+                          <div className="pm-score-row" role="listitem">
+                            <span className="pm-score-model">Strategy</span>
+                            <span className="pm-score-value">{promptStep.assembly.promptStrategy.id}</span>
+                          </div>
+                          {promptStep.assembly.promptStrategy.modelMatch && (
+                            <div className="pm-score-row" role="listitem">
+                              <span className="pm-score-model">Model match</span>
+                              <span className="pm-score-value">{promptStep.assembly.promptStrategy.modelMatch.source} · {promptStep.assembly.promptStrategy.modelMatch.hint}</span>
+                            </div>
+                          )}
+                          <div className="pm-score-row" role="listitem">
+                            <span className="pm-score-model">Style</span>
+                            <span className="pm-score-value">{promptStep.assembly.promptStrategy.systemStyle}</span>
+                          </div>
+                          {promptStep.assembly.promptStrategy.variantId && (
+                            <div className="pm-score-row" role="listitem">
+                              <span className="pm-score-model">Variant</span>
+                              <span className="pm-score-value">{promptStep.assembly.promptStrategy.variantId}</span>
+                            </div>
+                          )}
+                          {promptStep.assembly.promptStrategy.taskType && (
+                            <div className="pm-score-row" role="listitem">
+                              <span className="pm-score-model">Task type</span>
+                              <span className="pm-score-value">{promptStep.assembly.promptStrategy.taskType}</span>
+                            </div>
+                          )}
+                          {promptStep.assembly.promptStrategy.role && (
+                            <div className="pm-score-row" role="listitem">
+                              <span className="pm-score-model">Role</span>
+                              <span className="pm-score-value">{promptStep.assembly.promptStrategy.role}</span>
+                            </div>
+                          )}
+                          <div className="pm-score-row" role="listitem">
+                            <span className="pm-score-model">Context</span>
+                            <span className="pm-score-value">{promptStep.assembly.promptStrategy.contextOrder}</span>
+                          </div>
+                          <div className="pm-score-row" role="listitem">
+                            <span className="pm-score-model">Examples</span>
+                            <span className="pm-score-value">{promptStep.assembly.promptStrategy.examplePolicy}</span>
+                          </div>
+                          <div className="pm-score-row" role="listitem">
+                            <span className="pm-score-model">Reasoning</span>
+                            <span className="pm-score-value">{promptStep.assembly.promptStrategy.reasoningPolicy}</span>
+                          </div>
+                          <div className="pm-score-row" role="listitem">
+                            <span className="pm-score-model">Tools</span>
+                            <span className="pm-score-value">{promptStep.assembly.promptStrategy.toolPolicy}</span>
+                          </div>
+                          <div className="pm-score-row" role="listitem">
+                            <span className="pm-score-model">Output</span>
+                            <span className="pm-score-value">{promptStep.assembly.promptStrategy.outputContract}</span>
+                          </div>
+                          {promptStep.assembly.promptStrategy.selectionReason && (
+                            <div className="pm-score-row" role="listitem">
+                              <span className="pm-score-model">Why</span>
+                              <span className="pm-score-value">{promptStep.assembly.promptStrategy.selectionReason}</span>
+                            </div>
+                          )}
+                          {promptStep.assembly.promptStrategy.bestPractice && (
+                            <>
+                              <div className="pm-score-row" role="listitem">
+                                <span className="pm-score-model">Provenance use</span>
+                                <span className="pm-score-value">Advisory prompt-contract evidence, not an automatic routing override</span>
+                              </div>
+                              <div className="pm-score-row" role="listitem">
+                                <span className="pm-score-model">Best practice</span>
+                                <span className="pm-score-value">{promptStep.assembly.promptStrategy.bestPractice.guidance}</span>
+                              </div>
+                              <div className="pm-score-row" role="listitem">
+                                <span className="pm-score-model">Eval cue</span>
+                                <span className="pm-score-value">{promptStep.assembly.promptStrategy.bestPractice.evaluationCue}</span>
+                              </div>
+                              <div className="pm-score-row" role="listitem">
+                                <span className="pm-score-model">Source</span>
+                                <span className="pm-score-value">{promptStep.assembly.promptStrategy.bestPractice.sourceRef}</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="pm-row">
                       <span className="pm-key">Assembly sections</span>
                       <span className="pm-value">{promptStep.assembly.sections.length} · {promptStep.assembly.totalTokenEstimate} estimated tokens</span>
@@ -449,6 +535,20 @@ export function PromptMicroscope({ runTrace }: Props) {
                 <span className="pm-key">Provider</span>
                 <span className="pm-value">{runTrace.providerId}</span>
               </div>
+              {worktreeIsolation && (
+                <div className="pm-row">
+                  <span className="pm-key">Worktree isolation</span>
+                  <span className="pm-value">
+                    {worktreeIsolation.status === 'ready'
+                      ? `ready · ${worktreeIsolation.worktreeId || worktreeIsolation.branch || worktreeIsolation.path || worktreeIsolation.agent} · Safety > Worktrees`
+                      : worktreeIsolation.status === 'preserved'
+                        ? `preserved · ${worktreeIsolation.worktreeId || worktreeIsolation.branch || worktreeIsolation.path || worktreeIsolation.agent} · Safety > Worktrees`
+                      : worktreeIsolation.status === 'auto_discarded'
+                        ? `auto-discarded · ${worktreeIsolation.worktreeId || worktreeIsolation.branch || worktreeIsolation.path || worktreeIsolation.agent}`
+                      : `${worktreeIsolation.status} · ${worktreeIsolation.error || worktreeIsolation.reason}`}
+                  </span>
+                </div>
+              )}
               <div className="pm-row">
                 <span className="pm-key">Tokens used</span>
                 <span className="pm-value">{runTrace.context.tokensUsed || '—'}</span>

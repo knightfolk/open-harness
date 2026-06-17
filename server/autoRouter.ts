@@ -20,6 +20,9 @@ import { suggestThresholdAdjustment } from './routerLearning';
 import { getLatestEvalRecommendations } from './evals';
 import { estimateTokens } from './contextManager';
 import { getModelConfig, isReasoningModel } from './modelProfiles';
+import { buildToolReliabilitySummary, type ToolReliabilitySummary } from './toolReliability';
+import { getToolReliabilitySessions } from './toolReliabilityLogTrace';
+import { getPromptStrategySelectionForModel } from './promptStrategies';
 import type { StoredConfig, StoredProvider } from './config';
 
 // ── Types ──────────────────────────────────────────────
@@ -114,7 +117,11 @@ export interface AutoRouterDecisionOptions {
 // ── State ──────────────────────────────────────────────
 
 let autoRouterConfig: AutoRouterConfig | null = null;
+let autoRouterBaseCandidates: AutoRouterCandidate[] = [];
 let candidateDiagnostics: AutoRouterCandidateDiagnostic[] = [];
+let candidateEvidenceRefreshedAt: string | null = null;
+let candidateEvidenceRefreshCount = 0;
+const CANDIDATE_CARD_MAX_CHARS = 5200;
 
 const decisionCache = new Map<string, { decision: AutoRouterDecision; expiresAt: number }>();
 const CACHE_MAX_ENTRIES = 256;
@@ -182,6 +189,211 @@ function annotateCandidatesWithEvalRecommendations(
   });
 }
 
+function modelKeysMatch(a: string, b: string): boolean {
+  const left = normalizeRecommendationModelKey(a);
+  const right = normalizeRecommendationModelKey(b);
+  return left === right || left.endsWith(right) || right.endsWith(left);
+}
+
+function pct(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function modelToolPairMatchesCandidate(pair: string, candidateModelId: string): boolean {
+  const [modelPart] = pair.split('/').map((part) => part.trim());
+  return modelKeysMatch(modelPart || pair, candidateModelId);
+}
+
+function modelToolPairToolName(pair: string): string {
+  const parts = pair.split('/').map((part) => part.trim());
+  return parts.length > 1 ? parts.slice(1).join(' / ') : pair;
+}
+
+function promptStrategyReliabilityLine(candidateModelId: string, summary: ToolReliabilitySummary): string {
+  const strategyId = getPromptStrategySelectionForModel(candidateModelId).profile.id;
+  const baseStats = summary.byPromptStrategy?.[strategyId];
+  const variantStats = Object.entries(summary.byPromptStrategyVariant || {})
+    .filter(([key, stats]) => key.startsWith(`${strategyId}:`) && stats.total > 0)
+    .sort(([, a], [, b]) => b.errorRate - a.errorRate || b.error - a.error || b.total - a.total)
+    .slice(0, 2);
+  if (!baseStats && variantStats.length === 0) return '';
+
+  const baseLine = baseStats
+    ? ` Prompt strategy tool evidence for ${strategyId}: ${baseStats.error}/${baseStats.total} tool errors, first-call ${baseStats.firstCallErrors}/${baseStats.runs}, recovery ${pct(baseStats.recoveryRate)}.`
+    : ` Prompt strategy tool evidence for ${strategyId}: no base bucket yet.`;
+  const variantLine = variantStats.length > 0
+    ? ` Risky prompt variants: ${variantStats.map(([key, stats]) =>
+      `${key} ${stats.error}/${stats.total} errors, first-call ${stats.firstCallErrors}/${stats.runs}`
+    ).join('; ')}.`
+    : '';
+  return `${baseLine}${variantLine}`;
+}
+
+function promptStrategyBestPracticeLine(candidateModelId: string): string {
+  const selection = getPromptStrategySelectionForModel(candidateModelId);
+  const note = selection.profile.bestPracticeNotes?.[0];
+  if (!note) return '';
+  return ` Prompt strategy best practice for ${selection.profile.id}: ${note.guidance} Eval cue: ${note.evaluationCue} Source: ${note.sourceRef}. Use as advisory prompt-contract evidence, not an automatic routing override.`;
+}
+
+function recoveryPatternLine(candidateModelId: string, summary: ToolReliabilitySummary): string {
+  const patterns = (summary.recoveryPatterns || [])
+    .filter((pattern) => modelKeysMatch(pattern.failedModel, candidateModelId))
+    .sort((a, b) => b.runs - a.runs || Date.parse(b.latestTimestamp) - Date.parse(a.latestTimestamp))
+    .slice(0, 2);
+  if (patterns.length === 0) return '';
+  return ` Repeated recovery patterns: ${patterns.map((pattern) =>
+    `${pattern.failedTool} failed, then ${pattern.recoveredByModel}/${pattern.recoveredByTool} worked in ${pattern.runs} run${pattern.runs === 1 ? '' : 's'} (evidence ${pattern.exampleEvidenceSources?.join(', ') || 'unknown'}, examples session ${pattern.exampleSessionIds?.join(', ') || 'unknown'}, run ${pattern.exampleRunIds.join(', ') || 'unknown'})`
+  ).join('; ')}. Prefer the recovered tool path or a cleaner model for similar first-tool choices.`;
+}
+
+function failureMemoryLine(candidateModelId: string, summary: ToolReliabilitySummary): string {
+  const memories = (summary.failureMemory || [])
+    .filter((item) => modelKeysMatch(item.model, candidateModelId))
+    .sort((a, b) => b.unrecoveredRuns - a.unrecoveredRuns || b.errorRuns - a.errorRuns)
+    .slice(0, 2);
+  if (memories.length === 0) return '';
+  return ` Model failure memory: ${memories.map((item) => {
+    const fixedBy = item.fixedBy.length
+      ? ` fixed by ${item.fixedBy.map((fix) => `${fix.model}/${fix.tool} in ${fix.runs} run${fix.runs === 1 ? '' : 's'}`).join(', ')}`
+      : ' no recovered fix path captured yet';
+    const fallback = item.fallbackRecoveryRuns > 0 ? `, fallback helped ${item.fallbackRecoveryRuns} time${item.fallbackRecoveryRuns === 1 ? '' : 's'}` : '';
+    const strategies = item.promptStrategyVariants.length > 0
+      ? `, prompt variants ${item.promptStrategyVariants.map((variant) => `${variant.id} (${variant.runs})`).join(', ')}`
+      : item.promptStrategies.length > 0
+        ? `, prompt strategies ${item.promptStrategies.map((strategy) => `${strategy.id} (${strategy.runs})`).join(', ')}`
+        : '';
+    return `${item.tool} failed in ${item.errorRuns} run${item.errorRuns === 1 ? '' : 's'} (${item.unrecoveredRuns} unrecovered${fallback}${strategies}, evidence ${item.exampleEvidenceSources?.join(', ') || 'unknown'}, examples session ${item.exampleSessionIds?.join(', ') || 'unknown'}, run ${item.exampleRunIds.join(', ') || 'unknown'});${fixedBy}`;
+  }).join('; ')}.`;
+}
+
+function outcomeExampleLine(candidateModelId: string, summary: ToolReliabilitySummary): string {
+  const outcomes = (summary.outcomeExamples || [])
+    .filter((item) => modelKeysMatch(item.failedModel, candidateModelId))
+    .slice(0, 3);
+  if (outcomes.length === 0) return '';
+  return ` Session outcomes after tool errors: ${outcomes.map((item) => {
+    const workedBy = item.workedBy
+      ? `${item.workedBy.model}/${item.workedBy.tool}`
+      : item.finalAnswerCaptured ? 'final answer without later tool' : item.finalStatus;
+    return `${item.failedTool} -> ${workedBy} (${item.outcome}, retry distance ${item.retryDistance}); evidence ${item.evidenceSource}, session ${item.sessionId}, run ${item.runId}`;
+  }).join('; ')}. Use these as avoid/retry-reduction evidence for similar tool-heavy tasks.`;
+}
+
+function errorSignatureLine(candidateModelId: string, summary: ToolReliabilitySummary): string {
+  const signatures = (summary.errorSignatures || [])
+    .filter((item) => modelKeysMatch(item.model, candidateModelId))
+    .sort((a, b) => b.unrecoveredRuns - a.unrecoveredRuns || b.runs - a.runs)
+    .slice(0, 2);
+  if (signatures.length === 0) return '';
+  return ` Tool error signatures: ${signatures.map((item) => {
+    const workedBy = item.workedBy.length
+      ? ` later worked via ${item.workedBy.map((worked) => `${worked.model}/${worked.tool} (${worked.runs} run${worked.runs === 1 ? '' : 's'}, avg retry ${worked.avgRetryDistance})`).join(', ')}`
+      : ' no working follow-up captured';
+    const variants = item.promptStrategyVariants.length > 0
+      ? `, prompt variants ${item.promptStrategyVariants.map((variant) => `${variant.id} (${variant.runs})`).join(', ')}`
+      : '';
+    return `${item.tool} "${item.signature}" in ${item.runs} run${item.runs === 1 ? '' : 's'} (${item.unrecoveredRuns} unrecovered, ${item.recoveredRuns} recovered${variants}, evidence ${item.exampleEvidenceSources?.join(', ') || 'unknown'}, examples session ${item.exampleSessionIds?.join(', ') || 'unknown'}, run ${item.exampleRunIds.join(', ') || 'unknown'});${workedBy}`;
+  }).join('; ')}. Use matching signatures to avoid repeating the same failed first tool or to choose the known recovered path earlier.`;
+}
+
+function retryReductionRecommendationLine(candidateModelId: string, summary: ToolReliabilitySummary): string {
+  const recommendations = (summary.retryReductionRecommendations || [])
+    .filter((item) => modelKeysMatch(item.failedModel, candidateModelId))
+    .slice(0, 2);
+  if (recommendations.length === 0) return '';
+  return ` Retry-reduction recommendations: ${recommendations.map((item) =>
+    `avoid ${item.avoidPath}; prefer ${item.preferPath}; retry distance ${item.retryDistance}; avg retry distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; session ${item.sessionId}; run ${item.runId}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}`
+  ).join('; ')}. Prefer these observed working paths before adding more retries.`;
+}
+
+export function annotateCandidatesWithToolReliability(
+  candidates: AutoRouterCandidate[],
+  summary: ToolReliabilitySummary | null | undefined,
+): AutoRouterCandidate[] {
+  if (!summary || summary.totalToolCalls === 0) return candidates;
+
+  return candidates.map((candidate) => {
+    const promptStrategyLine = promptStrategyReliabilityLine(candidate.modelId, summary);
+    const promptBestPracticeLine = promptStrategyBestPracticeLine(candidate.modelId);
+    const match = Object.entries(summary.byModel || {})
+      .find(([model]) => modelKeysMatch(model, candidate.modelId));
+    if (!match) {
+      if (!promptStrategyLine && !promptBestPracticeLine) return candidate;
+      const base = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
+      const merged = `${base}${promptBestPracticeLine}${promptStrategyLine} Treat as prompt-contract evidence for tool-heavy execute tasks until this model has its own tool traces.`;
+      return {
+        ...candidate,
+        card: merged.length > CANDIDATE_CARD_MAX_CHARS
+          ? `${merged.slice(0, CANDIDATE_CARD_MAX_CHARS - 3)}…`
+          : merged,
+      };
+    }
+
+    const [model, bucket] = match;
+    const patternLine = recoveryPatternLine(candidate.modelId, summary);
+    const failureLine = failureMemoryLine(candidate.modelId, summary);
+    const outcomeLine = outcomeExampleLine(candidate.modelId, summary);
+    const signatureLine = errorSignatureLine(candidate.modelId, summary);
+    const retryReductionLine = retryReductionRecommendationLine(candidate.modelId, summary);
+    if (bucket.total === 0) {
+      if (!promptStrategyLine && !promptBestPracticeLine) return candidate;
+      const base = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
+      const merged = `${base}${promptBestPracticeLine}${promptStrategyLine} Treat as prompt-contract evidence for tool-heavy execute tasks until this model has its own tool traces.`;
+      return {
+        ...candidate,
+        card: merged.length > CANDIDATE_CARD_MAX_CHARS
+          ? `${merged.slice(0, CANDIDATE_CARD_MAX_CHARS - 3)}…`
+          : merged,
+      };
+    }
+
+    const recoveryExample = (summary.recoveryExamples || [])
+      .find((item) => modelKeysMatch(item.firstError.model, candidate.modelId));
+    const recoveryPath = recoveryExample
+      ? recoveryExample.recoveredBy.length > 0
+        ? ` Recent recovery path: ${recoveryExample.firstError.tool} failed, then ${recoveryExample.recoveredBy.map((step) => step.tool).join(' -> ')} completed before final answer.`
+        : ` Recent recovery path: ${recoveryExample.firstError.tool} failed, then the run still reached a final answer.`
+      : '';
+    const riskyToolPairs = Object.entries(summary.byModelTool || {})
+      .filter(([pair, stats]) => modelToolPairMatchesCandidate(pair, candidate.modelId) && stats.error > 0)
+      .sort(([, a], [, b]) => b.errorRate - a.errorRate || b.error - a.error || b.total - a.total)
+      .slice(0, 3);
+    const riskyToolLine = riskyToolPairs.length > 0
+      ? ` Specific risky tools for this model: ${riskyToolPairs.map(([pair, stats]) =>
+        `${modelToolPairToolName(pair)} ${stats.error}/${stats.total} errors, first-call ${stats.firstCallErrors}/${stats.runs}, recovery ${pct(stats.recoveryRate)}`
+      ).join('; ')}.`
+      : '';
+    const riskLine = bucket.error > 0
+      ? `${promptBestPracticeLine}Tool reliability evidence for ${model}: ${bucket.error}/${bucket.total} traced tool calls errored (${pct(bucket.errorRate)}), first-call failures ${bucket.firstCallErrors}/${bucket.runs}, recovery ${pct(bucket.recoveryRate)} over ${bucket.affectedRuns} affected run${bucket.affectedRuns === 1 ? '' : 's'}, avg recovery rounds ${bucket.avgRecoveryRounds}. Penalize this candidate for tool-heavy execute tasks until prompt/tool contracts or capability cards are improved.${promptStrategyLine}${recoveryPath}${patternLine}${failureLine}${signatureLine}${retryReductionLine}${outcomeLine}${riskyToolLine}`
+      : `${promptBestPracticeLine}Tool reliability evidence for ${model}: 0/${bucket.total} traced tool-call errors across ${bucket.runs} tool-using run${bucket.runs === 1 ? '' : 's'}.${patternLine}${failureLine}${signatureLine}${retryReductionLine}${outcomeLine}${promptStrategyLine} Treat as positive but still limited historical evidence for tool-heavy execute tasks.`;
+    const base = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
+    const merged = `${base} ${riskLine}`;
+
+    return {
+      ...candidate,
+      card: merged.length > CANDIDATE_CARD_MAX_CHARS
+        ? `${merged.slice(0, CANDIDATE_CARD_MAX_CHARS - 3)}…`
+        : merged,
+    };
+  });
+}
+
+function annotateCandidatesWithCurrentEvidence(candidates: AutoRouterCandidate[]): AutoRouterCandidate[] {
+  let annotatedCandidates = annotateCandidatesWithEvalRecommendations(candidates);
+  try {
+    annotatedCandidates = annotateCandidatesWithToolReliability(
+      annotatedCandidates,
+      buildToolReliabilitySummary(getToolReliabilitySessions()),
+    );
+  } catch {
+    // Best-effort; persisted sessions may be unavailable during tests/startup.
+  }
+  candidateEvidenceRefreshedAt = new Date().toISOString();
+  candidateEvidenceRefreshCount += 1;
+  return annotatedCandidates;
+}
+
 function normalizeCandidate(candidate: AutoRouterCandidate): AutoRouterCandidate {
   const supportsThinking = typeof candidate.supportsThinking === 'boolean'
     ? candidate.supportsThinking
@@ -221,6 +433,9 @@ export function configureAutoRouter(config: StoredConfig): void {
   const ar = (config as any).autoRouter as AutoRouterConfig | undefined;
   if (!ar || !ar.enabled || !ar.classifierModel || !ar.candidates || ar.candidates.length === 0) {
     autoRouterConfig = null;
+    autoRouterBaseCandidates = [];
+    candidateEvidenceRefreshedAt = null;
+    candidateEvidenceRefreshCount = 0;
     candidateDiagnostics = [];
     return;
   }
@@ -234,8 +449,14 @@ export function configureAutoRouter(config: StoredConfig): void {
 
   if (validCandidates.length === 0) {
     autoRouterConfig = null;
+    autoRouterBaseCandidates = [];
+    candidateEvidenceRefreshedAt = null;
+    candidateEvidenceRefreshCount = 0;
     return;
   }
+
+  autoRouterBaseCandidates = validCandidates;
+  const annotatedCandidates = annotateCandidatesWithCurrentEvidence(autoRouterBaseCandidates);
 
   autoRouterConfig = {
     enabled: true,
@@ -243,7 +464,7 @@ export function configureAutoRouter(config: StoredConfig): void {
     threshold: typeof ar.threshold === 'number' ? ar.threshold : 0.7,
     defaultModel: ar.defaultModel || validCandidates[0].modelId,
     cacheTTLMs: typeof ar.cacheTTLMs === 'number' ? ar.cacheTTLMs : 300_000,
-    candidates: annotateCandidatesWithEvalRecommendations(validCandidates),
+    candidates: annotatedCandidates,
   };
 
   // Auto-adjust threshold from historical data if available
@@ -272,6 +493,8 @@ export function getAutoRouterState(): {
   candidateCount: number;
   candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking: boolean; toolCallQuality: string; contextWindowTokens: number }>;
   unavailableCandidates: AutoRouterCandidateDiagnostic[];
+  candidateEvidenceRefreshedAt: string | null;
+  candidateEvidenceRefreshCount: number;
   cacheSize: number;
 } {
   if (!autoRouterConfig) {
@@ -283,6 +506,8 @@ export function getAutoRouterState(): {
       candidateCount: 0,
       candidates: [],
       unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
+      candidateEvidenceRefreshedAt,
+      candidateEvidenceRefreshCount,
       cacheSize: 0,
     };
   }
@@ -301,6 +526,8 @@ export function getAutoRouterState(): {
       contextWindowTokens: candidateContextWindow(c),
     })),
     unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
+    candidateEvidenceRefreshedAt,
+    candidateEvidenceRefreshCount,
     cacheSize: decisionCache.size,
   };
 }
@@ -371,7 +598,10 @@ export async function routeTask(
 ): Promise<AutoRouterDecision | null> {
   if (!autoRouterConfig || !autoRouterConfig.enabled) return null;
 
-  const candidates = autoRouterConfig.candidates;
+  const candidates = autoRouterBaseCandidates.length > 0
+    ? annotateCandidatesWithCurrentEvidence(autoRouterBaseCandidates)
+    : autoRouterConfig.candidates;
+  autoRouterConfig.candidates = candidates;
   if (candidates.length === 0) return null;
 
   // Single candidate: no routing needed

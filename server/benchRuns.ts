@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { v4 as uuid } from 'uuid';
 
 import { buildScoreBreakdown, type EvalScores, type EvalScoreBreakdown } from './evals';
+import type { PromptStrategyTrace } from './promptStrategies';
 import { redactSecrets } from './sectionRedaction';
 import { resolveShell } from './shell';
 
@@ -60,6 +61,7 @@ export interface BenchRunResult {
   prompt: string;
   response: string;
   responseLength: number;
+  promptStrategy?: PromptStrategyTrace;
   toolCalls: Array<{ name: string; status: string; input?: string; output?: string; duration?: number }>;
   validationResults: ValidationCommandResult[];
   validationPassed: boolean;

@@ -351,7 +351,7 @@ function WorktreesTab({ dir }: { dir: string }) {
       <div className="safety-section-header">
         <div>
           <h3>Sandboxed Worktrees</h3>
-          <p>Run risky work in a git worktree. Promote changes back when they're good.</p>
+          <p>Run risky work in a git worktree. Validate, promote, or discard isolated changes from here.</p>
         </div>
         <div className="safety-section-actions">
           <button className="btn btn-ghost btn-small" onClick={autoClean} title="Auto-remove clean worktrees (keeps the most recent)">
@@ -387,32 +387,36 @@ function WorktreesTab({ dir }: { dir: string }) {
         <div className="safety-empty">No worktrees. Create one to sandbox a high-risk run.</div>
       ) : (
         <ul className="safety-list">
-          {worktrees.map((wt) => (
+          {worktrees.map((wt) => {
+            const shortId = wt.id.slice(0, 8);
+            const worktreeLabel = wt.label || wt.branch;
+            return (
             <li key={wt.id} className={`safety-item ${wt.status !== 'active' ? 'restored' : ''}`}>
               <div className="safety-item-row">
                 <div className="safety-item-main">
                   <div className="safety-item-title">
-                    <GitBranch size={12} /> {wt.label || wt.branch}
+                    <GitBranch size={12} /> {worktreeLabel}
                   </div>
                   <div className="safety-item-meta">
-                    {new Date(wt.createdAt).toLocaleString()} · base: {wt.baseRef} ·
+                    id: <code title={wt.id}>{shortId}</code> · {new Date(wt.createdAt).toLocaleString()} · base: {wt.baseRef} ·
                     {' '}<span className={wt.clean ? 'safety-ok' : 'safety-warn'}>{wt.clean ? 'clean' : 'dirty'}</span>
                     {wt.lastError && <span className="safety-warn"> · {wt.lastError}</span>}
                   </div>
                 </div>
                 <div className="safety-item-actions">
-                  <button className="btn btn-ghost btn-small" onClick={() => showDiff(wt.id)} title="Show diff vs base">
+                  <button className="btn btn-ghost btn-small" onClick={() => showDiff(wt.id)} title="Show diff vs base" aria-label={`Show diff for isolated worktree ${shortId}: ${worktreeLabel}`}>
                     {expanded === wt.id ? <EyeOff size={12} /> : <Eye size={12} />}
                   </button>
-                  <button className="btn btn-ghost btn-small" onClick={() => validate(wt.id)} disabled={validatingId === wt.id} title="Run project validation commands inside this worktree">
+                  <button className="btn btn-ghost btn-small" onClick={() => validate(wt.id)} disabled={validatingId === wt.id} title="Run project validation commands inside this isolated worktree" aria-label={`Validate isolated worktree ${shortId}: ${worktreeLabel}`}>
                     {validatingId === wt.id ? <RefreshCw size={12} className="spin" /> : <CheckCircle2 size={12} />}
                     Validate
                   </button>
-                  <button className="btn btn-secondary btn-small" onClick={() => promote(wt.id)} title="Merge worktree branch into its base">
+                  <button className="btn btn-secondary btn-small" onClick={() => promote(wt.id)} title="Merge worktree branch into its base" aria-label={`Promote isolated worktree ${shortId}: ${worktreeLabel}`}>
                     <Play size={12} /> Promote
                   </button>
-                  <button className="btn btn-ghost btn-small" onClick={() => remove(wt.id, !wt.clean)} title={wt.clean ? 'Remove' : 'Force-remove'}>
+                  <button className="btn btn-ghost btn-small" onClick={() => remove(wt.id, !wt.clean)} title={wt.clean ? 'Discard isolated worktree' : 'Force-discard isolated worktree with uncommitted changes'} aria-label={`${wt.clean ? 'Discard' : 'Force-discard'} isolated worktree ${shortId}: ${worktreeLabel}`}>
                     <Trash2 size={12} />
+                    Discard
                   </button>
                 </div>
               </div>
@@ -422,7 +426,8 @@ function WorktreesTab({ dir }: { dir: string }) {
                 </div>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

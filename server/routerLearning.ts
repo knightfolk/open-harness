@@ -49,6 +49,18 @@ export interface RoutingEvent {
   taskType: string;
   /** Role bucket used for routing */
   role: string;
+  /** Prompt strategy profile selected for the model family */
+  promptStrategyId?: string;
+  /** Prompt strategy family bucket */
+  promptStrategyFamily?: string;
+  /** Prompt strategy system style */
+  promptStrategyStyle?: string;
+  /** Prompt strategy role/task variant */
+  promptStrategyVariantId?: string;
+  /** Prompt strategy inferred task type */
+  promptStrategyTaskType?: string;
+  /** Prompt strategy variant selection reason */
+  promptStrategySelectionReason?: string;
   /** User turns at time of routing */
   userTurns: number;
   /** Outcome signal (null until received) */
@@ -80,7 +92,11 @@ export interface LearningSummary {
   byTaskType: Record<string, TaskTypeRoutingSummary>;
   byRole: Record<string, TaskTypeRoutingSummary>;
   byComplexity: Record<string, TaskTypeRoutingSummary>;
+  byPromptStrategy: Record<string, TaskTypeRoutingSummary>;
+  byPromptStrategyFamily: Record<string, TaskTypeRoutingSummary>;
+  byPromptStrategyVariant: Record<string, TaskTypeRoutingSummary>;
   bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
+  bestPromptStrategyVariants: Array<{ strategyVariant: string; model: string; total: number; success: number; rate: number }>;
 }
 
 export interface RoutingImportResult {
@@ -206,6 +222,30 @@ function bestByTaskType(taskTypeSummary: Record<string, TaskTypeRoutingSummary>)
   }).filter((row) => row.model !== 'unknown');
 }
 
+function bestPromptStrategyVariants(strategySummary: Record<string, TaskTypeRoutingSummary>): Array<{ strategyVariant: string; model: string; total: number; success: number; rate: number }> {
+  return Object.entries(strategySummary)
+    .map(([strategyVariant, data]) => {
+      let bestModel = '';
+      let best: { total: number; success: number; rate: number } | null = null;
+      for (const [model, modelData] of Object.entries(data.byModel)) {
+        if (!best || modelData.rate > best.rate || (modelData.rate === best.rate && modelData.total > best.total)) {
+          best = modelData;
+          bestModel = model;
+        }
+      }
+      return {
+        strategyVariant,
+        model: bestModel || 'unknown',
+        total: data.total,
+        success: data.success,
+        rate: data.rate,
+      };
+    })
+    .filter((row) => row.model !== 'unknown')
+    .sort((a, b) => b.rate - a.rate || b.total - a.total || a.strategyVariant.localeCompare(b.strategyVariant))
+    .slice(0, 8);
+}
+
 function normalizeOutcome(value: unknown): RoutingEvent['outcome'] {
   return value === 'success' || value === 'failure' || value === 'ambiguous' ? value : null;
 }
@@ -247,10 +287,16 @@ function normalizeImportedEvent(value: unknown, datasetKind: 'production' | 'ben
     complexity: typeof input.complexity === 'string' ? input.complexity : 'unknown',
     taskType: typeof input.taskType === 'string' ? input.taskType : 'unknown',
     role: typeof input.role === 'string' ? input.role : 'unknown',
+    promptStrategyId: typeof input.promptStrategyId === 'string' ? input.promptStrategyId : undefined,
+    promptStrategyFamily: typeof input.promptStrategyFamily === 'string' ? input.promptStrategyFamily : undefined,
+    promptStrategyStyle: typeof input.promptStrategyStyle === 'string' ? input.promptStrategyStyle : undefined,
+    promptStrategyVariantId: typeof input.promptStrategyVariantId === 'string' ? input.promptStrategyVariantId : undefined,
+    promptStrategyTaskType: typeof input.promptStrategyTaskType === 'string' ? input.promptStrategyTaskType : undefined,
+    promptStrategySelectionReason: typeof input.promptStrategySelectionReason === 'string' ? input.promptStrategySelectionReason : undefined,
     userTurns: Number.isFinite(Number(input.userTurns)) ? Number(input.userTurns) : 0,
     outcome: normalizeOutcome(input.outcome),
     outcomeNote: typeof input.outcomeNote === 'string' ? input.outcomeNote : undefined,
-    datasetKind: normalizeDatasetKind(input.datasetKind || datasetKind),
+    datasetKind: normalizeDatasetKind(datasetKind || input.datasetKind),
   };
 }
 
@@ -466,7 +512,11 @@ export function getLearningSummary() {
       byTaskType: {},
       byRole: {},
       byComplexity: {},
+      byPromptStrategy: {},
+      byPromptStrategyFamily: {},
+      byPromptStrategyVariant: {},
       bestByTaskType: [],
+      bestPromptStrategyVariants: [],
     } as LearningSummary;
   }
 
@@ -475,6 +525,13 @@ export function getLearningSummary() {
   const byTaskType = buildTaskTypeSummary(events);
   const byRole = buildRoleSummary(events);
   const byComplexity = buildComplexitySummary(events);
+  const byPromptStrategy = buildSummaryByKey(events, (event) => event.promptStrategyId || 'unknown');
+  const byPromptStrategyFamily = buildSummaryByKey(events, (event) => event.promptStrategyFamily || 'unknown');
+  const byPromptStrategyVariant = buildSummaryByKey(events, (event) =>
+    event.promptStrategyVariantId
+      ? `${event.promptStrategyId || 'unknown'}:${event.promptStrategyVariantId}`
+      : event.promptStrategyId || 'unknown'
+  );
 
   let total = 0;
   let successes = 0;
@@ -491,7 +548,11 @@ export function getLearningSummary() {
     byTaskType,
     byRole,
     byComplexity,
+    byPromptStrategy,
+    byPromptStrategyFamily,
+    byPromptStrategyVariant,
     bestByTaskType: bestByTaskType(byTaskType),
+    bestPromptStrategyVariants: bestPromptStrategyVariants(byPromptStrategyVariant),
   };
 }
 

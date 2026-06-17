@@ -20,6 +20,7 @@ export interface PersistedMessage {
     duration?: number;
   }>;
   runTrace?: any;
+  evidenceSource?: 'saved_session_trace' | 'log_trace' | 'imported_trace';
 }
 
 export interface PersistedSession {

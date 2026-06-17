@@ -96,8 +96,12 @@ export const PROMPT_STRATEGY_SOURCES = {
   mistralPromptEngineering: 'https://docs.mistral.ai/models/best-practices/prompt-engineering',
   mistralFunctionCalling: 'https://docs.mistral.ai/studio-api/conversations/function-calling',
   mistralPromptingCapabilities: 'https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities',
+  deepseekChatCompletion: 'https://api-docs.deepseek.com/api/create-chat-completion',
+  deepseekThinkingMode: 'https://api-docs.deepseek.com/guides/thinking_mode',
+  deepseekMultiRound: 'https://api-docs.deepseek.com/guides/multi_round_chat',
   xaiOverview: 'https://docs.x.ai/overview',
   xaiFunctionCalling: 'https://docs.x.ai/guides/function-calling',
+  qwenQuickstart: 'https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html',
   openHarnessGuide: 'docs/MODEL_PROMPTING_GUIDE.md',
 } as const;
 
@@ -151,6 +155,27 @@ function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracti
       ...common,
     ];
   }
+  if (family === 'deepseek') {
+    return [
+      {
+        id: 'deepseek-thinking-mode-structure',
+        sourceRef: PROMPT_STRATEGY_SOURCES.deepseekThinkingMode,
+        appliesTo: ['reasoning', 'tool-use'],
+        guidance: 'Use explicit tool-call sequencing and keep reasoning mode boundaries clear for multi-step tasks.',
+        rationale: 'DeepSeek exposes separate reasoning and tool-call flow controls; prompts should model those phases explicitly.',
+        evaluationCue: 'Track first-call success and retry distance on reasoning-enabled versus reasoning-disabled tool tasks before changing baseline prompts.',
+      },
+      {
+        id: 'deepseek-chat-contract',
+        sourceRef: PROMPT_STRATEGY_SOURCES.deepseekMultiRound,
+        appliesTo: ['tool-use', 'coding', 'direct'],
+        guidance: 'Keep each message role clear and include required context each turn, since the API is stateless and does not persist history.',
+        rationale: 'DeepSeek’s chat API expects full conversation history per request; concise role boundaries reduce prompt drift.',
+        evaluationCue: 'Run side-by-side tests where context-pack shape is equal but role/task instructions differ, then select lowest-retry profile.',
+      },
+      ...common,
+    ];
+  }
   if (family === 'grok') {
     return [
       {
@@ -189,6 +214,27 @@ function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracti
         guidance: 'Keep tool descriptions, parameters, required fields, and tool-choice policy explicit for tool-heavy prompts.',
         rationale: 'Mistral function-calling guidance separates deciding whether to use a tool from generating required tool arguments.',
         evaluationCue: 'Compare first-call tool error rate before and after tool-contract prompt changes.',
+      },
+      ...common,
+    ];
+  }
+  if (family === 'qwen') {
+    return [
+      {
+        id: 'qwen-thinking-budget',
+        sourceRef: PROMPT_STRATEGY_SOURCES.qwenQuickstart,
+        appliesTo: ['reasoning', 'tool-use'],
+        guidance: 'Turn on explicit thinking only for complex tasks and keep generation budgets explicit for predictable latency.',
+        rationale: 'Qwen documentation shows configurable thinking budget and generation-template controls, so prompt strategy should match task complexity.',
+        evaluationCue: 'Compare completion quality and recovery path on complex tool tasks before enabling higher thinking budgets by default.',
+      },
+      {
+        id: 'qwen-template-compression',
+        sourceRef: PROMPT_STRATEGY_SOURCES.qwenQuickstart,
+        appliesTo: ['direct', 'coding', 'summarization'],
+        guidance: 'Use compact system directives plus a strict output contract instead of verbose meta-instructions.',
+        rationale: 'Template-based chat construction favors clear prompt sections and compact role-facing instructions.',
+        evaluationCue: 'Measure direct answer quality and tool-error rates between compact versus verbose output-contract prompts.',
       },
       ...common,
     ];
@@ -291,7 +337,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     id: 'deepseek-structured-code-v1',
     family: 'deepseek',
     appliesTo: ['deepseek'],
-    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.deepseekChatCompletion, PROMPT_STRATEGY_SOURCES.deepseekMultiRound, PROMPT_STRATEGY_SOURCES.deepseekThinkingMode, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('deepseek'),
     updatedAt: UPDATED_AT,
     systemStyle: 'structured',
@@ -311,7 +357,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     id: 'qwen-xml-code-v1',
     family: 'qwen',
     appliesTo: ['qwen'],
-    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.qwenQuickstart, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('qwen'),
     updatedAt: UPDATED_AT,
     systemStyle: 'xml-tagged',

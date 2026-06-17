@@ -20,10 +20,14 @@ evidence before the kickoff goal can close.
 | Clicking an agent opens right-hand detail. | Manual UI notes or screenshot showing selected agent detail inspector. | partial: clicking the saved `coder run` row opened the right-side Agent detail overlay; phase rows in the left queue now support keyboard activation with Enter/Space as well as click, and their inline detail chevrons are real disclosure buttons; Agent detail cards now expose focus labels with role/name, status, task, model/provider, latest artifact cue, explicit selected-agent state, and controlled detail disclosure; Agent detail shell back controls are typed and labelled, agent-list rows expose current detail state, Agent detail replay filters are a labelled group with selected state; Agent detail replay empty/filter-empty states are polite statuses; Agent detail replay summary is a labelled group with decorative summary/event/header/meta icons; live active-agent detail proof remains pending |
 | The user can flag or steer bad agent direction. | Runtime scenario trace with a steering note recorded during a safe phase. | partial: saved run detail exposes steering controls (`Flag assumption`, `Add note`, `Proof`, `Steering`); active steering controls now explain whether notes target the orchestrator or the selected agent for the next safe phase, whether actions persist as replay steering events, and when artifact approval/revision controls appear; redirect now sends the current note draft as the correction reason when present; steering action/note controls expose the target run or phase plus action purpose in their accessible labels; recording and next-phase use of a steering note remain pending |
 | Chat no longer shows every diagnostic surface by default. | Manual UI notes showing diagnostics collapsed behind Details/Actions and artifacts still reviewable. | partial: existing saved session showed clean prose by default with replay/artifact/details affordances; Details and artifact review opened on demand without raw tool-event dump; live thinking, typing, and browser preview loading indicators remain small polite status lines with decorative dots hidden from assistive tech; the Details toggle, tool-summary toggle, confidence details toggle, patch review action, replay export action, team-plan artifact actions, artifact drawer actions, Browser panel actions, and suggested-action controls now have explicit button semantics/accessibility labels, with Browser quick URL presets exposed as a labelled group with selected state, Browser preview exposed as a URL-labelled region, Browser empty and reachable-without-screenshot states exposed as polite statuses, Browser preview errors exposed as alerts, Artifact Drawer copy buttons exposing copied state, artifact approval/revision buttons associated with saved/error feedback status, the Details toggle owning a labelled details region, the tool-summary toggle owning a labelled tool details region, the confidence toggle owning a labelled confidence details region, Artifact Drawer items exposed as labelled regions, artifact content previews labelled by artifact, long-artifact expansion controls owning their preview content, referenced-file chips exposed as a labelled group, and decorative Browser health/warning glyphs plus Details/tool-summary/confidence/message-action/team-plan/artifact-drawer type/action/toggle/note icons/count badges hidden from assistive tech; the expanded suggested-action strip is a labelled group; the artifact drawer toggle now exposes expanded/collapsed state, artifact count, artifact-type summary, and ownership of the expanded artifact region to assistive tech; suggested next actions now default to a compact `Actions` affordance even inside Details |
-| Theme textures are subtle, bounded, and accessible. | Manual review notes across chat, sidebar, settings, code, terminal, and diff surfaces. | partial: current Theme settings and visible shell contrast inspected; the texture setting now states that textures are shell-only and that reduced transparency disables textures/blur while using solid theme fallback colors; reduced-transparency CSS now consumes the theme fallback surface, border, and shadow variables for primary shell/panel surfaces; reduced-motion CSS now disables small chat/work/status pulsing animations plus shared `.spin` loaders; live reduced-transparency browser proof remains pending |
+| Theme textures are subtle, bounded, and accessible. | Manual review notes across chat, sidebar, settings, code, terminal, and diff surfaces. | partial: current Theme settings and visible shell contrast inspected; `test:theme-accessibility` now regression-tests built-in contrast, reduced-transparency fallback behavior, and reduced-motion behavior; the texture setting states that textures are shell-only and that reduced transparency disables textures/blur while using solid theme fallback colors; reduced-transparency CSS consumes theme fallback surface, border, and shadow variables for primary shell/panel surfaces and overlays; reduced-motion CSS disables shell/chat/work/status motion; live reduced-transparency/reduced-motion browser proof remains pending |
 | Model routing and evaluation are visible enough to trust. | Model Lab eval/bench proof review exports plus Routing Learning/Agent Role/Auto-Router trust-state notes. | partial: no-spend Model Lab, Routing Learning, Agent Roles, and Auto-Router transparency surfaces inspected; Model Lab sections now expose a labelled tablist with selected-state tabs for Eval, Tasks, Bench, Packs, Results, and History, each tab controls a matching focusable tabpanel, ArrowLeft/ArrowRight/Home/End move between tabs, and roving tabindex keeps the selected tab in the normal tab order; Model Lab prompt, task, and model selections are now labelled provider-call matrix groups, with explicit per-item select/deselect labels and Select all labels that state how many prompts/tasks/candidates will be selected; Model Lab proof-prep, task seeding, Eval launch, Bench launch, prompt-pack folder prep/import/pack-run/export controls are explicit non-submit buttons with targeted labels; Prompt Packs import path has a direct label, import errors are alerts, missing registry/manifests states are polite statuses, trust/status pills now expose explicit prompt-pack trust/manifest-status labels, and registry-root ready/missing status labels include location/path context; Model Lab matrix caution boxes now announce selected run count plus provider-rate-limit/metered-billing risk with status/alert semantics based on matrix size; Model Lab diagnostics now announce proof-prep/error messages as status/alert regions; Model Lab Eval/Bench launch buttons now repeat the provider-budget approval condition and selected matrix size at the action point; Agent Roles renders role assignments and auto-configure suggestions; model ability icons now expose available/unavailable capability labels, Agent Roles recommended-model grid is a labelled group, role cards now expose role/description/model/thinking labels, effort sections expose labelled/described section relationships, effort counts expose role-count labels, recommendation cards expose role/model labels, eval recommendation cards expose role/model/proof/reason labels, empty effort buckets are polite statuses, auto-configure and eval-recommendation apply buttons have explicit button semantics/labels, and decorative role/effort icons are hidden from assistive tech; Auto-Router summary counts now expose catalog/configured/routed status labels, classifier/default/threshold controls have direct labels, sync/add candidate controls are explicit typed buttons with targeted labels, no-candidate empty state is a polite status, candidate rows expose candidate/source/cost/capability labels, candidate eval recommendations expose model/role/proof/reason labels, candidate capability/cost controls are labelled, add-candidate model/cost/capability/toggle controls have direct labels, and remove controls are explicit typed buttons with decorative trash icons; live proof of the newer proof-trust callout plus proof exports, proof-review decisions, and approved/trusted apply evidence remains pending |
-| Lint/build pass. | Current `npm run lint` and `npm run build` command results. | pending |
+| Prompt response strategy is model-specific, traceable, testable, and backed by a prompt strategy database. | Prompt Microscope run-trace evidence, prompt strategy database tests, Model Lab same-model strategy comparison, and Routing Learning strategy outcome/export proof. | partial: `server/promptStrategies.ts` defines versioned model-family prompt profiles and role/task variants; prompt assembly traces record strategy id/family/style/output contract and variant metadata; Prompt Microscope, Model Lab, Routing Learning, proof briefs, exports, and no-spend prompt/routing tests expose prompt strategy metadata; tool reliability and routing outcome summaries now preserve prompt strategy and variant context; provider-approved prompt trace and same-model prompt-strategy comparison remain pending |
+| OpenHarness can explain which model/tool/prompt-strategy combinations failed, which later path worked, and how routing or prompt contracts should change to reduce first-call errors and retry loops. | Routing Learning tool reliability, session outcomes, recovery patterns, failure memory, normalized signatures, Auto-Router candidate-card annotations, and saved session/run breadcrumbs. | partial: regression coverage and UI/export/candidate-card evidence preserve failed model/provider/tool paths, prompt strategy/variant context, retry distance, later working path, and session/run breadcrumbs; real populated live failure-memory/recovery rows remain pending |
+| Auto-Router candidate-card evidence includes saved session/run breadcrumbs for recovery patterns, failure memory, session outcomes, and normalized signatures that inform tool-heavy route scoring. | Auto-Router candidate-card annotations, `test:tool-reliability`, `test:premier-model-harness`, and `test:premier-baseline-manifest`. | partial: classifier-side candidate-card annotations include compact session/run breadcrumbs and guards preserve them; provider/live evidence with real populated failure rows remains pending |
+| Lint/build pass. | Current `npm run lint` and `npm run build` command results. | passed via `npm run check:premier-no-spend` on 2026-06-17; command ran no-provider automated proof, lint, and build |
 | Server/runtime changes have been relaunched and reachability verified. | Current restart proof for `3001`, `5173`, and `/api/config` if server/runtime changes are included in the closeout pass. | pending |
+| Runtime relaunch does not leave duplicate OpenHarness/Electron windows. | Restart-scope proof that stale Electron shells are cleaned up before launch and the desktop app enforces single-instance behavior. | pending |
 
 ## Provider-Backed Proof Run Approval Draft
 
@@ -32,8 +36,12 @@ Status: approval not requested yet
 Planned calls:
 
 - Eval proof: proposed smallest 1 prompt x 1 model run.
+- Same-model prompt strategy comparison: proposed smallest 1 prompt x 1 model x
+  2 strategy run after provider-spend approval.
 - Bench proof: proposed smallest 1 task x 1 model run.
-- Runtime scenarios: proposed Planning Room plus one execute or investigate run.
+- Runtime scenarios: proposed Planning Room plus one execute or investigate run,
+  with durable runtime trace/export paths for Planning Room, execute/investigate,
+  and steering-event evidence.
 
 Current local inventory snapshot from 2026-06-16 no-spend inspection:
 
@@ -48,9 +56,10 @@ Current local inventory snapshot from 2026-06-16 no-spend inspection:
 Approval options to ask reviewer:
 
 1. Approve smallest proof runs only.
-2. Approve eval proof only.
-3. Approve bench proof only.
-4. Do not run provider-backed proof yet.
+2. Approve eval proof plus same-model prompt strategy comparison.
+3. Approve eval proof only.
+4. Approve bench proof only.
+5. Do not run provider-backed proof yet.
 
 ## Browser/Manual Proof Approval Draft
 
@@ -59,6 +68,8 @@ Status: approval not requested yet
 Planned checks:
 
 - Refreshed desktop/narrow chat-first shell.
+- Durable screenshot or DOM-note artifact path recorded for desktop and
+  narrow-width checks.
 - Model Lab History cap.
 - Agent Roles proof-trust callout.
 - Theme reduced-transparency copy.
@@ -68,8 +79,9 @@ Planned checks:
 Approval options to ask reviewer:
 
 1. Run browser/manual proof pass.
-2. Limit to no-provider UI checks only.
-3. Do not run browser/manual proof yet.
+2. Run browser/manual proof pass and save durable screenshot/DOM-note artifacts.
+3. Limit to no-provider UI checks only.
+4. Do not run browser/manual proof yet.
 
 ## Final Gate Approval Draft
 
@@ -77,21 +89,29 @@ Status: approval not requested yet
 
 Planned commands:
 
-- `npm run lint`
-- `npm run build`
-- Optional scoped hardening only if touched routing/provider/budget/import-export/security-sensitive paths require it.
+- `npm run check:premier-no-spend`
+- Optional full hardening only if server/runtime, provider, security, routing,
+  import/export, or budget logic changes again.
+- Save durable gate log/artifact paths for each command that runs.
+- If server/runtime code changed, save restart/reachability proof for `3001`,
+  `5173`, `/api/config`, and the duplicate Electron/process-shape check.
 
 Approval options to ask reviewer:
 
-1. Run lint/build only.
-2. Run lint/build plus scoped hardening.
-3. Do not run final gates yet.
+1. Run premier no-spend check only.
+2. Run premier no-spend check and save durable gate logs.
+3. Run premier no-spend check plus full hardening and save durable gate logs.
+4. Do not run final gates yet.
 
 ## Model Lab Eval Proof
 
 - Report id: pending
 - Proof review status: pending
 - Proof brief: `docs/proof/2026-06-16-model-lab-eval-manual-alt-proof-brief.md`
+- Proof artifact path(s): `docs/proof/2026-06-16-model-lab-eval-manual-alt-proof-brief.md`
+- Same-model prompt strategy id(s): pending provider-approved comparison
+- Same-model prompt strategy variant id(s): pending provider-approved comparison
+- Same-model comparison artifact path(s): pending provider-approved comparison
 - Recommendation report: `docs/proof/2026-06-16-model-lab-eval-manual-alt-recommendation-report.md`
 - Routing Learning trust state: partial no-spend proof. Routing Learning is reachable from Tools, exposes export/import actions and proof-state recommendation counts, and keeps `Apply trusted (0)` disabled when no approved applicable recommendations are available.
 - Notes: partial no-spend UI evidence collected 2026-06-16. Model Lab opens from Tools as an addable panel. Eval tab showed `Prepare smallest eval proof`, proof-gate guidance, 7 eval prompts, enabled model choices, provider-spend guard copy, and disabled `Run Eval (0 x 0 = 0)` before selections. Results currently shows `No results yet. Configure and run an eval.` when no report is selected in the current panel state. History shows existing eval report rows including `Eval 6/6/2026`, `manual-alt`, `manual`, and `test recommendations`, each labeled `proof unreviewed`. A client-only follow-up made History rows real keyboard-accessible buttons with labels such as `Open eval report manual-alt`; browser refresh confirmed 116 saved eval/bench history buttons. Selecting `manual-alt` opened Results with `Export proof brief`, `Export report`, `Recommendation trust: proof not approved yet`, `Review state: unreviewed`, `Mark approved`, `Needs attention`, and `Clear review`, with no document or chat-root horizontal overflow. Because the Codex in-app browser cannot save downloads, durable local export artifacts were generated from the same saved report data and recommendation-report endpoint under `docs/proof/`: `2026-06-16-model-lab-eval-manual-alt-proof-brief.md` and `2026-06-16-model-lab-eval-manual-alt-recommendation-report.md`. A later client-only responsiveness follow-up capped visible Model Lab History rows to the latest 20 eval reports and latest 20 bench runs, with count copy when older rows are hidden; live browser verification of the cap is still pending because the current browser driver timed out before clicking Tools in the heavy app state. A client-only follow-up added Routing Learning as an optional Tools panel, reusing `RoutingLearningPane`; browser refresh confirmed Tools now shows `Routing Learning Add Routing Learning to sidebar`, and opening it showed export/import actions, eval recommendation proof-state counts, `Apply trusted (0)` disabled, observed outcome summaries, route feedback controls, and recent routing decisions. This does not replace a provider-approved proof run, proof review decision, or approved recommendation apply proof.
@@ -102,6 +122,10 @@ Approval options to ask reviewer:
 - Proof review status: pending
 - Proof brief: `docs/proof/2026-06-16-model-lab-bench-4e08ec13-87a0-43d2-a1d9-c92cbd8615df-proof-brief.md`
 - JSON artifact: `docs/proof/2026-06-16-model-lab-bench-4e08ec13-87a0-43d2-a1d9-c92cbd8615df.json`
+- Proof artifact path(s): `docs/proof/2026-06-16-model-lab-bench-4e08ec13-87a0-43d2-a1d9-c92cbd8615df-proof-brief.md`, `docs/proof/2026-06-16-model-lab-bench-4e08ec13-87a0-43d2-a1d9-c92cbd8615df.json`
+- Same-model prompt strategy id(s): pending provider-approved comparison
+- Same-model prompt strategy variant id(s): pending provider-approved comparison
+- Same-model comparison artifact path(s): pending provider-approved comparison
 - Validation summary: pending
 - Notes: partial no-spend UI evidence collected 2026-06-16. Model Lab Bench tab currently shows `No bench results yet. Select tasks and run a bench.` when no bench run is selected in the current panel state. Model Lab History showed many bench entries labeled `proof unreviewed`, including `assisted export regression` rows with `running`, `1 tasks`, and dates from 2026-06-12 and 2026-06-16. A client-only follow-up made History rows real keyboard-accessible buttons with labels such as `Open bench run assisted export regression`; selecting a saved bench row opened Bench with `Export proof brief`, `Export JSON`, `Bench proof needs review`, `Review state: unreviewed`, `Mark approved`, `Needs attention`, `Clear review`, task/model evidence, trace proof, and validation status, with no document or chat-root horizontal overflow. Because the Codex in-app browser cannot save downloads, durable local export artifacts were generated from saved bench run `4e08ec13-87a0-43d2-a1d9-c92cbd8615df` under `docs/proof/`: `2026-06-16-model-lab-bench-4e08ec13-87a0-43d2-a1d9-c92cbd8615df-proof-brief.md` and `2026-06-16-model-lab-bench-4e08ec13-87a0-43d2-a1d9-c92cbd8615df.json`. Bench proof run and proof review decision remain pending.
 
@@ -239,9 +263,9 @@ Phase-mapped manual UI evidence:
 
 ## Final Gates
 
-- `npm run lint`: pending
-- `npm run build`: pending
-- `npm run test:hardening` or scoped substitute: pending
+- `npm run lint`: passed via `npm run check:premier-no-spend` on 2026-06-17
+- `npm run build`: passed via `npm run check:premier-no-spend` on 2026-06-17
+- `npm run test:hardening` or scoped substitute: current scoped substitute is `npm run check:premier-no-spend`; full hardening remains optional if server/runtime, provider, security, routing, import/export, or budget logic changes again
 - Runtime restart/reachability: pending
 - Remaining risks: pending
 
@@ -1103,3 +1127,1605 @@ Phase-mapped manual UI evidence:
   - UI HTML included `<title>OpenHarness — Universal AI Harness</title>` and `id="root"`.
   - Config sample returned 5 providers with active model `Auto`.
 - Provider-backed eval/bench proof remains pending unless explicitly approved separately.
+
+## Phase 7 prompt strategy database start — 2026-06-17
+
+- Added `docs/PROMPT_STRATEGY_DATABASE_PLAN.md` with current provider-doc synthesis for model-specific prompt response strategy.
+- Added `server/promptStrategies.ts` with versioned prompt strategy profiles for OpenAI, Anthropic/Claude, Gemini, Mistral-family, DeepSeek, Qwen, MiniMax, Llama, Gemma, Phi, and unknown/default.
+- `server/promptBuilder.ts` now records the selected prompt strategy in prompt assembly trace metadata.
+- `server/runTrace.ts` and `src/types/index.ts` type the prompt strategy trace for persisted run data and UI consumption.
+- Prompt Microscope now shows strategy id, style, context order, examples policy, reasoning policy, and output contract when prompt assembly metadata is present.
+- Validation and relaunch proof:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+- Docker MCP still reports Docker Desktop is not running. Remaining Phase 7 work: make prompt strategies actively shape prompt construction, persist strategy ids into Routing Learning outcomes, and add `test:prompt-strategy-database`.
+
+## Docker MCP relaunch proof after Docker Desktop start — 2026-06-17
+
+- After Docker Desktop was started, OpenHarness was relaunched with `npm start`.
+- Docker MCP gateway loaded the Docker MCP catalog, enabled `context7`, `sequentialthinking`, `playwright`, `memory`, and `puppeteer`, listed 42 gateway tools plus internal dynamic tools, and connected to OpenHarness with 50 tools available.
+- MCP watchdog started on a 30-second interval.
+- Reachability after relaunch:
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+- Vite console still reports existing theme contrast warnings for charcoal, silver, sage, blush, and system classic high contrast.
+
+## Phase 7 strategy-driven prompt directives — 2026-06-17
+
+- `server/promptBuilder.ts` now translates the selected prompt strategy into small runtime directives for outcome-first prompting, XML/structured boundaries, context ordering, example policy, reasoning policy, tool simplicity, and output contract.
+- The directives are intentionally narrow and additive: they preserve existing role prompts and output contracts while letting model-family strategy influence prompt shape.
+- Validation and relaunch proof:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - Docker MCP connected with 50 tools and watchdog started.
+- Vite still reports the existing theme contrast warnings for charcoal, silver, sage, blush, and system classic high contrast.
+
+## Phase 7 routing-learning prompt strategy outcomes — 2026-06-17
+
+- Routing Learning events now support prompt strategy id, strategy family, and strategy style metadata.
+- New auto-router decisions record the selected model's prompt strategy metadata without changing routing behavior.
+- Learning summaries now include prompt-strategy and strategy-family breakdowns so reviewers can separate weak model choice from weak prompt strategy.
+- Settings > Routing Learning now shows prompt strategy and strategy family breakdown columns beside task type, role, and complexity.
+- Validation and relaunch proof:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - Docker MCP connected with 50 tools and watchdog started.
+- Vite still reports the existing theme contrast warnings for charcoal, silver, sage, blush, and system classic high contrast.
+
+## Phase 7 tool-call reliability trace metadata — 2026-06-17
+
+- Run traces now preserve tool-call status as structured data: `running`,
+  `complete`, `skipped`, or `error`.
+- Tool-call trace steps now include model, provider id, tool round, duration,
+  and redacted error text when invocation fails.
+- Fake `subagent-*` tool calls now appear as failed tool-call trace steps in
+  addition to the generic error step, so model-specific tool hallucinations can
+  be counted later.
+- MCP invocation exceptions now stream and persist as `error` tool-call status
+  instead of appearing as successful completed calls with an `Error:` output.
+- This creates the session/log evidence needed to compare which models make
+  reliable first tool calls, which recover after failures, and which spend extra
+  retry rounds before a useful final answer.
+- Validation and relaunch proof:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - Docker MCP connected with 50 tools.
+- Vite still reports the existing theme contrast warnings for charcoal, silver,
+  sage, blush, and system classic high contrast.
+
+## Phase 7 Auto-Router candidate tool reliability cues — 2026-06-17
+
+- Settings > Auto-Router candidate rows now load Routing Learning summary data
+  and show a `Tool errors/total` badge when the candidate has persisted
+  per-model tool-call traces.
+- Candidate details now include tool-call error rate and recovered tool-error
+  run counts, making tool-heavy route tuning visible beside eval-backed router
+  cues and capability cards.
+- This keeps the behavior advisory: it does not silently change routing, but it
+  gives reviewers evidence before adjusting candidate cards or effective costs.
+- Because this slice only changes client UI and docs, the running server does
+  not need to be restarted; a browser refresh is enough after build output is
+  refreshed.
+- Validation proof:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - Server restart intentionally skipped because no server/runtime files changed
+    in this slice.
+
+## Phase 7 prompt strategy database regression gate — 2026-06-17
+
+- Added `scripts/test-prompt-strategy-database.ts`.
+- Added package script `test:prompt-strategy-database`.
+- The test verifies required prompt strategy profiles for OpenAI, Anthropic,
+  Gemini, Mistral, DeepSeek, Qwen, MiniMax, Llama, Gemma, Phi, and unknown.
+- The test verifies source registry coverage for the researched provider docs,
+  representative model-family mapping, prompt strategy trace shape, and
+  prompt-builder directive inclusion for representative models.
+- This closes the previously documented implementation gap where the prompt
+  strategy database existed but did not have its own focused regression gate.
+- The new gate caught and fixed two prompt strategy integration issues:
+  OpenAI-style `gpt-*` ids now resolve through strategy `appliesTo` hints before
+  falling back to generic model-family detection, and minimal prompts now include
+  the selected strategy id in the emitted prompt text.
+- Validation and relaunch proof:
+  - `npm run test:prompt-strategy-database` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - Docker MCP connected with 50 tools.
+- Vite still reports the existing theme contrast warnings for charcoal, silver,
+  sage, blush, and system classic high contrast.
+
+## Phase 7 tool-call reliability Routing Learning aggregation — 2026-06-17
+
+- Routing Learning now derives tool reliability from persisted session run
+  traces rather than requiring a separate manual log.
+- The `/api/router/learning` summary now includes total traced tool calls,
+  completed/error/skipped/running counts, runs with tool errors, recovered
+  tool-error runs, recent error examples, and breakdowns by model, provider,
+  and tool.
+- Settings > Routing Learning now shows tool-call errors, tool recovery,
+  per-model/per-provider/per-tool error rows, average duration, and recent
+  error examples.
+- Routing Learning JSON and Markdown evidence exports now include tool
+  reliability evidence so reviewers can identify models that make unreliable
+  first tool calls or recover only after extra retries.
+- This advances the model failure memory requirement from the kickoff doc:
+  "what failed, whether fallback was used, and what fixed it."
+- Validation and relaunch proof:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:3001/api/router/learning` returned `200`.
+  - The routing-learning response included `toolReliability=true`,
+    `totalToolCalls=10`, and `errorToolCalls=0` from persisted session traces.
+  - Docker MCP connected with 50 tools.
+- Vite still reports the existing theme contrast warnings for charcoal, silver,
+  sage, blush, and system classic high contrast.
+
+## Phase 7 tool reliability regression gate — 2026-06-17
+
+- Extracted tool reliability aggregation into `server/toolReliability.ts` so the
+  runtime summary can be tested without booting the server or reading real
+  persisted sessions.
+- Added `scripts/test-tool-reliability.ts`.
+- Added package script `test:tool-reliability`.
+- The test covers explicit tool failures, recovered tool-error runs, unrecovered
+  tool-error runs, skipped calls, legacy complete/running inference, recent
+  error ordering, and model/provider/tool breakdowns.
+- The `/api/router/learning` endpoint and routing evidence export still include
+  the same `toolReliability` summary, now produced by the shared helper.
+- Validation and relaunch proof:
+  - `npm run test:tool-reliability` passed.
+  - `npm run test:prompt-strategy-database` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:3001/api/router/learning` returned `200`.
+  - The routing-learning response included `toolReliability=true`,
+    `totalToolCalls=10`, and `errorToolCalls=0` from persisted session traces.
+  - Docker MCP connected with 50 tools.
+- Vite still reports the existing theme contrast warnings for charcoal, silver,
+  sage, blush, and system classic high contrast.
+
+## Phase 7 tool-heavy routing advice — 2026-06-17
+
+- Tool reliability summaries now include derived `toolHeavyAdvice` rows.
+- Advice rows are advisory only: they can flag a model as clean, caution-worthy,
+  or risky for tool-heavy work, or flag a recurring tool failure point, but they
+  do not silently change thresholds, candidate costs, or capability cards.
+- Settings > Routing Learning now shows tool-heavy routing advice beside raw
+  tool reliability buckets.
+- Routing Learning Markdown evidence briefs now include the same advice so
+  exported proof carries the interpretation as well as the raw counts.
+- `test:tool-reliability` now verifies advice ordering and content for risky
+  models, recurring tool failures, and clean tool traces.
+- Validation and relaunch proof:
+  - `npm run test:tool-reliability` passed.
+  - `npm run test:prompt-strategy-database` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:3001/api/router/learning` returned `200`.
+  - The routing-learning response included `toolReliability=true`,
+    `totalToolCalls=10`, and `toolHeavyAdvice.length=1` from persisted session
+    traces.
+  - Docker MCP connected with 50 tools.
+- Vite still reports the existing theme contrast warnings for charcoal, silver,
+  sage, blush, and system classic high contrast.
+
+## Phase 7 first-call and retry-round tool reliability signals — 2026-06-17
+
+- Tool reliability buckets now track tool-using run count, first-call failures,
+  first-call failure rate, and average recovery rounds after the first tool
+  error.
+- The overall Routing Learning tool reliability summary now includes
+  `runsWithToolCalls`, `firstCallErrorRuns`, and `avgRecoveryRounds`.
+- Tool-heavy routing advice now carries first-call failure rate and average
+  recovery rounds, so reviewers can distinguish clean first tool choices from
+  models that only recover after extra retries.
+- Settings > Routing Learning and Markdown evidence briefs now expose
+  first-call failures and recovery rounds beside raw tool-call error counts.
+- `test:tool-reliability` now verifies first-call failure counts/rates and
+  recovery-round calculations.
+- Validation and relaunch proof:
+  - `npm run test:tool-reliability` passed.
+  - `npm run test:prompt-strategy-database` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - OpenHarness was relaunched with `npm start`.
+  - `http://127.0.0.1:3001/` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:3001/api/router/learning` returned `200`.
+  - The routing-learning response included `toolReliability=true`,
+    `totalToolCalls=10`, `runsWithToolCalls=1`, `firstCallErrorRuns=0`,
+    `avgRecoveryRounds=0`, and `toolHeavyAdvice.length=1` from persisted
+    session traces.
+  - Docker MCP connected with 50 tools.
+- Vite still reports the existing theme contrast warnings for charcoal, silver,
+  sage, blush, and system classic high contrast.
+
+## Phase 7 Model Lab prompt strategy evidence - 2026-06-17
+
+- Added prompt strategy trace persistence to Model Lab eval and bench result rows.
+- Added proof brief summaries and row-level evidence panels for prompt strategy id, family, style, reasoning policy, tool policy, output contract, and review date.
+- Extended `test:prompt-strategy-database` to cover Model Lab strategy metadata shape.
+
+## Phase 7 same-model strategy comparison - 2026-06-17
+
+- Added optional prompt strategy id overrides to prompt building while preserving default model-family strategy selection.
+- Added opt-in Model Lab eval strategy selection so the same prompt/model can be compared across multiple prompt contracts.
+- Extended `test:prompt-strategy-database` to verify same-model strategy overrides and distinct prompt contracts.
+
+## Phase 7 prompt strategy outcome summaries - 2026-06-17
+
+- Eval summaries now aggregate by prompt strategy id beside model id.
+- Model Lab proof briefs and recommendation exports expose best prompt strategy, family/style, average score, latency, tool count, run count, and best model for each strategy.
+- Extended `test:prompt-strategy-database` to verify strategy outcome aggregation from same-model eval rows.
+
+## Phase 7 role/task prompt strategy variants - 2026-06-17
+
+- Added role/task variants to prompt strategy profiles for coder/tool-proof, reviewer/findings, planner/artifact, summarizer/direct, and reasoner/tradeoff behavior.
+- Prompt assembly traces now record variant id, role, task type, and selection reason when a variant is selected.
+- Prompt directives now include the selected role/task variant so the emitted prompt contract changes with role/task type, not just model family.
+- Eval prompt strategy summaries use variant-aware keys when variant metadata exists.
+- Extended `test:prompt-strategy-database` to verify variant coverage, same-model override variants, reviewer/planner variant selection, and variant-aware eval summaries.
+
+## Phase 7 Routing Learning prompt strategy variants - 2026-06-17
+
+- Auto-router learning events now persist prompt strategy variant id, inferred task type, and variant selection reason beside base strategy id/family/style.
+- Routing Learning summaries now include a strategy-variant breakdown for reviewed outcomes.
+- Extended `test:router-learning-outcomes` to verify variant metadata persistence, hydration, and summary aggregation.
+
+## Phase 7 Routing Learning variant export evidence - 2026-06-17
+
+- Routing Learning Markdown briefs now include prompt strategy variant outcome summaries.
+- Recent routing decision lines in the Markdown brief include the variant-aware prompt strategy key.
+- Extended `test:router-learning-outcomes` to verify imported routing evidence preserves prompt strategy variant metadata and selected dataset kind.
+
+## Phase 7 Prompt Microscope strategy variant visibility - 2026-06-17
+
+- Prompt Microscope now shows prompt strategy variant id, inferred task type, route role, tool policy, and variant selection reason beside base strategy fields.
+- Extended `test:prompt-strategy-database` to verify prompt assembly traces and prompt-strategy section previews carry variant metadata for microscope/debug-bundle visibility.
+
+## Phase 7 best prompt strategy variant signals - 2026-06-17
+
+- Routing Learning summaries now expose `bestPromptStrategyVariants`, a ranked prompt-contract signal derived from reviewed outcomes.
+- Routing Learning UI and Markdown briefs now show the strongest variant-aware prompt contract beside task-type model winners.
+- Extended `test:router-learning-outcomes` to verify the best strategy variant signal and best model evidence.
+
+## Phase 7 Model Lab variant-aware proof summaries - 2026-06-17
+
+- Model Lab proof briefs now summarize observed prompt strategies with variant-aware keys when role/task variants are present.
+- Observed strategy summary lines now include task type and role context so proof exports do not collapse different prompt contracts under the same base family strategy.
+- Extended `test:prompt-strategy-database` to verify variant-aware strategy evidence key construction.
+
+## Phase 7 session outcome mining for tool-call errors - 2026-06-17
+
+- Tool reliability now captures recent recovery examples from saved run traces, including first failed model/provider/tool, later completed tool calls, final-answer capture, and recovery-round distance.
+- Routing Learning and its export brief surface these paths so model/tool errors can be reduced at the source instead of merely retried.
+- Tool reliability summaries now also include session outcome examples for each tool-error run: recovered tool path, fallback tool path, final-answer-only recovery, unrecovered error, or running/unknown.
+- Routing Learning Markdown/JSON evidence and UI rows expose these outcome examples, including prompt strategy context, worked-by model/tool, final status, and retry distance.
+- Auto-router candidate cards include compact session-outcome evidence so classifier scoring can avoid brittle first-tool choices and prefer known short recovery paths for similar tool-heavy tasks.
+- Validation and relaunch proof:
+  - `npm run test:prompt-routing-memory` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - Follow-up export proof: `npm run test:router-learning-export` passed after adding an explicit `toolReliability.outcomeExamples` fixture, and `npm run test:prompt-routing-memory` plus `npm run lint` passed again.
+  - Follow-up kickoff gate alignment: `test:prompt-routing-memory` now runs the kickoff's named `test:prompt-routing-quality-readiness` and `test:prompt-routing-output-p0` gates before the Phase 7 prompt-strategy/outcome-persistence/tool-reliability/export/import/auto-router tests. The expanded bundle passed with `test:router-learning-outcomes` included, and `npm run lint` passed.
+  - Relaunched OpenHarness after server/runtime changes.
+  - `http://127.0.0.1:3001/api/config` returned a non-empty response.
+  - `http://127.0.0.1:5173/` returned the Vite HTML shell.
+  - `http://127.0.0.1:3001/api/router/learning` exposes top-level `toolReliability.outcomeExamples`.
+  - Docker MCP connected with 50 tools.
+
+## Phase 5 built-in theme contrast cleanup - 2026-06-17
+
+- Adjusted built-in theme contrast tokens that were repeatedly warning during runtime proof:
+  - Charcoal/System Classic high contrast now checks readable secondary text on elevated surface instead of dark-on-dark bubble/surface.
+  - Silver, Sage, and Blush light themes now use darker accessible accent/user-bubble colors while preserving their visual families.
+- Added `test:theme-contrast` to assert built-in themes have no contrast regressions.
+- Added the theme contrast gate to `test:hardening`.
+- Validation proof:
+  - `npm run test:theme-contrast` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - Follow-up Phase 3 cleanup removed the remaining `SubAgentTracker` ineffective dynamic-import warning.
+
+## Phase 5 reduced-transparency regression gate - 2026-06-17
+
+- Extended the reduced-transparency CSS fallback to cover overlay backdrops that still declared blur:
+  - Settings modal overlay.
+  - Review Changes overlay.
+- Added `test:theme-reduced-transparency` to assert the media query disables texture opacity, backdrop blur, and surface opacity while routing primary panels and overlays through theme fallback surface, border, and shadow variables.
+- Added the reduced-transparency gate to `test:hardening`.
+- Validation proof:
+  - `npm run test:theme-reduced-transparency` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+
+## Phase 5 reduced-motion regression gate - 2026-06-17
+
+- Corrected the reduced-transparency overlay selector to cover the actual Review Changes overlay class.
+- Extended reduced-motion protection to newer motion surfaces:
+  - Chat message entrance animation.
+  - Settings modal entrance animation.
+  - Review Changes overlay/flyout entrance animation.
+  - Agent detail active-row pulse.
+- Added `test:theme-reduced-motion` to assert the reduced-motion media query covers the major shell/chat/work/status motion selectors.
+- Added the reduced-motion gate to `test:hardening`.
+- Validation proof:
+  - `npm run test:theme-contrast` passed.
+  - `npm run test:theme-reduced-transparency` passed.
+  - `npm run test:theme-reduced-motion` passed.
+  - `npm run lint` passed.
+  - `npm run build` passed.
+
+## Phase 5 grouped theme accessibility proof command - 2026-06-17
+
+- Added `test:theme-accessibility` as the focused no-spend Phase 5 proof bundle.
+- The grouped command runs built-in theme contrast, reduced-transparency, and reduced-motion regression gates.
+- `test:hardening` now calls the grouped theme accessibility command instead of duplicating the three individual theme gates inline.
+- Validation proof:
+  - `npm run test:theme-accessibility` passed.
+  - `npm run lint` passed.
+
+## Premier no-spend automated proof command - 2026-06-17
+
+- Added `test:premier-no-spend` as the current no-provider automated proof baseline.
+- The baseline now includes Phase 5 theme accessibility, Phase 7 prompt/routing
+  memory, and Phase 4 execute/proof hygiene.
+- The command runs `test:theme-accessibility` and `test:prompt-routing-memory`.
+- Added `check:premier-no-spend` for the same no-provider baseline plus `lint`
+  and `build`.
+- This does not replace manual/browser proof or provider-backed Model Lab proof, but gives future sessions one safe command before those heavier checks.
+- Validation proof:
+  - `npm run test:premier-no-spend` passed.
+  - `npm run lint` passed.
+  - `npm run check:premier-no-spend` passed after adding the combined no-provider test/lint/build command.
+
+## Phase 7 normalized tool-error signatures - 2026-06-17
+
+- Added normalized per-model/provider/tool error signatures to
+  `server/toolReliability.ts`.
+- Each signature captures runs, recovered/unrecovered counts, fallback recovery
+  count, prompt strategy/variant context, sample error text, example run ids,
+  and the later model/tool path that worked with average retry distance.
+- Auto-router candidate cards now include matching signature evidence so the
+  classifier can avoid repeating the same failed first tool or choose a known
+  recovery path earlier.
+- Regression coverage:
+  - `scripts/test-tool-reliability.ts` now asserts signature grouping,
+    recovered/unrecovered counts, strategy variant context, worked-by paths, and
+    candidate-card signature annotations.
+  - `npm run test:tool-reliability` passed.
+  - `npm run test:execute-proof-hygiene` passed.
+  - `npm run check:premier-no-spend` passed with Phase 5 theme accessibility,
+    Phase 7 prompt/routing memory, Phase 4 execute/proof hygiene, lint, and
+    build.
+  - Runtime was restarted after the server/routing change; `3001`, `5173`,
+    server root, `/api/config`, and `/api/router/learning` responded, and the
+    Routing Learning payload exposed `toolReliability.errorSignatures`.
+
+## Phase 7 tool-error learning contract alignment - 2026-06-17
+
+- Confirmed the current implementation tracks tool-call errors per model,
+  provider, tool, prompt strategy, and prompt variant through saved run traces.
+- Confirmed session outcome mining connects first failed tool calls to later
+  completed tool calls, final-answer-only recovery, unrecovered errors, and
+  retry distance so routing can learn what ultimately worked instead of only
+  counting failures.
+- Added the missing client API type for `toolReliability.errorSignatures`, so
+  normalized model/provider/tool/signature groups remain part of the visible
+  Routing Learning/export contract.
+- Strengthened the Premier model-harness guard to protect normalized
+  tool-error signatures, session-outcome rows, and retry-distance fields.
+- Prompt Microscope now reads the latest `worktree_isolation` lifecycle event,
+  so preserved or auto-discarded worktree state overrides the initial ready
+  event when users inspect a run.
+- This slice changed client/types/tests/docs only. The running server does not
+  need to be restarted; a browser refresh is enough for the Prompt Microscope
+  display change.
+
+## Phase 7 normalized tool-error signature visibility - 2026-06-17
+
+- Routing Learning now renders a dedicated `Normalized tool-error signatures`
+  evidence section when saved traces contain signature rows.
+- Each row shows the failed model/tool, normalized signature, recovered and
+  unrecovered run counts, fallback recovery count, prompt strategy or variant
+  context, later model/tool path that worked, average retry distance, and
+  example run ids.
+- Routing Learning Markdown evidence exports now include the same normalized
+  signature rows, so offline evidence carries the exact model/provider/tool
+  failure memory used to reduce first-call errors and retry loops.
+- The Premier model-harness guard now protects both the in-app normalized
+  signature section and the Markdown export signature heading, including
+  worked-by retry distance and example run-id fields.
+- Session outcome rows, recovery-path rows, and recent tool-error rows now
+  surface session/run ids directly in Routing Learning and Markdown evidence,
+  making it easier to inspect the saved session or logs that prove what
+  ultimately worked.
+- Tool failure memory and normalized signature summaries now carry bounded
+  `exampleSessionIds` beside `exampleRunIds`, so compact model/tool failure
+  rows can point directly to both the saved session and run trace that produced
+  the evidence.
+- This is client/docs/test-only visibility work. Browser/manual proof and real
+  saved-session signature rows remain pending before final closeout.
+
+## Phase 7 tool-error session lookup restart proof - 2026-06-17
+
+- Runtime tool-reliability summary shape changed to include example session ids
+  for model/tool failure memory and normalized tool-error signatures.
+- Restarted with the repo-native `npm start` launcher after stopping stale
+  `3001`/`5173` listeners.
+- Reachability proof:
+  - `3001` listener: PID `19023`.
+  - `5173` listener: PID `19020`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+
+## Phase 7 recovery-pattern session lookup - 2026-06-17
+
+- Recurring tool-call recovery patterns now carry bounded `exampleSessionIds`
+  beside `exampleRunIds`.
+- Recovery-pattern session ids are also merged into compact model failure memory
+  rows, so the failure-memory view preserves the saved-session breadcrumb even
+  when read apart from the recovery-pattern list.
+- Routing Learning recovery-pattern rows and Markdown evidence now show both
+  session ids and run ids, so repeated failure-to-working-path patterns can be
+  traced back to saved session evidence.
+- Premier model-harness guards now cover the recovery-pattern session-id
+  breadcrumb.
+- Restarted with the repo-native `npm start` launcher after stopping stale
+  `3001`/`5173` listeners.
+- Reachability proof:
+  - `3001` listener: PID `44467`.
+  - `5173` listener: PID `44462`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+- Follow-up propagation: recovery-pattern session ids are now merged into
+  model failure-memory rows.
+- Follow-up restart/reachability proof:
+  - `3001` listener: PID `63872`.
+  - `5173` listener: PID `63871`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+
+## Phase 7 routing-learning export session breadcrumbs - 2026-06-17
+
+- `scripts/test-router-learning-export.ts` now fixtures recovery patterns,
+  failure memory, and normalized error signatures with `exampleSessionIds` and
+  `exampleRunIds`.
+- The export guard now asserts that Routing Learning exports preserve
+  recovery-pattern, failure-memory, and normalized-signature session
+  breadcrumbs, plus normalized-signature retry-distance evidence.
+- `scripts/test-router-learning-import.ts` now confirms full Routing Learning
+  exports that carry enriched `summary.toolReliability` breadcrumb evidence
+  still preview/import their routing events cleanly.
+- This protects the offline evidence bundle used to inspect what failed, which
+  saved session/run proves it, and what model/tool path eventually worked.
+
+## Phase 7 auto-router candidate breadcrumb evidence - 2026-06-17
+
+- Auto-Router tool-reliability candidate-card annotations now include compact
+  example session/run breadcrumbs for repeated recovery patterns, model failure
+  memory, session outcomes, and normalized error signatures.
+- Settings > Auto-Router candidate rows now also include session/run
+  breadcrumbs in the visible recent recovery path and accessibility text.
+- Settings > Auto-Router candidate rows now label the saved-session breadcrumb
+  separately as `Recovery proof: session ..., run ...`.
+- The visible Recovery proof label now also exposes a model-specific
+  accessibility label with the same session/run ids and Auto-Router context.
+- The Phase 7 checklist now requires that visible `Recovery proof: session ...,
+  run ...` label during manual Settings > Auto-Router proof, plus its
+  model-specific accessibility label.
+- `scripts/test-premier-baseline-manifest.ts` now preserves both the visible
+  Recovery proof label and accessibility-label requirement in the checklist and
+  handoff.
+- `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` now requires both
+  classifier-side candidate-card breadcrumbs and Settings-side candidate-row
+  recovery breadcrumbs before Phase 7 routing-memory proof can close.
+- `scripts/test-premier-baseline-manifest.ts` now keeps both breadcrumb
+  requirements visible in the Premier no-spend baseline handoff.
+- `scripts/test-premier-baseline-manifest.ts` now also preserves the exact
+  Settings-side `Recovery proof: session ..., run ...` label requirement across
+  the checklist and handoff.
+- `docs/PREMIER_HARNESS_KICKOFF.md` now also names Settings Auto-Router
+  candidate-row saved-session breadcrumbs in the Phase 7 stop condition, and
+  the stop-condition audit guard preserves that source-of-truth wording.
+- `docs/PREMIER_HARNESS_KICKOFF.md` Stop Condition and paste-ready goal prompt
+  now explicitly carry the tool-error memory, saved session/run breadcrumb,
+  retry-distance, and later-working-path requirements.
+- `scripts/test-premier-stop-condition-audit.ts` now preserves those expanded
+  kickoff Stop Condition and paste-ready goal prompt requirements.
+- `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` now has a phase-mapped row for
+  Phase 7 tool-error breadcrumb evidence across Routing Learning, Auto-Router
+  Settings, and classifier-side candidate-card annotations.
+- The checklist's Premier no-spend command-scope list now also names Phase 7
+  tool-error breadcrumb evidence beside prompt/routing memory.
+- `NEXT_SESSION.md` now mirrors that Premier no-spend command-scope wording.
+- `scripts/test-premier-baseline-manifest.ts` now guards that quick-handoff
+  command-scope wording too.
+- `scripts/test-premier-stop-condition-audit.ts` now requires that phase-mapped
+  breadcrumb row to stay in the proof checklist.
+- `scripts/test-premier-baseline-manifest.ts` now also keeps the phase-mapped
+  breadcrumb row tied to the Premier no-spend manifest.
+- This gives the classifier-side routing evidence the same saved-session lookup
+  trail as Routing Learning UI/export, so repeated tool failures can be traced
+  back to concrete run evidence while reducing future first-call retries.
+- `scripts/test-tool-reliability.ts` now guards those candidate-card
+  breadcrumbs.
+- `scripts/test-premier-model-harness.ts` now also guards the Auto-Router
+  candidate-card breadcrumb strings so the Premier no-spend model-harness gate
+  covers classifier-side tool-error evidence.
+- `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` now explicitly requires
+  Auto-Router candidate-card breadcrumb examples for the saved session/run ids
+  behind tool-error recovery evidence, and the closeout-matrix guard preserves
+  that requirement.
+- `scripts/test-premier-baseline-manifest.ts` now also keeps that
+  candidate-card breadcrumb requirement tied to the official Premier no-spend
+  baseline manifest across the checklist, proof file, and next-session handoff.
+- `scripts/test-premier-stop-condition-audit.ts` now also requires the
+  checklist and next-session handoff to preserve the candidate-card breadcrumb
+  closeout requirement.
+- Restarted with the repo-native `npm start` launcher after stopping stale
+  `3001`/`5173` listeners.
+- Reachability proof:
+  - `3001` listener: PID `40553`.
+  - `5173` listener: PID `40550`.
+  - `http://127.0.0.1:3001/api/config` returned `200`.
+  - `http://127.0.0.1:5173/` returned `200`.
+
+## Phase 3 agent detail lazy chunk cleanup - 2026-06-17
+
+## Narrow chat-first layout browser proof - 2026-06-17
+
+- Live no-provider browser inspection at a narrow viewport found a closeout risk:
+  the sidebar and main chat region both reported visible overlapping bounds when
+  the sidebar was default-open under the responsive breakpoint.
+- Fixed the narrow default by auto-closing the sidebar at widths at or below
+  640px while keeping the top-bar sidebar toggle available for intentional
+  navigation.
+- The first post-fix narrow pass removed sidebar/main overlap but exposed a
+  squeezed composer text area at 28px wide.
+- Fixed the narrow composer layout so the input area uses the available chat
+  width and the textarea can shrink/grow within the row.
+- Final live browser proof:
+  - viewport: 433px by 889px
+  - visible sidebar: none by default
+  - main area: x=0, width=433px
+  - input area: x=10, width=413px
+  - chat textarea: x=15, width=360px, `aria-label="Chat message"`
+  - sidebar/main overlap: false
+  - horizontal overflow: false
+  - visible drag/reorder affordances: none
+  - visible alerts: none
+- Validation:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+- This is client-only Phase 1/manual UI proof progress. No server restart was
+  required; a browser refresh was enough.
+
+## Premier narrow-layout regression gate - 2026-06-17
+
+- Added `scripts/test-premier-narrow-layout.ts` to lock down the narrow
+  chat-first behavior found during live manual proof:
+  - `src/App.tsx` keeps the 640px narrow sidebar auto-close breakpoint.
+  - the sidebar closes automatically at narrow width and on resize.
+  - the resize listener is cleaned up.
+  - `src/styles/components.css` keeps the narrow composer width override.
+  - the textarea keeps `min-width: 0`, `flex: 1 1 auto`, and `width: 100%`
+    so it cannot collapse to the 28px failure observed in the browser pass.
+  - Settings keeps its narrow modal contract: `94vw`, no min-width, stacked
+    modal body, full-width nav, bounded nav height, bottom nav divider, and
+    hidden horizontal content overflow.
+  - Routing Learning keeps its narrow evidence contract: explanation, metrics,
+    debug, breakdown, and mini grids collapse to one column; headers stack; and
+    actions align from the start.
+  - Model Library/Model Lab-adjacent grid rules keep toolbar, summary, and
+    model-card columns at one column under the narrow breakpoint.
+  - Model Lab and Routing Learning panel registry entries keep narrow-safe
+    minimum panel sizes.
+- Added `test:premier-narrow-layout`.
+- `test:premier-no-spend` now runs:
+  - Phase 5 theme accessibility
+  - Phase 7 prompt/routing memory
+  - Phase 4 execute/proof hygiene
+  - Premier narrow-layout regression
+- Validation:
+  - `npm run test:premier-narrow-layout` passed.
+  - `npm run lint` passed.
+  - `npm run check:premier-no-spend` passed with the new narrow-layout gate
+    included.
+  - Follow-up `npm run check:premier-no-spend` passed again after expanding the
+    narrow-layout gate to Settings, Routing Learning, Model Library/Model
+    Lab-adjacent grids, and proof-panel minimum sizes.
+- Browser limitation note: the in-app browser viewport override stopped honoring
+  the requested narrow width during follow-up Settings proof, so the new
+  regression gate records the narrow layout contract, while broader narrow
+  Settings/Model Lab/Routing Learning live proof remains pending.
+- This is client/test/docs/package wiring only. No server restart was required.
+
+## Premier proof-trust regression gate - 2026-06-17
+
+- Added `scripts/test-premier-proof-trust.ts` to lock down the Phase 6
+  proof-review and trusted-apply contracts without provider spend.
+- The gate asserts that Model Lab keeps:
+  - labelled proof-review groups and checklists
+  - visible review state
+  - visible proof-review note labels
+  - grouped proof-review actions
+  - approve / needs-attention / clear-review labels with trust consequences
+  - eval and bench export trust wording
+  - proof brief exports preserving proof-review state and notes
+  - unapproved eval recommendations/rankings framed as review-only evidence
+- The gate asserts that Routing Learning keeps:
+  - bulk apply filtered to `proofTrusted` recommendations only
+  - skipped unapproved recommendations called out after bulk apply
+  - disabled bulk apply when no approved proof exists
+  - individual recommendation labels for approved, unreviewed/manual, and
+    needs-attention/blocked states
+  - export counts for approved, unreviewed, and needs-attention proof
+  - Markdown export guidance that unreviewed or attention-needed proof must not
+    be treated as approved evidence
+- The gate asserts that Settings keeps proof-trust copy and Agent Roles /
+  Auto-Router action labels that distinguish approved, manual-after-review, and
+  blocked proof states.
+- Added `test:premier-proof-trust`.
+- `test:premier-no-spend` now includes the proof-trust gate.
+- Validation:
+  - `npm run test:premier-proof-trust` passed.
+  - `npm run lint` passed.
+  - `npm run check:premier-no-spend` passed with Phase 5 theme accessibility,
+    Phase 7 prompt/routing memory, Phase 4 execute/proof hygiene, Premier
+    narrow-layout regression, Premier proof-trust regression, lint, and build.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier steering-contract regression gate - 2026-06-17
+
+- Added `scripts/test-premier-steering-contract.ts` to lock down the no-spend
+  steering contract that supports the kickoff's "steer incorrect work before it
+  goes too far" requirement.
+- The gate asserts that:
+  - all steering actions are accepted by the API and typed in run traces
+  - invalid steering actions return `400`
+  - missing sessions/runs return `404`
+  - steering writes structured `type: 'steering'`, `source: 'user'`,
+    `target`, `note`, and `createdAt` run-trace events
+  - steering events pass through `appendRunStep()` so trace redaction still
+    applies
+  - active-run orchestrator and agent steering notes are queued, drained, and
+    injected into orchestration or direct-model prompt context
+  - pause, cancel, and redirect update active-run control state
+  - the client API posts action/note/target to the steering endpoint and raises
+    useful errors
+  - `App` rejects empty `add-note`, updates message run traces, and refreshes
+    the agent detail state after steering saves
+  - Agent detail routes run-level steering to the orchestrator, phase-level
+    steering to the agent, uses redirect note text when present, explains replay
+    persistence, and exposes steering history/replay filters after completion
+- Added `test:premier-steering-contract`.
+- `test:premier-no-spend` now includes the steering-contract gate.
+- Validation:
+  - `npm run test:premier-steering-contract` passed.
+  - `npm run lint` passed.
+  - `npm run check:premier-no-spend` passed with Phase 5 theme accessibility,
+    Phase 7 prompt/routing memory, Phase 4 execute/proof hygiene, Premier
+    narrow-layout regression, Premier proof-trust regression, Premier
+    steering-contract regression, lint, and build.
+- This is test/docs/package wiring only. No server restart was required.
+- Remaining gap: live provider-approved active-run proof still needs to show a
+  real steering action recorded in replay history during a safe phase.
+
+## Premier artifact-review regression gate - 2026-06-17
+
+- Added `scripts/test-premier-artifact-review.ts` to lock down the kickoff's
+  artifact-first verification contract without provider spend.
+- The gate asserts that generated artifacts keep:
+  - a quiet collapsed `Review artifact(s)` entry outside hidden diagnostics
+  - review notes/comments
+  - flag / needs-revision state
+  - approval state
+  - structured `approve-artifact` and `needs-revision` steering persistence
+  - saved replay event feedback when a run trace is present
+  - local-only feedback when no replay persistence path exists
+  - `Revise` prompts that include artifact type, label, id, content, and the
+    current reviewer note
+  - accessible labels, busy state, review state, and feedback status text
+- Added `test:premier-artifact-review`.
+- `test:premier-no-spend` now includes the artifact-review gate.
+- Validation:
+  - `npm run test:premier-artifact-review` passed.
+  - Full `npm run check:premier-no-spend` was not rerun after adding this gate;
+    run it when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier calm-chat regression gate - 2026-06-17
+
+- Added `scripts/test-premier-calm-chat.ts` to lock down the kickoff's calm-chat
+  contract without provider spend.
+- The gate asserts that:
+  - message diagnostics start collapsed behind `Details`
+  - the Details control exposes an accessible summary of hidden surfaces
+  - tool calls, confidence, team-plan artifacts, Prompt Microscope, and next
+    actions render only inside the opened details region
+  - suggested next actions default to a compact `Actions` affordance before
+    showing chips
+  - confidence stays opt-in and self-contained inside Details
+  - Details and confidence affordances keep quiet visual styling
+- Added `test:premier-calm-chat`.
+- `test:premier-no-spend` now includes the calm-chat gate.
+- Validation was not rerun in this slice; run `npm run test:premier-calm-chat`
+  or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier active-work regression gate - 2026-06-17
+
+- Added `scripts/test-premier-active-work.ts` to lock down the kickoff's Phase 2
+  active-work model without provider spend.
+- The gate asserts that:
+  - `buildRunTree()` nests phase agents under the owning run using the phase id
+    prefix
+  - `buildActiveWorkState()` uses real run-trace orchestration mode and phase
+    agents to produce workflow steps
+  - running, blocked, error, completed, and pending states remain explicit
+    status labels rather than fake percentage progress
+  - the chat active-work strip stays a compact status entry point with
+    accessible workflow, step, metadata, and `Agent detail` labels
+  - the sidebar run/phase rows expose status, task, model/provider, attention,
+    artifact, and focus cues for the right-hand inspector
+- Added `test:premier-active-work`.
+- `test:premier-no-spend` now includes the active-work gate.
+- Validation was not rerun in this slice; run `npm run test:premier-active-work`
+  or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier layout-shell regression gate - 2026-06-17
+
+- Added `scripts/test-premier-layout-shell.ts` to lock down the kickoff's Phase
+  1 chat-first/non-draggable shell contract without provider spend.
+- The gate asserts that:
+  - `DEFAULT_LAYOUT` remains chat-only
+  - default Tools panels exclude the permanent `sub-agents` split
+  - saved layouts prune all default-hidden panels plus forced-hidden
+    `sub-agents`
+  - advanced panels stay reachable from the top-bar `Tools` menu
+  - reset returns to the default layout
+  - `LayoutEngine` and `PanelWrapper` do not expose default drag/drop or reorder
+    handlers
+  - panel headers keep close buttons labelled without adding drag handles
+- Added `test:premier-layout-shell`.
+- `test:premier-no-spend` now includes the layout-shell gate.
+- Validation was not rerun in this slice; run `npm run test:premier-layout-shell`
+  or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier agent-detail regression gate - 2026-06-17
+
+- Added `scripts/test-premier-agent-detail.ts` to lock down the kickoff's Phase
+  3 right-hand inspector contract without provider spend.
+- The gate asserts that:
+  - `AgentFocusPanel` remains a complementary `Agent detail inspector`
+  - the detail panel lazy-loads `SubAgentTracker` instead of keeping permanent
+    split chrome
+  - selected agents expose status, objective, model/provider, token/time, and
+    focus labels
+  - `SubAgentTracker` keeps workflow progress, compact tool bundles, replay
+    summary, latest proof, replay filters, and replay event list semantics
+  - steering controls preserve flag, redirect, pause, cancel, request-proof,
+    approve-artifact, needs-revision, note, target, and history behavior
+  - replay filters preserve proof/files/tools/routing/steering/error views
+- Added `test:premier-agent-detail`.
+- `test:premier-no-spend` now includes the agent-detail gate.
+- Validation was not rerun in this slice; run `npm run test:premier-agent-detail`
+  or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier model-harness regression gate - 2026-06-17
+
+- Added `scripts/test-premier-model-harness.ts` to lock down the kickoff's
+  Phase 6 model-harness trust contract without provider spend.
+- The gate asserts that:
+  - model ability utilities expose thinking, vision, tools, and long-context
+    support with honest available/unavailable labels
+  - Settings keeps model capability scorecards and role/effort scoring inputs
+  - premium/luxury model warnings, model budget controls, and provider
+    rate-limit controls remain visible before expensive work
+  - Auto-Router explains classifier, default fallback, threshold, effective
+    cost, eval-proof trust, and candidate evidence freshness
+  - Auto-Router candidate rows show eval-backed cues, tool reliability,
+    risky tool pairs, prompt-strategy reliability, capability flags, effective
+    cost, and editable capability cards
+  - Routing Learning shows tool reliability by model, provider, tool,
+    model/tool pair, prompt strategy, and strategy variant with first-call and
+    recovery-round evidence
+  - Model Lab proof briefs preserve best model, prompt strategy results,
+    recommendation trust, and inspectable output evidence wording
+- Added `test:premier-model-harness`.
+- `test:premier-no-spend` now includes the model-harness gate.
+- Validation was not rerun in this slice; run
+  `npm run test:premier-model-harness` or `npm run check:premier-no-spend`
+  when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier theme-texture regression gate - 2026-06-17
+
+- Added `scripts/test-premier-theme-textures.ts` to lock down the kickoff's
+  Phase 5 texture-layer contract without provider spend.
+- The gate asserts that:
+  - theme tokens enumerate the approved texture recipes
+  - built-in themes expose texture CSS variables and safe `none` defaults
+  - theme plugin validation and schema cap `textureOpacity` at `0.18`
+  - app-shell texture recipes render through `.app-layout::before`, not dense
+    text surfaces
+  - texture overlays ignore pointer events
+  - reduced transparency disables texture opacity, blur, and backdrop filters
+  - Settings exposes a shell-wide texture opacity slider with `0..18%` bounds
+    and explains the reduced-transparency fallback
+- Added `test:premier-theme-textures`.
+- `test:premier-no-spend` now includes the theme-texture gate.
+- Validation was not rerun in this slice; run
+  `npm run test:premier-theme-textures` or `npm run check:premier-no-spend`
+  when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier Review Changes regression gate - 2026-06-17
+
+- Added `scripts/test-premier-review-changes.ts` to lock down the kickoff's
+  one-path diff/patch/review contract without provider spend.
+- The gate asserts that:
+  - permanent `Diffs` / `Patches` layout panels are not reintroduced
+  - `ReviewChangesFlyout` remains the single accessible dialog for Summary,
+    Files, Patches, Validate, and Commit
+  - the flyout preserves keyboardable tab semantics
+  - file rows keep stage, unstage, review, explain, and propose-patch actions
+  - patch proposals stay hosted inside the Review Changes flow
+  - validation proof can be copied, downloaded, and saved back to chat as an
+    artifact
+  - Environment rail `Changes` is the primary review entry point for no-project,
+    clean-tree, and changed-tree states
+  - assistant message patch actions route into the patch proposal/review flow
+- Added `test:premier-review-changes`.
+- `test:premier-no-spend` now includes the Review Changes gate.
+- Validation was not rerun in this slice; run
+  `npm run test:premier-review-changes` or `npm run check:premier-no-spend`
+  when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier baseline-manifest regression gate - 2026-06-17
+
+- Added `scripts/test-premier-baseline-manifest.ts` to lock down the Phase 0
+  source-of-truth contract for the Premier no-spend baseline.
+- The gate asserts that:
+  - `test:premier-no-spend` includes every current no-spend gate
+  - `check:premier-no-spend` still runs the no-spend baseline plus lint/build
+  - `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` names every current gate scope
+  - this closeout proof document keeps a section for every Premier gate
+  - `NEXT_SESSION.md` lists every current Premier regression in the handoff
+- Added `test:premier-baseline-manifest`.
+- `test:premier-no-spend` now includes the baseline-manifest gate.
+- Validation was not rerun in this slice; run
+  `npm run test:premier-baseline-manifest` or
+  `npm run check:premier-no-spend` when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier stop-condition audit regression gate - 2026-06-17
+
+- Added `scripts/test-premier-stop-condition-audit.ts` to lock down the
+  kickoff stop-condition audit before the goal can be treated as complete.
+- The gate asserts that:
+  - every kickoff stop condition remains present in the kickoff source and the
+    closeout evidence table
+  - the proof checklist keeps the phase-mapped review matrix, runtime scenario
+    proof template, and final-gate template
+  - the closeout proof preserves explicit remaining-gap language for live
+    active-run proof, steering proof, reduced-motion/transparency proof,
+    proof-review decisions, provider-approved prompt strategy proof, and
+    restart/reachability
+  - `NEXT_SESSION.md` keeps the source-of-truth, approval, and
+    stale-evidence-not-complete handoff guards
+- Added `test:premier-stop-condition-audit`.
+- `test:premier-no-spend` now includes the stop-condition audit gate.
+- Validation was not rerun in this slice; run
+  `npm run test:premier-stop-condition-audit` or
+  `npm run check:premier-no-spend` when final local gates are in scope.
+- This is test/docs/package wiring only. No server restart was required.
+
+## Premier prompt-source provenance regression gate - 2026-06-17
+
+- Refreshed the Phase 7 prompt strategy source list against official provider
+  docs for OpenAI, Anthropic, Google Gemini, and Mistral.
+- Updated `server/promptStrategies.ts` source refs from older OpenAI/Claude URLs
+  to current official `platform.openai.com` and `docs.anthropic.com` docs.
+- Added `scripts/test-premier-prompt-source-provenance.ts` to lock down the
+  provider-source contract.
+- The gate asserts that:
+  - prompt strategy source refs use official provider documentation
+  - `docs/PROMPT_STRATEGY_DATABASE_PLAN.md` cites the same official URLs
+  - every prompt strategy profile source ref comes from the central registry
+  - the plan preserves source refresh and primary-source guidance
+- Added `test:premier-prompt-source-provenance`.
+- `test:premier-no-spend` now includes the prompt-source provenance gate.
+- Validation was not rerun in this slice; run
+  `npm run test:premier-prompt-source-provenance` or
+  `npm run check:premier-no-spend` when final local gates are in scope.
+- This touched server prompt-strategy metadata only. Restart/reachability proof
+  follows in the active session notes.
+
+- Removed the duplicate static import that made the `SubAgentTracker` dynamic import ineffective.
+- `AgentFocusPanel` now lazy-loads `SubAgentTracker` behind a local suspense boundary, matching the pinned-panel lazy loading path.
+- Validation proof:
+  - `npm run lint` passed.
+  - `npm run build` passed.
+  - Build output now emits a separate `SubAgentTracker` chunk and no longer reports the ineffective dynamic-import warning.
+
+## Phase 7 tool-call outcome learning goal alignment - 2026-06-17
+
+- Updated `docs/PREMIER_HARNESS_KICKOFF.md` so tool-call error memory is part of the Premier goal: model/provider/tool failure, prompt strategy context, later working path, and retry cost.
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so the Phase 7 routing-memory proof explicitly includes tool-reliability outcome mining evidence.
+- Existing implementation evidence remains centered on `server/toolReliability.ts`, `test:tool-reliability`, Routing Learning exports, and Auto-Router candidate-card annotations.
+- Restart proof after server prompt-strategy provenance metadata changes: killed previous `3001`/`5173` listeners, relaunched with `npm start`, confirmed `http://127.0.0.1:3001/api/config` responded, confirmed `http://127.0.0.1:5173/` returned HTTP 200, and confirmed fresh listeners on PIDs 59642 (`3001`) and 59640 (`5173`).
+
+## Premier manifest and stop-condition audit tightening - 2026-06-17
+
+- Tightened `scripts/test-premier-baseline-manifest.ts` so the Premier no-spend manifest must keep `test:premier-stop-condition-audit` and `test:premier-prompt-source-provenance` in the bundle, checklist, proof doc, and next-session handoff.
+- Tightened `scripts/test-premier-stop-condition-audit.ts` so the closeout audit must preserve the newer Phase 7 stop condition: OpenHarness can explain which model/tool/prompt-strategy combinations failed, which later path worked, and how routing or prompt contracts should change to reduce first-call errors and retry loops.
+- Remaining gap before final closeout: saved local sessions currently do not contain populated real-world failure-memory/recovery-pattern rows, so `test:tool-reliability` proves the session/log-mining contract but live Routing Learning evidence still needs a future real tool-error run or approved proof scenario.
+- This was docs/test-only audit tightening. No server/runtime restart was required.
+
+## Premier live-evidence guard regression gate - 2026-06-17
+
+- Added `scripts/test-premier-live-evidence-guard.ts` to prevent static regression coverage from being mistaken for final live/provider/manual proof.
+- The gate asserts that:
+  - the kickoff keeps the rule that missing or indirect checklist evidence leaves the overhaul open
+  - the proof checklist preserves direct-evidence, stale-evidence, provider-spend approval, runtime scenario, and final-gate boundaries
+  - this closeout proof keeps explicit remaining live-evidence gaps for provider-approved prompt traces, real-world tool failure-memory/recovery rows, active-run proof, steering proof, and reduced-motion/transparency browser proof
+  - `NEXT_SESSION.md` keeps the Phase 7 proof gap, provider-budget approval guard, stale-evidence guard, browser/manual proof approval, and final-gate approval language
+- Added `test:premier-live-evidence-guard`.
+- `test:premier-no-spend` now includes the live-evidence-guard gate.
+- Validation was not rerun in this slice; run `npm run test:premier-live-evidence-guard` or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is docs/test/package wiring only. No server restart was required.
+
+## Premier approval-boundaries regression gate - 2026-06-17
+
+- Added `scripts/test-premier-approval-boundaries.ts` to keep provider-spend, browser/manual proof, and final local validation approval boundaries explicit while the Premier overhaul remains open.
+- The gate asserts that:
+  - the proof checklist preserves the provider-backed proof approval prompt and options
+  - provider-spend proof remains marked as approval-gated
+  - `NEXT_SESSION.md` keeps browser/manual proof approval, final-gate approval, provider-budget approval, and stale-evidence-not-complete language
+  - this closeout proof keeps explicit incomplete-proof language for provider-approved prompt strategy proof, live active-run proof, skipped validation, and restart scope
+- Added `test:premier-approval-boundaries`.
+- `test:premier-no-spend` now includes the approval-boundaries gate.
+- Validation was not rerun in this slice; run `npm run test:premier-approval-boundaries` or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is docs/test/package wiring only. No server restart was required.
+
+## Premier closeout-matrix regression gate - 2026-06-17
+
+- Added `scripts/test-premier-closeout-matrix.ts` to keep final Premier completion tied to a phase-mapped and stop-condition-mapped evidence matrix instead of loose regression notes.
+- The gate asserts that:
+  - the proof checklist preserves the phase-mapped review matrix for Phases 1 through 7
+  - the checklist preserves the `Premier Harness Closeout Evidence`, `Runtime Scenario Proof`, `Final Gates`, and remaining-risks template sections
+  - this closeout proof preserves the kickoff stop-condition evidence matrix with required evidence and status/notes columns
+  - `NEXT_SESSION.md` tells future sessions to keep filling the durable proof file from remaining stop-condition gaps instead of treating partial evidence as completion
+- Added `test:premier-closeout-matrix`.
+- `test:premier-no-spend` now includes the closeout-matrix gate.
+- Validation was not rerun in this slice; run `npm run test:premier-closeout-matrix` or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is docs/test/package wiring only. No server restart was required.
+
+## Premier no-spend gate wording alignment - 2026-06-17
+
+- Cleaned up `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so the current no-spend gate list clearly names baseline-manifest, stop-condition-audit, prompt-source-provenance, live-evidence-guard, approval-boundaries, and closeout-matrix regression gates as separate requirements.
+- Updated the top-level `NEXT_SESSION.md` repository-state note so the current `test:premier-no-spend` bundle names all newer guard gates instead of stopping at prompt-source provenance.
+- Follow-up alignment: the same top-level handoff now also names the
+  restart-scope and worktree-isolation contract gates.
+- Current aligned gate tail: baseline-manifest, stop-condition-audit,
+  prompt-source-provenance, live-evidence-guard, approval-boundaries,
+  closeout-matrix, restart-scope, and worktree-isolation.
+- This was docs-only handoff/checklist alignment. It did not rerun validation and does not close the remaining live/manual/provider-backed proof gaps.
+- No server/runtime restart was required.
+
+## Premier restart-scope regression gate - 2026-06-17
+
+- Added `scripts/test-premier-restart-scope.ts` to keep the kickoff restart rules tied to the Premier no-spend baseline.
+- The gate asserts that:
+  - client-only changes do not require a server restart
+  - docs-only changes do not require any restart
+  - server/runtime changes require killing existing OpenHarness processes, relaunching, and verifying `3001`, `5173`, and `/api/config`
+  - the proof checklist preserves restart/reachability as direct closeout evidence
+  - this closeout proof keeps both restart-proof and no-restart-required language
+  - `NEXT_SESSION.md` keeps the server/runtime relaunch handoff guard
+- Added `test:premier-restart-scope`.
+- `test:premier-no-spend` now includes the restart-scope gate.
+- Validation was not rerun in this slice; run `npm run test:premier-restart-scope` or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is docs/test/package wiring only. No server restart was required.
+
+## Premier worktree-isolation regression gate - 2026-06-17
+
+- Added `scripts/test-premier-worktree-isolation.ts` to keep the kickoff requirement for worktree isolation per implementation agent visible in the Premier no-spend baseline.
+- The gate asserts that:
+  - `docs/PREMIER_HARNESS_KICKOFF.md` preserves the product requirement for worktree isolation before multi-agent write flow
+  - the proof checklist keeps worktree isolation in Phase 6/model-harness closeout coverage
+  - this closeout proof keeps worktree isolation and multi-agent write flow language visible as remaining safety evidence
+  - `NEXT_SESSION.md` keeps the worktree-isolation handoff and current no-spend gate name
+- Added `test:premier-worktree-isolation`.
+- `test:premier-no-spend` now includes the worktree-isolation gate.
+- Remaining gap: this guard preserves the requirement and closeout boundary; it does not by itself implement or prove isolated worktrees for live multi-agent write flow.
+- Validation was not rerun in this slice; run `npm run test:premier-worktree-isolation` or `npm run check:premier-no-spend` when final local gates are in scope.
+- This is docs/test/package wiring only. No server restart was required.
+
+## Premier execute worktree isolation implementation - 2026-06-17
+
+- Advanced the kickoff worktree-isolation requirement from documentation guard toward runtime behavior.
+- `server/orchestrator.ts` now attempts to create an OpenHarness git worktree before execute-mode implementer work when a project folder is open.
+- When worktree creation succeeds, implementer, implementer retry, deterministic artifact fallback, validation repair, apply/validation proof, and reviewer phases use the isolated worktree path instead of the base checkout path.
+- Run traces now include a `worktree_isolation` step with `ready`, `failed`, or `unavailable` status plus worktree id, path, branch, base ref, and error metadata when available.
+- Final execute output now includes a worktree isolation proof section telling the user which isolated worktree was used and that promotion/discard should happen from Safety.
+- `scripts/test-premier-worktree-isolation.ts` now checks the real orchestrator isolation hooks and shared run-trace typing, not only docs/handoff wording.
+- Remaining gap: live execute proof still needs to show a real implementation run creating an isolated worktree and then promoting or discarding through Safety before this requirement can be marked fully closed.
+- Server/runtime code changed; restart/reachability proof follows in active session notes.
+
+## Premier execute worktree isolation restart proof - 2026-06-17
+
+- Restarted after server/runtime execute-orchestration changes for worktree isolation.
+- Targeted existing LISTEN sockets on `3001` and `5173`, relaunched with `npm start`, and confirmed fresh listener PIDs: `99752` on `3001` and `99738` on `5173`.
+- Confirmed `http://127.0.0.1:3001/api/config` responded.
+- Confirmed `http://127.0.0.1:5173/` returned HTTP 200.
+- No full validation suite was run in this slice; `test:premier-worktree-isolation`, `test:premier-no-spend`, lint, and build remain available for the final approved local gate pass.
+
+## Premier worktree isolation Agent detail visibility - 2026-06-17
+
+- `src/components/SubAgentTracker.tsx` now renders `worktree_isolation` run-trace steps in Agent detail replay instead of leaving them as unhandled/unknown events.
+- Replay filtering treats worktree isolation as proof and routing evidence, so the event is visible in the places users check for safety and execution context.
+- Run replay summaries now count ready isolated worktrees, and latest proof can report whether worktree isolation is ready, failed, or unavailable.
+- `scripts/test-premier-agent-detail.ts` now locks the Agent detail worktree-isolation replay surface.
+- `scripts/test-premier-worktree-isolation.ts` now checks that the UI exposes the isolation evidence emitted by the orchestrator.
+- This was client/test/docs work. Browser refresh is enough; no server restart was required.
+
+## Premier worktree isolation active-work cue - 2026-06-17
+
+- `src/utils/agentWorkState.ts` now surfaces the latest `worktree_isolation` run-trace event as compact active-work metadata before artifact proof.
+- When isolation is ready, active work can show `isolated worktree: <id/branch/path>`; failed or unavailable isolation is surfaced as `worktree isolation <status>` with the error or reason.
+- `scripts/test-premier-active-work.ts` now includes a synthetic ready worktree event and asserts the active-work state exposes `isolated worktree: wt-123`.
+- `scripts/test-premier-worktree-isolation.ts` now checks the active-work cue path in addition to orchestrator, trace typing, and Agent detail replay visibility.
+- This was client/test/docs work. Browser refresh is enough; no server restart was required.
+
+## Premier worktree isolation replay/export coverage - 2026-06-17
+
+- `src/App.tsx` now describes `worktree_isolation` run steps in live run activity instead of falling through as an unknown event.
+- `server/index.ts` now includes `worktreeIsolation` in exported run debug bundles and emits visible thinking/status text for isolation readiness/failure.
+- `src/components/PromptMicroscope.tsx` now shows a compact Worktree isolation metadata row when a run trace includes the isolation event.
+- `scripts/test-premier-worktree-isolation.ts` now locks live activity text, debug export preservation, Prompt Microscope metadata, Agent detail replay visibility, active-work metadata, shared trace typing, and orchestrator isolation hooks.
+- Server/runtime code changed; restart/reachability proof follows in active session notes.
+
+## Premier worktree isolation replay/export restart proof - 2026-06-17
+
+- Restarted after server/runtime replay-export changes for worktree isolation evidence.
+- Targeted existing LISTEN sockets on `3001` and `5173`, relaunched with `npm start`, and confirmed fresh listener PIDs: `57393` on `3001` and `57391` on `5173`.
+- Confirmed `http://127.0.0.1:3001/api/config` responded.
+- Confirmed `http://127.0.0.1:5173/` returned HTTP 200.
+- No full validation suite was run in this slice; `test:premier-worktree-isolation`, `test:premier-no-spend`, lint, and build remain available for the final approved local gate pass.
+
+## Premier worktree isolation Safety discoverability - 2026-06-17
+
+- Agent detail replay worktree-isolation details now tell users: `Open Safety > Worktrees to validate, promote, or discard this isolated worktree.`
+- Prompt Microscope worktree-isolation metadata now includes `Safety > Worktrees` when isolation is ready.
+- This connects runtime isolation proof to the existing Safety worktree controls without adding new chrome or duplicating the promote/discard flow.
+- `scripts/test-premier-worktree-isolation.ts` now locks the Safety breadcrumb in both Agent detail replay and Prompt Microscope metadata.
+- This was client/test/docs work. Browser refresh is enough; no server restart was required.
+
+## Premier worktree Safety action clarity - 2026-06-17
+
+- `src/components/SafetyPanel.tsx` Worktrees copy now says users can validate, promote, or discard isolated changes from Safety.
+- Worktree validation title now names the isolated worktree, and the destructive worktree action is visibly labelled `Discard` instead of being icon-only.
+- Clean and dirty removal titles now say `Discard isolated worktree` / `Force-discard isolated worktree with uncommitted changes`, matching the Agent detail and Prompt Microscope breadcrumb language.
+- `scripts/test-premier-worktree-isolation.ts` now locks the Safety validate/promote/discard wording.
+- This was client/test/docs work. Browser refresh is enough; no server restart was required.
+
+## Premier worktree trace-to-Safety matching - 2026-06-17
+
+- `src/components/SafetyPanel.tsx` now shows the short worktree id in each Safety > Worktrees row.
+- This lets users match `worktree_isolation` run-trace proof to the exact Safety row before choosing Validate, Promote, or Discard.
+- `scripts/test-premier-worktree-isolation.ts` now locks the visible worktree id cue in the Safety panel.
+- This was client/test/docs work. Browser refresh is enough; no server restart was required.
+
+## Premier worktree Safety action accessibility - 2026-06-17
+
+- `src/components/SafetyPanel.tsx` now gives Safety > Worktrees actions accessible labels that include the short worktree id and row label.
+- Show diff, Validate, Promote, and Discard controls can now be distinguished by the same id surfaced in `worktree_isolation` trace evidence.
+- `scripts/test-premier-worktree-isolation.ts` now locks these trace-to-action accessible labels.
+- This was client/test/docs work. Browser refresh is enough; no server restart was required.
+
+## Premier worktree exact-id cue - 2026-06-17
+
+- `src/components/SafetyPanel.tsx` now exposes the full worktree id on the visible short id in Safety > Worktrees.
+- This lets users reconcile exact exported/debug `worktree_isolation` evidence with the visible Safety row without adding noisy chrome.
+- `scripts/test-premier-worktree-isolation.ts` now locks the exact-id cue.
+- This was client/test/docs work. Browser refresh is enough; no server restart was required.
+
+## Premier execute worktree cleanup lifecycle - 2026-06-17
+
+- `server/orchestrator.ts` now refreshes the execute isolation worktree after implementer/validation/review work.
+- Clean isolated worktrees with no changes are auto-discarded so empty execute sandboxes do not accumulate.
+- Dirty isolated worktrees remain available in Safety > Worktrees for Validate, Promote, or Discard.
+- The execute isolation proof text now records whether the worktree was auto-discarded, preserved for Safety review, or had a cleanup-check failure.
+- `scripts/test-premier-worktree-isolation.ts` now locks clean auto-discard and dirty worktree preservation behavior.
+- Remaining live proof: run an approved execute scenario that creates an isolated worktree and demonstrates the preserved dirty path or clean auto-discard path.
+- Server/runtime code changed; restart/reachability proof follows in active session notes.
+
+## Premier execute worktree cleanup restart proof - 2026-06-17
+
+- Restarted after server/runtime execute worktree cleanup changes.
+- Targeted existing LISTEN sockets on `3001` and `5173`, relaunched with `npm start`, and confirmed fresh listener PIDs: `36251` on `3001` and `36250` on `5173`.
+- Confirmed `http://127.0.0.1:3001/api/config` responded.
+- Confirmed `http://127.0.0.1:5173/` returned HTTP 200.
+- No full validation suite was run in this slice; `test:premier-worktree-isolation`, `test:premier-no-spend`, lint, and build remain available for the final approved local gate pass.
+
+## Premier worktree lifecycle trace statuses - 2026-06-17
+
+- `worktree_isolation` run-trace steps now distinguish `ready`, `preserved`, `auto_discarded`, `unavailable`, and `failed` states.
+- Execute cleanup now emits a structured `auto_discarded` step when a clean isolated worktree is removed, a `preserved` step when a dirty isolated worktree remains in Safety, and a `failed` step if cleanup cannot be checked or completed.
+- Agent detail replay, active-work metadata, live run activity, Prompt Microscope metadata, server visible status, and debug exports now have explicit wording for preserved and auto-discarded worktrees.
+- `scripts/test-premier-worktree-isolation.ts` now locks the lifecycle statuses and the corresponding UI/export surfaces.
+- Server/runtime code changed; restart/reachability proof follows in active session notes.
+
+## Premier worktree lifecycle trace restart proof - 2026-06-17
+
+- Restarted after server/runtime lifecycle trace status changes.
+- Targeted existing LISTEN sockets on `3001` and `5173`, relaunched with `npm start`, and confirmed fresh listener PIDs: `62863` on `3001` and `62861` on `5173`.
+- Confirmed `http://127.0.0.1:3001/api/config` responded.
+- Confirmed `http://127.0.0.1:5173/` returned HTTP 200.
+- No full validation suite was run in this slice; `test:premier-worktree-isolation`, `test:premier-no-spend`, lint, and build remain available for the final approved local gate pass.
+
+## Phase 7 routing-adherence gate alignment - 2026-06-17
+
+- Added `npm run test:routing-adherence` to the `test:prompt-routing-memory` bundle so the automated Phase 7 no-spend proof matches the kickoff validation list.
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` to name routing adherence in the no-spend baseline and Phase 7 prompt/routing evidence capture rows.
+- Updated `scripts/test-premier-baseline-manifest.ts` to guard the package-script inclusion and the `NEXT_SESSION.md` handoff breadcrumb.
+- This is package/docs/test-manifest alignment only. No server/runtime restart was required. The gate has not been run in this continuation; final validation remains pending approval.
+
+## Restart duplicate-window stop-condition audit alignment - 2026-06-17
+
+- Added the kickoff stop condition `Runtime relaunch does not leave duplicate OpenHarness/Electron windows.` to the closeout proof matrix.
+- Updated `scripts/test-premier-stop-condition-audit.ts` so the stop-condition audit preserves the duplicate-window restart requirement alongside reachability proof.
+- This is docs/test-manifest alignment only. No server/runtime restart was required. The audit has not been rerun in this continuation; final validation remains pending approval.
+
+## Phase 6 calibration/comparison pack guard alignment - 2026-06-17
+
+- Added regression coverage in `scripts/test-premier-model-harness.ts` for Model Lab Prompt Packs calibration/comparison guidance: cheaper open candidates first, tight frontier comparisons second, export pack evidence, and apply role/router changes only when the evidence supports them.
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so the Phase 6 proof checklist names the kickoff calibration/comparison flow explicitly.
+- This is docs/test-manifest alignment only. No server/runtime restart was required. The model-harness gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Phase 6 provider-health and rate-limit guard alignment - 2026-06-17
+
+- Added regression coverage in `scripts/test-premier-model-harness.ts` for Settings provider-health badge states and Model Lab warnings for provider rate limits, metered billing, provider health, and provider-budget approval before expensive runs.
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so Phase 6 proof explicitly requires provider health and rate-limit warnings before Model Lab work or provider/model configuration changes.
+- This is docs/test-manifest alignment only. No server/runtime restart was required. The model-harness gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Worktree isolation diff-review guard alignment - 2026-06-17
+
+- Added regression coverage in `scripts/test-premier-worktree-isolation.ts` for Safety > Worktrees diff inspection before Validate/Promote/Discard decisions.
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so worktree-isolation proof requires the ability to inspect diffs, validate, promote, or discard isolated worktrees before multi-agent write flows are treated as safe.
+- This is docs/test-manifest alignment only. No server/runtime restart was required. The worktree-isolation gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Review Changes patch-action language alignment - 2026-06-17
+
+- Updated `src/components/MessageBubble.tsx` so assistant message diff actions title themselves as sending the diff to `Review Changes`, not a separate `Patch Review panel`.
+- Updated `scripts/test-premier-review-changes.ts` to guard that Review Changes wording and the no-project Review Changes dialog label.
+- This is client/test-manifest alignment only. Browser refresh is enough; no server/runtime restart was required. The Review Changes gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Calm-chat replay proof affordance guard alignment - 2026-06-17
+
+- Added regression coverage in `scripts/test-premier-calm-chat.ts` for the quiet replay-export button and compact `Run replay` summary in assistant messages.
+- This preserves replayable proof as an artifact-first affordance without moving tool traces, Prompt Microscope, confidence, or next actions back into default message chrome.
+- This is test-manifest alignment for existing client UI. Browser refresh is enough; no server/runtime restart was required. The calm-chat gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Artifact drawer copy and expansion guard alignment - 2026-06-17
+
+- Added regression coverage in `scripts/test-premier-artifact-review.ts` for artifact copy labels and long-artifact preview/full-content controls.
+- This preserves the kickoff artifact-first trust requirement by keeping generated artifacts inspectable, copyable, and reviewable without exposing raw diagnostic clutter by default.
+- This is test-manifest alignment for existing client UI. Browser refresh is enough; no server/runtime restart was required. The artifact-review gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Active-work Environment rail guard alignment - 2026-06-17
+
+- Added regression coverage in `scripts/test-premier-active-work.ts` for the Environment rail active-work summary: workflow label, current task, model/provider, latest proof/artifact cue, compact step list, current-step marker, and Agent detail entry point.
+- This supports the kickoff requirement that left/environment context explains active work while staying compact and trace-backed, not becoming a second chat.
+- This is test-manifest alignment for existing client UI. Browser refresh is enough; no server/runtime restart was required. The active-work gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Quiet bottom status chrome alignment - 2026-06-17
+
+- Updated `src/components/StatusBar.tsx` so the permanent bottom status strip is hidden during quiet chat and appears only for active warnings, background model/routing activity, or an already-open status surface such as model/trust/terminal controls.
+- Added regression coverage in `scripts/test-premier-layout-shell.ts` for quiet-status behavior and fixed Environment rail context sections.
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so closeout proof must confirm bottom status chrome is not permanent in quiet chat.
+- This is client/test/docs work. Browser refresh is enough; no server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Quiet status chrome shell-gate refinement - 2026-06-17
+
+- Refined the quiet-status change so `src/App.tsx` owns the bottom chrome mount decision and includes Auto-Router activity as an active reason to show it.
+- Removed the duplicate inner hide gate from `src/components/StatusBar.tsx`, preserving model/trust/terminal controls whenever the shell renders the status bar.
+- Updated `scripts/test-premier-layout-shell.ts` to guard App-level quiet-status mount conditions plus StatusBar warning/terminal surfaces.
+- This is client/test/docs work. Browser refresh is enough; no server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Top-bar model/router evidence entry alignment - 2026-06-17
+
+- Updated `src/components/TopBar.tsx` so the model/router badge opens the relevant evidence surface: Routing Learning for `Router`, Model Lab for concrete models.
+- Updated `src/styles/components.css` so the badge remains quiet but behaves like an actionable control.
+- Added regression coverage in `scripts/test-premier-layout-shell.ts` for the model/router evidence entry point.
+- This addresses the earlier recorded gap where the top-bar `Router` label did not open routing trust/detail. Browser refresh is enough; no server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Top-bar model/router focus guard alignment - 2026-06-17
+
+- Added explicit keyboard focus styling for the top-bar model/router evidence button in `src/styles/components.css`.
+- Updated `scripts/test-premier-layout-shell.ts` so the evidence badge remains a typed button with hover/focus affordances.
+- This is client/test/docs work. Browser refresh is enough; no server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Top-bar evidence entry checklist alignment - 2026-06-17
+
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so closeout proof includes the top-bar model/router evidence entry: `Router` opens Routing Learning and concrete models open Model Lab.
+- Updated `scripts/test-premier-layout-shell.ts` to preserve that checklist wording.
+- This is docs/test alignment only. No server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Top-bar evidence entry open-not-toggle refinement - 2026-06-17
+
+- Updated `src/components/TopBar.tsx` so the model/router evidence badge opens the relevant panel instead of toggling it closed if already visible.
+- Updated `src/App.tsx` to pass `addPanel` as `onOpenPanel` while preserving Tools menu toggle behavior.
+- Updated `scripts/test-premier-layout-shell.ts` to guard the open-not-toggle contract.
+- This is client/test work. Browser refresh is enough; no server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Top-bar mock snippet contract alignment - 2026-06-17
+
+- Updated `src/utils/mockData.ts` so the demo/mock assistant snippet reflects the current top-bar model/router evidence-entry contract instead of showing a passive/minimal `TopBar` call.
+- Updated `scripts/test-premier-layout-shell.ts` to guard the mock snippet alignment.
+- This is client/test alignment only. Browser refresh is enough; no server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Top-bar quiet-control semantics alignment - 2026-06-17
+
+- Updated `src/components/TopBar.tsx` so the sidebar toggle and Tools menu expose direct button labels while decorative top-bar icons are hidden from assistive tech.
+- Updated `scripts/test-premier-layout-shell.ts` to preserve those top-bar quiet-control semantics.
+- This is client/test alignment only. Browser refresh is enough; no server/runtime restart was required. The layout-shell gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Agent detail inactive-run steering boundary alignment - 2026-06-17
+
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so Agent detail proof must confirm inactive/completed/blocked runs do not show unsafe live steering controls, while replay filters remain available for proof/routing/artifact-feedback/past-steering inspection.
+- Updated `scripts/test-premier-agent-detail.ts` to guard that inactive-run steering boundary and checklist wording.
+- This is docs/test alignment only. No server/runtime restart was required. The agent-detail gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Steering next-safe-phase proof alignment - 2026-06-17
+
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so runtime scenario proof must confirm steering notes are recorded as structured replay evidence and injected into the next safe orchestrator or agent phase.
+- Updated `scripts/test-premier-steering-contract.ts` to preserve the next-safe-phase instruction copy and checklist wording.
+- This is docs/test alignment only. No server/runtime restart was required. The steering-contract gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Pause/cancel steering semantics alignment - 2026-06-17
+
+- Updated `src/components/SubAgentTracker.tsx` so Pause/Cancel descriptions match the current runtime behavior: safe stop/cancel plus replay evidence, not a resumable pause workflow.
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so runtime proof must not treat Pause as resumable unless a dedicated resume path is implemented and proven.
+- Updated `scripts/test-premier-steering-contract.ts` to guard that boundary.
+- This is client/docs/test alignment only. No server/runtime restart was required. The steering-contract gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Artifact feedback replay-evidence checklist alignment - 2026-06-17
+
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so artifact approval/revision proof must show structured replay steering evidence with artifact label, type, id, and reviewer note.
+- Updated `scripts/test-premier-artifact-review.ts` to preserve that checklist requirement.
+- This is docs/test alignment only. No server/runtime restart was required. The artifact-review gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Tool-reliability evidence-source tuning guard alignment - 2026-06-17
+
+- Updated `scripts/test-tool-reliability.ts` to directly protect source-aware tuning actions for `log_trace` and `imported_trace` retry-reduction recommendations.
+- Added coverage that identical avoid/prefer recommendations from different evidence sources remain separate rows so imported/log evidence cannot silently become local router tuning evidence.
+- This is test-only alignment. No server/runtime restart was required. The tool-reliability gate has not been rerun in this continuation; final validation remains pending approval.
+
+## Tool-reliability provider-qualified retry-reduction alignment - 2026-06-17
+
+- Added provider-qualified retry-reduction paths to `server/toolReliability.ts` while retaining the existing short model/tool paths for compatibility.
+- Surfaced provider-qualified avoid/prefer paths in Routing Learning evidence text, Settings candidate rows, and Auto-Router classifier candidate-card annotations so retry-reduction proof stays tied to model, provider, tool, session, and run.
+- Updated focused guards and export/import fixtures to preserve `avoidProviderPath` and `preferProviderPath` and to prevent same-model recommendations from different providers collapsing into one row.
+- Server/runtime files changed in this slice, so OpenHarness was restarted and reachability proof was required. Full prompt/routing-memory validation remains pending approval.
+
+## Source-backed prompt best-practice database alignment - 2026-06-17
+
+- Added structured best-practice notes to prompt strategy profiles so each family can carry source-backed guidance, rationale, and an eval cue for prompt-response improvement.
+- Added Mistral function-calling guidance to the prompt source registry to support tool-heavy prompt contracts with primary vendor documentation.
+- Updated API type mirrors and provenance guards so source-backed notes remain part of the prompt strategy database instead of living only in docs.
+- Server/profile data changed in this slice, so OpenHarness restart/reachability proof was required. Full prompt/routing-memory validation remains pending approval.
+
+## Model Lab prompt best-practice visibility alignment - 2026-06-17
+
+- Surfaced source-backed prompt strategy best-practice guidance in `src/components/ModelLabPanel.tsx`, including eval cues for same-model prompt strategy comparisons.
+- Added accessibility-label coverage so prompt strategy cards expose guidance and eval cues to assistive technologies and static proof guards.
+- Updated `scripts/test-premier-model-harness.ts` to guard that Model Lab no longer hides prompt best-practice metadata inside the raw strategy database.
+- This was client/test/docs alignment only. No server/runtime restart was required; browser refresh is enough. Full validation remains pending approval.
+
+## Auto-Router prompt best-practice advisory alignment - 2026-06-17
+
+- Added source-backed prompt strategy best-practice guidance and eval cues to Auto-Router classifier candidate-card annotations.
+- Kept the signal advisory only: prompt guidance can inform classifier scoring and human review, but does not automatically rewrite router thresholds, candidate costs, or defaults.
+- Updated focused guards to preserve the classifier-visible guidance and advisory boundary.
+- Server routing code changed in this slice, so OpenHarness restart/reachability proof was required. Full validation remains pending approval.
+
+## Prompt Microscope best-practice trace evidence alignment - 2026-06-17
+
+- Added source-backed best-practice evidence to prompt strategy traces so each prompt build can carry guidance, rationale, eval cue, and source reference.
+- Surfaced that trace evidence in Prompt Microscope beside strategy id, model match, variant, task type, role, context, examples, reasoning, tools, output, and selection reason.
+- Updated focused guards to preserve the replay/debug evidence path for prompt-response quality improvements.
+- Server trace data changed in this slice, so OpenHarness restart/reachability proof was required. Full validation remains pending approval.
+
+## Model Lab prompt best-practice proof-summary alignment - 2026-06-17
+
+- Updated Model Lab prompt-strategy proof summary text so observed strategies can include the source-backed eval cue and source reference from their trace evidence.
+- This keeps exported proof briefs tied to the prompt-response hypothesis behind each selected strategy, rather than only listing family/style metadata.
+- Added focused static coverage in `scripts/test-premier-model-harness.ts`.
+- This was client/test/docs alignment only. No server/runtime restart was required; browser refresh is enough. Full validation remains pending approval.
+
+## Routing Learning prompt best-practice export alignment - 2026-06-17
+
+- Added source-backed prompt eval cue/source annotations to Routing Learning Markdown evidence exports for recent routing decisions when a selected prompt strategy resolves to a known profile.
+- Kept the catalog lookup best-effort so Routing Learning evidence still exports even if prompt strategy metadata is unavailable.
+- Added focused static coverage in `scripts/test-premier-model-harness.ts`.
+- This was client/test/docs alignment only. No server/runtime restart was required; browser refresh is enough. Full validation remains pending approval.
+
+## Server Routing Learning prompt best-practice export alignment - 2026-06-17
+
+- Added `promptStrategyBestPractices` to server Routing Learning JSON exports, scoped to strategies referenced by exported events.
+- Preserved source-backed prompt guidance, rationale, eval cue, and source references in exported learning bundles so prompt-response context survives import/export handoff.
+- Updated API and export guards to protect the server export shape.
+- Server export code changed in this slice, so OpenHarness restart/reachability proof was required. Full validation remains pending approval.
+
+## Routing Learning prompt best-practice import-preview alignment - 2026-06-17
+
+- Added import-preview support for `promptStrategyBestPractices` metadata so imported/shared learning bundles disclose prompt strategy rows, note counts, and source refs before import.
+- Kept imported prompt best-practice metadata context-only: it is previewed for reviewers but not merged into local prompt strategy profiles by event import.
+- Updated API, UI messaging, import regression coverage, and Premier static guards.
+- Server import code changed in this slice, so OpenHarness restart/reachability proof was required. Full validation remains pending approval.
+
+## Routing Learning import response prompt-preview passthrough - 2026-06-17
+
+- Updated the `/api/router/learning/import` response to include `promptBestPracticePreview` from the import preview helper.
+- This ensures dry-run import confirmation and real import completion can both disclose prompt best-practice metadata as context-only, non-merged evidence.
+- Added focused static coverage in `scripts/test-premier-model-harness.ts`.
+- Server import response code changed in this slice, so OpenHarness restart/reachability proof was required. Full validation remains pending approval.
+
+## Premier closeout prompt best-practice proof coverage alignment - 2026-06-17
+
+- Updated `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` so Phase 7 prompt strategy and routing-memory proof explicitly requires source-backed prompt best-practice metadata across Prompt Microscope, Model Lab summaries, Routing Learning exports/import previews, and Auto-Router candidate cards.
+- Updated `scripts/test-premier-baseline-manifest.ts` and `scripts/test-premier-closeout-matrix.ts` so the no-spend closeout guards preserve the new best-practice metadata/export/import-preview expectations.
+- Status: static coverage aligned; not a substitute for final no-spend command output, browser/manual proof, provider-approved proof runs, or final lint/build gates.
+
+## Premier model scorecard breadth alignment - 2026-06-17
+
+- Expanded Model Library scorecards so open-source and frontier models are compared across the kickoff's named trust dimensions: coding, reasoning, review, planning, tool use, vision, long context, speed, cost, privacy, and local availability.
+- Updated the Premier model-harness static guard and proof checklist so future no-spend proof cannot regress back to shallow context/tools/vision-only scorecards.
+- Status: client/test/docs alignment only. Browser refresh is enough; no server/runtime restart was required. Full model-harness validation, browser/manual proof, provider-approved proof runs, and final gates remain pending.
+
+## Artifact feedback save-without-refresh hardening - 2026-06-17
+
+- Hardened artifact approval/needs-revision persistence so a steering callback that succeeds without returning a refreshed run is treated as saved feedback with refresh pending, not as a failed replay save.
+- Updated the Premier artifact-review static guard to preserve the saved-without-refresh path.
+- Status: client/test work only. Browser refresh is enough; no server/runtime restart was required. Full artifact-review validation, live replay proof, and final gates remain pending.
+
+## Calm replay validation-proof summary alignment - 2026-06-17
+
+- Updated the compact message `Run replay` summary so validation proof artifacts are counted separately from generic artifacts.
+- Updated the Premier calm-chat static guard and proof checklist to preserve validation-proof visibility without reintroducing noisy message-level diagnostics.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full calm-chat validation, browser/manual proof, and final gates remain pending.
+
+## Layout shell pinned-tool legacy pruning - 2026-06-17
+
+- Hardened the flat shell against stale persisted Tools state by pruning forced-hidden `sub-agents` entries from pinned-tool localStorage and blocking forced-hidden panels from being pinned again.
+- Updated the Premier layout-shell static guard so chat-first defaults cannot be undermined by legacy pinned panel state.
+- Status: client/test work only. Browser refresh is enough; no server/runtime restart was required. Full layout-shell validation, browser/manual proof, and final gates remain pending.
+
+## Theme texture startup-default guard alignment - 2026-06-17
+
+- Added Premier theme-texture guard coverage for startup/global CSS defaults so OpenHarness begins with no texture recipe and zero texture opacity before runtime theme hydration.
+- Updated the proof checklist to require this no-texture startup invariant alongside shell-only overlays, opacity bounds, schema validation, user adjustment, and reduced-transparency fallback behavior.
+- Status: docs/test alignment only. No server/runtime restart was required. Full theme-texture validation, browser/manual reduced-transparency proof, and final gates remain pending.
+
+## Left-pane active-work row label alignment - 2026-06-17
+
+- Strengthened the left-pane active-work run row so one focusable label exposes status, current task, model, provider, elapsed time, and latest proof/artifact.
+- Updated the Premier active-work static guard and proof checklist to preserve the kickoff row contract while keeping phase rows nested under the owning run.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full active-work validation, live active-run proof, and final gates remain pending.
+
+## Review Changes validation-proof save feedback alignment - 2026-06-17
+
+- Strengthened Review Changes validation-proof persistence feedback: saved proof artifacts now announce success as a status, and save failures announce as alerts.
+- Updated the Premier Review Changes static guard and proof checklist so proof persistence remains reviewable inside the single consolidated Review Changes flow.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full Review Changes validation, browser/manual proof, and final gates remain pending.
+
+## Agent Detail live-summary accessibility alignment - 2026-06-17
+
+- Strengthened the right-hand Agent Detail inspector so both the top run-count summary and detailed harness run summary use polite live status announcements.
+- Updated the Premier Agent Detail static guard and proof checklist so future Phase 3 proof preserves live summary announcements alongside workflow progress, replay summaries, replay filters, latest proof, and structured steering controls.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full Agent Detail validation, live steering proof, browser/manual proof, and final gates remain pending.
+
+## Agent Detail right-hand region landmark alignment - 2026-06-17
+
+- Strengthened the Agent Detail shell integration so the overlay is a named right-hand region, with the existing AgentFocusPanel still owning the detailed complementary inspector semantics inside it.
+- Updated the Premier Agent Detail static guard and proof checklist so future Phase 3 work preserves the named right-hand pane, AgentFocusPanel mount, and structured steering callback wiring.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full Agent Detail validation, live steering proof, browser/manual proof, and final gates remain pending.
+
+## Agent Detail steering description association alignment - 2026-06-17
+
+- Strengthened Agent Detail steering controls so action buttons and note submission are programmatically associated with the visible target and replay-persistence guidance.
+- Updated Premier steering/Agent Detail static guards and the proof checklist so target/persistence guidance remains attached to controls, not merely displayed nearby.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Live steering replay proof and final gates remain pending.
+
+## Calm chat replay export details alignment - 2026-06-17
+
+- Moved the replay/debug bundle export action behind message Details while preserving the compact `Run replay` summary in the quiet chat stream.
+- Updated the Premier calm-chat static guard and proof checklist so replay export remains an opt-in diagnostic action alongside tool details, confidence, Prompt Microscope, team plan, and next actions.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full calm-chat validation, browser/manual proof, and final gates remain pending.
+
+## Artifact drawer review-region labelling alignment - 2026-06-17
+
+- Strengthened the artifact review surface so the drawer is a labelled review group with artifact count/summary while keeping detailed artifact actions inside the quiet drawer.
+- Updated the Premier artifact-review static guard and proof checklist so comments, approval, needs-revision, saved replay feedback, copy, expand, and revise-from-here remain discoverable without noisy message-detail clutter.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full artifact-review validation, browser/manual proof, and final gates remain pending.
+
+## Theme texture opacity control accessibility alignment - 2026-06-17
+
+- Strengthened the Theme texture opacity control so assistive technologies receive both the current shell texture percentage and the reduced-transparency fallback guidance.
+- Updated the Premier theme-texture static guard and proof checklist so user-adjustable texture opacity remains tied to the shell-only/reduced-transparency safety contract.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full theme-texture validation, reduced-transparency browser proof, and final gates remain pending.
+
+## Routing Learning recommendation trust-label alignment - 2026-06-17
+
+- Strengthened Routing Learning role recommendation rows so each row exposes its proof status and trusted/untrusted evidence state, not only the apply button label.
+- Updated the Premier model-harness static guard and proof checklist so recommendation rows remain reviewable before role/router changes are trusted.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full model-harness validation, Model Lab proof review, browser/manual proof, and final gates remain pending.
+
+## Prompt Microscope provenance advisory alignment - 2026-06-17
+
+- Strengthened Prompt Microscope prompt-strategy provenance so source-backed best-practice guidance, eval cues, and source refs are explicitly labelled as advisory prompt-contract evidence rather than automatic routing overrides.
+- Updated Premier model-harness/prompt-source static guards and the proof checklist so future Phase 7 proof preserves the provenance/trust boundary.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full prompt/routing memory validation, live saved-run proof, provider-approved prompt strategy comparisons, and final gates remain pending.
+
+## Routing Learning imported selected-model identity guard - 2026-06-17
+
+- Added a guard that imported Routing Learning events preserve selected model identity along with prompt strategy variant and dataset kind.
+- Updated the Premier proof checklist so imported evidence cannot blur which model path routed or recovered a run.
+- Status: test/docs alignment only. No server/runtime code changed, so no restart was required. Full prompt/routing memory validation, imported evidence proof, and final gates remain pending.
+
+## Tool reliability recovery prompt-strategy context alignment - 2026-06-17
+
+- Added prompt strategy id and variant context to tool-reliability recovery examples, so recovered tool-error paths can be traced to the prompt contract active during the run.
+- Updated the tool-reliability guard and Premier proof checklist so recovery examples preserve prompt-contract context alongside failed model/provider/tool and later working path evidence.
+- Server/runtime code changed, so OpenHarness was restarted. Reachability proof after restart: `/api/config` on port `3001` responded, the UI on port `5173` responded, and process shape showed one OpenHarness Electron main process plus normal helper processes.
+- Full prompt/routing memory validation, imported evidence proof, provider-approved proof runs, and final gates remain pending.
+
+## Routing Learning recovery-example prompt-strategy passthrough - 2026-06-17
+
+- Added client/UI/export passthrough for prompt strategy id and variant on tool-reliability recovery examples.
+- Routing Learning now exposes that strategy context in recovery-path rows and Markdown evidence exports, so reviewers can separate prompt-contract failures from model/tool failures.
+- Status: client/test/docs alignment only. No server/runtime code changed in this slice, so no restart was required. Full prompt/routing memory validation, imported evidence proof, provider-approved proof runs, and final gates remain pending.
+
+## Top-bar model/router evidence target alignment - 2026-06-17
+
+- Added stable evidence-target metadata to the top-bar model/router badge so Router -> Routing Learning and concrete model -> Model Lab destinations remain auditable while keeping the top bar quiet.
+- Updated the Premier layout-shell static guard and proof checklist for this quiet evidence entry point.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full browser/manual proof and final gates remain pending.
+
+## Review Changes consolidated-surface marker alignment - 2026-06-17
+
+- Added a stable consolidated-surface marker to Review Changes so diffs, patch proposals, validation proof, and commit prep are provably routed through one flyout.
+- Updated the Premier Review Changes static guard and proof checklist to prevent duplicated permanent Diffs/Patches panels from creeping back in.
+- Status: client/test/docs work only. Browser refresh is enough; no server/runtime restart was required. Full Review Changes validation, browser/manual proof, and final gates remain pending.
+
+## No-provider baseline closeout-boundary alignment - 2026-06-17
+
+- Strengthened the closeout checklist so the no-provider baseline cannot be mistaken for final acceptance by itself.
+- Updated the live-evidence guard to require current manual/browser evidence, runtime scenario proof, approved provider-backed proof where applicable, and final gates before completion.
+- Status: docs/test alignment only. No server/runtime restart was required. Full browser/manual proof, runtime scenario proof, provider-approved proof runs, and final gates remain pending.
+
+## Duplicate Electron final-gate evidence alignment - 2026-06-17
+
+- Added `Duplicate Electron/process-shape check` to the final evidence template so restart closeout records whether relaunch left one OpenHarness desktop shell plus normal helper processes.
+- Updated `scripts/test-premier-restart-scope.ts` to guard the kickoff duplicate-window stop condition, the closeout template field, and existing process-shape proof language.
+- Status: docs/test alignment only. No server/runtime restart was required. Full restart-scope validation and final gates remain pending approval.
+
+## Same-model prompt strategy comparison evidence alignment - 2026-06-17
+
+- Added same-model prompt strategy id, variant id, and comparison artifact path fields to the Model Lab Eval Proof template.
+- Updated Phase 7 evidence capture and static guards so provider-approved strategy comparisons must record the compared strategy contracts and durable artifact path, not only the winning model summary.
+- Updated Model Lab Eval proof briefs to explicitly list same-model prompt strategy comparisons when one model has results under multiple prompt strategy contracts.
+- Extended the same comparison evidence fields and proof-brief summary to Model Lab Bench proof so eval and bench artifacts preserve the same strategy-contract comparison trail.
+- Tightened the proof-brief comparison summary so a same-model strategy comparison is only listed when the same model has multiple strategy contracts on the same prompt/task, not merely somewhere in the same report.
+- Updated the provider-backed approval draft so same-model prompt strategy comparison requires explicit approval instead of being implied by the smallest proof runs.
+- Status: client/docs/test alignment only. Browser refresh is enough; no server/runtime restart was required. Provider-approved prompt strategy comparison proof remains pending.
+
+## Browser/manual durable artifact approval alignment - 2026-06-17
+
+- Updated the browser/manual proof approval draft so the reviewer can approve a pass that saves durable screenshot or DOM-note artifact paths for desktop and narrow-width UI checks.
+- This keeps manual proof aligned with the closeout template's `Screenshot/artifact path(s)` field instead of leaving UI evidence only in chat.
+- Status: docs/test alignment only. No server/runtime restart was required. Browser/manual proof remains pending approval.
+
+## Runtime scenario durable trace approval alignment - 2026-06-17
+
+- Updated the provider-backed proof approval draft so runtime scenarios explicitly require durable runtime trace/export paths for Planning Room, execute/investigate, and steering-event evidence.
+- This keeps runtime proof aligned with the closeout template's `Runtime trace/export path(s)` field instead of relying on unfindable chat-only scenario notes.
+- Status: docs/test alignment only. No server/runtime restart was required. Runtime scenario proof remains pending approval.
+
+## Final-gate durable artifact approval alignment - 2026-06-17
+
+- Updated the final-gate approval draft so validation approval includes saving durable gate log/artifact paths for commands that run.
+- Added explicit restart/reachability plus duplicate Electron/process-shape artifact expectations when server/runtime code changed.
+- Status: docs/test alignment only. No server/runtime restart was required. Final gates remain pending approval.
+
+## Approval-boundary durable evidence guard alignment - 2026-06-17
+
+- Aligned the reusable proof checklist provider approval prompt with the closeout draft so same-model strategy comparison, runtime trace/export artifacts, and durable proof artifact paths are explicit before provider-spend work starts.
+- Updated `scripts/test-premier-approval-boundaries.ts` to guard provider approval choices plus durable browser/manual, runtime trace, and final-gate artifact expectations.
+- Updated stale paste-ready approval prompts in `NEXT_SESSION.md` so future sessions ask for same-model strategy comparison approval, durable browser/manual artifacts, runtime trace exports, and final-gate logs consistently.
+- Status: docs/test alignment only. No server/runtime restart was required. Approval-boundary validation remains pending.
+
+## Durable proof artifact naming alignment - 2026-06-17
+
+- Updated `docs/proof/README.md` with naming examples for same-model strategy comparisons, manual UI DOM notes, runtime scenario traces, and final gate logs.
+- Added content guidance for strategy ids/variants, screenshot or DOM-note paths, runtime trace/export paths, gate logs, and restart/process-shape proof.
+- Updated `scripts/test-premier-closeout-matrix.ts` so the closeout guard preserves the artifact naming guidance.
+- Added redaction guidance for logs, traces, screenshots, and DOM notes so durable proof artifacts do not store provider keys, cookies, raw private prompts, customer data, or unnecessary private file contents.
+- Mirrored the redaction reminder in the reusable proof checklist's evidence-storage guidance so reviewers see it before copying the final evidence template.
+- Added `docs/proof/2026-06-17-manual-ui-dom-notes-template.md` as a redaction-aware starter artifact for the approved browser/manual proof pass.
+- Added `docs/proof/2026-06-17-runtime-scenario-trace-template.md` as a redaction-aware starter artifact for approved Planning Room, execute/investigate, and steering-event runtime proof.
+- Added `docs/proof/2026-06-17-final-gate-log-template.md` as a redaction-aware starter artifact for approved final validation gates and restart/process-shape proof.
+- Added `docs/proof/2026-06-17-same-model-strategy-comparison-template.md` as a redaction-aware starter artifact for approved same-model prompt strategy comparison proof.
+- Added `docs/proof/2026-06-17-model-lab-eval-proof-template.md` and `docs/proof/2026-06-17-model-lab-bench-proof-template.md` as redaction-aware starter artifacts for approved Model Lab proof runs.
+- Added `docs/proof/2026-06-17-routing-learning-evidence-template.md` as a redaction-aware starter artifact for Routing Learning export/import, prompt-strategy outcome, and tool-error memory proof.
+- Added `docs/proof/2026-06-17-auto-router-candidate-evidence-template.md` as a redaction-aware starter artifact for Auto-Router candidate-card, Settings candidate-row, and classifier-side breadcrumb proof.
+- Added `docs/proof/2026-06-17-worktree-isolation-evidence-template.md` as a redaction-aware starter artifact for implementation-agent worktree isolation proof before multi-agent write flows.
+- Added `docs/proof/2026-06-17-theme-texture-evidence-template.md` as a redaction-aware starter artifact for Theme Texture accessibility proof.
+- Added `docs/proof/2026-06-17-calm-chat-artifact-review-evidence-template.md` as a redaction-aware starter artifact for Calm Chat, Artifact Review, and Review Changes proof.
+- Clarified in `docs/proof/README.md` that templates are not proof and should be copied or renamed into dated completed evidence artifacts before use.
+- Clarified that the closeout log remains the index of record, so completed proof artifacts must be linked back from the closeout file with a short status.
+- Mirrored the template-not-proof and closeout-log backlink rule in the reusable proof checklist before the final evidence template.
+- Strengthened `scripts/test-premier-closeout-matrix.ts` so every starter proof template must keep `Status: template, not proof`, artifact-path fields, redaction checklist fields, and remaining-gap fields.
+- Added the Routing Learning evidence template to that per-template safety audit so routing-memory proof follows the same template-not-proof and redaction contract as Model Lab, manual UI, runtime, and final-gate proof.
+- Extended the Routing Learning evidence template with Phase 7 source/tuning fields for saved-session/imported/log-derived evidence, tuning actions, repeated/single trace confidence, and imported evidence preview boundaries.
+- Added the Auto-Router candidate evidence template to the generic per-template safety audit so classifier-side breadcrumb proof follows the same template-not-proof and redaction contract.
+- Added the worktree isolation evidence template to the generic per-template safety audit so implementation-agent isolation proof follows the same template-not-proof and redaction contract.
+- Added worktree-isolation-specific closeout guard coverage for lifecycle trace artifacts, dirty-state preservation, diff review before promotion, validation before promotion, promote/discard decisions, and main-checkout protection.
+- Added provider preflight fields to the Model Lab eval and bench proof templates so approved runs capture provider health, rate-limit warnings, budget warnings, matrix size, and approval-gated launch labels before provider spend.
+- Added the same provider preflight fields to the same-model prompt strategy comparison template because it also spends provider calls.
+- Added provider preflight fields to the runtime scenario trace template because Planning Room and execute/investigate proof can also call configured models.
+- Added provider context fields to the Auto-Router candidate evidence template so manual tuning proof captures provider health, rate-limit warnings, budget warnings, configuration-change approval, and approved/trusted evidence basis.
+- Added recommendation trust and provider-context fields to the Routing Learning evidence template so proof distinguishes trusted applied recommendations from unreviewed/manual-only and needs-attention blocked recommendations before tuning.
+- Added provider context fields to the worktree isolation evidence template so provider-backed execute proof captures provider health, rate-limit warnings, budget warnings, approval-gated launch state, and manual approval before proving isolated write flows.
+- Added a template lane map to `docs/proof/README.md` so future proof passes can choose the correct starter artifact for Model Lab Eval, Model Lab Bench, same-model strategy comparison, Routing Learning, Auto-Router, manual UI, runtime scenario, worktree isolation, and final gates.
+- Updated the reusable proof checklist to point readers to the README's naming rules and template lane map before copying the closeout evidence block.
+- Added Theme Texture template guard coverage for opacity bounds, shell-only textures, dense text readability, contrast sampling, reduced transparency, and reduced motion proof fields.
+- Added the Theme Texture evidence template to the generic per-template safety audit so accessibility proof follows the same template-not-proof and redaction contract.
+- Added `docs/proof/2026-06-17-agent-detail-steering-evidence-template.md` as a redaction-aware starter artifact for right-hand Agent Detail and structured steering proof.
+- Added Agent Detail steering template guard coverage for right-hand inspector state, model/provider/role visibility, grouped tool calls, steering controls, persisted run-trace events, next-safe-phase evidence, and accessibility labels.
+- Confirmed the Agent Detail steering evidence template is included in the generic per-template safety audit.
+- Added Calm Chat artifact-review template guard coverage for collapsed diagnostics, Prompt Microscope/detail affordances, artifact drawer review controls, Review Changes consolidation, validation proof save status, and labelled details regions.
+- Status: docs/test alignment only. No server/runtime restart was required. Closeout-matrix validation remains pending.

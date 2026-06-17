@@ -13,6 +13,7 @@ interface Props {
   onToggleSidebar: () => void;
   visiblePanels: Set<PanelId>;
   onTogglePanel: (id: PanelId) => void;
+  onOpenPanel: (id: PanelId) => void;
   onResetLayout: () => void;
   activeModel: string;
   sessionTitle: string;
@@ -24,12 +25,13 @@ interface Props {
 }
 
 export function TopBar({
-  sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onResetLayout,
+  sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onOpenPanel, onResetLayout,
   activeModel, sessionTitle, workingDir,
   environmentOpen, onToggleEnvironment,
   pinnedTools, onTogglePinnedTool,
 }: Props) {
   const modelLabel = activeModel.toLowerCase() === 'auto' ? 'Router' : activeModel;
+  const modelDetailPanel: PanelId = activeModel.toLowerCase() === 'auto' ? 'routing-learning' : 'model-lab';
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const panelMenuIds = useMemo(() =>
@@ -84,15 +86,15 @@ export function TopBar({
         >
           <Heart size={13} />
         </span>
-        {active && <Check size={14} className="panel-menu-check" />}
+        {active && <Check size={14} className="panel-menu-check" aria-hidden="true" />}
       </button>
     );
   }), [panelMenuIds, visiblePanels, pinnedTools, onTogglePanel, onTogglePinnedTool]);
 
   return (
     <div className="top-bar">
-      <button className="top-bar-toggle" onClick={onToggleSidebar} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
-        {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+      <button className="top-bar-toggle" type="button" onClick={onToggleSidebar} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'} aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
+        {sidebarOpen ? <PanelLeftClose size={18} aria-hidden="true" /> : <PanelLeftOpen size={18} aria-hidden="true" />}
       </button>
 
       <div className="top-bar-title">
@@ -103,10 +105,18 @@ export function TopBar({
           </span>
         )}
       </div>
-      <div className="top-bar-model" title={`Routing via ${activeModel}`}>
-        <span className="top-bar-model-dot" />
+      <button
+        className="top-bar-model"
+        type="button"
+        data-model-evidence-entry="true"
+        data-model-evidence-panel={modelDetailPanel}
+        onClick={() => onOpenPanel(modelDetailPanel)}
+        title={activeModel.toLowerCase() === 'auto' ? 'Open Routing Learning for router evidence' : `Open Model Lab for ${activeModel}`}
+        aria-label={activeModel.toLowerCase() === 'auto' ? 'Open Routing Learning for router evidence' : `Open Model Lab for model ${activeModel}`}
+      >
+        <span className="top-bar-model-dot" aria-hidden="true" />
         <span>{modelLabel}</span>
-      </div>
+      </button>
 
       <div className="top-bar-actions">
         <button
@@ -115,18 +125,20 @@ export function TopBar({
           title={environmentOpen ? 'Hide Environment' : 'Show Environment'}
           aria-label={environmentOpen ? 'Hide Environment' : 'Show Environment'}
         >
-          <Activity size={16} />
+          <Activity size={16} aria-hidden="true" />
         </button>
 
         <div ref={menuRef} style={{ position: 'relative' }}>
           <button
             className={'top-bar-action top-bar-panels-btn' + (panelMenuOpen ? ' active' : '')}
+            type="button"
             onClick={() => setPanelMenuOpen(!panelMenuOpen)}
             title="Tools and panels"
+            aria-label="Open Tools and panels menu"
           >
-            <Wrench size={16} />
+            <Wrench size={16} aria-hidden="true" />
             <span className="top-bar-panels-label">Tools</span>
-            <ChevronDown size={12} />
+            <ChevronDown size={12} aria-hidden="true" />
           </button>
 
           {panelMenuOpen && (

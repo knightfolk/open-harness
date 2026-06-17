@@ -702,6 +702,31 @@ interface ModelPromptConfig {
 }
 ```
 
+#### Prompt Strategy Database
+
+The family table below should become a versioned prompt strategy database, not
+only static documentation. See `docs/PROMPT_STRATEGY_DATABASE_PLAN.md`.
+
+The database should encode:
+
+- model family and optional model-id overrides
+- source references and last-reviewed date
+- system prompt style and token budget
+- instruction placement and context ordering
+- example policy
+- reasoning policy
+- tool policy
+- role/task output contract
+- known strengths, risks, and recommended regression tests
+
+This keeps prompt response optimization measurable. A bad answer should be
+debuggable as one of three separate questions:
+
+1. Was the wrong model routed?
+2. Was the right model prompted with the wrong strategy?
+3. Was the prompt strategy right, but the task needed stronger validation or a
+   different role?
+
 #### 2. Family Configurations
 
 | Family | Style | Max Sys Tokens | Tool Quality | Reasoning | Temp | CoT Trigger | Repeat Rules | Stop Seqs | Max Out |

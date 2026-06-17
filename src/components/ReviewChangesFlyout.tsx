@@ -300,7 +300,7 @@ export function ReviewChangesFlyout({ workingDir, _sessionId: sessionId, onClose
   if (!workingDir) {
     return (
       <div className="review-flyout-overlay" onClick={onClose}>
-        <div className="review-flyout" role="dialog" aria-modal="true" aria-labelledby="review-changes-title-empty" onClick={e => e.stopPropagation()}>
+        <div className="review-flyout" role="dialog" aria-modal="true" aria-labelledby="review-changes-title-empty" data-review-changes-surface="diffs-patches-validation-commit" onClick={e => e.stopPropagation()}>
           <div className="review-flyout-header">
             <span className="review-flyout-title" id="review-changes-title-empty">Review Changes</span>
             <button className="review-flyout-close" type="button" onClick={onClose} aria-label="Close review changes"><X size={16} /></button>
@@ -315,7 +315,7 @@ export function ReviewChangesFlyout({ workingDir, _sessionId: sessionId, onClose
 
   return (
     <div className="review-flyout-overlay" onClick={onClose}>
-      <div className="review-flyout" role="dialog" aria-modal="true" aria-labelledby="review-changes-title" onClick={e => e.stopPropagation()}>
+      <div className="review-flyout" role="dialog" aria-modal="true" aria-labelledby="review-changes-title" data-review-changes-surface="diffs-patches-validation-commit" onClick={e => e.stopPropagation()}>
         {/* ── Header ── */}
         <div className="review-flyout-header">
           <span className="review-flyout-title" id="review-changes-title">Review Changes</span>
@@ -609,12 +609,22 @@ export function ReviewChangesFlyout({ workingDir, _sessionId: sessionId, onClose
                         disabled={proofSaving || !sessionId}
                         aria-label="Save validation proof artifact to chat"
                         title={sessionId ? 'Save proof into this session and show it in chat as a review artifact' : 'Open a session to save proof artifacts'}
+                        aria-describedby={proofSaved || proofSaveError ? 'review-changes-proof-save-status' : undefined}
                       >
-                        <FileText size={11} />
+                        <FileText size={11} aria-hidden="true" />
                         {proofSaving ? 'Saving...' : proofSaved ? 'Saved to chat' : 'Save artifact'}
                       </button>
                     </div>
-                    {proofSaveError && <div className="validate-proof-error">{proofSaveError}</div>}
+                    {proofSaved && !proofSaveError && (
+                      <div id="review-changes-proof-save-status" className="validate-proof-saved" role="status" aria-live="polite">
+                        Validation proof saved to chat as a review artifact.
+                      </div>
+                    )}
+                    {proofSaveError && (
+                      <div id="review-changes-proof-save-status" className="validate-proof-error" role="alert">
+                        {proofSaveError}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="validate-commands">

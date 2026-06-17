@@ -54,8 +54,8 @@ const steeringActions: Array<{ action: RunSteeringAction; label: string }> = [
 const steeringActionDescriptions: Partial<Record<RunSteeringAction, string>> = {
   'flag-assumption': 'Records an assumption flag for the next safe phase.',
   redirect: 'Requests orchestrator redirection and stops the current path where possible.',
-  pause: 'Requests a safe pause for this run.',
-  cancel: 'Requests cancellation for this run.',
+  pause: 'Requests a safe stop at the current model request and records pause evidence in the replay.',
+  cancel: 'Cancels the current path and records cancellation evidence in the replay.',
   'request-proof': 'Records a proof request in the replay.',
   'approve-artifact': 'Records artifact approval in the replay.',
   'needs-revision': 'Records artifact revision feedback in the replay.',
@@ -86,10 +86,10 @@ function availableSteeringActions(agent: SubAgent): Array<{ action: RunSteeringA
 
 function stepMatchesReplayFilter(step: HarnessRunStep, filter: ReplayFilter): boolean {
   if (filter === 'all') return true;
-  if (filter === 'proof') return step.type === 'artifact' || step.type === 'final_answer' || step.type === 'context_pack' || step.type === 'repo_map';
+  if (filter === 'proof') return step.type === 'artifact' || step.type === 'final_answer' || step.type === 'context_pack' || step.type === 'repo_map' || step.type === 'worktree_isolation';
   if (filter === 'files') return step.type === 'context_pack' || step.type === 'repo_map' || step.type === 'artifact';
   if (filter === 'tools') return step.type === 'tool_call' || step.type === 'prompt_built';
-  if (filter === 'routing') return step.type === 'route' || step.type === 'auto_router' || step.type === 'orchestration' || step.type === 'model_request';
+  if (filter === 'routing') return step.type === 'route' || step.type === 'auto_router' || step.type === 'orchestration' || step.type === 'model_request' || step.type === 'worktree_isolation';
   if (filter === 'steering') return step.type === 'steering';
   if (filter === 'errors') return step.type === 'error';
   return true;
@@ -213,6 +213,7 @@ function stepIcon(step: HarnessRunStep) {
     case 'artifact': return FileText;
     case 'auto_router': return Gauge;
     case 'prompt_built': return FileText;
+    case 'worktree_isolation': return Package;
     case 'model_request': return Zap;
     case 'tool_call': return Terminal;
     case 'model_text': return Gauge;
@@ -232,6 +233,12 @@ function stepTitle(step: HarnessRunStep): string {
     case 'artifact': return `Artifact · ${step.artifact.title}`;
     case 'auto_router': return formatAutoRouterStepTitle(step);
     case 'prompt_built': return `Prompt built · ${step.toolCount} tool${step.toolCount === 1 ? '' : 's'}`;
+    case 'worktree_isolation': {
+      if (step.status === 'ready') return `Worktree isolation ready · ${step.agent}`;
+      if (step.status === 'preserved') return `Worktree preserved for Safety · ${step.agent}`;
+      if (step.status === 'auto_discarded') return `Clean worktree auto-discarded · ${step.agent}`;
+      return `Worktree isolation ${step.status} · ${step.agent}`;
+    }
     case 'model_request': return `Model request · round ${step.round}`;
     case 'tool_call': return step.durationMs == null ? `Tool started · ${step.name}` : `Tool finished · ${step.name}`;
     case 'model_text': return `Model text · ${step.chars} chars`;
@@ -256,6 +263,16 @@ function stepDetail(step: HarnessRunStep): string | null {
       : `${step.artifact.type} · ${step.artifact.summary}`;
     case 'auto_router': return formatAutoRouterStepDetail(step);
     case 'prompt_built': return step.promptPreview;
+    case 'worktree_isolation': {
+      const target = step.path ? `path: ${basename(step.path)}` : '';
+      const branch = step.branch ? `branch: ${step.branch}` : '';
+      const base = step.baseRef ? `base: ${step.baseRef}` : '';
+      const error = step.error ? `error: ${step.error}` : '';
+      const action = step.status === 'ready' || step.status === 'preserved' ? 'Open Safety > Worktrees to validate, promote, or discard this isolated worktree.' : '';
+      return [step.reason, step.worktreeId ? `id: ${step.worktreeId}` : '', branch, base, target, error, action]
+        .filter(Boolean)
+        .join(' · ');
+    }
     case 'model_request': return step.model;
     case 'tool_call': {
       const parts = [];
@@ -292,10 +309,17 @@ function latestReplayProof(steps: HarnessRunStep[]): string {
   const proofStep = steps
     .slice()
     .reverse()
-    .find((step) => step.type === 'artifact' || step.type === 'final_answer' || step.type === 'tool_call' || step.type === 'error');
+    .find((step) => step.type === 'artifact' || step.type === 'final_answer' || step.type === 'worktree_isolation' || step.type === 'tool_call' || step.type === 'error');
   if (!proofStep) return 'Waiting for proof.';
   if (proofStep.type === 'artifact') return `${proofStep.artifact.title}: ${proofStep.artifact.summary}`;
   if (proofStep.type === 'final_answer') return `Final answer captured (${proofStep.chars} chars).`;
+  if (proofStep.type === 'worktree_isolation') return proofStep.status === 'ready'
+    ? `Worktree isolation ready for ${proofStep.agent}: ${proofStep.worktreeId || proofStep.branch || proofStep.path || 'isolated checkout'}`
+    : proofStep.status === 'preserved'
+      ? `Worktree preserved for Safety: ${proofStep.worktreeId || proofStep.branch || proofStep.path || 'isolated checkout'}`
+    : proofStep.status === 'auto_discarded'
+      ? `Clean worktree auto-discarded: ${proofStep.worktreeId || proofStep.branch || proofStep.path || 'isolated checkout'}`
+    : `Worktree isolation ${proofStep.status}: ${proofStep.error || proofStep.reason}`;
   if (proofStep.type === 'tool_call') return proofStep.durationMs == null
     ? `Tool running: ${proofStep.name}`
     : `Tool finished: ${proofStep.name}${proofStep.outputPreview ? ` · ${compactToolOutput(proofStep.outputPreview)}` : ''}`;
@@ -306,6 +330,7 @@ function RunReplaySummary({ steps }: { steps: HarnessRunStep[] }) {
   const artifacts = steps.filter((step) => step.type === 'artifact').length;
   const validationProofs = steps.filter((step) => step.type === 'artifact' && step.artifact.type === 'validation_proof').length;
   const tools = steps.filter((step) => step.type === 'tool_call').length;
+  const worktreeIsolation = steps.filter((step) => step.type === 'worktree_isolation' && step.status === 'ready').length;
   const steering = steps.filter((step) => step.type === 'steering').length;
   const modelRequests = steps.filter((step) => step.type === 'model_request').length;
   const contextFiles = new Set(
@@ -317,7 +342,7 @@ function RunReplaySummary({ steps }: { steps: HarnessRunStep[] }) {
   ).size;
   const hasFinal = steps.some((step) => step.type === 'final_answer');
   return (
-    <div className="sub-agent-replay" role="group" aria-label={`Run replay summary: ${steps.length} events, ${artifacts} artifacts, ${validationProofs} validation proofs, ${contextFiles} context files, ${tools} tool calls, ${steering} steering events, ${modelRequests} model requests, ${hasFinal ? 'final answer captured' : 'final answer pending'}`}>
+    <div className="sub-agent-replay" role="group" aria-label={`Run replay summary: ${steps.length} events, ${artifacts} artifacts, ${validationProofs} validation proofs, ${contextFiles} context files, ${worktreeIsolation} isolated worktrees, ${tools} tool calls, ${steering} steering events, ${modelRequests} model requests, ${hasFinal ? 'final answer captured' : 'final answer pending'}`}>
       <div className="sub-agent-replay-header">
         <span>Run replay</span>
         <span>{steps.length} event{steps.length === 1 ? '' : 's'}</span>
@@ -326,6 +351,7 @@ function RunReplaySummary({ steps }: { steps: HarnessRunStep[] }) {
         <span><FileText size={11} aria-hidden="true" /> {artifacts} artifact{artifacts === 1 ? '' : 's'}</span>
         <span><CheckCircle2 size={11} aria-hidden="true" /> {validationProofs} validation proof{validationProofs === 1 ? '' : 's'}</span>
         <span><FileText size={11} aria-hidden="true" /> {contextFiles} context file{contextFiles === 1 ? '' : 's'}</span>
+        <span><Package size={11} aria-hidden="true" /> {worktreeIsolation} isolated worktree{worktreeIsolation === 1 ? '' : 's'}</span>
         <span><Terminal size={11} aria-hidden="true" /> {tools} tool call{tools === 1 ? '' : 's'}</span>
         <span><Flag size={11} aria-hidden="true" /> {steering} steering</span>
         <span><Zap size={11} aria-hidden="true" /> {modelRequests} request{modelRequests === 1 ? '' : 's'}</span>
@@ -416,6 +442,7 @@ export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAge
       <div
         className="sub-agent-summary"
         role="status"
+        aria-live="polite"
         aria-label={`Harness run summary: ${running} working, ${blocked} blocked, ${waiting} waiting, ${failed} failed, ${completed} complete, ${formatTokens(totalTokens)} tokens`}
       >
         <span>{running} working</span>
@@ -441,6 +468,9 @@ export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAge
         const expandedRegionId = `agent-detail-expanded-${agent.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         const availableActions = availableSteeringActions(agent);
         const canSteer = availableActions.length > 0;
+        const steeringTargetInfoId = `${expandedRegionId}-steering-target`;
+        const steeringPersistenceInfoId = `${expandedRegionId}-steering-persistence`;
+        const steeringDescriptionIds = `${steeringTargetInfoId} ${steeringPersistenceInfoId}`;
         const steeringTargetLabel = agent.id.includes(':phase:')
           ? 'Notes target this agent for the next safe phase.'
           : 'Notes target the orchestrator for the next safe phase.';
@@ -559,8 +589,8 @@ export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAge
                   </div>
                   {canSteer ? (
                     <>
-                      <div className="sub-agent-steering-target">{steeringTargetLabel}</div>
-                      <div className="sub-agent-steering-target">{steeringPersistenceLabel}</div>
+                      <div id={steeringTargetInfoId} className="sub-agent-steering-target">{steeringTargetLabel}</div>
+                      <div id={steeringPersistenceInfoId} className="sub-agent-steering-target">{steeringPersistenceLabel}</div>
                       <div className="sub-agent-steering-actions" role="group" aria-label={`Available steering actions for ${agent.name}`}>
                         {availableActions.map((action) => (
                           <button
@@ -569,6 +599,7 @@ export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAge
                             type="button"
                             title={steeringActionDescriptions[action.action]}
                             aria-label={`${action.label} for ${agent.name}. ${steeringActionDescriptions[action.action] || ''} ${steeringTargetLabel}`}
+                            aria-describedby={steeringDescriptionIds}
                             onClick={(event) => {
                               event.stopPropagation();
                               handleSteer(agent, action.action);
@@ -586,6 +617,7 @@ export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAge
                           onChange={(event) => setNoteDrafts((prev) => ({ ...prev, [agent.id]: event.target.value }))}
                           placeholder="Add steering note or redirect reason..."
                           aria-label={`Steering note for ${agent.name}`}
+                          aria-describedby={steeringDescriptionIds}
                           onClick={(event) => event.stopPropagation()}
                           onKeyDown={(event) => {
                             event.stopPropagation();
@@ -601,6 +633,7 @@ export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAge
                           }}
                           disabled={!noteDrafts[agent.id]?.trim()}
                           aria-label={`Add steering note for ${agent.name}`}
+                          aria-describedby={steeringDescriptionIds}
                         >
                           Add note
                         </button>

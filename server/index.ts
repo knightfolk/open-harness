@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
-import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, lstatSync, writeFileSync, appendFileSync } from 'fs';
 import { join, basename, dirname, extname, isAbsolute, resolve, relative, parse as parsePath } from 'path';
 import { execFileSync, spawn } from 'child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
@@ -18,6 +18,7 @@ import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAl
 import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost, estimateCostForRanking } from './modelProfiles';
 import { buildContextWindow, estimateTokens } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
+import { PROMPT_STRATEGY_PROFILES, getPromptStrategyById, getPromptStrategySelectionForModel, toPromptStrategyTrace } from './promptStrategies';
 import { formatProjectProfileForPrompt, getProjectProfile } from './projectProfile';
 import {
   buildContextPack,
@@ -54,11 +55,15 @@ import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
 import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins } from './promptPlugins';
-import type { PersistedSession, SessionGoal } from './sessionStore';
+import type { PersistedMessage, PersistedSession, SessionGoal } from './sessionStore';
 import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from './sessionGoals';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
 import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './streamCleaner';
+import { buildToolReliabilitySummary } from './toolReliability';
+import { getToolReliabilitySessions } from './toolReliabilityLogTrace';
+import { buildRouterLearningExportPayload } from './routerLearningExport';
+import { buildRouterLearningImportPreview } from './routerLearningImport';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -71,6 +76,15 @@ function sanitizeFilePart(value: string): string {
 }
 
 const PLANNING_ROOM_BENCH_MODEL_ID = 'OpenHarness Planning Room';
+
+function promptStrategyTraceForModel(modelId: string, promptStrategyId?: string) {
+  const override = getPromptStrategyById(promptStrategyId);
+  if (override) {
+    return toPromptStrategyTrace(override, undefined, { source: 'applies-to', hint: promptStrategyId || override.id });
+  }
+  const selection = getPromptStrategySelectionForModel(modelId);
+  return toPromptStrategyTrace(selection.profile, undefined, selection.modelMatch);
+}
 
 interface EstimatedModelUsage {
   inputTokens: number;
@@ -414,6 +428,62 @@ interface MessageRow {
   timestamp: string;
   toolCalls?: ToolCallRow[];
   runTrace?: HarnessRun;
+  evidenceSource?: PersistedMessage['evidenceSource'];
+}
+
+const LOCAL_EVIDENCE_SOURCE: NonNullable<PersistedMessage['evidenceSource']> = 'saved_session_trace';
+let serverRunTraceLogFile: string | null = null;
+
+function resolveServerRunTraceLogFile(): string | null {
+  if (serverRunTraceLogFile) return serverRunTraceLogFile;
+  const serverProcess = processLedger.getProcess(process.pid);
+  if (serverProcess?.logFile) {
+    serverRunTraceLogFile = serverProcess.logFile;
+    return serverRunTraceLogFile;
+  }
+  return null;
+}
+
+function appendRunTraceLog(line: string) {
+  const logFile = resolveServerRunTraceLogFile();
+  if (!logFile) return;
+  try {
+    appendFileSync(logFile, `${line}\n`, 'utf-8');
+  } catch {
+    // Do not block runtime behavior if trace logging is unavailable.
+  }
+}
+
+function emitRunTraceCompletion(run: HarnessRun) {
+  appendRunTraceLog(`[run-complete] ${JSON.stringify({ runId: run.id, status: run.status })}`);
+}
+
+function emitRunTraceStep(step: HarnessRunStep, runId: string) {
+  if (!runId) return;
+  if (step.type === 'tool_call') {
+    appendRunTraceLog(`[run-step] ${JSON.stringify({
+      runId,
+      step: {
+        type: 'tool_call',
+        name: step.name,
+        status: step.status,
+        model: step.model,
+        providerId: step.providerId,
+        round: step.round,
+        error: step.error,
+      },
+    })}`);
+    return;
+  }
+  if (step.type === 'final_answer') {
+    appendRunTraceLog(`[run-step] ${JSON.stringify({ runId, step: { type: 'final_answer', chars: step.chars } })}`);
+  }
+}
+
+function completeHarnessRunAndTrace(run: HarnessRun, status: 'complete' | 'error' = 'complete') {
+  const completed = completeHarnessRun(run, status);
+  emitRunTraceCompletion(completed);
+  return completed;
 }
 
 const STEERING_ACTIONS: RunSteeringAction[] = [
@@ -1154,7 +1224,7 @@ app.post('/api/sessions/:sessionId/validation-proof-artifacts', (req, res) => {
   });
   appendRunStep(run, { type: 'artifact', artifact });
   appendRunStep(run, { type: 'final_answer', chars: proofText.length });
-  completeHarnessRun(run, failed > 0 ? 'error' : 'complete');
+  completeHarnessRunAndTrace(run, failed > 0 ? 'error' : 'complete');
 
   const message: MessageRow = {
     id: messageId,
@@ -1162,6 +1232,7 @@ app.post('/api/sessions/:sessionId/validation-proof-artifacts', (req, res) => {
     content: proofText,
     timestamp: capturedAt,
     runTrace: run,
+    evidenceSource: LOCAL_EVIDENCE_SOURCE,
   };
   session.messages.push(message);
   session.updatedAt = capturedAt;
@@ -1319,7 +1390,17 @@ app.get('/api/providers/rate-limits/status', (_req, res) => {
 
 // ── Router Learning (M19) ────────────────────────────
 app.get('/api/router/learning', (_req, res) => {
-  res.json(getLearningSummary());
+  const toolReliability = (() => {
+    try {
+      return buildToolReliabilitySummary(getToolReliabilitySessions());
+    } catch {
+      return buildToolReliabilitySummary([]);
+    }
+  })();
+  res.json({
+    ...getLearningSummary(),
+    toolReliability,
+  });
 });
 
 app.get('/api/router/learning/events', (req, res) => {
@@ -1330,50 +1411,28 @@ app.get('/api/router/learning/events', (req, res) => {
 
 app.get('/api/router/learning/export', (_req, res) => {
   const events = getAllRoutingEvents();
-  const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
-  res.json({
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    summary: getLearningSummary(),
-    eventCount: events.length,
-    productionEventCount: events.length - benchmarkEventCount,
-    benchmarkEventCount,
+  const toolReliability = (() => {
+    try {
+      return buildToolReliabilitySummary(getToolReliabilitySessions());
+    } catch {
+      return buildToolReliabilitySummary([]);
+    }
+  })();
+  res.json(buildRouterLearningExportPayload({
     events,
-  });
+    learningSummary: getLearningSummary(),
+    toolReliability,
+    routerState: getAutoRouterState(),
+  }));
 });
 
 app.post('/api/router/learning/import', (req, res) => {
   const body = req.body || {};
   const dryRun = body.dryRun === true || req.query.dryRun === 'true';
   const datasetKind = body.datasetKind === 'benchmark' || req.query.datasetKind === 'benchmark' ? 'benchmark' : 'production';
-  const schemaVersion = typeof body.schemaVersion === 'number'
-    ? body.schemaVersion
-    : typeof body.fullExport?.schemaVersion === 'number'
-      ? body.fullExport.schemaVersion
-      : null;
-  const importSource = Array.isArray(body)
-    ? 'raw-array'
-    : Array.isArray(body.events)
-      ? 'events'
-      : Array.isArray(body.fullExport?.events)
-        ? 'fullExport.events'
-        : Array.isArray(body.recentEvents)
-          ? 'recentEvents'
-          : 'none';
-  const warnings = schemaVersion != null && schemaVersion !== 1
-    ? [`Unsupported schemaVersion ${schemaVersion}; importing recognized event fields only.`]
-    : [];
-  const events = Array.isArray(body)
-    ? body
-    : Array.isArray(body.events)
-    ? body.events
-    : Array.isArray(body.fullExport?.events)
-      ? body.fullExport.events
-      : Array.isArray(body.recentEvents)
-        ? body.recentEvents
-        : [];
+  const { events, importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview } = buildRouterLearningImportPreview(body);
   if (!Array.isArray(events)) return res.status(400).json({ error: 'events array required' });
-  res.json({ ok: true, ...importRoutingEvents(events, { dryRun, datasetKind }), importSource, schemaVersion, warnings });
+  res.json({ ok: true, ...importRoutingEvents(events, { dryRun, datasetKind }), importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview });
 });
 
 app.get('/api/router/adherence/events', (req, res) => {
@@ -2880,6 +2939,7 @@ function maybeEmitThinkingSSE(res: express.Response, assistantId: string, chars:
 
 function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep) {
   const appended = appendRunStep(run, step);
+  emitRunTraceStep(appended, run.id);
   writeSSE(res, 'run_step', { runId: run.id, step: appended });
 }
 
@@ -2897,6 +2957,7 @@ function persistAssistantMessage(
     content,
     timestamp: new Date().toISOString(),
     runTrace: run,
+    evidenceSource: LOCAL_EVIDENCE_SOURCE,
   });
   session.updatedAt = new Date().toISOString();
   sessionStore.saveSession(session);
@@ -2912,6 +2973,7 @@ function persistAssistantError(
   if (existing) {
     existing.content = errorContent;
     existing.runTrace = run;
+    existing.evidenceSource = LOCAL_EVIDENCE_SOURCE;
   } else {
     session.messages.push({
       id: assistantId,
@@ -2919,6 +2981,7 @@ function persistAssistantError(
       content: errorContent,
       timestamp: new Date().toISOString(),
       runTrace: run,
+      evidenceSource: LOCAL_EVIDENCE_SOURCE,
     });
   }
   session.updatedAt = new Date().toISOString();
@@ -2933,6 +2996,7 @@ function persistAssistantRunTrace(
   const existing = session.messages.find((m) => m.id === assistantId && m.role === 'assistant');
   if (!existing) return;
   existing.runTrace = run;
+  existing.evidenceSource = LOCAL_EVIDENCE_SOURCE;
   session.updatedAt = new Date().toISOString();
   sessionStore.saveSession(session);
 }
@@ -2951,6 +3015,7 @@ function buildRunDebugBundle(sessionId: string, messageId: string) {
     .filter((step): step is Extract<HarnessRunStep, { type: 'artifact' }> => step.type === 'artifact')
     .map((step) => step.artifact);
   const modelOutputs = steps.filter((step) => step.type === 'model_text' || step.type === 'model_thinking' || step.type === 'final_answer');
+  const worktreeIsolation = steps.filter((step): step is Extract<HarnessRunStep, { type: 'worktree_isolation' }> => step.type === 'worktree_isolation');
 
   return {
     schemaVersion: '0.1.0',
@@ -2973,6 +3038,7 @@ function buildRunDebugBundle(sessionId: string, messageId: string) {
     replay: {
       promptAssembly: promptStep?.assembly || null,
       routeDecision: routeSteps,
+      worktreeIsolation,
       modelOutputs,
       artifacts,
       errors,
@@ -3016,6 +3082,13 @@ function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
     case 'auto_router': return 'Auto-router is choosing a model';
     case 'prompt_built': return 'Building the model prompt';
     case 'steering': return `Steering: ${step.action}`;
+    case 'worktree_isolation': return step.status === 'ready'
+      ? 'Worktree isolation ready'
+      : step.status === 'preserved'
+        ? 'Worktree preserved for Safety review'
+      : step.status === 'auto_discarded'
+        ? 'Clean worktree auto-discarded'
+      : `Worktree isolation ${step.status}`;
     case 'model_request': return `Waiting for ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Using ${step.name}` : `Finished ${step.name}`;
     case 'model_text': return 'Receiving response text';
@@ -3259,7 +3332,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     guardRun.status = 'error';
     writeSSE(res, 'run_start', guardRun);
     emitRunStep(res, guardRun, { type: 'error', message: workspaceMismatch });
-    completeHarnessRun(guardRun, 'error');
+    completeHarnessRunAndTrace(guardRun, 'error');
     await streamTextSSE(res, 'text', workspaceMismatch);
     writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: workspaceMismatch });
     persistAssistantError(session, assistantId, workspaceMismatch, guardRun);
@@ -3355,11 +3428,19 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       source: 'router',
     });
 
+    const selectedRoutingModel = route.suggestedModels[0] || requestedModel;
+    const promptStrategySelection = getPromptStrategySelectionForModel(selectedRoutingModel);
+    const promptStrategy = promptStrategySelection.profile;
+    const promptStrategyTrace = toPromptStrategyTrace(promptStrategy, {
+      role: route.role,
+      taskDescription: content,
+      hasTools: true,
+    }, promptStrategySelection.modelMatch);
     recordRoutingDecision({
       timestamp: new Date().toISOString(),
       sessionId: session.id,
       taskHash: String(Math.abs(content.split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0)).toString(36)),
-      selectedModel: route.suggestedModels[0] || requestedModel,
+      selectedModel: selectedRoutingModel,
       score: rd.score ?? 0,
       candidateScores: rd.candidateScores || {},
       wasFallback: rd.fallback ?? false,
@@ -3369,6 +3450,12 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       complexity: route.complexity,
       taskType: route.mode,
       role: route.role,
+      promptStrategyId: promptStrategy.id,
+      promptStrategyFamily: promptStrategy.family,
+      promptStrategyStyle: promptStrategy.systemStyle,
+      promptStrategyVariantId: promptStrategyTrace.variantId,
+      promptStrategyTaskType: promptStrategyTrace.taskType,
+      promptStrategySelectionReason: promptStrategyTrace.selectionReason,
       userTurns: session.messages.length,
     });
   }
@@ -3466,7 +3553,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel, directContext, requestController.signal);
   }
 
-  completeHarnessRun(run, run.status === 'error' ? 'error' : 'complete');
+  completeHarnessRunAndTrace(run, run.status === 'error' ? 'error' : 'complete');
   persistAssistantRunTrace(session, assistantId, run);
   writeSSE(res, 'run_complete', run);
   writeSSE(res, 'done', {});
@@ -3483,7 +3570,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
           : 'Request was aborted.')
       : err?.message;
     const errorContent = `Error: ${errorMessage || err}`;
-    completeHarnessRun(run, 'error');
+    completeHarnessRunAndTrace(run, 'error');
     persistAssistantError(session, assistantId, errorContent, run);
     if (!res.writableEnded) {
       writeSSE(res, 'assistant_message', { id: assistantId, role: 'assistant', content: errorContent });
@@ -3968,17 +4055,18 @@ async function streamWithNativeAdapter(
         const tcId = tc.id || uuid();
         const displayArgs = redactOutputText(tc.arguments);
         res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: displayArgs }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs });
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, status: 'running', model: run.effectiveModel, providerId: run.providerId, round });
 
         const startTime = Date.now();
         let output: string;
+        let toolError: string | undefined;
         let parsedArgs: any = {};
         try { parsedArgs = JSON.parse(tc.arguments); } catch { parsedArgs = {}; }
 
         if (isRedundantToolCall(toolTracker, tc.name, parsedArgs)) {
           const skipMsg = `[Skipped: ${tc.name} already called with same path]`;
           res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 }) + '\n\n');
-          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: skipMsg, durationMs: 0 });
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: skipMsg, durationMs: 0, status: 'skipped', model: run.effectiveModel, providerId: run.providerId, round });
           // `name` is what Gemini's functionResponse needs to match the call.
           roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: wrapToolResultForModel(tc.name, skipMsg) });
           sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 });
@@ -3989,6 +4077,7 @@ async function streamWithNativeAdapter(
           const rejectMsg = `Tool '${tc.name}' is not a registered tool. Multi-agent tasks must use the built-in orchestration system. Do not invent tool names starting with 'subagent-'.`;
           console.warn(`[tool-guard] Rejected fake subagent tool call: ${tc.name}`);
           res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: rejectMsg, durationMs: 0, status: 'error', error: rejectMsg, model: run.effectiveModel, providerId: run.providerId, round });
           if (run) emitRunStep(res, run, { type: 'error', message: `Rejected fake subagent tool: ${tc.name}` });
           roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: wrapToolResultForModel(tc.name, rejectMsg) });
           sessionToolCalls.push({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 });
@@ -3999,14 +4088,16 @@ async function streamWithNativeAdapter(
           const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined, run, res);
           output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } catch (err: any) {
-          output = redactOutputText('Error: ' + err.message);
+          toolError = redactOutputText(err?.message || String(err));
+          output = redactOutputText('Error: ' + toolError);
         }
         const duration = Date.now() - startTime;
+        const toolStatus = toolError ? 'error' : 'complete';
 
-        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 500), duration }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: output.slice(0, 500), durationMs: duration });
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: toolStatus, input: displayArgs, output: output.slice(0, 500), error: toolError, duration }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: output.slice(0, 500), durationMs: duration, status: toolStatus, error: toolError, model: run.effectiveModel, providerId: run.providerId, round });
 
-        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 2000), duration });
+        sessionToolCalls.push({ id: tcId, name: tc.name, status: toolStatus, input: displayArgs, output: output.slice(0, 2000), duration });
         // `name` is what Gemini's functionResponse needs to match the call.
         roundMessages.push({ role: 'tool', tool_call_id: tcId, name: tc.name, content: wrapToolResultForModel(tc.name, output) });
       }
@@ -4029,6 +4120,7 @@ async function streamWithNativeAdapter(
       timestamp: new Date().toISOString(),
       toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
       runTrace: run,
+      evidenceSource: LOCAL_EVIDENCE_SOURCE,
     });
     session.updatedAt = new Date().toISOString();
     sessionStore.saveSession(session);
@@ -4057,6 +4149,7 @@ async function streamModel(
   systemTaskContext?: string,
   propagateProviderErrors = false,
   abortSignal?: AbortSignal,
+  promptStrategyId?: string,
 ) {
   const providerStartedAt = Date.now();
   // ── Model-aware prompt building ─────────────────────
@@ -4179,6 +4272,7 @@ async function streamModel(
     tools: filteredMcpTools.length > 0 ? filteredMcpTools : undefined,
     taskDescription: systemTaskContext,
     enableThinking: isReasoningModel(effectiveModel),
+    promptStrategyId,
   });
 
   // If the model doesn't support native tool calls, do not advertise tools yet.
@@ -4485,10 +4579,11 @@ async function streamModel(
         const tcId = tc.id || uuid();
         const displayArgs = redactOutputText(tc.arguments);
         res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'running', input: displayArgs }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs });
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, status: 'running', model: run.effectiveModel, providerId: run.providerId, round });
 
         const startTime = Date.now();
         let output: string;
+        let toolError: string | undefined;
         let parsedArgs: any = {};
         try { parsedArgs = JSON.parse(tc.arguments); } catch { parsedArgs = {}; }
 
@@ -4496,7 +4591,7 @@ async function streamModel(
         if (isRedundantToolCall(toolTracker, tc.name, parsedArgs)) {
           const skipMsg = `[Skipped: ${tc.name} already called with same path]`;
           res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 }) + '\n\n');
-          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: skipMsg, durationMs: 0 });
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: skipMsg, durationMs: 0, status: 'skipped', model: run.effectiveModel, providerId: run.providerId, round });
           apiMessages.push({ role: 'tool', tool_call_id: tcId, content: wrapToolResultForModel(tc.name, skipMsg) });
           sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: skipMsg, duration: 0 });
           continue;
@@ -4506,6 +4601,7 @@ async function streamModel(
           const rejectMsg = `Tool '${tc.name}' is not a registered tool. Multi-agent tasks must use the built-in orchestration system. Do not invent tool names starting with 'subagent-'.`;
           console.warn(`[tool-guard] Rejected fake subagent tool call: ${tc.name}`);
           res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 }) + '\n\n');
+          if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: rejectMsg, durationMs: 0, status: 'error', error: rejectMsg, model: run.effectiveModel, providerId: run.providerId, round });
           if (run) emitRunStep(res, run, { type: 'error', message: `Rejected fake subagent tool: ${tc.name}` });
           apiMessages.push({ role: 'tool', tool_call_id: tcId, content: wrapToolResultForModel(tc.name, rejectMsg) });
           sessionToolCalls.push({ id: tcId, name: tc.name, status: 'error', input: displayArgs, output: rejectMsg, duration: 0 });
@@ -4516,14 +4612,16 @@ async function streamModel(
           const mcpResult = await invokeMCPTool(tc.name, parsedArgs, toolServerMap, session.workingDir || undefined, run, res);
           output = typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult, null, 2);
         } catch (err: any) {
-          output = redactOutputText('Error: ' + err.message);
+          toolError = redactOutputText(err?.message || String(err));
+          output = redactOutputText('Error: ' + toolError);
         }
         const duration = Date.now() - startTime;
+        const toolStatus = toolError ? 'error' : 'complete';
 
-        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 500), duration }) + '\n\n');
-        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: output.slice(0, 500), durationMs: duration });
+        res.write('event: tool_call\ndata: ' + JSON.stringify({ id: tcId, name: tc.name, status: toolStatus, input: displayArgs, output: output.slice(0, 500), error: toolError, duration }) + '\n\n');
+        if (run) emitRunStep(res, run, { type: 'tool_call', id: tcId, name: tc.name, input: displayArgs, outputPreview: output.slice(0, 500), durationMs: duration, status: toolStatus, error: toolError, model: run.effectiveModel, providerId: run.providerId, round });
 
-        sessionToolCalls.push({ id: tcId, name: tc.name, status: 'complete', input: displayArgs, output: output.slice(0, 2000), duration });
+        sessionToolCalls.push({ id: tcId, name: tc.name, status: toolStatus, input: displayArgs, output: output.slice(0, 2000), duration });
 
         // Add tool result to conversation for next round
         apiMessages.push({ role: 'tool', tool_call_id: tcId, content: wrapToolResultForModel(tc.name, output) });
@@ -4613,6 +4711,7 @@ async function streamModel(
       timestamp: new Date().toISOString(),
       toolCalls: sessionToolCalls.length > 0 ? sessionToolCalls : undefined,
       runTrace: run,
+      evidenceSource: LOCAL_EVIDENCE_SOURCE,
     });
     session.updatedAt = new Date().toISOString();
 
@@ -5223,6 +5322,7 @@ app.post('/api/bench/run', async (req, res) => {
           prompt: task.prompt,
           response: 'No provider for model',
           responseLength: 0,
+          promptStrategy: promptStrategyTraceForModel(modelId),
           toolCalls: [],
           validationResults: [],
           validationPassed: false,
@@ -5282,6 +5382,7 @@ app.post('/api/bench/run', async (req, res) => {
           prompt: task.prompt,
           response,
           responseLength: response.length,
+          promptStrategy: promptStrategyTraceForModel(modelId),
           toolCalls: [],
           validationResults: setupResults,
           validationPassed: false,
@@ -5449,6 +5550,7 @@ app.post('/api/bench/run', async (req, res) => {
           prompt: task.prompt,
           response: '',
           responseLength: 0,
+          promptStrategy: promptStrategyTraceForModel(modelId),
           toolCalls: [],
           validationResults: [],
           validationPassed: false,
@@ -5544,6 +5646,7 @@ app.post('/api/bench/run', async (req, res) => {
         prompt: task.prompt,
         response,
         responseLength: response.length,
+        promptStrategy: promptStrategyTraceForModel(modelId),
         toolCalls: toolCallsAccum,
         validationResults,
         validationPassed: validationResults.length === 0 || validationResults.every(r => r.passed),
@@ -5580,6 +5683,10 @@ app.post('/api/bench/run', async (req, res) => {
 
 app.get('/api/evals/prompts', (_req, res) => {
   res.json(evals.getAllPrompts());
+});
+
+app.get('/api/prompt-strategies', (_req, res) => {
+  res.json(Object.values(PROMPT_STRATEGY_PROFILES));
 });
 
 app.get('/api/evals/reports', (_req, res) => {
@@ -5664,11 +5771,12 @@ app.get('/api/runs/:runId/debug-bundle', (req, res) => {
 });
 
 app.post('/api/evals/run', async (req, res) => {
-  const { name, promptIds, modelIds, workingDir, packContext } = req.body as {
+  const { name, promptIds, modelIds, workingDir, packContext, promptStrategyIds } = req.body as {
     name?: string;
     promptIds: string[];
     modelIds: string[];
     workingDir?: string;
+    promptStrategyIds?: string[];
     packContext?: import('./evals').EvalReport['packContext'];
   };
 
@@ -5678,6 +5786,14 @@ app.post('/api/evals/run', async (req, res) => {
 
   const targetWorkspace = ensureKnownWorkspace(workingDir || process.cwd());
   if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+  const requestedPromptStrategyIds = Array.isArray(promptStrategyIds)
+    ? promptStrategyIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    : [];
+  const invalidPromptStrategyIds = requestedPromptStrategyIds.filter((id) => !getPromptStrategyById(id));
+  if (invalidPromptStrategyIds.length > 0) {
+    return res.status(400).json({ error: `Unknown prompt strategy id(s): ${invalidPromptStrategyIds.join(', ')}` });
+  }
+  const effectivePromptStrategyIds: Array<string | undefined> = requestedPromptStrategyIds.length > 0 ? requestedPromptStrategyIds : [undefined];
 
   const report = evals.createReport(
     name || `Eval ${new Date().toLocaleDateString()}`,
@@ -5692,6 +5808,10 @@ app.post('/api/evals/run', async (req, res) => {
       }
       : undefined,
   );
+  if (effectivePromptStrategyIds.length > 1) {
+    report.total = promptIds.length * modelIds.length * effectivePromptStrategyIds.length;
+    evals.saveReport(report);
+  }
 
   // Return immediately with the report ID
   res.status(201).json({ id: report.id, status: 'running', total: report.total });
@@ -5703,7 +5823,7 @@ app.post('/api/evals/run', async (req, res) => {
   for (const modelId of modelIds) {
     const resolved = resolveProviderForModel(modelId);
     if (!resolved) {
-      for (const p of prompts) {
+      for (const promptStrategyId of effectivePromptStrategyIds) for (const p of prompts) {
         report.results.push({
           modelId,
           promptId: p.id,
@@ -5711,6 +5831,7 @@ app.post('/api/evals/run', async (req, res) => {
           status: 'error',
           response: 'No provider for model',
           responseLength: 0,
+          promptStrategy: promptStrategyTraceForModel(modelId, promptStrategyId),
           toolCallCount: 0,
           toolCalls: [],
           wallMs: 0,
@@ -5721,7 +5842,7 @@ app.post('/api/evals/run', async (req, res) => {
       continue;
     }
 
-    for (const p of prompts) {
+    for (const promptStrategyId of effectivePromptStrategyIds) for (const p of prompts) {
       const testSession: SessionRow = {
         id: uuid(),
         title: `[eval] ${modelId}--${p.id}`,
@@ -5765,6 +5886,12 @@ app.post('/api/evals/run', async (req, res) => {
           resolved.chatURL, resolved.apiKey, resolved.providerId,
           testSession.messages, writer, uuid(), testSession,
           modelId,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          promptStrategyId,
         );
       } catch (err: any) {
         console.error(`[eval] ${modelId}/${p.id} error:`, err.message);
@@ -5794,6 +5921,7 @@ app.post('/api/evals/run', async (req, res) => {
         status: 'ok',
         response,
         responseLength: response.length,
+        promptStrategy: promptStrategyTraceForModel(modelId, promptStrategyId),
         toolCallCount: compactToolCalls.length,
         toolCalls: compactToolCalls,
         wallMs,
@@ -6597,7 +6725,7 @@ app.listen(PORT, SERVER_LISTEN_HOST, () => {
   console.log(`OpenHarness server running on http://${SERVER_LISTEN_HOST}:${PORT}`);
 
   // Register this server process in the ledger so the UI can see/kill it.
-  processLedger.registerExternal({
+  const serverProcessEntry = processLedger.registerExternal({
     pid: process.pid,
     kind: 'server',
     name: `OpenHarness server (port ${PORT})`,
@@ -6605,6 +6733,7 @@ app.listen(PORT, SERVER_LISTEN_HOST, () => {
     args: ['server/index.ts'],
     notes: `Started on port ${PORT}`,
   });
+  if (serverProcessEntry.logFile) serverRunTraceLogFile = serverProcessEntry.logFile;
   const _activeModel = appConfig.activeModel || 'MiniMax-M3';
   const _family = detectModelFamily(_activeModel);
   const _cfg = getModelConfig(_activeModel);

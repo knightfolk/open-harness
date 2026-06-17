@@ -4,6 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
 import { redactSecrets } from './sectionRedaction';
+import type { PromptStrategyTrace } from './promptStrategies';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ export interface EvalResult {
   status: 'ok' | 'error';
   response: string;
   responseLength: number;
+  promptStrategy?: PromptStrategyTrace;
   toolCallCount: number;
   toolCalls: Array<{ name: string; status: string }>;
   wallMs: number;
@@ -97,6 +99,8 @@ export interface EvalReport {
 
 export interface EvalSummary {
   byModel: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }>;
+  byPromptStrategy?: Record<string, { family: string; systemStyle: string; avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number; bestModel: string }>;
+  bestPromptStrategy?: string;
   bestModel: string;
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
 }
@@ -551,6 +555,19 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
   }
   lines.push('');
 
+  if (summary.byPromptStrategy && Object.keys(summary.byPromptStrategy).length > 0) {
+    lines.push('## Prompt Strategy Summary');
+    lines.push('');
+    lines.push(`- Best prompt strategy: ${summary.bestPromptStrategy || 'n/a'}`);
+    lines.push('');
+    lines.push('| Strategy | Family | Style | Avg score | Avg latency | Avg tools | Runs | Best model |');
+    lines.push('| --- | --- | --- | ---: | ---: | ---: | ---: | --- |');
+    for (const [strategyId, strategy] of Object.entries(summary.byPromptStrategy)) {
+      lines.push(`| ${markdownEscape(strategyId)} | ${markdownEscape(strategy.family)} | ${markdownEscape(strategy.systemStyle)} | ${strategy.avgScore}/10 | ${(strategy.avgLatencyMs / 1000).toFixed(1)}s | ${strategy.avgToolCount} | ${strategy.totalRuns} | ${markdownEscape(strategy.bestModel)} |`);
+    }
+    lines.push('');
+  }
+
   lines.push('## Weakest Signals');
   lines.push('');
   lines.push('| Model | Prompt | Score | Weakest signal | Validation | Status |');
@@ -573,6 +590,14 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
 
 export function generateSummary(results: EvalResult[]): EvalSummary {
   const byModel: Record<string, { scores: number[]; latencies: number[]; toolCounts: number[] }> = {};
+  const byPromptStrategy: Record<string, {
+    family: string;
+    systemStyle: string;
+    scores: number[];
+    latencies: number[];
+    toolCounts: number[];
+    modelScores: Record<string, number[]>;
+  }> = {};
 
   for (const r of results) {
     if (r.status !== 'ok') continue;
@@ -580,11 +605,33 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
     byModel[r.modelId].scores.push(r.scores.overallScore);
     byModel[r.modelId].latencies.push(r.scores.latencyMs);
     byModel[r.modelId].toolCounts.push(r.scores.toolCount);
+    if (r.promptStrategy) {
+      const strategyKey = r.promptStrategy.variantId ? `${r.promptStrategy.id}:${r.promptStrategy.variantId}` : r.promptStrategy.id;
+      if (!byPromptStrategy[strategyKey]) {
+        byPromptStrategy[strategyKey] = {
+          family: r.promptStrategy.family,
+          systemStyle: r.promptStrategy.variantId ? `${r.promptStrategy.systemStyle}/${r.promptStrategy.taskType || 'variant'}` : r.promptStrategy.systemStyle,
+          scores: [],
+          latencies: [],
+          toolCounts: [],
+          modelScores: {},
+        };
+      }
+      const strategy = byPromptStrategy[strategyKey];
+      strategy.scores.push(r.scores.overallScore);
+      strategy.latencies.push(r.scores.latencyMs);
+      strategy.toolCounts.push(r.scores.toolCount);
+      if (!strategy.modelScores[r.modelId]) strategy.modelScores[r.modelId] = [];
+      strategy.modelScores[r.modelId].push(r.scores.overallScore);
+    }
   }
 
   const byModelSummary: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }> = {};
+  const byPromptStrategySummary: NonNullable<EvalSummary['byPromptStrategy']> = {};
   let bestModel = '';
   let bestScore = -1;
+  let bestPromptStrategy = '';
+  let bestPromptStrategyScore = -1;
 
   for (const [modelId, data] of Object.entries(byModel)) {
     const avgScore = data.scores.reduce((a, b) => a + b, 0) / data.scores.length;
@@ -594,6 +641,28 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
     if (avgScore > bestScore) {
       bestScore = avgScore;
       bestModel = modelId;
+    }
+  }
+
+  for (const [strategyId, data] of Object.entries(byPromptStrategy)) {
+    const avgScore = data.scores.reduce((a, b) => a + b, 0) / data.scores.length;
+    const avgLatencyMs = data.latencies.reduce((a, b) => a + b, 0) / data.latencies.length;
+    const avgToolCount = data.toolCounts.reduce((a, b) => a + b, 0) / data.toolCounts.length;
+    const bestModelForStrategy = Object.entries(data.modelScores)
+      .map(([modelId, scores]) => ({ modelId, avgScore: scores.reduce((a, b) => a + b, 0) / scores.length }))
+      .sort((a, b) => b.avgScore - a.avgScore)[0]?.modelId || '';
+    byPromptStrategySummary[strategyId] = {
+      family: data.family,
+      systemStyle: data.systemStyle,
+      avgScore: Math.round(avgScore * 10) / 10,
+      avgLatencyMs: Math.round(avgLatencyMs),
+      avgToolCount: Math.round(avgToolCount * 10) / 10,
+      totalRuns: data.scores.length,
+      bestModel: bestModelForStrategy,
+    };
+    if (avgScore > bestPromptStrategyScore) {
+      bestPromptStrategyScore = avgScore;
+      bestPromptStrategy = strategyId;
     }
   }
 
@@ -617,6 +686,8 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
 
   return {
     byModel: byModelSummary,
+    byPromptStrategy: byPromptStrategySummary,
+    bestPromptStrategy,
     bestModel,
     recommendations,
   };

@@ -154,6 +154,7 @@ export function repairLatestUserOnlySessions(options: LatestUserOnlyScanOptions 
         content: 'Run interrupted: OpenHarness recovered this session because no assistant response was saved after your last message. Please retry the request.',
         timestamp,
         runTrace,
+        evidenceSource: 'saved_session_trace',
       });
       session.updatedAt = timestamp;
       writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');

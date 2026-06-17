@@ -157,6 +157,12 @@ Work:
 - Pass real session signals into `routeWithAutoRouter()`: image presence, turn count, tool count, context estimate, attached artifacts, dirty git state, and user-selected thinking level.
 - Split deterministic workflow routing from model selection in the trace: heuristic route, complexity, policy gates, auto-router candidate scoring, final model choice.
 - Add bounded behavior for tiny ambiguous prompts like `review`.
+- Track tool-call errors by model, provider, tool, model/tool pair, prompt
+  strategy, and strategy variant, then compare failed first calls with recovered
+  runs so routing can reduce avoidable retries instead of merely recovering
+  after them.
+- Preserve provider-qualified retry-reduction paths so same-model tool errors
+  from different providers remain distinct routing evidence.
 - Add explicit escalation/de-escalation policy:
   - Simple low-risk tasks: cheapest viable model, no classifier.
   - Medium tasks: classifier route.
@@ -358,3 +364,41 @@ If this first slice changes server/runtime code, kill existing OpenHarness proce
 - Prompt transparency: every run can explain which prompt sections were used and why.
 - Output usability: users can act on plans, findings, diffs, validations, and comparisons without reading raw transcripts.
 - Runtime reliability: timeout/failure reports identify exact phase and recovery path.
+
+## Phase 7 Model Lab prompt strategy evidence - 2026-06-17
+
+- Model Lab eval and bench artifacts now store prompt-strategy traces per result row.
+- Proof briefs summarize observed strategies, keeping future routing decisions grounded in both model outcome and prompt contract.
+- Model Lab eval setup now has an opt-in prompt strategy comparison selector, allowing same prompt/same model runs across selected strategy ids without changing normal chat routing defaults.
+
+## Phase 7 prompt strategy outcome summaries - 2026-06-17
+
+- Eval reports now summarize prompt strategy outcomes independently from model outcomes.
+- Proof exports identify the best observed prompt strategy, giving Routing Learning a safer evidence source before any automatic threshold or candidate-card change.
+- Prompt strategy traces now include role/task variants, so prompt-response evidence can separate base model-family strategy from coder, reviewer, planner, summarizer, and reasoner prompt contracts.
+- Routing Learning now aggregates reviewed outcomes by prompt strategy variant, making future router tuning aware of role/task prompt contracts without automatically changing thresholds.
+- Prompt Microscope now exposes role/task prompt strategy variant metadata directly in run traces, including the selected variant and why it was chosen.
+
+### 2026-06-17 Tool-call recovery learning
+
+Routing Learning now surfaces tool-call recovery paths in addition to per-model error rates. The goal is to learn which model/tool combinations fail first, which later calls actually recover the session, and where auto-router capability cards or prompt contracts should be tightened to prevent repeated retries.
+
+Auto-router candidate cards now ingest that persisted reliability evidence before classifier scoring, including first-call failures, recovery rate, average recovery rounds, and a recent recovery path when available. This gives the classifier model concrete model/tool error memory while preserving the user's configured candidates.
+
+Candidate tuning UI now mirrors the classifier-side reliability signal: per-model rows show first-call failures and recent recovery paths, making it clear which tool failed first and which later tool path ultimately recovered.
+
+Routing Learning now also breaks tool reliability down by model/tool pair, so repeated `model / tool` failures can be separated from broad model weakness or broad tool-schema weakness.
+
+The classifier-side candidate-card annotation now includes those highest-risk model/tool pairs, giving route scoring direct evidence about which tools are risky for each model while leaving candidate availability unchanged.
+
+Auto-Router candidate tuning now displays top risky model/tool pairs in the candidate row itself, keeping user-facing tuning evidence aligned with classifier-side route scoring evidence.
+
+Routing Learning now groups tool reliability by prompt strategy and prompt strategy variant, allowing prompt-response tuning to detect whether a role/task prompt contract correlates with tool-call failures or recovery-heavy runs.
+
+Classifier candidate cards now carry matching prompt-strategy tool reliability for each model's default strategy, so route scoring can account for risky prompt contracts without automatically disabling the model.
+
+Prompt-strategy reliability now also applies provisionally to new Auto-Router candidates that share the same default prompt contract but do not yet have model-specific tool traces.
+
+Auto-Router candidate tuning now displays prompt-strategy and prompt-variant tool reliability beside broad model/tool reliability, keeping user-facing prompt-contract tuning evidence aligned with classifier-side scoring inputs.
+
+Client API types now explicitly include normalized tool-error signatures, keeping the server-side failure memory contract visible to Routing Learning, exports, and future UI work. This protects the loop that groups repeated errors by model/provider/tool/signature, links them to saved session/run ids, and shows which later model/tool path ultimately worked so future routing can reduce first-call mistakes and retry loops.

@@ -8,6 +8,11 @@ const isDev = !app.isPackaged;
 
 let mainWindow = null;
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.exit(0);
+}
+
 // ── Menu ───────────────────────────────────────────────
 function send(channel, ...args) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -182,6 +187,15 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
 });
 
 app.on('window-all-closed', () => {

@@ -390,10 +390,9 @@ export function ArtifactDrawer({ message, onSendMessage, onRunSteer }: Props) {
       const savedRun = steerResult || null;
       if (!savedRun) {
         updateFeedback(artifact.id, {
-          error: 'Could not confirm replay save',
           flagged: verdict === 'needs-revision',
           localOnly: undefined,
-          saved: undefined,
+          saved: verdict,
           savedRunEventCount: undefined,
           saving: false,
           savingVerdict: undefined,
@@ -414,7 +413,7 @@ export function ArtifactDrawer({ message, onSendMessage, onRunSteer }: Props) {
   };
 
   return (
-    <div className="artifact-drawer">
+    <div className="artifact-drawer" role="group" aria-label={`Message artifact review drawer: ${artifacts.length} artifact${artifacts.length !== 1 ? 's' : ''}${artifactSummary ? `, ${artifactSummary}` : ''}`}>
       <button
         type="button"
         className="artifact-toggle"
@@ -443,7 +442,7 @@ export function ArtifactDrawer({ message, onSendMessage, onRunSteer }: Props) {
             const artifactFeedback = feedback[artifact.id];
             const feedbackStatusId = `artifact-feedback-status-${safeDomId(message.id)}-${safeDomId(artifact.id)}`;
             const artifactContentId = `artifact-content-${safeDomId(message.id)}-${safeDomId(artifact.id)}`;
-            const hasFeedbackStatus = !!(artifactFeedback?.error || artifactFeedback?.savedRunEventCount || artifactFeedback?.localOnly);
+            const hasFeedbackStatus = !!(artifactFeedback?.error || artifactFeedback?.saved || artifactFeedback?.savedRunEventCount || artifactFeedback?.localOnly);
             const artifactExpanded = expandedArtifacts[artifact.id] || false;
             const isLongArtifact = artifact.content.length > 500;
             const visibleArtifactContent = isLongArtifact && !artifactExpanded
@@ -550,6 +549,9 @@ export function ArtifactDrawer({ message, onSendMessage, onRunSteer }: Props) {
                 )}
                 {artifactFeedback?.savedRunEventCount && !artifactFeedback?.error && (
                   <span id={feedbackStatusId} className="artifact-feedback-saved" role="status" aria-live="polite">Saved to replay ({artifactFeedback.savedRunEventCount} events)</span>
+                )}
+                {artifactFeedback?.saved && !artifactFeedback?.savedRunEventCount && !artifactFeedback?.error && (
+                  <span id={feedbackStatusId} className="artifact-feedback-saved" role="status" aria-live="polite">Saved to replay; refresh pending</span>
                 )}
                 {artifactFeedback?.localOnly && !artifactFeedback?.savedRunEventCount && !artifactFeedback?.error && (
                   <span id={feedbackStatusId} className="artifact-feedback-local" role="status" aria-live="polite">Local note only</span>

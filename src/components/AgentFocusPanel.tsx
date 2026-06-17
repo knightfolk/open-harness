@@ -2,8 +2,10 @@
 import {
   ArrowLeft, Bot, CheckCircle2, ChevronRight, Circle, AlertCircle, Loader, Clock, Zap,
 } from 'lucide-react';
+import { Suspense, lazy } from 'react';
 import type { HarnessRun, RunSteeringAction, SubAgent } from '../types';
-import { SubAgentTracker } from './SubAgentTracker';
+
+const SubAgentTracker = lazy(() => import('./SubAgentTracker').then((m) => ({ default: m.SubAgentTracker })));
 
 interface Props {
   agents: SubAgent[];
@@ -90,6 +92,7 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
         <div
           className="agent-focus-header-stats"
           role="status"
+          aria-live="polite"
           aria-label={`Agent run summary: ${running} running, ${waiting} waiting, ${blocked} blocked, ${complete} complete, ${failed} failed`}
         >
           <span className="agent-focus-pill running">{running} running</span>
@@ -156,11 +159,13 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
           className="agent-focus-detail"
           aria-label={`Selected agent detail: ${focused.runTrace ? `${focused.runTrace.role} run` : focused.name}`}
         >
-          <SubAgentTracker
-            agents={[focused]}
-            focusedAgentId={focused.id}
-            onRunSteer={onRunSteer}
-          />
+          <Suspense fallback={<div className="empty-state">Loading agent detail...</div>}>
+            <SubAgentTracker
+              agents={[focused]}
+              focusedAgentId={focused.id}
+              onRunSteer={onRunSteer}
+            />
+          </Suspense>
         </section>
       </div>
     </div>

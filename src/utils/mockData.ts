@@ -182,7 +182,11 @@ function App() {
     <div className="app-layout">
       <Sidebar isOpen={sidebarOpen} />
       <main className="main-area">
-        <TopBar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+        <TopBar
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          activeModel="Auto"
+          onOpenPanel={(panel) => console.log('Open evidence panel', panel)}
+        />
         <div className="content-area">
           <ChatView />
           {agentDetailOpen && <AgentFocusPanel />}

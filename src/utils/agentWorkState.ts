@@ -76,6 +76,21 @@ export function phaseLabel(phase: SubAgent): string {
 }
 
 function latestArtifactCue(agent: SubAgent): string | null {
+  const isolationStep = agent.runTrace?.steps?.slice().reverse().find((step): step is Extract<HarnessRunStep, { type: 'worktree_isolation' }> =>
+    step.type === 'worktree_isolation',
+  );
+  if (isolationStep) {
+    if (isolationStep.status === 'ready') {
+      return `isolated worktree: ${isolationStep.worktreeId || isolationStep.branch || isolationStep.path || 'ready'}`;
+    }
+    if (isolationStep.status === 'preserved') {
+      return `worktree preserved: ${isolationStep.worktreeId || isolationStep.branch || isolationStep.path || 'Safety review'}`;
+    }
+    if (isolationStep.status === 'auto_discarded') {
+      return `clean worktree auto-discarded: ${isolationStep.worktreeId || isolationStep.branch || isolationStep.path || 'complete'}`;
+    }
+    return `worktree isolation ${isolationStep.status}: ${isolationStep.error || isolationStep.reason}`;
+  }
   const artifactStep = agent.runTrace?.steps?.slice().reverse().find((step): step is Extract<HarnessRunStep, { type: 'artifact' }> =>
     step.type === 'artifact',
   );

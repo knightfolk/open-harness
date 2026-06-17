@@ -36,9 +36,15 @@ Primary sources reviewed:
   - https://docs.mistral.ai/models/best-practices/prompt-engineering
   - https://docs.mistral.ai/studio-api/conversations/function-calling
   - https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities
+- DeepSeek official API behavior and reasoning docs:
+  - https://api-docs.deepseek.com/api/create-chat-completion
+  - https://api-docs.deepseek.com/guides/thinking_mode
+  - https://api-docs.deepseek.com/guides/multi_round_chat
 - xAI Grok prompts and function calling:
   - https://docs.x.ai/overview
   - https://docs.x.ai/guides/function-calling
+- Qwen quickstart API guidance:
+  - https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html
 
 Shared best practices:
 

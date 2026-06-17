@@ -10,6 +10,7 @@ const HISTORY_VISIBLE_LIMIT = 20;
 
 export function ModelLabPanel({ workingDir, models }: Props) {
   const [prompts, setPrompts] = useState<api.PromptCase[]>([]);
+  const [promptStrategies, setPromptStrategies] = useState<api.PromptStrategyProfile[]>([]);
   const [reports, setReports] = useState<api.EvalReportSummary[]>([]);
   const [tasks, setTasks] = useState<api.HarnessTask[]>([]);
   const [, setSuites] = useState<api.TaskSuite[]>([]);
@@ -18,6 +19,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   const [selectedReport, setSelectedReport] = useState<api.EvalReport | null>(null);
   const [selectedBenchRun, setSelectedBenchRun] = useState<api.BenchRun | null>(null);
   const [selectedPromptIds, setSelectedPromptIds] = useState<Set<string>>(new Set());
+  const [selectedPromptStrategyIds, setSelectedPromptStrategyIds] = useState<Set<string>>(new Set());
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [runName, setRunName] = useState('');
@@ -35,8 +37,9 @@ export function ModelLabPanel({ workingDir, models }: Props) {
   useEffect(() => {
     (async () => {
       try {
-        const [p, r, t, s, b, plugins, health] = await Promise.all([
+        const [p, strategies, r, t, s, b, plugins, health] = await Promise.all([
           api.getEvalPrompts(),
+          api.getPromptStrategies().catch(() => []),
           api.getEvalReports(),
           api.getTasks().catch(() => []),
           api.getTaskSuites().catch(() => []),
@@ -45,6 +48,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
           api.getProviderHealth().catch(() => null),
         ]);
         setPrompts(p);
+        setPromptStrategies(strategies);
         setReports(r);
         setTasks(t);
         setSuites(s);
@@ -144,6 +148,14 @@ export function ModelLabPanel({ workingDir, models }: Props) {
     });
   }, []);
 
+  const togglePromptStrategy = useCallback((id: string) => {
+    setSelectedPromptStrategyIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
   const toggleTask = useCallback((id: string) => {
     setSelectedTaskIds(prev => {
       const next = new Set(prev);
@@ -220,6 +232,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
         promptIds: Array.from(selectedPromptIds),
         modelIds: Array.from(selectedModelIds),
         workingDir: workingDir || undefined,
+        promptStrategyIds: Array.from(selectedPromptStrategyIds),
         packContext: preparedPackRun || undefined,
       });
       setActiveRunId(result.id);
@@ -234,7 +247,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       });
       setRunning(false);
     }
-  }, [selectedPromptIds, selectedModelIds, runName, preparedPackRun, workingDir]);
+  }, [selectedPromptIds, selectedModelIds, selectedPromptStrategyIds, runName, preparedPackRun, workingDir]);
 
   const handleBenchRun = useCallback(async () => {
     if (selectedTaskIds.size === 0 || selectedModelIds.size === 0) return;
@@ -520,9 +533,48 @@ export function ModelLabPanel({ workingDir, models }: Props) {
             {/* Model Selection */}
             <ModelSelection models={models} selected={selectedModelIds} onToggle={toggleModel} onSelectAll={selectAllModels} />
 
+            {promptStrategies.length > 0 && (
+              <div
+                style={{ marginBottom: 12 }}
+                role="group"
+                aria-label={`${selectedPromptStrategyIds.size} prompt strateg${selectedPromptStrategyIds.size === 1 ? 'y' : 'ies'} selected for same-model Model Lab comparison`}
+              >
+                <div style={labelStyle}>Prompt strategy comparison ({selectedPromptStrategyIds.size || 'default'})</div>
+                <div style={{ color: 'var(--text-tertiary)', fontSize: 10, lineHeight: 1.4, marginBottom: 6 }}>
+                  Leave empty to use each model's default strategy. Select one or more strategies to compare the same prompt/model across prompt contracts.
+                </div>
+                {promptStrategies.slice(0, 12).map((strategy) => {
+                  const bestPractice = strategy.bestPracticeNotes?.[0];
+                  return (
+                    <label key={strategy.id} style={checkboxRowStyle(selectedPromptStrategyIds.has(strategy.id))}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPromptStrategyIds.has(strategy.id)}
+                        onChange={() => togglePromptStrategy(strategy.id)}
+                        aria-label={`${selectedPromptStrategyIds.has(strategy.id) ? 'Deselect' : 'Select'} prompt strategy ${strategy.id} for same-model comparison${bestPractice ? `. Source-backed guidance: ${bestPractice.guidance}. Eval cue: ${bestPractice.evaluationCue}` : ''}`}
+                      />
+                      <div>
+                        <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{strategy.id}</div>
+                        <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 1 }}>
+                          {strategy.family} · {strategy.systemStyle} · {strategy.reasoningPolicy} · {strategy.outputContract}
+                        </div>
+                        {bestPractice && (
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 10, marginTop: 4, lineHeight: 1.35 }}>
+                            <strong>Best practice:</strong> {bestPractice.guidance}
+                            <br />
+                            <span style={{ color: 'var(--text-tertiary)' }}>Eval cue: {bestPractice.evaluationCue}</span>
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
             <MatrixRunCaution
               kind="eval"
-              selectedItems={selectedPromptIds.size}
+              selectedItems={selectedPromptIds.size * Math.max(1, selectedPromptStrategyIds.size)}
               selectedModels={selectedModelIds.size}
               providerHealthSignal={providerHealthSignal}
             />
@@ -536,10 +588,10 @@ export function ModelLabPanel({ workingDir, models }: Props) {
               onClick={handleRun}
               disabled={running || selectedPromptIds.size === 0 || selectedModelIds.size === 0}
               style={runBtnStyle(running || selectedPromptIds.size === 0 || selectedModelIds.size === 0)}
-              title={matrixRunApprovalTitle('eval', selectedPromptIds.size, selectedModelIds.size)}
-              aria-label={matrixRunApprovalTitle('eval', selectedPromptIds.size, selectedModelIds.size)}
+              title={matrixRunApprovalTitle('eval', selectedPromptIds.size * Math.max(1, selectedPromptStrategyIds.size), selectedModelIds.size)}
+              aria-label={matrixRunApprovalTitle('eval', selectedPromptIds.size * Math.max(1, selectedPromptStrategyIds.size), selectedModelIds.size)}
             >
-              {running ? 'Running...' : matrixRunApprovalLabel('eval', selectedPromptIds.size, selectedModelIds.size)}
+              {running ? 'Running...' : matrixRunApprovalLabel('eval', selectedPromptIds.size * Math.max(1, selectedPromptStrategyIds.size), selectedModelIds.size)}
             </button>
           </div>
         )}
@@ -1120,9 +1172,12 @@ function buildEvalProofBrief(
 ): string {
   const summary = report.summary;
   const byModel = summary ? Object.entries(summary.byModel) : [];
+  const byPromptStrategy = summary?.byPromptStrategy ? Object.entries(summary.byPromptStrategy) : [];
   const failed = report.results.filter((result) => result.status !== 'ok');
   const weakest = averageBreakdown(report.results).weakestSignal;
   const promptIds = Array.from(new Set(report.results.map((result) => result.promptId)));
+  const promptStrategies = summarizePromptStrategies(report.results);
+  const sameModelComparisons = summarizeSameModelPromptStrategyComparisons(report.results);
   const packContext = report.packContext || preparedPackRun;
   return [
     '# Model Lab Eval Proof Brief',
@@ -1151,12 +1206,21 @@ function buildEvalProofBrief(
     `Best model: ${summary?.bestModel || 'not available'}`,
     `Weakest signal: ${weakest.label} (${weakest.score}/${weakest.maxScore})`,
     `Failures: ${failed.length}/${report.results.length}`,
+    `Prompt strategies observed: ${promptStrategies.length > 0 ? promptStrategies.join('; ') : 'not recorded'}`,
+    `Same-model prompt strategy comparisons: ${sameModelComparisons.length > 0 ? sameModelComparisons.join('; ') : 'not recorded'}`,
     '',
     '## Model results',
     '',
     ...(byModel.length > 0
       ? byModel.map(([modelId, data]) => `- ${modelId}: score ${data.avgScore}/10, latency ${(data.avgLatencyMs / 1000).toFixed(1)}s, tools ${data.avgToolCount}`)
       : ['- No summary by model recorded.']),
+    '',
+    '## Prompt strategy results',
+    '',
+    `Best prompt strategy: ${summary?.bestPromptStrategy || 'not available'}`,
+    ...(byPromptStrategy.length > 0
+      ? byPromptStrategy.map(([strategyId, data]) => `- ${strategyId}: score ${data.avgScore}/10, family ${data.family}, style ${data.systemStyle}, latency ${(data.avgLatencyMs / 1000).toFixed(1)}s, tools ${data.avgToolCount}, best model ${data.bestModel || 'not available'}`)
+      : ['- No prompt strategy summary recorded.']),
     '',
     '## Recommendations',
     '',
@@ -1185,6 +1249,8 @@ function buildBenchProofBrief(run: api.BenchRun): string {
   const failed = run.results.filter((result) => result.status === 'error' || result.status === 'validation-failed' || !result.validationPassed);
   const validationPasses = run.results.filter((result) => result.validationPassed).length;
   const traceWarnings = run.results.flatMap((result) => result.traceProof?.warnings || []);
+  const promptStrategies = summarizePromptStrategies(run.results);
+  const sameModelComparisons = summarizeSameModelPromptStrategyComparisons(run.results);
   return [
     '# Model Lab Bench Proof Brief',
     '',
@@ -1205,6 +1271,8 @@ function buildBenchProofBrief(run: api.BenchRun): string {
     `Validation passes: ${validationPasses}/${run.results.length}`,
     `Failures or validation failures: ${failed.length}/${run.results.length}`,
     `Regression flags: ${summary?.regressionFlags.length || 0}`,
+    `Prompt strategies observed: ${promptStrategies.length > 0 ? promptStrategies.join('; ') : 'not recorded'}`,
+    `Same-model prompt strategy comparisons: ${sameModelComparisons.length > 0 ? sameModelComparisons.join('; ') : 'not recorded'}`,
     '',
     '## Model results',
     '',
@@ -1572,6 +1640,57 @@ function validationFindingSnippets(results: api.ValidationCommandResult[]): stri
   return [...new Set(snippets)];
 }
 
+function summarizePromptStrategies(results: Array<{ modelId: string; promptStrategy?: api.PromptStrategyTrace }>): string[] {
+  const counts = new Map<string, { strategy: api.PromptStrategyTrace; models: Set<string>; count: number }>();
+  for (const result of results) {
+    if (!result.promptStrategy) continue;
+    const key = promptStrategyEvidenceKey(result.promptStrategy);
+    const existing = counts.get(key) || { strategy: result.promptStrategy, models: new Set<string>(), count: 0 };
+    existing.models.add(result.modelId);
+    existing.count++;
+    counts.set(key, existing);
+  }
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count || a.strategy.id.localeCompare(b.strategy.id))
+    .slice(0, 8)
+    .map(({ strategy, models, count }) => `${promptStrategyEvidenceKey(strategy)} (${strategy.family}, ${strategy.systemStyle}${strategy.taskType ? `, task ${strategy.taskType}` : ''}${strategy.role ? `, role ${strategy.role}` : ''}${strategy.bestPractice ? `, eval cue: ${strategy.bestPractice.evaluationCue}, source: ${strategy.bestPractice.sourceRef}` : ''}, ${count} row${count === 1 ? '' : 's'}, models: ${[...models].slice(0, 3).join(', ')}${models.size > 3 ? ', ...' : ''})`);
+}
+
+function promptStrategyEvidenceKey(strategy: api.PromptStrategyTrace): string {
+  return strategy.variantId ? `${strategy.id}:${strategy.variantId}` : strategy.id;
+}
+
+function summarizeSameModelPromptStrategyComparisons(results: Array<{ modelId: string; promptId?: string; promptName?: string; taskId?: string; taskName?: string; promptStrategy?: api.PromptStrategyTrace }>): string[] {
+  const byModelAndWork = new Map<string, { modelId: string; workLabel: string; strategies: Set<string> }>();
+  for (const result of results) {
+    if (!result.promptStrategy) continue;
+    const workLabel = result.promptName || result.promptId || result.taskName || result.taskId || 'unknown prompt/task';
+    const key = `${result.modelId}::${workLabel}`;
+    const existing = byModelAndWork.get(key) || { modelId: result.modelId, workLabel, strategies: new Set<string>() };
+    existing.strategies.add(promptStrategyEvidenceKey(result.promptStrategy));
+    byModelAndWork.set(key, existing);
+  }
+  return [...byModelAndWork.values()]
+    .filter(({ strategies }) => strategies.size > 1)
+    .sort((a, b) => a.modelId.localeCompare(b.modelId) || a.workLabel.localeCompare(b.workLabel))
+    .map(({ modelId, workLabel, strategies }) => `${modelId} / ${workLabel}: ${[...strategies].sort().join(', ')}`);
+}
+
+function PromptStrategyEvidence({ strategy }: { strategy?: api.PromptStrategyTrace }) {
+  if (!strategy) return <span>No prompt strategy trace recorded for this row.</span>;
+  return (
+    <div>
+      <div>{strategy.id}</div>
+      {strategy.modelMatch && <div>Model match {strategy.modelMatch.source} · {strategy.modelMatch.hint}</div>}
+      {strategy.variantId && <div>Variant {strategy.variantId} · task {strategy.taskType || 'unknown'} · role {strategy.role || 'unknown'}</div>}
+      <div>Family {strategy.family} · style {strategy.systemStyle} · context {strategy.contextOrder}</div>
+      <div>Examples {strategy.examplePolicy} · reasoning {strategy.reasoningPolicy} · tools {strategy.toolPolicy} · output {strategy.outputContract}</div>
+      {strategy.selectionReason && <div>{strategy.selectionReason}</div>}
+      <div>Reviewed {strategy.updatedAt}</div>
+    </div>
+  );
+}
+
 function ValidationFindingsPanel({ run }: { run: api.BenchRun }) {
   const failed = run.results
     .map(result => ({
@@ -1631,6 +1750,9 @@ function EvalEvidencePanel({ report }: { report: api.EvalReport }) {
               <div key={i}>{tool.name} · {tool.status}</div>
             )) : <span>No tool calls recorded.</span>}
           </EvidenceBlock>
+          <EvidenceBlock title="Prompt strategy">
+            <PromptStrategyEvidence strategy={result.promptStrategy} />
+          </EvidenceBlock>
           <EvidenceBlock title="Response">
             <pre style={evidencePreStyle}>{trimEvidence(result.response || '(empty response)', 1800)}</pre>
           </EvidenceBlock>
@@ -1667,6 +1789,9 @@ function BenchEvidencePanel({ run }: { run: api.BenchRun }) {
           )}
           <EvidenceBlock title="Prompt">
             <pre style={evidencePreStyle}>{trimEvidence(result.prompt, 1400)}</pre>
+          </EvidenceBlock>
+          <EvidenceBlock title="Prompt strategy">
+            <PromptStrategyEvidence strategy={result.promptStrategy} />
           </EvidenceBlock>
           <EvidenceBlock title="Failed or weak signals">
             <SignalList signals={result.scores.breakdown?.signals || []} />

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import http from 'http';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -17,6 +17,19 @@ function checkPort(port) {
     req.on('error', () => resolve(false));
     req.setTimeout(1000, () => { req.destroy(); resolve(false); });
   });
+}
+
+function runQuiet(command, args) {
+  return new Promise(resolve => {
+    execFile(command, args, { cwd: root }, () => resolve());
+  });
+}
+
+async function stopExistingDesktopShell() {
+  if (process.platform !== 'darwin') return;
+  await runQuiet('osascript', ['-e', 'tell application "OpenHarness" to quit']);
+  await runQuiet('pkill', ['-f', `${root}.*node_modules/.bin/electron`]);
+  await runQuiet('pkill', ['-f', `${root}.*node_modules/electron`]);
 }
 
 async function waitForPort(port, label, timeout = 15000) {
@@ -73,6 +86,7 @@ await waitForPort(VITE_PORT, 'Vite');
 
 // Launch Electron
 console.log('Launching Electron...');
+await stopExistingDesktopShell();
 const electron = spawn('npx', ['electron', '.'], {
   cwd: root,
   stdio: 'inherit',
@@ -85,9 +99,12 @@ electron.on('exit', code => {
   process.exit(code || 0);
 });
 
-process.on('SIGINT', () => {
+function stopChildrenAndExit() {
   electron.kill();
   server.kill();
   vite.kill();
   process.exit(0);
-});
+}
+
+process.on('SIGINT', stopChildrenAndExit);
+process.on('SIGTERM', stopChildrenAndExit);

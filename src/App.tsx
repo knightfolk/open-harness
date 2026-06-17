@@ -30,28 +30,33 @@ const OnboardingWizard = lazy(() => import('./components/OnboardingWizard').then
 const ReviewChangesFlyout = lazy(() => import('./components/ReviewChangesFlyout').then((m) => ({ default: m.ReviewChangesFlyout })));
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const SIDEBAR_WIDTH_KEY = 'openharness.sidebar.width.v1';
+const FIXED_SIDEBAR_WIDTH = 260;
 const PINNED_TOOLS_KEY = 'openharness.pinned-tools.v1';
 const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
 const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
 const THEME_TEXTURE_OPACITY_OVERRIDE_KEY = 'openharness.theme.texture-opacity-override.v1';
+const NARROW_SIDEBAR_AUTO_CLOSE_WIDTH = 640;
+const FORCE_HIDDEN_TOOL_PANELS: PanelId[] = ['sub-agents'];
 
-function loadSidebarWidth() {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-    const width = raw ? Number(raw) : 260;
-    return Number.isFinite(width) ? Math.min(420, Math.max(200, width)) : 260;
-  } catch {
-    return 260;
-  }
+function sanitizePinnedTools(value: unknown): PanelId[] {
+  const knownPanels = new Set<string>(ALL_PANELS);
+  const forcedHidden = new Set<string>(FORCE_HIDDEN_TOOL_PANELS);
+  if (!Array.isArray(value)) return [];
+  return value.filter((id): id is PanelId => (
+    typeof id === 'string'
+    && knownPanels.has(id)
+    && !forcedHidden.has(id)
+  ));
 }
 
 function loadPinnedTools(): PanelId[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(PINNED_TOOLS_KEY) || '[]');
-    const knownPanels = new Set<string>(ALL_PANELS);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((id): id is PanelId => typeof id === 'string' && knownPanels.has(id));
+    const sanitized = sanitizePinnedTools(parsed);
+    if (JSON.stringify(parsed) !== JSON.stringify(sanitized)) {
+      localStorage.setItem(PINNED_TOOLS_KEY, JSON.stringify(sanitized));
+    }
+    return sanitized;
   } catch {
     return [];
   }
@@ -102,6 +107,13 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
     case 'auto_router': return describeAutoRouterRunStep(step);
     case 'steering': return `Steering applied: ${step.action}${step.target ? ` (${step.target})` : ''}${step.note ? ` · ${step.note}` : ''}`;
+    case 'worktree_isolation': return step.status === 'ready'
+      ? `Worktree isolation ready for ${step.agent}: ${step.worktreeId || step.branch || step.path || 'isolated checkout'}`
+      : step.status === 'preserved'
+        ? `Worktree preserved for Safety review for ${step.agent}: ${step.worktreeId || step.branch || step.path || 'isolated checkout'}`
+      : step.status === 'auto_discarded'
+        ? `Clean worktree auto-discarded for ${step.agent}: ${step.worktreeId || step.branch || step.path || 'isolated checkout'}`
+      : `Worktree isolation ${step.status} for ${step.agent}: ${step.error || step.reason}`;
     case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
     case 'model_text': return `Received ${step.chars} characters from model`;
@@ -272,6 +284,7 @@ function buildSubAgentsFromLoadedMessages(rawMessages: api.MessageInfo[]): SubAg
 
 function runStepMeansWork(step: HarnessRunStep): boolean {
   if (step.type === 'model_request' || step.type === 'model_text' || step.type === 'model_thinking' || step.type === 'prompt_built' || step.type === 'repo_map' || step.type === 'context_pack') return true;
+  if (step.type === 'worktree_isolation') return step.status !== 'ready';
   if (step.type === 'tool_call') return step.durationMs == null;
   return false;
 }
@@ -315,7 +328,7 @@ function defaultRoleThinking(): Record<string, ThinkingEffort> {
 
 function App() {
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
-  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const sidebarWidth = FIXED_SIDEBAR_WIDTH;
   const [pinnedTools, setPinnedTools] = useState<PanelId[]>(loadPinnedTools);
   const [environmentOpen, setEnvironmentOpen] = useState(loadEnvironmentOpen);
   const [clickyEnabled, setClickyEnabled] = useState(loadClickyEnabled);
@@ -340,6 +353,17 @@ function App() {
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
+
+  useEffect(() => {
+    const closeSidebarForNarrowScreens = () => {
+      if (window.innerWidth <= NARROW_SIDEBAR_AUTO_CLOSE_WIDTH) {
+        setSidebarOpen(false);
+      }
+    };
+    closeSidebarForNarrowScreens();
+    window.addEventListener('resize', closeSidebarForNarrowScreens);
+    return () => window.removeEventListener('resize', closeSidebarForNarrowScreens);
+  }, []);
   const [providerRateLimitStatus, setProviderRateLimitStatus] = useState<api.ProviderRateLimitStatus | null>(null);
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
   const [contextWarning, setContextWarning] = useState<string | null>(null);
@@ -1456,25 +1480,6 @@ function App() {
     return set;
   }, [layout]);
 
-  const startResizeSidebar = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = sidebarWidth;
-    const onMove = (moveEvent: MouseEvent) => {
-      const next = Math.min(420, Math.max(200, startWidth + (moveEvent.clientX - startX)));
-      setSidebarWidth(next);
-      try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next)); } catch { /* ignore */ }
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      document.body.classList.remove('is-resizing-panel');
-    };
-    document.body.classList.add('is-resizing-panel');
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [sidebarWidth]);
-
   // Compute enabled tool count: 3 built-in + MCP tools from running servers
   const builtinToolCount = trustMode === "chat-only" ? 0 : trustMode === "read-only" ? 2 : 3;
   const mcpToolCount = mcpStatus
@@ -1516,6 +1521,7 @@ function App() {
     contextWarning ||
     terminalPanelOpen ||
     runningModel ||
+    lastAutoRouterStep ||
     providerRateLimitWarning ||
     subAgents.some((agent) => agent.status === 'running' || agent.status === 'blocked' || agent.status === 'error'),
   );
@@ -1523,8 +1529,10 @@ function App() {
     openAgentFocusPanel(agentId);
   };
   const togglePinnedTool = useCallback((id: PanelId) => {
+    if (FORCE_HIDDEN_TOOL_PANELS.includes(id)) return;
     setPinnedTools((prev) => {
-      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      const current = sanitizePinnedTools(prev);
+      const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
       try { localStorage.setItem(PINNED_TOOLS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
@@ -1593,7 +1601,6 @@ function App() {
         onDeleteProject={handleDeleteProject}
         clickyEnabled={clickyEnabled}
       />
-      {sidebarOpen && <div className="sidebar-resizer" onMouseDown={startResizeSidebar} role="separator" aria-orientation="vertical" aria-label="Resize sidebar" />}
 
       <main className="main-area">
         <TopBar
@@ -1601,6 +1608,7 @@ function App() {
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           visiblePanels={visiblePanels}
           onTogglePanel={togglePanel}
+          onOpenPanel={addPanel}
           onResetLayout={resetLayout}
           activeModel={activeModel}
           sessionTitle={sessionTitle}
@@ -1667,7 +1675,7 @@ function App() {
                 />
 
                 {agentFocusOpen && (
-                  <div className="agent-focus-overlay">
+                  <div className="agent-focus-overlay" role="region" aria-label="Right-hand Agent detail pane">
                     <AgentFocusPanel
                       agents={subAgents}
                       focusedId={focusedSubAgentId}
@@ -1842,7 +1850,6 @@ function App() {
         clickyEnabled={clickyEnabled}
         onClickyEnabledChange={handleClickyEnabledChange}
       />
-      {sidebarOpen && <div className="sidebar-resizer" onMouseDown={startResizeSidebar} role="separator" aria-orientation="vertical" aria-label="Resize sidebar" />}
       </Suspense>
     </div>
   );

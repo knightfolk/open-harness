@@ -1067,6 +1067,46 @@ function modelHarnessFit(card: (typeof TOP_MODEL_CATALOG)[number]) {
   };
 }
 
+function modelSignal(card: (typeof TOP_MODEL_CATALOG)[number], patterns: RegExp[], fallback: string) {
+  const text = [
+    card.displayName,
+    card.family,
+    card.provider,
+    card.compactDescription,
+    card.reviewSummary,
+    ...card.bestFor,
+    ...card.strengths,
+    ...card.weaknesses,
+    ...card.benchmarkHighlights,
+  ].join(' ').toLowerCase();
+  return patterns.some((pattern) => pattern.test(text)) ? 'Strong' : fallback;
+}
+
+function modelScorecardSignals(card: (typeof TOP_MODEL_CATALOG)[number]) {
+  const speed = card.routerCost <= 0.45 || modelSignal(card, [/\bspeed\b/, /\bfast\b/, /\blatency\b/, /\bworker\b/, /\bflash\b/], '') === 'Strong'
+    ? 'Fast'
+    : card.relativeCost === 'luxury' || card.contextWindowTokens >= 1_000_000
+      ? 'Slower'
+      : 'Mixed';
+  const privacy = /local|open-weight|open deployment|open-source|oss|qwen|deepseek|mistral|llama|gemma|phi|kimi|minimax/i.test([
+    card.provider,
+    card.family,
+    card.displayName,
+    ...card.strengths,
+  ].join(' '))
+    ? 'Open/local path'
+    : 'Hosted';
+  return {
+    coding: modelSignal(card, [/\bcod(e|ing)\b/, /\bswe\b/, /\bimplementation\b/, /\bbug\b/, /\brepo\b/, /\brefactor\b/], 'Mixed'),
+    reasoning: card.supportsThinking ? 'Strong' : modelSignal(card, [/\breason/i, /\bplanning\b/, /\banalysis\b/, /\bmath\b/, /\bdebug/i], 'Mixed'),
+    review: modelSignal(card, [/\breview\b/, /\bdebug/i, /\bquality\b/, /\barchitecture\b/], 'Mixed'),
+    planning: modelSignal(card, [/\bplanning\b/, /\barchitecture\b/, /\borchestration\b/, /\bdecomposition\b/, /\bagent\b/], 'Mixed'),
+    speed,
+    privacy,
+    localAvailability: privacy === 'Open/local path' ? 'Likely' : 'Provider',
+  };
+}
+
 function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | keyof typeof MODEL_CATEGORY_META>('all');
@@ -1170,12 +1210,13 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
           const categoryMeta = MODEL_CATEGORY_META[category];
           const accessClass = access.label.toLowerCase();
           const fit = modelHarnessFit(card);
+          const signals = modelScorecardSignals(card);
           return (
             <article
               key={card.id}
               className="model-card"
               role="listitem"
-              aria-label={`${card.displayName} capability scorecard. Provider ${card.provider}. ${categoryMeta.label}. Access ${access.label}${access.providerLabel ? ` via ${access.providerLabel}` : ''}. Harness fit ${fit.score} percent, ${fit.label}. Cost ${formatModelCost(card)}. Context ${formatContextWindow(card.contextWindowTokens)}. Tools ${card.supportsTools ? 'yes' : 'basic'}. Vision ${card.supportsImages ? 'yes' : 'no'}.`}
+              aria-label={`${card.displayName} capability scorecard. Provider ${card.provider}. ${categoryMeta.label}. Access ${access.label}${access.providerLabel ? ` via ${access.providerLabel}` : ''}. Harness fit ${fit.score} percent, ${fit.label}. Coding ${signals.coding}. Reasoning ${signals.reasoning}. Review ${signals.review}. Planning ${signals.planning}. Tool use ${card.supportsTools ? 'supported' : 'basic'}. Vision ${card.supportsImages ? 'yes' : 'no'}. Long context ${formatContextWindow(card.contextWindowTokens)}. Speed ${signals.speed}. Cost ${formatModelCost(card)}. Privacy ${signals.privacy}. Local availability ${signals.localAvailability}.`}
               style={{ ['--model-category-color' as any]: categoryMeta.color, ['--model-category-bg' as any]: categoryMeta.background }}
               title={modelCatalogTooltip(card.id)}
             >
@@ -1191,11 +1232,18 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
               </div>
               <div className="model-card-category">{categoryMeta.label}</div>
               <p className="model-card-compact">{card.compactDescription}</p>
-              <div className="model-card-metrics" role="list" aria-label={`${card.displayName} core capability metrics`}>
+              <div className="model-card-metrics" role="list" aria-label={`${card.displayName} core capability scorecard: coding, reasoning, review, planning, tool use, vision, long context, speed, cost, privacy, and local availability`}>
+                <div role="listitem" aria-label={`Coding capability ${signals.coding}`}><span>Coding</span><strong>{signals.coding}</strong></div>
+                <div role="listitem" aria-label={`Reasoning capability ${signals.reasoning}`}><span>Reasoning</span><strong>{signals.reasoning}</strong></div>
+                <div role="listitem" aria-label={`Review capability ${signals.review}`}><span>Review</span><strong>{signals.review}</strong></div>
+                <div role="listitem" aria-label={`Planning capability ${signals.planning}`}><span>Planning</span><strong>{signals.planning}</strong></div>
                 <div role="listitem" aria-label={`Context window ${formatContextWindow(card.contextWindowTokens)}`}><span>Context</span><strong>{formatContextWindow(card.contextWindowTokens)}</strong></div>
                 <div role="listitem" aria-label={`Cost tier ${formatModelCost(card)}`}><span>Cost</span><strong>{formatModelCost(card)}</strong></div>
                 <div role="listitem" aria-label={`Tool capability ${card.supportsTools ? 'supported' : 'basic'}`}><span>Tools</span><strong>{card.supportsTools ? 'Yes' : 'Basic'}</strong></div>
                 <div role="listitem" aria-label={`Vision capability ${card.supportsImages ? 'supported' : 'not supported'}`}><span>Vision</span><strong>{card.supportsImages ? 'Yes' : 'No'}</strong></div>
+                <div role="listitem" aria-label={`Speed expectation ${signals.speed}`}><span>Speed</span><strong>{signals.speed}</strong></div>
+                <div role="listitem" aria-label={`Privacy and deployment posture ${signals.privacy}`}><span>Privacy</span><strong>{signals.privacy}</strong></div>
+                <div role="listitem" aria-label={`Local availability ${signals.localAvailability}`}><span>Local</span><strong>{signals.localAvailability}</strong></div>
               </div>
               <div className="model-card-scorecard" role="group" aria-label={`${card.displayName} harness fit score ${fit.score} percent: ${fit.label}`}>
                 <div className="model-card-score-main">
@@ -2635,6 +2683,7 @@ function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextu
   const baseTextureOpacity = activeThemeDetails?.tokens.effects?.textureOpacity ?? 0;
   const effectiveTextureOpacity = textureOpacityOverride ?? baseTextureOpacity;
   const effectiveTexturePercent = Math.round(effectiveTextureOpacity * 100);
+  const textureGuidanceId = 'theme-texture-opacity-guidance';
   const [importFeedback, setImportFeedback] = useState<{ kind: 'error' | 'success'; message: string; details?: string[] } | null>(null);
   const themeGroups = [
     { mode: 'dark', label: 'Dark themes', themes: getThemesByMode('dark') },
@@ -2732,12 +2781,14 @@ function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextu
               value={effectiveTexturePercent}
               onChange={(event) => onTextureOpacityOverrideChange(Number(event.target.value) / 100)}
               aria-label="Theme texture opacity"
+              aria-valuetext={`${effectiveTexturePercent}% shell texture opacity`}
+              aria-describedby={textureGuidanceId}
             />
             <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
               {effectiveTexturePercent}%
             </div>
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+          <div id={textureGuidanceId} style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
             Textures are shell-only. When reduced transparency is requested, textures and blur are disabled and glass surfaces use each theme's solid fallback colors.
           </div>
         </div>
@@ -2835,6 +2886,109 @@ const TOP_ROUTER_MODEL_CARDS: RouterModelCard[] = TOP_MODEL_CATALOG.map((card) =
 }));
 
 const normalizeModelKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+function formatRouterPercent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function routerToolReliabilityForModel(
+  summary: api.RouterLearningSummary | null,
+  modelId: string,
+): api.ToolReliabilityBucket | null {
+  const byModel = summary?.toolReliability?.byModel || {};
+  const candidateKey = normalizeModelKey(modelId);
+  for (const [key, bucket] of Object.entries(byModel)) {
+    const normalized = normalizeModelKey(key);
+    if (normalized === candidateKey || normalized.endsWith(candidateKey) || candidateKey.endsWith(normalized)) {
+      return bucket;
+    }
+  }
+  return null;
+}
+
+function routerToolRecoveryForModel(
+  summary: api.RouterLearningSummary | null,
+  modelId: string,
+): api.ToolReliabilityRecoveryExample | null {
+  const examples = summary?.toolReliability?.recoveryExamples || [];
+  const candidateKey = normalizeModelKey(modelId);
+  return examples.find((example) => {
+    const normalized = normalizeModelKey(example.firstError.model);
+    return normalized === candidateKey || normalized.endsWith(candidateKey) || candidateKey.endsWith(normalized);
+  }) || null;
+}
+
+function routerToolRecoveryLabel(example: api.ToolReliabilityRecoveryExample): string {
+  const recoveryPath = example.recoveredBy.length > 0
+    ? example.recoveredBy.map((step) => `${step.tool} (${step.model})`).join(' -> ')
+    : 'final answer without a later completed tool call';
+  return `${example.firstError.tool} failed, then ${recoveryPath}; session ${example.sessionId}, run ${example.runId}`;
+}
+
+function routerRetryReductionForModel(
+  summary: api.RouterLearningSummary | null,
+  modelId: string,
+): api.ToolReliabilityRetryReductionRecommendation | null {
+  const recommendations = summary?.toolReliability?.retryReductionRecommendations || [];
+  const candidateKey = normalizeModelKey(modelId);
+  return recommendations.find((recommendation) => {
+    const normalized = normalizeModelKey(recommendation.failedModel);
+    return normalized === candidateKey || normalized.endsWith(candidateKey) || candidateKey.endsWith(normalized);
+  }) || null;
+}
+
+function routerToolPairRisksForModel(
+  summary: api.RouterLearningSummary | null,
+  modelId: string,
+): Array<[string, api.ToolReliabilityBucket]> {
+  const pairs = summary?.toolReliability?.byModelTool || {};
+  const candidateKey = normalizeModelKey(modelId);
+  return Object.entries(pairs)
+    .filter(([pair, stats]) => {
+      const modelPart = pair.split('/')[0]?.trim() || pair;
+      const normalized = normalizeModelKey(modelPart);
+      return stats.error > 0 && (normalized === candidateKey || normalized.endsWith(candidateKey) || candidateKey.endsWith(normalized));
+    })
+    .sort(([, a], [, b]) => b.errorRate - a.errorRate || b.error - a.error || b.total - a.total)
+    .slice(0, 3);
+}
+
+function routerToolPairLabel(pair: string): string {
+  const parts = pair.split('/').map((part) => part.trim());
+  return parts.length > 1 ? parts.slice(1).join(' / ') : pair;
+}
+
+const PROMPT_STRATEGY_MODEL_HINTS: Array<{ hints: string[]; strategyId: string }> = [
+  { hints: ['gpt', 'openai', 'codex', 'o-series'], strategyId: 'openai-outcome-first-v1' },
+  { hints: ['claude', 'anthropic'], strategyId: 'anthropic-xml-evidence-v1' },
+  { hints: ['gemini', 'google'], strategyId: 'gemini-specific-iterative-v1' },
+  { hints: ['mistral', 'devstral', 'codestral'], strategyId: 'mistral-structured-purpose-v1' },
+  { hints: ['deepseek'], strategyId: 'deepseek-structured-code-v1' },
+  { hints: ['qwen'], strategyId: 'qwen-xml-code-v1' },
+  { hints: ['minimax', 'm3'], strategyId: 'minimax-long-context-agent-v1' },
+  { hints: ['llama'], strategyId: 'llama-repeat-rules-v1' },
+  { hints: ['gemma'], strategyId: 'gemma-concise-first-user-v1' },
+  { hints: ['phi'], strategyId: 'phi-minimal-router-v1' },
+];
+
+function routerPromptStrategyIdForModel(modelId: string): string {
+  const normalized = modelId.toLowerCase();
+  return PROMPT_STRATEGY_MODEL_HINTS.find((entry) => entry.hints.some((hint) => normalized.includes(hint)))?.strategyId
+    || 'unknown-safe-structured-v1';
+}
+
+function routerPromptStrategyReliabilityForModel(
+  summary: api.RouterLearningSummary | null,
+  modelId: string,
+): { strategyId: string; bucket: api.ToolReliabilityBucket | null; variants: Array<[string, api.ToolReliabilityBucket]> } {
+  const strategyId = routerPromptStrategyIdForModel(modelId);
+  const bucket = summary?.toolReliability?.byPromptStrategy?.[strategyId] || null;
+  const variants = Object.entries(summary?.toolReliability?.byPromptStrategyVariant || {})
+    .filter(([key, stats]) => key.startsWith(`${strategyId}:`) && stats.total > 0)
+    .sort(([, a], [, b]) => b.errorRate - a.errorRate || b.error - a.error || b.total - a.total)
+    .slice(0, 2);
+  return { strategyId, bucket, variants };
+}
 
 function getProviderIdFromModelId(modelId: string) {
   return modelId.includes(':') ? modelId.split(':')[0] : '';
@@ -3039,9 +3193,11 @@ function AutoRouterPane() {
   const [arThreshold, setArThreshold] = useState(0.7);
   const [arClassifier, setArClassifier] = useState('');
   const [arDefaultModel, setArDefaultModel] = useState('');
+  const [routerState, setRouterState] = useState<api.AutoRouterState | null>(null);
   const [arCandidates, setArCandidates] = useState<api.AutoRouterCandidateConfig[]>([]);
   const [configuredCandidates, setConfiguredCandidates] = useState<api.AutoRouterCandidateConfig[]>([]);
   const [evalRecommendations, setEvalRecommendations] = useState<api.EvalRecommendation[]>([]);
+  const [routerLearningSummary, setRouterLearningSummary] = useState<api.RouterLearningSummary | null>(null);
   const [arSaving, setArSaving] = useState(false);
   const [newCandidate, setNewCandidate] = useState<api.AutoRouterCandidateConfig>({
     modelId: '', cost: 0.5, supportsImages: false, supportsThinking: false, card: ''
@@ -3065,6 +3221,7 @@ function AutoRouterPane() {
   // Load router state and candidates on mount
   useEffect(() => {
     api.getRouterState().then((state) => {
+      setRouterState(state);
       setArEnabled(state.enabled);
       setArThreshold(state.threshold);
     }).catch(() => {});
@@ -3090,6 +3247,9 @@ function AutoRouterPane() {
     api.getEvalRecommendations()
       .then(setEvalRecommendations)
       .catch(() => setEvalRecommendations([]));
+    api.getRouterLearning()
+      .then(setRouterLearningSummary)
+      .catch(() => setRouterLearningSummary(null));
   }, []);
 
   const persistRouterConfig = async (partial: Partial<api.AutoRouterConfig>) => {
@@ -3104,7 +3264,8 @@ function AutoRouterPane() {
       candidates: [],
     };
     const merged = { ...current, ...partial };
-    await api.configureRouter(merged);
+    const result = await api.configureRouter(merged);
+    setRouterState(result.state);
     return merged;
   };
 
@@ -3123,6 +3284,7 @@ function AutoRouterPane() {
           cacheTTLMs: currentAr?.cacheTTLMs ?? 300000,
           candidates: currentAr?.candidates || arCandidates,
         });
+        setRouterState(await api.getRouterState());
       } else {
         // Enable: use existing config or defaults
         const cfg = await api.getConfig();
@@ -3141,6 +3303,7 @@ function AutoRouterPane() {
         });
         setConfiguredCandidates(scannedCandidates);
         setArCandidates(mergeRouterCandidates(candidates, merged.state.candidates.map((c) => ({ ...c, card: '', supportsThinking: c.supportsThinking }))));
+        setRouterState(merged.state);
       }
       setArEnabled(!arEnabled);
     } catch (err) {
@@ -3226,6 +3389,11 @@ function AutoRouterPane() {
   ));
   const selectedClassifierMissing = arClassifier && !arCandidates.some((candidate) => normalizeModelKey(candidate.modelId) === normalizeModelKey(arClassifier));
   const selectedDefaultMissing = arDefaultModel && !arCandidates.some((candidate) => normalizeModelKey(candidate.modelId) === normalizeModelKey(arDefaultModel));
+  const evidenceRefreshLabel = routerState?.candidateEvidenceRefreshedAt
+    ? new Date(routerState.candidateEvidenceRefreshedAt).toLocaleString()
+    : 'Not refreshed yet';
+  const evidenceRefreshCount = routerState?.candidateEvidenceRefreshCount ?? 0;
+  const toolEvidenceSources = routerLearningSummary?.toolReliability?.byEvidenceSource || [];
 
   return (
     <>
@@ -3322,6 +3490,42 @@ function AutoRouterPane() {
                   Treat approved proof as trusted, review unreviewed proof manually, and do not trust needs-attention proof until it is resolved.
                 </p>
               </div>
+              <div
+                className="router-eval-recommendation"
+                role="status"
+                aria-label={`Auto-Router evidence freshness: candidate evidence refreshed ${evidenceRefreshCount} time${evidenceRefreshCount === 1 ? '' : 's'}, last refresh ${evidenceRefreshLabel}`}
+                style={{ marginBottom: 10 }}
+              >
+                <span>Candidate evidence freshness</span>
+                <p>
+                  Eval and tool-reliability annotations were rebuilt {evidenceRefreshCount} time{evidenceRefreshCount === 1 ? '' : 's'}.
+                  Last refresh: {evidenceRefreshLabel}.
+                </p>
+                <p className={`eval-proof-status ${routerState?.enabled ? 'approved' : 'unreviewed'}`}>
+                  {routerState?.enabled
+                    ? 'The classifier sees refreshed candidate cards when routing runs.'
+                    : 'Auto-Router is disabled, so evidence refresh metadata is informational only.'}
+                </p>
+              </div>
+              {toolEvidenceSources.length > 0 && (
+                <div
+                  className="router-eval-recommendation"
+                  role="status"
+                  aria-label={`Auto-Router tool-error evidence sources: ${toolEvidenceSources.map((source) => `${source.source} has ${source.outcomeRuns} outcome runs, ${source.retryReductionRecommendations} retry recommendations, average retry distance ${source.avgRetryDistance}, tuning action ${source.tuningAction}`).join('; ')}`}
+                  style={{ marginBottom: 10 }}
+                >
+                  <span>Tool-error evidence sources</span>
+                  <p>
+                    Check the source mix before changing candidate cards or costs; saved-session evidence is strongest for local routing behavior,
+                    while imported or log-derived evidence should be treated as context until manually reviewed.
+                  </p>
+                  <p>
+                    {toolEvidenceSources.map((source) =>
+                      `${source.source}: ${source.outcomeRuns} outcome run${source.outcomeRuns === 1 ? '' : 's'}, ${source.recoveredRuns} recovered, ${source.unrecoveredRuns} unrecovered, ${source.retryReductionRecommendations} retry recommendation${source.retryReductionRecommendations === 1 ? '' : 's'}, avg retry distance ${source.avgRetryDistance}, tuning action ${source.tuningAction}`
+                    ).join(' · ')}
+                  </p>
+                </div>
+              )}
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -3390,6 +3594,18 @@ function AutoRouterPane() {
                   const recKey = normalizeModelKey(rec.modelId);
                   return candidateKey === recKey || candidateKey.endsWith(recKey) || recKey.endsWith(candidateKey);
                 });
+                const toolReliability = routerToolReliabilityForModel(routerLearningSummary, c.modelId);
+                const toolRecovery = routerToolRecoveryForModel(routerLearningSummary, c.modelId);
+                const retryReduction = routerRetryReductionForModel(routerLearningSummary, c.modelId);
+                const toolPairRisks = routerToolPairRisksForModel(routerLearningSummary, c.modelId);
+                const promptStrategyReliability = routerPromptStrategyReliabilityForModel(routerLearningSummary, c.modelId);
+                const toolReliabilityTone = toolReliability && toolReliability.total > 0
+                  ? toolReliability.errorRate > 0.2
+                    ? 'custom'
+                    : toolReliability.error > 0
+                      ? 'catalog'
+                      : 'ok'
+                  : null;
                 return (
                 <div
                   key={c.modelId}
@@ -3415,6 +3631,15 @@ function AutoRouterPane() {
                       {evalRecommendation && <span role="listitem" aria-label={`${c.modelId} eval recommendation status: ${evalProofStatusCopy(evalRecommendation)}`} style={routerSourceBadgeStyle(evalRecommendation.proofReviewStatus === 'approved' ? 'ok' : 'custom')}>
                         {evalRecommendation.proofReviewStatus === 'approved' ? 'Eval-backed' : 'Eval evidence'}
                       </span>}
+                      {toolReliability && toolReliability.total > 0 && (
+                        <span
+                          role="listitem"
+                          aria-label={`${c.modelId} tool reliability: ${toolReliability.error} errors from ${toolReliability.total} traced tool calls, ${toolReliability.recoveredRuns} recovered runs`}
+                          style={routerSourceBadgeStyle(toolReliabilityTone || 'catalog')}
+                        >
+                          Tool {toolReliability.error}/{toolReliability.total}
+                        </span>
+                      )}
                       {c.supportsImages && <span role="listitem" aria-label={`${c.modelId} supports image inputs`} style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Images</span>}
                       {c.supportsThinking && <span role="listitem" aria-label={`${c.modelId} supports native thinking`} style={{ fontSize: 10, color: 'var(--accent-color, #6366f1)' }}>Thinking</span>}
                     </div>
@@ -3428,6 +3653,55 @@ function AutoRouterPane() {
                         <p>{evalRecommendation.reason}</p>
                         <p className={`eval-proof-status ${evalRecommendation.proofReviewStatus}`}>
                           {evalProofStatusDetail(evalRecommendation)}
+                        </p>
+                      </div>
+                    )}
+                    {toolReliability && toolReliability.total > 0 && (
+                      <div
+                        className="router-eval-recommendation"
+                        role="group"
+                        aria-label={`Auto-router tool reliability for ${c.modelId}: ${toolReliability.error} errors from ${toolReliability.total} traced tool calls, ${formatRouterPercent(toolReliability.errorRate)} error rate, ${toolReliability.firstCallErrors} first-call failures from ${toolReliability.runs} tool-using runs, ${toolReliability.recoveredRuns} recovered runs from ${toolReliability.affectedRuns} affected runs${toolRecovery ? `. Recent recovery path: ${routerToolRecoveryLabel(toolRecovery)}` : ''}${retryReduction ? `. Retry-reduction recommendation: avoid ${retryReduction.avoidPath}, prefer ${retryReduction.preferPath}, provider path avoid ${retryReduction.avoidProviderPath}, provider path prefer ${retryReduction.preferProviderPath}, retry distance ${retryReduction.retryDistance}, average retry distance ${retryReduction.avgRetryDistance}, source ${retryReduction.evidenceSource}, confidence ${retryReduction.evidenceConfidence} from ${retryReduction.supportRunCount} runs, supporting sessions ${(retryReduction.supportSessionIds || []).join(', ') || retryReduction.sessionId}, supporting runs ${(retryReduction.supportRunIds || []).join(', ') || retryReduction.runId}, tuning action ${retryReduction.tuningAction}, session ${retryReduction.sessionId}, run ${retryReduction.runId}` : ''}${toolPairRisks.length ? `. Risky tool pairs: ${toolPairRisks.map(([pair, stats]) => `${routerToolPairLabel(pair)} ${stats.error}/${stats.total} errors`).join(', ')}` : ''}${promptStrategyReliability.bucket ? `. Prompt strategy ${promptStrategyReliability.strategyId}: ${promptStrategyReliability.bucket.error}/${promptStrategyReliability.bucket.total} tool errors` : ''}`}
+                      >
+                        <span>
+                          Tool reliability · {toolReliability.error}/{toolReliability.total} errors · {formatRouterPercent(toolReliability.errorRate)}
+                        </span>
+                        <p>
+                          {toolReliability.error === 0
+                            ? `No tool-call errors in ${toolReliability.total} persisted traced call${toolReliability.total === 1 ? '' : 's'}.`
+                            : `${toolReliability.recoveredRuns}/${toolReliability.affectedRuns} tool-error run${toolReliability.affectedRuns === 1 ? '' : 's'} recovered to a final answer; ${toolReliability.firstCallErrors}/${toolReliability.runs} tool-using run${toolReliability.runs === 1 ? '' : 's'} failed on the first call.`}
+                        </p>
+                        {toolRecovery && (
+                          <p>
+                            Recent recovery path: {routerToolRecoveryLabel(toolRecovery)} in {toolRecovery.recoveryRounds} round{toolRecovery.recoveryRounds === 1 ? '' : 's'}.
+                          </p>
+                        )}
+                        {toolRecovery && (
+                          <p aria-label={`Auto-Router recovery proof for ${c.modelId}: session ${toolRecovery.sessionId}, run ${toolRecovery.runId}`}>
+                            Recovery proof: session {toolRecovery.sessionId}, run {toolRecovery.runId}.
+                          </p>
+                        )}
+                        {retryReduction && (
+                          <p aria-label={`Auto-Router retry-reduction recommendation for ${c.modelId}: avoid ${retryReduction.avoidPath}, prefer ${retryReduction.preferPath}, provider path avoid ${retryReduction.avoidProviderPath}, provider path prefer ${retryReduction.preferProviderPath}, source ${retryReduction.evidenceSource}, confidence ${retryReduction.evidenceConfidence} from ${retryReduction.supportRunCount} runs, average retry distance ${retryReduction.avgRetryDistance}, supporting sessions ${(retryReduction.supportSessionIds || []).join(', ') || retryReduction.sessionId}, supporting runs ${(retryReduction.supportRunIds || []).join(', ') || retryReduction.runId}, tuning action ${retryReduction.tuningAction}, session ${retryReduction.sessionId}, run ${retryReduction.runId}`}>
+                            Retry reduction: avoid {retryReduction.avoidPath}; prefer {retryReduction.preferPath}; provider path avoid {retryReduction.avoidProviderPath}; provider path prefer {retryReduction.preferProviderPath}; retry distance {retryReduction.retryDistance}; avg retry distance {retryReduction.avgRetryDistance}; source {retryReduction.evidenceSource}; confidence {retryReduction.evidenceConfidence} from {retryReduction.supportRunCount} run{retryReduction.supportRunCount === 1 ? '' : 's'}; supporting sessions {(retryReduction.supportSessionIds || []).join(', ') || retryReduction.sessionId}; supporting runs {(retryReduction.supportRunIds || []).join(', ') || retryReduction.runId}; tuning action {retryReduction.tuningAction}; {retryReduction.tuningGuidance}; session {retryReduction.sessionId}, run {retryReduction.runId}.
+                          </p>
+                        )}
+                        {toolPairRisks.length > 0 && (
+                          <p>
+                            Risky tools for this model: {toolPairRisks.map(([pair, stats]) =>
+                              `${routerToolPairLabel(pair)} ${stats.error}/${stats.total} errors, first-call ${stats.firstCallErrors}/${stats.runs}`
+                            ).join('; ')}.
+                          </p>
+                        )}
+                        {promptStrategyReliability.bucket && (
+                          <p>
+                            Prompt strategy {promptStrategyReliability.strategyId}: {promptStrategyReliability.bucket.error}/{promptStrategyReliability.bucket.total} tool errors, first-call {promptStrategyReliability.bucket.firstCallErrors}/{promptStrategyReliability.bucket.runs}
+                            {promptStrategyReliability.variants.length > 0
+                              ? `; risky variants ${promptStrategyReliability.variants.map(([variant, stats]) => `${variant} ${stats.error}/${stats.total}`).join(', ')}.`
+                              : '.'}
+                          </p>
+                        )}
+                        <p className={`eval-proof-status ${toolReliability.error > 0 ? 'needs-attention' : 'approved'}`}>
+                          This same evidence is also added to classifier candidate cards for tool-heavy execute scoring.
                         </p>
                       </div>
                     )}

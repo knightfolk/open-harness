@@ -104,8 +104,19 @@ Recent trust-surface improvements include:
 - Auto-Router candidate cards and Prompt Microscope route explanations that distinguish selected models from rejected alternatives.
 - Model Lab, Routing Learning, Agent Roles, provider health, budget, and rate-limit controls with clearer proof/review states.
 - Artifact Drawer, Team Plan, and Patch Review validation gates that make plans, artifacts, validation proof, and replay feedback easier to inspect.
+- Phase 7 routing-memory work adds versioned model-family prompt strategies plus role/task variants, and records strategy id/family/style/variant in run traces for same-model strategy comparisons.
+- Tool-call reliability now aggregates per-model/provider/tool outcomes with retry distance and first-call failure signals so routing can prefer lower-friction recovery paths.
+- Auto-Router and Routing Learning now expose evidence-source-tagged avoid/prefer recommendations (`saved_session_trace`, `log_trace`, `imported_trace`) with supporting session/run ids for audit.
 
 Use [docs/PREMIER_HARNESS_PROOF_CHECKLIST.md](docs/PREMIER_HARNESS_PROOF_CHECKLIST.md) and the closeout proof notes before calling the overhaul done. Final release proof still requires the relevant browser/manual proof plus the validation commands listed below.
+
+If you are validating the Phase 7 prompt/routing memory loop specifically, run:
+
+```bash
+npm run test:prompt-strategy-database
+npm run test:prompt-routing-memory
+npm run test:tool-reliability
+```
 
 ## Architecture
 

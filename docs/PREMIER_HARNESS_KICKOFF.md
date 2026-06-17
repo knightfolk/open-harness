@@ -226,6 +226,10 @@ To lead for both open-source and frontier models, OpenHarness should add:
 - replayable runs with prompts, artifacts, tools, diffs, and validation proof
 - provider health and rate-limit visibility
 - model failure memory: what failed, whether fallback was used, and what fixed it
+- tool-call error memory: which model/provider/tool failed, which prompt
+  strategy was active, what later worked, and how many retries recovery cost
+- saved session/run breadcrumbs for tool-error recovery evidence, including
+  Auto-Router candidate-card annotations used by classifier-side routing
 - import/export of routing learning and benchmark results
 
 ## Implementation Phases
@@ -450,6 +454,121 @@ Done when:
 
 - OpenHarness can honestly explain which model should do which work and why.
 
+### Phase 7: Prompt Response And Strategy Database
+
+Files:
+
+- `docs/PROMPT_STRATEGY_DATABASE_PLAN.md`
+- `docs/MODEL_PROMPTING_GUIDE.md`
+- `server/promptBuilder.ts`
+- `server/router.ts`
+- `server/autoRouter.ts`
+- `server/evals.ts`
+- `src/data/modelCatalog.ts`
+- `src/components/PromptMicroscope.tsx`
+- `src/components/ModelLabPanel.tsx`
+
+Tasks:
+
+- Research current best-practice system prompting guidance from primary model
+  providers.
+- Split model capability data from prompt strategy data.
+- Add a versioned prompt strategy database keyed by model family, model id, role,
+  and task type.
+- Let `buildPromptForModel()` choose a prompt strategy profile and record the
+  strategy id in prompt assembly trace data.
+- Add Prompt Microscope visibility for strategy id, family, style, context
+  ordering, reasoning policy, examples policy, and output contract.
+- Expand routing tests so they measure model choice plus prompt strategy choice.
+- Add Model Lab comparisons for same model/same task across prompt strategies.
+- Record routing-learning outcomes by prompt strategy id so weak strategies can
+  be detected independently from weak models.
+- Track tool-call errors by model, provider, tool, model/tool pair, prompt
+  strategy, and strategy variant, then mine saved sessions/log-derived run
+  traces for the later model/tool path that actually recovered the run.
+- Treat saved logs and sessions as retry-reduction training data: capture the
+  original failing tool call, the eventual successful model/tool/prompt path,
+  and the number of retry/repair rounds so future routing can avoid repeating
+  the same first error.
+- Preserve saved session/run breadcrumbs in Routing Learning UI/exports and
+  Auto-Router candidate-card evidence so reviewers and classifiers can trace
+  retry-reduction advice back to the run that proved what worked.
+- Include the tool-error evidence source with those breadcrumbs
+  (`saved_session_trace`, future `log_trace`, or `imported_trace`) so routing
+  can tell whether an avoid/retry-reduction recommendation came from a saved
+  session, imported evidence bundle, or log-derived trace.
+- Preview imported Routing Learning bundles as `imported_trace` evidence before
+  import approval, and do not silently merge imported tool-reliability summaries
+  into local routing state without a reviewed merge path.
+- Summarize tool-error evidence by source so reviewers can quickly see how many
+  outcome runs and retry-reduction recommendations came from saved sessions
+  versus imported or future log-derived traces.
+- Attach source-aware tuning guidance to retry-reduction recommendations:
+  saved-session traces may tune local router settings after review, log-derived
+  traces require source review first, and imported traces remain context-only
+  until a reviewed merge path promotes them.
+- Include recommendation support count and confidence so one-off recovery paths
+  are distinguishable from repeated avoid/prefer evidence.
+- Preserve supporting session/run breadcrumbs for retry-reduction
+  recommendations so repeated recommendations can be traced back to the saved
+  runs that support them.
+- Include average retry distance across supporting runs so repeated
+  avoid/prefer recommendations show the typical recovery cost, not only the
+  latest example.
+- De-duplicate retry-reduction recommendations by evidence source, failed
+  first path, and preferred later path so repeated traces strengthen one
+  recommendation instead of cluttering the UI with duplicate rows.
+- Derive explicit retry-reduction recommendations from saved outcomes:
+  identify the failed first model/tool path, the later preferred working path,
+  retry distance, evidence source, and session/run proof so future routing can
+  avoid the known weak first move.
+
+Validation:
+
+- `npm run test:prompt-routing-quality-readiness`
+- `npm run test:prompt-routing-output-p0`
+- `npm run test:routing-adherence`
+- `npm run test:tool-reliability`
+- New `npm run test:prompt-strategy-database` after implementation.
+- At least one live no-provider or provider-approved prompt trace showing the
+  selected prompt strategy in Prompt Microscope.
+
+Done when:
+
+- OpenHarness can explain not only which model should do the work, but which
+  prompt strategy that model received and why that strategy is expected to
+  improve response quality.
+- OpenHarness can explain which model/tool/prompt-strategy combinations failed,
+  which later path worked, and how routing or prompt contracts should change to
+  reduce first-call errors and retry loops.
+- OpenHarness can compare saved-session/log evidence across failed and
+  successful tool-call attempts so it can prefer the path that ultimately
+  worked instead of merely retrying the same weak model/tool contract.
+- Auto-Router candidate-card evidence includes saved session/run breadcrumbs
+  for recovery patterns, failure memory, session outcomes, and normalized
+  signatures, plus the evidence source behind those examples, that inform
+  tool-heavy route scoring.
+- Routing Learning and Auto-Router candidate cards expose distilled
+  avoid/prefer retry-reduction recommendations, not only raw error rows.
+- Routing Learning UI/exports show a tool-error evidence-source summary with
+  outcome counts, recovered/unrecovered counts, retry recommendation count, and
+  average retry distance.
+- Routing Learning, Settings, and Auto-Router candidate cards show the tuning
+  action behind each retry-reduction recommendation.
+- Retry-reduction recommendations show whether the avoid/prefer guidance is a
+  single trace or repeated trace, with the supporting run count.
+- Retry-reduction recommendations expose supporting session/run ids, not only
+  the latest example id.
+- Retry-reduction recommendations show both the example retry distance and the
+  average retry distance across supporting runs.
+- Matching avoid/prefer recommendations collapse into one row with repeated
+  confidence when multiple runs support the same path.
+- Routing Learning imports disclose imported tool-reliability summary counts as
+  preview-only `imported_trace` evidence before event import approval.
+- Settings Auto-Router candidate rows expose the same saved session/run
+  breadcrumbs for recent recovery paths, so manual tuning and classifier-side
+  route evidence point to the same proof run.
+
 ## Restart Rules
 
 - Client-only changes: do not restart the server. A browser refresh is enough.
@@ -459,6 +578,11 @@ Done when:
   - server on `3001`
   - Vite UI on `5173`
   - `/api/config`
+- Runtime relaunch must leave only one OpenHarness desktop shell. The start
+  path should quit stale OpenHarness Electron windows before launching and the
+  Electron main process should enforce single-instance behavior. Launcher
+  shutdown should clean up Electron, server, and Vite on both interrupt and
+  terminate signals.
 
 ## Stop Condition
 
@@ -471,8 +595,20 @@ Stop the overhaul only when all of this is true:
 - Chat no longer shows every diagnostic surface by default.
 - Theme textures are subtle, bounded, and accessible.
 - Model routing and evaluation are visible enough to trust.
+- Prompt response strategy is model-specific, traceable, testable, and backed by
+  a prompt strategy database.
+- OpenHarness can explain which model/tool/prompt-strategy combinations failed,
+  which later path worked, and how routing or prompt contracts should change to
+  reduce first-call errors and retry loops.
+- Auto-Router candidate-card evidence includes saved session/run breadcrumbs
+  for recovery patterns, failure memory, session outcomes, and normalized
+  signatures that inform tool-heavy route scoring.
+- Settings Auto-Router candidate rows expose the same saved session/run
+  breadcrumbs for recent recovery paths, so manual tuning and classifier-side
+  route evidence point to the same proof run.
 - Lint/build pass.
 - Server/runtime changes have been relaunched and reachability verified.
+- Runtime relaunch does not leave duplicate OpenHarness/Electron windows.
 
 Use `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` to collect closeout evidence for
 proof runs, manual UI review, runtime scenario proof, and final validation
@@ -495,6 +631,11 @@ Non-negotiables:
 - Add a path for users to flag or steer incorrect agent work.
 - Keep message chrome quiet by default.
 - Theme textures must be subtle, bounded, and accessible.
+- Prompt strategy and tool-error memory must stay traceable by model, provider,
+  tool, prompt strategy, saved session/run id, retry distance, and later working
+  path.
+- Auto-Router candidate evidence and Settings candidate rows should point to the
+  same saved session/run proof for tool-error recovery.
 
 Before changing files:
 - Inspect docs/PREMIER_HARNESS_KICKOFF.md,
@@ -503,7 +644,9 @@ Before changing files:
   src/components/Sidebar.tsx, src/components/AgentFocusPanel.tsx,
   src/components/SubAgentTracker.tsx, src/components/MessageBubble.tsx,
   src/components/EnvironmentRail.tsx, server/runTrace.ts,
-  server/orchestrator.ts, and server/agentRuntime.ts.
+  server/orchestrator.ts, server/agentRuntime.ts, server/toolReliability.ts,
+  server/autoRouter.ts, and src/components/SettingsModal.tsx when the slice
+  touches routing or model-harness evidence.
 
 Work in one narrow phase only. Validate with lint/build, and if server/runtime
 code changes, relaunch OpenHarness and verify the app is reachable.

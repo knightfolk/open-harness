@@ -13,6 +13,7 @@ import type { HarnessRunStep, TeamPlanArtifactData, TeamPlanParticipant, WorkPro
 import { applyPatch } from './patchApply';
 import { runValidation, summarizeValidationFailure, type ValidationCommandResult } from './benchRuns';
 import { checkCommandPolicy, type TrustMode } from './toolPolicy';
+import { createWorktree, refreshWorktreeState, removeWorktree, type Worktree } from './worktrees';
 import { existsSync, statSync } from 'fs';
 import { dirname, extname, isAbsolute, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
@@ -621,6 +622,44 @@ async function runExecutePipeline(
       `${artifactFolder}/README.md`,
     ]
     : [];
+  let implementationWorktree: Worktree | null = null;
+  let implementationWorkingDir = workingDir;
+  let implementationIsolationProof = workingDir
+    ? 'Implementation worktree isolation was not created.'
+    : 'Implementation worktree isolation was unavailable because no project folder is open.';
+  if (workingDir) {
+    try {
+      implementationWorktree = createWorktree(workingDir, { label: 'OpenHarness execute implementer' });
+      implementationWorkingDir = implementationWorktree.path;
+      implementationIsolationProof = `Implementation ran in isolated worktree ${implementationWorktree.id} (${implementationWorktree.branch}) at ${implementationWorktree.path}; base ${implementationWorktree.baseRef}. Promote or discard from Safety when ready.`;
+      callbacks.onStep?.({
+        type: 'worktree_isolation',
+        status: 'ready',
+        agent: 'implementer',
+        reason: 'Execute-mode implementation writes and validation are scoped to an isolated git worktree.',
+        worktreeId: implementationWorktree.id,
+        path: implementationWorktree.path,
+        branch: implementationWorktree.branch,
+        baseRef: implementationWorktree.baseRef,
+      });
+    } catch (err: any) {
+      implementationIsolationProof = `Implementation worktree isolation was unavailable: ${err?.message || err}.`;
+      callbacks.onStep?.({
+        type: 'worktree_isolation',
+        status: 'failed',
+        agent: 'implementer',
+        reason: 'OpenHarness attempted to create an isolated git worktree before execute-mode implementation writes.',
+        error: err?.message || String(err),
+      });
+    }
+  } else {
+    callbacks.onStep?.({
+      type: 'worktree_isolation',
+      status: 'unavailable',
+      agent: 'implementer',
+      reason: 'No project folder is open, so execute-mode implementation cannot be isolated in a git worktree.',
+    });
+  }
   const implPrompt = appendSteeringNotesToPrompt(
   [
     artifactCreation
@@ -649,7 +688,8 @@ async function runExecutePipeline(
         `## Task (from user)`,
         userMessage,
         ``,
-        workingDir ? `Working directory: ${workingDir}` : '',
+        implementationWorkingDir ? `Working directory: ${implementationWorkingDir}` : '',
+        implementationWorktree ? `Isolation: write and validation tools are scoped to isolated worktree ${implementationWorktree.id}; do not write to the base checkout.` : '',
         ``,
         `## Planner Notes (advisory only)`,
         plannerArtifact?.response || '(plan generation failed — proceed directly)',
@@ -667,7 +707,8 @@ async function runExecutePipeline(
         `## Task (from user)`,
         userMessage,
         '',
-        workingDir ? `Working directory: ${workingDir}` : '',
+        implementationWorkingDir ? `Working directory: ${implementationWorkingDir}` : '',
+        implementationWorktree ? `Isolation: produce and validate changes inside isolated worktree ${implementationWorktree.id}; do not write to the base checkout.` : '',
         '',
         `Implement the plan above. Produce a unified-diff patch for each file change.`,
         `Prefer minimal, surgical edits. After the patch, list exactly which validation`,
@@ -693,7 +734,7 @@ async function runExecutePipeline(
       profileId: implProfile,
       prompt: implPrompt,
       modelId: implModelId,
-      workingDir,
+      workingDir: implementationWorkingDir,
       signal: callbacks.signal,
       timeoutMs: artifactCreation ? ARTIFACT_IMPLEMENTER_TIMEOUT_MS : undefined,
       onStep: callbacks.onStep,
@@ -738,7 +779,8 @@ async function runExecutePipeline(
       `## Task`,
       userMessage,
       ``,
-      workingDir ? `Working directory: ${workingDir}` : '',
+      implementationWorkingDir ? `Working directory: ${implementationWorkingDir}` : '',
+      implementationWorktree ? `Isolation: continue writing only inside isolated worktree ${implementationWorktree.id}.` : '',
       ``,
       `Current manifest findings:`,
       ...(manifestFindings.length > 0 ? manifestFindings.map((finding) => `- ${finding}`) : ['- No artifact files were written.']),
@@ -756,7 +798,7 @@ async function runExecutePipeline(
         profileId: implProfile,
         prompt: retryPrompt,
         modelId: implModelId,
-        workingDir,
+        workingDir: implementationWorkingDir,
         signal: callbacks.signal,
         timeoutMs: ARTIFACT_RETRY_TIMEOUT_MS,
         onStep: callbacks.onStep,
@@ -795,11 +837,11 @@ async function runExecutePipeline(
     artifactCreation
     && writeToolAvailable
     && callbacks.invokeTool
-    && workingDir
+    && implementationWorkingDir
     && !artifactManifestComplete
   ) {
     try {
-      const fallbackArtifact = await createFallbackStandaloneArtifact(userMessage, implModelId, workingDir, callbacks.invokeTool);
+      const fallbackArtifact = await createFallbackStandaloneArtifact(userMessage, implModelId, implementationWorkingDir, callbacks.invokeTool);
       phases.push({
         label: 'artifact-fallback',
         modelId: 'openharness-scaffold',
@@ -825,7 +867,7 @@ async function runExecutePipeline(
     }
   }
 
-  let executionProof = await tryApplyAndValidateExecute(implArtifact?.response || '', config, workingDir, {
+  let executionProof = await tryApplyAndValidateExecute(implArtifact?.response || '', config, implementationWorkingDir, {
     artifactCreation,
     writeToolUsed: !!implArtifact?.notes.some((note) => note === 'tool=write_file' || note === 'tool=create_file'),
     writtenFiles: extractWrittenFilesFromAgentNotes(implArtifact?.notes || []),
@@ -847,7 +889,8 @@ async function runExecutePipeline(
       `## Task`,
       userMessage,
       ``,
-      workingDir ? `Working directory: ${workingDir}` : '',
+      implementationWorkingDir ? `Working directory: ${implementationWorkingDir}` : '',
+      implementationWorktree ? `Isolation: repair files only inside isolated worktree ${implementationWorktree.id}.` : '',
       ``,
       `Failed validation evidence:`,
       `- ${summarizeValidationFailure(executionProof.validationResults)}`,
@@ -865,7 +908,7 @@ async function runExecutePipeline(
         profileId: implProfile,
         prompt: repairPrompt,
         modelId: implModelId,
-        workingDir,
+        workingDir: implementationWorkingDir,
         signal: callbacks.signal,
         timeoutMs: ARTIFACT_REPAIR_TIMEOUT_MS,
         onStep: callbacks.onStep,
@@ -886,7 +929,7 @@ async function runExecutePipeline(
       });
       if (repairArtifact.notes.some((note) => note.startsWith('write_file:path=')) || repairArtifact.response.trim()) {
         implArtifact = mergeAgentArtifacts(implArtifact, repairArtifact);
-        executionProof = await tryApplyAndValidateExecute(implArtifact?.response || '', config, workingDir, {
+        executionProof = await tryApplyAndValidateExecute(implArtifact?.response || '', config, implementationWorkingDir, {
           artifactCreation,
           writeToolUsed: !!implArtifact?.notes.some((note) => note === 'tool=write_file' || note === 'tool=create_file'),
           writtenFiles: extractWrittenFilesFromAgentNotes(implArtifact?.notes || []),
@@ -910,6 +953,9 @@ async function runExecutePipeline(
   const reviewPrompt = appendSteeringNotesToPrompt([
     `## Implementation`,
     implArtifact?.response || '(implementation generation failed)',
+    '',
+    `## Isolation proof`,
+    implementationIsolationProof,
     '',
     `## Apply and validation proof`,
     executionProof.summary,
@@ -957,7 +1003,7 @@ async function runExecutePipeline(
       profileId: reviewProfile,
       prompt: reviewPrompt,
       modelId: reviewModelId,
-      workingDir,
+      workingDir: implementationWorkingDir,
       signal: callbacks.signal,
       timeoutMs: artifactCreation ? ARTIFACT_REVIEW_TIMEOUT_MS : undefined,
       onStep: callbacks.onStep,
@@ -985,13 +1031,66 @@ async function runExecutePipeline(
   }
   }
 
+  if (implementationWorktree && workingDir) {
+    try {
+      const refreshedWorktree = refreshWorktreeState(implementationWorktree);
+      if (refreshedWorktree.clean) {
+        const removed = removeWorktree(workingDir, refreshedWorktree.id, { force: true });
+        implementationIsolationProof += removed
+          ? ` Clean isolated worktree ${refreshedWorktree.id} had no changes and was auto-discarded.`
+          : ` Clean isolated worktree ${refreshedWorktree.id} had no changes, but auto-discard did not complete; review Safety > Worktrees.`;
+        callbacks.onStep?.({
+          type: 'worktree_isolation',
+          status: removed ? 'auto_discarded' : 'failed',
+          agent: 'implementer',
+          reason: removed
+            ? 'Clean execute isolation worktree had no changes and was auto-discarded.'
+            : 'Clean execute isolation worktree had no changes, but auto-discard did not complete.',
+          worktreeId: refreshedWorktree.id,
+          path: refreshedWorktree.path,
+          branch: refreshedWorktree.branch,
+          baseRef: refreshedWorktree.baseRef,
+        });
+      } else {
+        implementationIsolationProof += ` Isolated worktree ${refreshedWorktree.id} has changes and remains available in Safety > Worktrees for Validate, Promote, or Discard.`;
+        callbacks.onStep?.({
+          type: 'worktree_isolation',
+          status: 'preserved',
+          agent: 'implementer',
+          reason: 'Execute isolation worktree has changes and remains available in Safety > Worktrees for Validate, Promote, or Discard.',
+          worktreeId: refreshedWorktree.id,
+          path: refreshedWorktree.path,
+          branch: refreshedWorktree.branch,
+          baseRef: refreshedWorktree.baseRef,
+        });
+      }
+    } catch (err: any) {
+      implementationIsolationProof += ` Worktree cleanup check failed: ${err?.message || err}; review Safety > Worktrees.`;
+      callbacks.onStep?.({
+        type: 'worktree_isolation',
+        status: 'failed',
+        agent: 'implementer',
+        reason: 'Worktree cleanup check failed after execute isolation.',
+        worktreeId: implementationWorktree.id,
+        path: implementationWorktree.path,
+        branch: implementationWorktree.branch,
+        baseRef: implementationWorktree.baseRef,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
   const proof = buildExecuteProofSummary(implArtifact?.response || '', executionProof);
 
   const phasesComplete = phases.every((p) => p.status === 'complete');
   const deliveryProven = proof.filesChanged && proof.validationRan;
   const ok = deliveryProven && (phasesComplete || fallbackArtifactUsed);
 
-  const finalText = normalizeExecuteFinalOutput({
+  const finalText = [
+    `### Worktree isolation`,
+    implementationIsolationProof,
+    '',
+    normalizeExecuteFinalOutput({
     proofSummary: proof.summary,
     deliveryProven,
     fallbackArtifactUsed,
@@ -999,7 +1098,8 @@ async function runExecutePipeline(
     plannerText: plannerArtifact?.response || '',
     implementationText: implArtifact?.response || '',
     reviewText: reviewArtifact?.response || '',
-  });
+    }),
+  ].join('\n');
   const reviewFindingsArtifact = buildReviewFindingsArtifact(userMessage, reviewArtifact?.response || finalText);
 
   return {

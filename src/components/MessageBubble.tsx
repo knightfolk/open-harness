@@ -16,6 +16,7 @@ function runReplaySummary(message: Message): string | null {
   const steps = message.runTrace?.steps || [];
   if (steps.length === 0) return null;
   const artifacts = steps.filter((step) => step.type === 'artifact').length;
+  const validationProofs = steps.filter((step) => step.type === 'artifact' && step.artifact.type === 'validation_proof').length;
   const tools = steps.filter((step) => step.type === 'tool_call').length;
   const steering = steps.filter((step) => step.type === 'steering').length;
   const hasFinal = steps.some((step) => step.type === 'final_answer');
@@ -23,6 +24,7 @@ function runReplaySummary(message: Message): string | null {
     `${steps.length} event${steps.length === 1 ? '' : 's'}`,
     tools > 0 ? `${tools} tool${tools === 1 ? '' : 's'}` : null,
     artifacts > 0 ? `${artifacts} artifact${artifacts === 1 ? '' : 's'}` : null,
+    validationProofs > 0 ? `${validationProofs} validation proof${validationProofs === 1 ? '' : 's'}` : null,
     steering > 0 ? `${steering} steering` : null,
     hasFinal ? 'final answer captured' : 'in progress',
   ].filter(Boolean).join(' · ');
@@ -408,33 +410,18 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
           </div>
 
           {/* Surface a one-click "Review patch" button when the assistant
-              message contains a unified diff. Routes to the Patch Review
-              panel via the propose-patch flow. */}
+              message contains a unified diff. Routes into Review Changes
+              via the propose-patch flow. */}
           {isAssistant && !isStreaming && onProposePatch && extractedDiff && (
             <div className="message-patch-action">
               <button
                 className="btn btn-secondary btn-small"
                 type="button"
                 onClick={() => onProposePatch(extractedDiff.diff, message.content.slice(0, 200))}
-                title="Send this diff to the Patch Review panel"
+                title="Send this diff to Review Changes"
                 aria-label="Review patch from this message"
               >
                 <span style={{ fontSize: 11 }} aria-hidden="true">🩹</span> Review patch
-              </button>
-            </div>
-          )}
-
-          {isAssistant && !isStreaming && message.runTrace && (
-            <div className="message-patch-action">
-              <button
-                className="btn btn-secondary btn-small"
-                type="button"
-                onClick={handleExportReplay}
-                title="Export this run's replay, prompts, routing, artifacts, and proof bundle"
-                aria-label="Export this run's replay bundle"
-              >
-                <Download size={12} aria-hidden="true" />
-                {replayExportStatus || 'Export replay'}
               </button>
             </div>
           )}
@@ -470,6 +457,21 @@ export function MessageBubble({ message, assistantName, projectProfile, onSendMe
           {/* ── Delight features for completed assistant messages ── */}
           {isAssistant && !isStreaming && showDetails && (
             <div id={detailsRegionId} className="message-details-region" role="region" aria-label="Message details">
+              {message.runTrace && (
+                <div className="message-patch-action">
+                  <button
+                    className="btn btn-secondary btn-small"
+                    type="button"
+                    onClick={handleExportReplay}
+                    title="Export this run's replay, prompts, routing, artifacts, and proof bundle"
+                    aria-label="Export this run's replay bundle from message details"
+                  >
+                    <Download size={12} aria-hidden="true" />
+                    {replayExportStatus || 'Export replay'}
+                  </button>
+                </div>
+              )}
+
               {!isStreaming && message.toolCalls && message.toolCalls.length > 0 && (
                 <ToolCallSummary toolCalls={message.toolCalls} />
               )}

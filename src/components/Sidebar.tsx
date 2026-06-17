@@ -170,7 +170,11 @@ export function Sidebar({
   if (!isOpen) return null;
 
   return (
-    <aside className="sidebar" aria-label="Project and chat navigation" style={width ? { width, minWidth: width } : undefined}>
+    <aside
+      className="sidebar"
+      aria-label="Project and chat navigation"
+      style={width ? { width, minWidth: width, ['--sidebar-width']: `${width}px` } : undefined}
+    >
       <div className="sidebar-tabs" role="group" aria-label="Sidebar panels">
         {tabConfig.map(({ key, icon: Icon, label }) => (
           <button
@@ -412,6 +416,9 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                         `Focus ${normalizeRunLabel(run)}`,
                         `status ${statusText}`,
                         run.task ? `task ${run.task}` : null,
+                        run.model ? `model ${run.model}` : null,
+                        run.runTrace?.providerId ? `provider ${run.runTrace.providerId}` : null,
+                        `elapsed ${formatAgentDuration(run.startTime)}`,
                         proof ? `${proof.label}: ${proof.value}` : null,
                       ].filter(Boolean).join('. ');
                       return (

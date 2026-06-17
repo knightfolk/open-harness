@@ -65,6 +65,17 @@ export interface PromptAssemblyTrace {
   family: string;
   style: string;
   target: string;
+  promptStrategy?: {
+    id: string;
+    family: string;
+    systemStyle: string;
+    contextOrder: string;
+    examplePolicy: string;
+    reasoningPolicy: string;
+    toolPolicy: string;
+    outputContract: string;
+    updatedAt: string;
+  };
   outputStyle?: OutputStyleTrace;
   sections: PromptAssemblySection[];
   totalTokenEstimate: number;
@@ -228,13 +239,36 @@ export type RunSteeringAction =
 
 export type HarnessRunStep =
   | { type: 'steering'; action: RunSteeringAction; target?: 'orchestrator' | 'agent'; source: 'user'; note?: string; createdAt: string }
+  | {
+  type: 'worktree_isolation';
+  status: 'ready' | 'preserved' | 'auto_discarded' | 'unavailable' | 'failed';
+  agent: string;
+  reason: string;
+  worktreeId?: string;
+  path?: string;
+  branch?: string;
+  baseRef?: string;
+  error?: string;
+}
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
   | { type: 'artifact'; artifact: WorkProductArtifact }
   | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace; outputStyle?: OutputStyleTrace }
   | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number>; stages?: RoutingStageTrace }
   | { type: 'model_request'; round: number; model: string }
-  | { type: 'tool_call'; id: string; name: string; input: unknown; outputPreview?: string; durationMs?: number }
+  | {
+  type: 'tool_call';
+  id: string;
+  name: string;
+  input: unknown;
+  outputPreview?: string;
+  durationMs?: number;
+  status?: 'running' | 'complete' | 'error' | 'skipped';
+  error?: string;
+  model?: string;
+  providerId?: string;
+  round?: number;
+}
   | { type: 'model_text'; chars: number }
   | { type: 'model_thinking'; chars: number; preview?: string; source: 'provider' | 'router' }
   | { type: 'final_answer'; chars: number }
@@ -334,6 +368,8 @@ export interface AutoRouterState {
   candidateCount: number;
   candidates: Array<{ modelId: string; cost: number; supportsImages: boolean; supportsThinking?: boolean; contextWindowTokens: number }>;
   unavailableCandidates?: Array<{ modelId: string; available: boolean; reason?: string }>;
+  candidateEvidenceRefreshedAt?: string | null;
+  candidateEvidenceRefreshCount?: number;
   cacheSize: number;
 }
 
@@ -1634,6 +1670,64 @@ export interface EvalScoreBreakdown {
   signals: EvalSignalScore[];
 }
 
+export interface PromptStrategyTrace {
+  id: string;
+  family: string;
+  modelMatch?: {
+    source: string;
+    hint: string;
+  };
+  systemStyle: string;
+  contextOrder: string;
+  examplePolicy: string;
+  reasoningPolicy: string;
+  toolPolicy: string;
+  outputContract: string;
+  variantId?: string;
+  role?: string;
+  taskType?: string;
+  selectionReason?: string;
+  bestPractice?: {
+    guidance: string;
+    rationale: string;
+    evaluationCue: string;
+    sourceRef: string;
+  };
+  updatedAt: string;
+}
+
+export interface PromptStrategyVariant {
+  id: string;
+  roles: string[];
+  taskTypes: string[];
+  selectionHint: string;
+  outputContract?: string;
+  reasoningPolicy?: string;
+  toolPolicy?: string;
+  examplePolicy?: string;
+}
+
+export interface PromptStrategyBestPracticeNote {
+  id: string;
+  sourceRef: string;
+  appliesTo: string[];
+  guidance: string;
+  rationale: string;
+  evaluationCue: string;
+}
+
+export interface PromptStrategyProfile extends PromptStrategyTrace {
+  appliesTo: string[];
+  sourceRefs: string[];
+  bestPracticeNotes: PromptStrategyBestPracticeNote[];
+  maxSystemPromptTokens: number;
+  instructionPlacement: string;
+  variants: PromptStrategyVariant[];
+  strengths: string[];
+  risks: string[];
+  recommendedTests: string[];
+}
+
 export interface EvalResult {
   modelId: string;
   promptId: string;
@@ -1641,6 +1735,7 @@ export interface EvalResult {
   status: 'ok' | 'error';
   response: string;
   responseLength: number;
+  promptStrategy?: PromptStrategyTrace;
   toolCallCount: number;
   toolCalls: Array<{ name: string; status: string }>;
   wallMs: number;
@@ -1649,6 +1744,8 @@ export interface EvalResult {
 
 export interface EvalSummary {
   byModel: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }>;
+  byPromptStrategy?: Record<string, { family: string; systemStyle: string; avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number; bestModel: string }>;
+  bestPromptStrategy?: string;
   bestModel: string;
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
 }
@@ -1702,6 +1799,12 @@ export async function getEvalPrompts(): Promise<PromptCase[]> {
   return res.json();
 }
 
+export async function getPromptStrategies(): Promise<PromptStrategyProfile[]> {
+  const res = await fetch(`${API_BASE}/api/prompt-strategies`);
+  if (!res.ok) throw new Error(`Failed to get prompt strategies: ${res.status}`);
+  return res.json();
+}
+
 export async function getEvalReports(): Promise<EvalReportSummary[]> {
   const res = await fetch(`${API_BASE}/api/evals/reports`);
   if (!res.ok) throw new Error(`Failed to get reports: ${res.status}`);
@@ -1731,6 +1834,7 @@ export async function runEval(params: {
   promptIds: string[];
   modelIds: string[];
   workingDir?: string;
+  promptStrategyIds?: string[];
   packContext?: EvalReport['packContext'];
 }): Promise<{ id: string; status: string; total: number }> {
   const res = await fetch(`${API_BASE}/api/evals/run`, {
@@ -2005,6 +2109,7 @@ export interface BenchRunResult {
   prompt: string;
   response: string;
   responseLength: number;
+  promptStrategy?: PromptStrategyTrace;
   toolCalls: Array<{ name: string; status: string }>;
   validationResults: ValidationCommandResult[];
   validationPassed: boolean;
@@ -2430,7 +2535,246 @@ export interface RouterLearningSummary {
   byTaskType: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
   byRole: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
   byComplexity: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  byPromptStrategy?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  byPromptStrategyFamily?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  byPromptStrategyVariant?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  toolReliability?: ToolReliabilitySummary;
   bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
+  bestPromptStrategyVariants?: Array<{ strategyVariant: string; model: string; total: number; success: number; rate: number }>;
+}
+
+export interface ToolReliabilityBucket {
+  total: number;
+  complete: number;
+  error: number;
+  skipped: number;
+  running: number;
+  runs: number;
+  firstCallErrors: number;
+  affectedRuns: number;
+  recoveredRuns: number;
+  errorRate: number;
+  firstCallErrorRate: number;
+  recoveryRate: number;
+  avgRecoveryRounds: number;
+  avgDurationMs: number;
+}
+
+export type ToolReliabilityEvidenceSource = 'saved_session_trace' | 'log_trace' | 'imported_trace';
+export type ToolReliabilityTuningAction = 'tune_local_router' | 'review_before_tuning' | 'context_only';
+export type ToolReliabilityEvidenceConfidence = 'single_trace' | 'repeated_trace';
+
+export interface ToolReliabilitySummary {
+  totalToolCalls: number;
+  completedToolCalls: number;
+  errorToolCalls: number;
+  skippedToolCalls: number;
+  runningToolCalls: number;
+  runsWithToolCalls: number;
+  firstCallErrorRuns: number;
+  runsWithToolErrors: number;
+  recoveredRunsWithToolErrors: number;
+  avgRecoveryRounds: number;
+  byModel: Record<string, ToolReliabilityBucket>;
+  byProvider: Record<string, ToolReliabilityBucket>;
+  byTool: Record<string, ToolReliabilityBucket>;
+  byModelTool: Record<string, ToolReliabilityBucket>;
+  byPromptStrategy: Record<string, ToolReliabilityBucket>;
+  byPromptStrategyVariant: Record<string, ToolReliabilityBucket>;
+  byEvidenceSource: ToolReliabilityEvidenceSourceSummary[];
+  toolHeavyAdvice: ToolReliabilityAdvice[];
+  recoveryExamples: ToolReliabilityRecoveryExample[];
+  outcomeExamples: ToolReliabilityOutcomeExample[];
+  recoveryPatterns: ToolReliabilityRecoveryPattern[];
+  failureMemory: ToolReliabilityFailureMemory[];
+  errorSignatures: ToolReliabilityErrorSignature[];
+  retryReductionRecommendations: ToolReliabilityRetryReductionRecommendation[];
+  recentErrors: Array<{
+    evidenceSource: ToolReliabilityEvidenceSource;
+    sessionId: string;
+    runId: string;
+    model: string;
+    providerId: string;
+    tool: string;
+    promptStrategyId?: string;
+    promptStrategyVariantId?: string;
+    round?: number;
+    error?: string;
+    timestamp: string;
+  }>;
+}
+
+export interface ToolReliabilityRecoveryExample {
+  evidenceSource: ToolReliabilityEvidenceSource;
+  sessionId: string;
+  runId: string;
+  promptStrategyId?: string;
+  promptStrategyVariantId?: string;
+  firstError: {
+    model: string;
+    providerId: string;
+    tool: string;
+    round?: number;
+    error?: string;
+  };
+  recoveredBy: Array<{
+    model: string;
+    providerId: string;
+    tool: string;
+    round?: number;
+    durationMs?: number;
+  }>;
+  finalStatus: string;
+  finalAnswerCaptured: boolean;
+  recoveryRounds: number;
+  timestamp: string;
+}
+
+export type ToolReliabilityOutcomeKind =
+  | 'recovered_tool_path'
+  | 'fallback_tool_path'
+  | 'final_answer_only'
+  | 'unrecovered_error'
+  | 'running_or_unknown';
+
+export interface ToolReliabilityOutcomeExample {
+  evidenceSource: ToolReliabilityEvidenceSource;
+  sessionId: string;
+  runId: string;
+  failedModel: string;
+  failedProviderId: string;
+  failedTool: string;
+  promptStrategyId?: string;
+  promptStrategyVariantId?: string;
+  outcome: ToolReliabilityOutcomeKind;
+  workedBy?: {
+    model: string;
+    providerId: string;
+    tool: string;
+    round?: number;
+    durationMs?: number;
+  };
+  finalStatus: string;
+  finalAnswerCaptured: boolean;
+  recoveryRounds: number;
+  retryDistance: number;
+  error?: string;
+  timestamp: string;
+}
+
+export interface ToolReliabilityRecoveryPattern {
+  failedModel: string;
+  failedProviderId: string;
+  failedTool: string;
+  recoveredByModel: string;
+  recoveredByProviderId: string;
+  recoveredByTool: string;
+  runs: number;
+  finalAnswerRuns: number;
+  avgRecoveryRounds: number;
+  latestTimestamp: string;
+  exampleSessionIds: string[];
+  exampleRunIds: string[];
+  exampleEvidenceSources: ToolReliabilityEvidenceSource[];
+}
+
+export interface ToolReliabilityFailureMemory {
+  model: string;
+  providerId: string;
+  tool: string;
+  errorRuns: number;
+  recoveredRuns: number;
+  unrecoveredRuns: number;
+  fallbackRecoveryRuns: number;
+  promptStrategies: Array<{ id: string; runs: number }>;
+  promptStrategyVariants: Array<{ id: string; runs: number }>;
+  latestError?: string;
+  latestTimestamp: string;
+  fixedBy: Array<{
+    model: string;
+    providerId: string;
+    tool: string;
+    runs: number;
+    avgRecoveryRounds: number;
+  }>;
+  exampleSessionIds: string[];
+  exampleRunIds: string[];
+  exampleEvidenceSources: ToolReliabilityEvidenceSource[];
+}
+
+export interface ToolReliabilityErrorSignature {
+  signature: string;
+  model: string;
+  providerId: string;
+  tool: string;
+  runs: number;
+  recoveredRuns: number;
+  unrecoveredRuns: number;
+  fallbackRecoveryRuns: number;
+  promptStrategies: Array<{ id: string; runs: number }>;
+  promptStrategyVariants: Array<{ id: string; runs: number }>;
+  sampleError?: string;
+  latestTimestamp: string;
+  workedBy: Array<{
+    model: string;
+    providerId: string;
+    tool: string;
+    runs: number;
+    avgRetryDistance: number;
+  }>;
+  exampleSessionIds: string[];
+  exampleRunIds: string[];
+  exampleEvidenceSources: ToolReliabilityEvidenceSource[];
+}
+
+export interface ToolReliabilityRetryReductionRecommendation {
+  evidenceSource: ToolReliabilityEvidenceSource;
+  tuningAction: ToolReliabilityTuningAction;
+  sessionId: string;
+  runId: string;
+  failedModel: string;
+  failedProviderId: string;
+  failedTool: string;
+  promptStrategyId?: string;
+  promptStrategyVariantId?: string;
+  outcome: ToolReliabilityOutcomeKind;
+  avoidPath: string;
+  preferPath: string;
+  avoidProviderPath: string;
+  preferProviderPath: string;
+  supportRunCount: number;
+  supportSessionIds: string[];
+  supportRunIds: string[];
+  evidenceConfidence: ToolReliabilityEvidenceConfidence;
+  avgRetryDistance: number;
+  retryDistance: number;
+  recommendation: string;
+  tuningGuidance: string;
+  timestamp: string;
+}
+
+export interface ToolReliabilityEvidenceSourceSummary {
+  source: ToolReliabilityEvidenceSource;
+  tuningAction: ToolReliabilityTuningAction;
+  outcomeRuns: number;
+  recoveredRuns: number;
+  unrecoveredRuns: number;
+  retryReductionRecommendations: number;
+  avgRetryDistance: number;
+  latestTimestamp: string;
+}
+
+export interface ToolReliabilityAdvice {
+  scope: 'model' | 'tool' | 'model_tool' | 'prompt_strategy' | 'strategy_variant';
+  key: string;
+  tone: 'good' | 'caution' | 'risk';
+  title: string;
+  detail: string;
+  total: number;
+  errorRate: number;
+  firstCallErrorRate: number;
+  recoveryRate: number;
+  avgRecoveryRounds: number;
 }
 
 export interface RoutingEvent {
@@ -2446,6 +2790,12 @@ export interface RoutingEvent {
   wasFallback: boolean;
   wasCached: boolean;
   classifierModel?: string | null;
+  promptStrategyId?: string;
+  promptStrategyFamily?: string;
+  promptStrategyStyle?: string;
+  promptStrategyVariantId?: string;
+  promptStrategyTaskType?: string;
+  promptStrategySelectionReason?: string;
   outcome: 'success' | 'failure' | 'ambiguous' | null;
   outcomeNote?: string;
   datasetKind?: 'production' | 'benchmark';
@@ -2454,6 +2804,20 @@ export interface RoutingEvent {
 export interface RouterLearningExport {
   schemaVersion: number;
   generatedAt: string;
+  routerEvidenceFreshness?: {
+    enabled: boolean;
+    candidateEvidenceRefreshedAt: string | null;
+    candidateEvidenceRefreshCount: number;
+    configuredCandidateCount: number;
+    activeCandidateCount: number;
+  };
+  promptStrategyBestPractices?: Array<{
+    strategyId: string;
+    family: string;
+    systemStyle: string;
+    sourceRefs: string[];
+    bestPracticeNotes: PromptStrategyBestPracticeNote[];
+  }>;
   summary: RouterLearningSummary;
   eventCount: number;
   productionEventCount?: number;
@@ -2470,8 +2834,26 @@ export interface RouterLearningImportResult {
   dryRun?: boolean;
   importSource?: string;
   schemaVersion?: number | null;
+  schemaSupported?: boolean;
   warnings?: string[];
   datasetKind?: 'production' | 'benchmark';
+  toolReliabilityPreview?: {
+    evidenceSource: 'imported_trace';
+    outcomeExamples: number;
+    recoveryExamples: number;
+    recoveryPatterns: number;
+    failureMemory: number;
+    errorSignatures: number;
+    retryReductionRecommendations: number;
+    evidenceSourceRows: number;
+    note: string;
+  };
+  promptBestPracticePreview?: {
+    strategyCount: number;
+    bestPracticeNoteCount: number;
+    sourceRefs: string[];
+    note: string;
+  };
 }
 
 export async function getRouterLearning(): Promise<RouterLearningSummary> {
@@ -2485,6 +2867,7 @@ export async function getRouterLearning(): Promise<RouterLearningSummary> {
     byRole: {},
     byComplexity: {},
     bestByTaskType: [],
+    bestPromptStrategyVariants: [],
   };
   return res.json();
 }

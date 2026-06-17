@@ -6,6 +6,7 @@
  * Data source: docs/MODEL_PROMPTING_GUIDE.md (May 2026 research)
  */
 import { getModelConfig, isReasoningModel, type ModelPromptConfig } from './modelProfiles';
+import { getPromptStrategyById, getPromptStrategySelectionForModel, toPromptStrategyTrace, type PromptStrategyProfile, type PromptStrategySelectionContext, type PromptStrategyTrace } from './promptStrategies';
 import { UNTRUSTED_CONTEXT_RULES, wrapUntrustedBlock } from './untrustedContent';
 
 // ── Types ──────────────────────────────────────────────
@@ -19,6 +20,7 @@ export interface BuildPromptOptions {
   tools?: any[];
   taskDescription?: string;
   enableThinking?: boolean;
+  promptStrategyId?: string;
 }
 
 export interface PromptAssemblySection {
@@ -37,6 +39,7 @@ export interface PromptAssembly {
   family: string;
   style: ModelPromptConfig['systemPromptStyle'];
   target: 'system-message' | 'anthropic-system' | 'gemini-systemInstruction';
+  promptStrategy: PromptStrategyTrace;
   outputStyle: OutputStyleTrace;
   sections: PromptAssemblySection[];
   totalTokenEstimate: number;
@@ -262,6 +265,9 @@ function buildPromptAssembly(
   const personality = normalizePersonality(options.personality);
   const outputStyle = outputStyleForRole(role);
   const outputContract = outputStyle.contract;
+  const promptStrategySelection = resolvePromptStrategy(options);
+  const promptStrategy = promptStrategySelection.profile;
+  const promptStrategyTrace = toPromptStrategyTrace(promptStrategy, promptStrategyContext(options, role), promptStrategySelection.modelMatch);
   const sections: PromptAssemblySection[] = [
     {
       id: 'identity',
@@ -282,6 +288,27 @@ function buildPromptAssembly(
       reason: `${config.family} uses ${config.systemPromptStyle} system prompt formatting.`,
       redacted: false,
       preview: `family=${config.family}; style=${config.systemPromptStyle}; target=${target}`,
+    },
+    {
+      id: 'prompt-strategy',
+      label: 'Prompt strategy',
+      source: `promptStrategies:${promptStrategy.id}`,
+      tokenEstimate: estimatePromptTokens(`${promptStrategyTrace.systemStyle} ${promptStrategyTrace.contextOrder} ${promptStrategyTrace.examplePolicy} ${promptStrategyTrace.reasoningPolicy} ${promptStrategyTrace.outputContract} ${promptStrategyTrace.variantId || ''}`),
+      included: true,
+      reason: promptStrategyTrace.selectionReason || 'Versioned prompt strategy selected from model family and model id for traceability.',
+      redacted: false,
+      preview: [
+        `strategy=${promptStrategy.id}`,
+        promptStrategyTrace.modelMatch ? `modelMatch=${promptStrategyTrace.modelMatch.source}:${promptStrategyTrace.modelMatch.hint}` : undefined,
+        promptStrategyTrace.variantId ? `variant=${promptStrategyTrace.variantId}` : undefined,
+        promptStrategyTrace.taskType ? `taskType=${promptStrategyTrace.taskType}` : undefined,
+        `style=${promptStrategy.systemStyle}`,
+        `context=${promptStrategyTrace.contextOrder}`,
+        `examples=${promptStrategyTrace.examplePolicy}`,
+        `reasoning=${promptStrategyTrace.reasoningPolicy}`,
+        `tools=${promptStrategyTrace.toolPolicy}`,
+        `output=${promptStrategyTrace.outputContract}`,
+      ].filter(Boolean).join('; '),
     },
     {
       id: 'context-pack',
@@ -350,6 +377,7 @@ function buildPromptAssembly(
     family: config.family,
     style: config.systemPromptStyle,
     target,
+    promptStrategy: promptStrategyTrace,
     outputStyle,
     sections,
     totalTokenEstimate: estimatePromptTokens(finalPrompt),
@@ -363,19 +391,40 @@ function buildSystemPrompt(config: ModelPromptConfig, options: BuildPromptOption
   const rolePrompt = ROLE_PROMPTS[role] || ROLE_PROMPTS['coder'];
   const personality = normalizePersonality(options.personality);
   const outputContract = outputContractForRole(role);
+  const promptStrategySelection = resolvePromptStrategy(options);
+  const promptStrategy = toPromptStrategyTrace(promptStrategySelection.profile, promptStrategyContext(options, role), promptStrategySelection.modelMatch);
 
   switch (config.systemPromptStyle) {
     case 'xml-tagged':
-      return buildXMLPrompt(config, rolePrompt, personality, outputContract, options);
+      return buildXMLPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
     case 'structured':
-      return buildStructuredPrompt(config, rolePrompt, personality, outputContract, options);
+      return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
     case 'concise':
-      return buildConcisePrompt(config, rolePrompt, personality, outputContract, options);
+      return buildConcisePrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
     case 'minimal':
-      return buildMinimalPrompt(rolePrompt, personality, outputContract, options);
+      return buildMinimalPrompt(promptStrategy, rolePrompt, personality, outputContract, options);
     default:
-      return buildStructuredPrompt(config, rolePrompt, personality, outputContract, options);
+      return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
   }
+}
+
+function resolvePromptStrategy(options: BuildPromptOptions): { profile: PromptStrategyProfile; modelMatch?: PromptStrategyTrace['modelMatch'] } {
+  const override = getPromptStrategyById(options.promptStrategyId);
+  if (override) {
+    return {
+      profile: override,
+      modelMatch: { source: 'applies-to', hint: options.promptStrategyId || override.id },
+    };
+  }
+  return getPromptStrategySelectionForModel(options.modelId);
+}
+
+function promptStrategyContext(options: BuildPromptOptions, role = options.role): PromptStrategySelectionContext {
+  return {
+    role,
+    taskDescription: options.taskDescription,
+    hasTools: !!options.tools?.length,
+  };
 }
 
 function normalizePersonality(personality?: string): string | undefined {
@@ -387,6 +436,7 @@ function normalizePersonality(personality?: string): string | undefined {
 
 function buildXMLPrompt(
   config: ModelPromptConfig,
+  promptStrategy: PromptStrategyTrace,
   rolePrompt: string,
   personality: string | undefined,
   outputContract: string,
@@ -422,6 +472,15 @@ function buildXMLPrompt(
   }
   parts.push('</rules>');
 
+  const strategyDirectives = promptStrategyDirectives(promptStrategy, options);
+  if (strategyDirectives.length > 0) {
+    parts.push('');
+    parts.push('<prompt_strategy>');
+    parts.push(`id: ${promptStrategy.id}`);
+    for (const directive of strategyDirectives) parts.push(`- ${directive}`);
+    parts.push('</prompt_strategy>');
+  }
+
   if (options.taskDescription) {
     parts.push('');
     parts.push('<task>');
@@ -439,6 +498,7 @@ function buildXMLPrompt(
 
 function buildStructuredPrompt(
   config: ModelPromptConfig,
+  promptStrategy: PromptStrategyTrace,
   rolePrompt: string,
   personality: string | undefined,
   outputContract: string,
@@ -470,6 +530,14 @@ function buildStructuredPrompt(
     parts.push('9. Follow the most recent trusted user instructions precisely');
   }
 
+  const strategyDirectives = promptStrategyDirectives(promptStrategy, options);
+  if (strategyDirectives.length > 0) {
+    parts.push('');
+    parts.push('## Prompt Strategy');
+    parts.push(`Strategy: ${promptStrategy.id}`);
+    for (const directive of strategyDirectives) parts.push(`- ${directive}`);
+  }
+
   if (options.taskDescription) {
     parts.push('');
     parts.push('## Task');
@@ -486,6 +554,7 @@ function buildStructuredPrompt(
 
 function buildConcisePrompt(
   config: ModelPromptConfig,
+  promptStrategy: PromptStrategyTrace,
   rolePrompt: string,
   personality: string | undefined,
   outputContract: string,
@@ -500,6 +569,10 @@ function buildConcisePrompt(
   }
 
   parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract}`);
+  const conciseDirectives = promptStrategyDirectives(promptStrategy, options).slice(0, 2);
+  if (conciseDirectives.length > 0) {
+    parts.push(`Prompt strategy ${promptStrategy.id}: ${conciseDirectives.join(' ')}`);
+  }
 
   if (options.taskDescription) {
     parts.push(`Task: ${options.taskDescription}`);
@@ -513,17 +586,71 @@ function buildConcisePrompt(
 }
 
 function buildMinimalPrompt(
+  promptStrategy: PromptStrategyTrace,
   rolePrompt: string,
   personality: string | undefined,
   outputContract: string,
   options: BuildPromptOptions,
 ): string {
   const base = personality || rolePrompt;
+  const strategy = promptStrategyDirectives(promptStrategy, options)[0];
+  const strategyLabel = `Prompt strategy ${promptStrategy.id}:`;
   if (options.workingDir) {
     const profile = options.projectProfileSummary ? ` ${wrapUntrustedBlock('project context', options.projectProfileSummary)}` : '';
-    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} Be concise.`;
+    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} ${strategyLabel} ${strategy || 'Be concise.'}`;
   }
-  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract}`;
+  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} ${strategyLabel} ${strategy || ''}`.trim();
+}
+
+function promptStrategyDirectives(strategy: PromptStrategyTrace, options: BuildPromptOptions): string[] {
+  const directives: string[] = [];
+  if (strategy.variantId && strategy.selectionReason) {
+    directives.push(`Role/task variant ${strategy.variantId}: ${strategy.selectionReason}`);
+  }
+
+  if (strategy.systemStyle === 'outcome-first') {
+    directives.push('Keep the prompt outcome-first: define success, constraints, available evidence, and the final answer shape without adding process-heavy narration.');
+  } else if (strategy.systemStyle === 'xml-tagged') {
+    directives.push('Keep instructions, context, task, examples, and output requirements separated with explicit section boundaries.');
+  } else if (strategy.systemStyle === 'concise' || strategy.systemStyle === 'minimal') {
+    directives.push('Keep the instruction contract short and direct; avoid multi-page process instructions.');
+  }
+
+  if (strategy.contextOrder === 'context-first-query-last' && options.workingDir) {
+    directives.push('For long-context work, read the provided context before the task and ground conclusions in specific evidence.');
+  } else if (strategy.contextOrder === 'short-context-inline') {
+    directives.push('Use only the most relevant context and repeat the key user constraint in the final answer when helpful.');
+  }
+
+  if (strategy.examplePolicy === 'few-shot') {
+    directives.push('Use examples only when they clarify expected structure; do not copy examples as task facts.');
+  } else if (strategy.examplePolicy === 'format-only') {
+    directives.push('Treat examples as output-format guidance, not as domain facts.');
+  }
+
+  if (strategy.reasoningPolicy === 'native' || strategy.reasoningPolicy === 'effort-param') {
+    directives.push('Use the model reasoning channel or effort setting when available, but expose only concise rationale and proof in the final answer.');
+  } else if (strategy.reasoningPolicy === 'brief-private-plan') {
+    directives.push('Plan briefly before answering, then present the result without hidden chain-of-thought or planning monologue.');
+  } else if (strategy.reasoningPolicy === 'none') {
+    directives.push('Avoid elaborate reasoning prompts; prefer direct classification, extraction, or concise answer format.');
+  }
+
+  if (strategy.toolPolicy === 'json-contract' || strategy.toolPolicy === 'plain-text-tools') {
+    directives.push('Keep tool requests simple and schema-shaped so weaker tool models can follow them.');
+  }
+
+  if (strategy.outputContract === 'proof-first') {
+    directives.push('Lead with evidence-backed result and validation/proof status before optional detail.');
+  } else if (strategy.outputContract === 'findings-first') {
+    directives.push('Lead with findings ordered by severity before summary or praise.');
+  } else if (strategy.outputContract === 'artifact-first') {
+    directives.push('Lead with the artifact, decision, or deliverable before explanation.');
+  } else if (strategy.outputContract === 'concise-answer') {
+    directives.push('Keep the final answer concise and avoid broad adjacent recommendations unless requested.');
+  }
+
+  return directives;
 }
 
 // ── Tool adaptation ────────────────────────────────────
