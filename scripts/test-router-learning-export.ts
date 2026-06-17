@@ -260,7 +260,17 @@ assert.equal(payload.productionEventCount, 1, 'export should count production ev
 assert.equal(payload.benchmarkEventCount, 1, 'export should count benchmark events');
 assert.equal(payload.promptStrategyBestPractices.length, 1, 'export should include source-backed prompt strategy metadata for referenced strategies');
 assert.equal(payload.promptStrategyBestPractices[0].strategyId, 'qwen-xml-code-v1', 'export should identify the referenced prompt strategy');
-assert.equal(payload.promptStrategyBestPractices[0].bestPracticeNotes[0].sourceRef, 'docs/MODEL_PROMPTING_GUIDE.md', 'export should preserve prompt strategy best-practice source reference');
+assert.ok(
+  payload.promptStrategyBestPractices[0].bestPracticeNotes.some((note) =>
+    note.sourceRef === 'https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html'
+  ),
+  'export should preserve qwen quickstart source-backed best-practice guidance',
+);
+assert.equal(
+  payload.promptStrategyBestPractices[0].bestPracticeNotes[0].sourceRef,
+  'https://qwen.readthedocs.io/en/stable/getting_started/quickstart.html',
+  'export should preserve the first prompt strategy best-practice source reference',
+);
 assert.match(payload.promptStrategyBestPractices[0].bestPracticeNotes[0].evaluationCue, /first-call tool errors|retry distance|final proof quality/i, 'export should preserve prompt strategy best-practice eval cue');
 assert.equal(payload.summary.toolReliability.outcomeExamples.length, toolReliability.outcomeExamples.length, 'export should include tool reliability outcome evidence in the summary');
 assert.equal(payload.summary.toolReliability.outcomeExamples[0].workedBy?.tool, 'list_directory', 'export should preserve session outcome working-path evidence');
