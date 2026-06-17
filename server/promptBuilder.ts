@@ -393,18 +393,19 @@ function buildSystemPrompt(config: ModelPromptConfig, options: BuildPromptOption
   const outputContract = outputContractForRole(role);
   const promptStrategySelection = resolvePromptStrategy(options);
   const promptStrategy = toPromptStrategyTrace(promptStrategySelection.profile, promptStrategyContext(options, role), promptStrategySelection.modelMatch);
+  const shouldEmitExplicitThinking = shouldEmitExplicitThinkingTrigger(config, role, promptStrategy);
 
   switch (config.systemPromptStyle) {
     case 'xml-tagged':
-      return buildXMLPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
+      return buildXMLPrompt(config, promptStrategy, personality, outputContract, options, shouldEmitExplicitThinking);
     case 'structured':
-      return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
+      return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options, shouldEmitExplicitThinking);
     case 'concise':
-      return buildConcisePrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
+      return buildConcisePrompt(config, promptStrategy, rolePrompt, personality, outputContract, options, shouldEmitExplicitThinking);
     case 'minimal':
       return buildMinimalPrompt(promptStrategy, rolePrompt, personality, outputContract, options);
     default:
-      return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
+      return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options, shouldEmitExplicitThinking);
   }
 }
 
@@ -441,6 +442,7 @@ function buildXMLPrompt(
   personality: string | undefined,
   outputContract: string,
   options: BuildPromptOptions,
+  shouldEmitExplicitThinking: boolean,
 ): string {
   const parts: string[] = [];
 
@@ -488,7 +490,7 @@ function buildXMLPrompt(
     parts.push('</task>');
   }
 
-  if (config.needsExplicitCotTrigger && options.role !== 'title') {
+  if (shouldEmitExplicitThinking) {
     parts.push('');
     parts.push('Think step by step before answering.');
   }
@@ -503,6 +505,7 @@ function buildStructuredPrompt(
   personality: string | undefined,
   outputContract: string,
   options: BuildPromptOptions,
+  shouldEmitExplicitThinking: boolean,
 ): string {
   const parts: string[] = [];
 
@@ -544,7 +547,7 @@ function buildStructuredPrompt(
     parts.push(options.taskDescription);
   }
 
-  if (config.needsExplicitCotTrigger && options.role !== 'title') {
+  if (shouldEmitExplicitThinking) {
     parts.push('');
     parts.push('Let\'s think step by step before answering.');
   }
@@ -559,6 +562,7 @@ function buildConcisePrompt(
   personality: string | undefined,
   outputContract: string,
   options: BuildPromptOptions,
+  shouldEmitExplicitThinking: boolean,
 ): string {
   const parts: string[] = [];
   parts.push(personality || rolePrompt);
@@ -578,7 +582,7 @@ function buildConcisePrompt(
     parts.push(`Task: ${options.taskDescription}`);
   }
 
-  if (config.needsExplicitCotTrigger && options.role !== 'title') {
+  if (shouldEmitExplicitThinking) {
     parts.push('Think step by step.');
   }
 
@@ -600,6 +604,17 @@ function buildMinimalPrompt(
     return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} ${strategyLabel} ${strategy || 'Be concise.'}`;
   }
   return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} ${strategyLabel} ${strategy || ''}`.trim();
+}
+
+function shouldEmitExplicitThinkingTrigger(
+  config: ModelPromptConfig,
+  role: string,
+  promptStrategy: PromptStrategyTrace,
+): boolean {
+  if (role === 'title') return false;
+  if (!config.needsExplicitCotTrigger) return false;
+  if (promptStrategy.reasoningPolicy === 'native' || promptStrategy.reasoningPolicy === 'brief-private-plan') return false;
+  return true;
 }
 
 function promptStrategyDirectives(strategy: PromptStrategyTrace, options: BuildPromptOptions): string[] {
