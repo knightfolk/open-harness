@@ -119,6 +119,7 @@ Recent trust-surface improvements include:
 - Artifact Drawer, Team Plan, and Patch Review validation gates that make plans, artifacts, validation proof, and replay feedback easier to inspect.
 - Phase 7 routing-memory work adds versioned model-family prompt strategies plus role/task variants, and records strategy id/family/style/variant in run traces for same-model strategy comparisons.
 - The same layer now also supports model-id based prompt-strategy overrides (for example OpenAI reasoning IDs like `o1`/`o3`, including provider-prefixed forms like `openai/o1-mini` and `provider:o3-mini-high`) so routing can keep a common family base while selecting dedicated contracts for selected model families.
+- Prompt strategy profile source provenance now includes primary family references (for example Llama prompt-format contracts and Gemma/Phi chat template guidance), so prompt strategy changes can be traced back to model-provider documentation before routing default updates.
 - Tool-call reliability now aggregates per-model/provider/tool outcomes with retry distance and first-call failure signals so routing can prefer lower-friction recovery paths.
 - Auto-Router and Routing Learning now expose evidence-source-tagged avoid/prefer recommendations (`saved_session_trace`, `log_trace`, `imported_trace`) with supporting session/run ids for audit.
 - Routing Learning exports now also include provider-qualified recovery and outcome evidence assertions so exported model/prompt strategy rows can be traced to the exact failing and working model/tool path.
