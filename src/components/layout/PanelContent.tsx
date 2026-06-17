@@ -36,7 +36,7 @@ interface Props {
     onFocusAgents?: () => void;
     trustMode?: string;
     models?: Array<{ id: string; name: string }>;
-    enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string }>;
+    enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
     onApplyRoleRecommendation?: (roleId: string, modelId: string) => void;
     pinnedTools?: PanelId[];
     onOpenPinnedTool?: (id: PanelId) => void;
@@ -78,7 +78,7 @@ export function PanelContent({ panelId, context }: Props) {
     case 'files':
       return wrapped(<FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />);
     case 'model-lab':
-      return wrapped(<ModelLabPanel workingDir={context.workingDir} models={context.models || []} />);
+      return wrapped(<ModelLabPanel workingDir={context.workingDir} models={context.models || []} enabledModels={context.enabledModels || []} />);
     case 'routing-learning':
       return wrapped(<RoutingLearningPane enabledModels={context.enabledModels || []} onApplyRoleRecommendation={context.onApplyRoleRecommendation} />);
     case 'safety':

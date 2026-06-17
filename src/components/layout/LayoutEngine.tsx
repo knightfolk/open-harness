@@ -30,7 +30,7 @@ interface Props {
   onFocusAgents?: () => void;
   trustMode?: string;
   models?: Array<{ id: string; name: string }>;
-  enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string }>;
+  enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
   onApplyRoleRecommendation?: (roleId: string, modelId: string) => void;
   pinnedTools?: PanelId[];
   onOpenPinnedTool?: (id: PanelId) => void;

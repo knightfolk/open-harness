@@ -1,14 +1,64 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import * as api from '../utils/api';
 
 interface Props {
   workingDir: string | null;
   models: Array<{ id: string; name: string }>;
+  enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
 }
 
 const HISTORY_VISIBLE_LIMIT = 20;
+type ModelSourceCategory = 'all' | 'frontier' | 'open-source';
+interface ModelLabSelectableModel {
+  id: string;
+  name: string;
+  providerId?: string;
+  providerName?: string;
+  providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom';
+  modelSource?: 'frontier' | 'open-source';
+}
 
-export function ModelLabPanel({ workingDir, models }: Props) {
+function inferModelSource(model: ModelLabSelectableModel): 'frontier' | 'open-source' {
+  const providerType = (model.providerType || '').toLowerCase();
+  const providerName = (model.providerName || '').toLowerCase();
+  const providerId = (model.providerId || '').toLowerCase();
+  if (providerType === 'local') return 'open-source';
+  if (providerName.includes('ollama') || providerName.includes('lm studio') || providerName.includes('lmstudio') || providerName.includes('local') || providerId.includes('ollama')) {
+    return 'open-source';
+  }
+  return 'frontier';
+}
+
+function providerModelKey(providerName?: string) {
+  return providerName?.trim() || 'unknown provider';
+}
+
+export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props) {
+  const selectableModels = useMemo<ModelLabSelectableModel[]>(() => {
+    const source = enabledModels.length > 0 ? enabledModels : models;
+    return source.map((model) => ({
+      ...model,
+      modelSource: inferModelSource(model),
+    }));
+  }, [enabledModels, models]);
+
+  const modelSourceGroups = useMemo(() => {
+    const frontier = selectableModels.filter((model) => model.modelSource === 'frontier');
+    const openSource = selectableModels.filter((model) => model.modelSource === 'open-source');
+    return {
+      all: selectableModels.length,
+      frontier: frontier.length,
+      'open-source': openSource.length,
+    };
+  }, [selectableModels]);
+
+  const [modelSourceFilter, setModelSourceFilter] = useState<ModelSourceCategory>('all');
+
+  const filteredModels = useMemo(() => {
+    if (modelSourceFilter === 'all') return selectableModels;
+    return selectableModels.filter((model) => model.modelSource === modelSourceFilter);
+  }, [modelSourceFilter, selectableModels]);
+
   const [prompts, setPrompts] = useState<api.PromptCase[]>([]);
   const [promptStrategies, setPromptStrategies] = useState<api.PromptStrategyProfile[]>([]);
   const [reports, setReports] = useState<api.EvalReportSummary[]>([]);
@@ -168,9 +218,9 @@ export function ModelLabPanel({ workingDir, models }: Props) {
     setSelectedPromptIds(new Set(prompts.map(p => p.id)));
   }, [prompts]);
 
-  const selectAllModels = useCallback(() => {
-    setSelectedModelIds(new Set(models.map(m => m.id)));
-  }, [models]);
+  const selectAllModels = useCallback((nextModels?: string[]) => {
+    setSelectedModelIds(new Set(nextModels || selectableModels.map(m => m.id)));
+  }, [selectableModels]);
 
   const selectAllTasks = useCallback(() => {
     setSelectedTaskIds(new Set(tasks.map(t => t.id)));
@@ -178,7 +228,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
 
   const prepareSmallEvalProofRun = useCallback(() => {
     const prompt = prompts[0];
-    const model = models[0];
+    const model = selectableModels[0];
     if (!prompt || !model) {
       setDiagnostic({
         tone: 'warning',
@@ -197,11 +247,11 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       title: 'Small eval proof prepared',
       detail: `Selected 1 prompt and 1 model. Review provider/budget cautions, then run the eval when ready.`,
     });
-  }, [prompts, models]);
+  }, [prompts, selectableModels]);
 
   const prepareSmallBenchProofRun = useCallback(() => {
     const task = tasks[0];
-    const model = models[0];
+    const model = selectableModels[0];
     if (!task || !model) {
       setDiagnostic({
         tone: 'warning',
@@ -219,7 +269,7 @@ export function ModelLabPanel({ workingDir, models }: Props) {
       title: 'Small bench proof prepared',
       detail: `Selected 1 task and 1 model. Review provider/budget cautions, then run the bench when ready.`,
     });
-  }, [tasks, models]);
+  }, [tasks, selectableModels]);
 
   const handleRun = useCallback(async () => {
     if (selectedPromptIds.size === 0 || selectedModelIds.size === 0) return;
@@ -531,7 +581,18 @@ export function ModelLabPanel({ workingDir, models }: Props) {
             </div>
 
             {/* Model Selection */}
-            <ModelSelection models={models} selected={selectedModelIds} onToggle={toggleModel} onSelectAll={selectAllModels} />
+            <ModelSourceFilter
+              value={modelSourceFilter}
+              counts={modelSourceGroups}
+              onChange={setModelSourceFilter}
+            />
+            <ModelSelection
+              models={filteredModels}
+              selected={selectedModelIds}
+              onToggle={toggleModel}
+              onSelectAll={() => selectAllModels(filteredModels.map((m) => m.id))}
+              onClear={() => setSelectedModelIds(new Set())}
+            />
 
             {promptStrategies.length > 0 && (
               <div
@@ -676,7 +737,23 @@ export function ModelLabPanel({ workingDir, models }: Props) {
                 </div>
 
                 {/* Model selection & run */}
-                <ModelSelection models={models} selected={selectedModelIds} onToggle={toggleModel} onSelectAll={selectAllModels} />
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginBottom: 6 }}>
+                    Active model filter: {modelSourceFilter}
+                  </div>
+                  <ModelSourceFilter
+                    value={modelSourceFilter}
+                    counts={modelSourceGroups}
+                    onChange={setModelSourceFilter}
+                  />
+                </div>
+                <ModelSelection
+                  models={filteredModels}
+                  selected={selectedModelIds}
+                  onToggle={toggleModel}
+                  onSelectAll={() => selectAllModels(filteredModels.map((m) => m.id))}
+                  onClear={() => setSelectedModelIds(new Set())}
+                />
 
                 <label style={{ ...checkboxRowStyle(includePlanningRoomBaseline), marginBottom: 10 }}>
                   <input
@@ -2245,25 +2322,36 @@ function StatusPill({ status }: { status: api.PromptPluginSummary['status'] }) {
   return <span style={{ ...pillStyle, ...colors }} aria-label={`Prompt pack manifest status: ${status}`}>{status}</span>;
 }
 
-function ModelSelection({ models, selected, onToggle, onSelectAll }: {
-  models: Array<{ id: string; name: string }>;
+function ModelSelection({ models, selected, onToggle, onSelectAll, onClear }: {
+  models: Array<ModelLabSelectableModel>;
   selected: Set<string>;
   onToggle: (id: string) => void;
   onSelectAll: () => void;
+  onClear: () => void;
 }) {
   const modelGroupLabel = `${selected.size} of ${models.length} Model Lab provider-call candidate${models.length === 1 ? '' : 's'} selected`;
   return (
     <div style={{ marginBottom: 16 }} role="group" aria-label={modelGroupLabel}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <div style={labelStyle}>Models ({selected.size} selected)</div>
-        <button
-          type="button"
-          onClick={onSelectAll}
-          style={linkBtnStyle}
-          aria-label={`Select all ${models.length} Model Lab provider-call candidate${models.length === 1 ? '' : 's'}`}
-        >
-          Select all
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            onClick={onSelectAll}
+            style={linkBtnStyle}
+            aria-label={`Select all ${models.length} Model Lab provider-call candidate${models.length === 1 ? '' : 's'}`}
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            style={linkBtnStyle}
+            aria-label="Clear all selected models for Model Lab provider-call runs"
+          >
+            Clear all
+          </button>
+        </div>
       </div>
       {models.map(m => (
         <label key={m.id} style={checkboxRowStyle(selected.has(m.id))}>
@@ -2273,8 +2361,50 @@ function ModelSelection({ models, selected, onToggle, onSelectAll }: {
             onChange={() => onToggle(m.id)}
             aria-label={`${selected.has(m.id) ? 'Deselect' : 'Select'} ${m.name} for Model Lab provider-call runs`}
           />
-          <span style={{ color: 'var(--text-primary)' }}>{m.name}</span>
+          <div>
+            <div style={{ color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span>{m.name}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{providerModelKey(m.providerName)}</span>
+            </div>
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 2 }}>
+              Source: <span style={{ color: m.modelSource === 'open-source' ? '#22c55e' : '#3b82f6' }}>{m.modelSource}</span>
+              {' · '}
+              Category: {m.modelSource === 'open-source' ? 'open-source / local' : 'frontier'}
+            </div>
+          </div>
         </label>
+      ))}
+    </div>
+  );
+}
+
+function ModelSourceFilter({ value, counts, onChange }: {
+  value: ModelSourceCategory;
+  counts: Record<ModelSourceCategory, number>;
+  onChange: (value: ModelSourceCategory) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Model source filter for frontier vs open-source model comparison"
+      style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}
+    >
+      {(
+        [
+          ['all', 'All models'],
+          ['frontier', 'Frontier'],
+          ['open-source', 'Open source'],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onChange(key)}
+          style={value === key ? filterBtnStyle : filterBtnStyleInactive}
+          aria-label={`Show ${label.toLowerCase()} models in Model Lab`}
+        >
+          {label} ({counts[key]})
+        </button>
       ))}
     </div>
   );
@@ -2438,6 +2568,23 @@ const inputStyle: React.CSSProperties = {
 
 const linkBtnStyle: React.CSSProperties = {
   background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: 10, cursor: 'pointer',
+};
+
+const filterBtnStyle: React.CSSProperties = {
+  background: 'var(--accent-primary)',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 4,
+  padding: '4px 8px',
+  fontSize: 10,
+  cursor: 'pointer',
+};
+
+const filterBtnStyleInactive: React.CSSProperties = {
+  ...filterBtnStyle,
+  background: 'var(--bg-secondary)',
+  color: 'var(--text-secondary)',
+  border: '1px solid var(--border-primary)',
 };
 
 const smallBtnStyle: React.CSSProperties = {

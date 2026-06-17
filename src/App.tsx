@@ -388,6 +388,7 @@ function App() {
           ...model,
           providerId: provider.id,
           providerName: provider.name,
+          providerType: provider.type,
         }))
       : []
   ), [providers]);
