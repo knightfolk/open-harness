@@ -450,7 +450,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         ? [
             '- Retry-reduction recommendations:',
             ...toolReliability.retryReductionRecommendations.slice(0, 5).map((item) =>
-              `- first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}, recovered ${item.preferPath}, prefer after ${item.retryDistance} rounds, avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${(item.supportSessionIds || []).join(', ') || item.sessionId}; supporting runs ${(item.supportRunIds || []).join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; session ${item.sessionId}; run ${item.runId}`
+              `- first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}, recovered ${item.preferPath}, prefer after ${item.retryDistance} rounds, avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${(item.supportSessionIds || []).join(', ') || item.sessionId}; supporting runs ${(item.supportRunIds || []).join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}`
             ),
           ]
         : ['- Retry-reduction recommendations: none captured yet.']),
@@ -1070,7 +1070,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
                     </div>
                     <div className={`routing-rate ${item.outcome === 'unrecovered_error' ? 'bad' : 'good'}`}>reduce</div>
                     <small>
-                      {item.recommendation} {item.tuningGuidance} Source {item.evidenceSource} · tuning {item.tuningAction} · supporting sessions {item.supportSessionIds?.join(', ') || item.sessionId} · supporting runs {item.supportRunIds?.join(', ') || item.runId} · session {item.sessionId} · run {item.runId} · strategy {item.promptStrategyVariantId || item.promptStrategyId || 'unknown'}
+                      {item.recommendation} {item.tuningGuidance} Source {item.evidenceSource} · tuning {item.tuningAction} · supporting sessions {item.supportSessionIds?.join(', ') || item.sessionId} · supporting runs {item.supportRunIds?.join(', ') || item.runId} · strategy {item.promptStrategyVariantId || item.promptStrategyId || 'unknown'} · provider path avoid {item.avoidProviderPath} · provider path prefer {item.preferProviderPath}
                     </small>
                   </div>
                 ))}
