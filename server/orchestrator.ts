@@ -177,6 +177,7 @@ async function runPlanningRoomPipeline(
         profileId: 'planner',
         prompt: independentPrompt,
         modelId,
+        fallbackModelIds: fallbackModelsForPhase(route, modelId),
         workingDir,
         signal: callbacks.signal,
         onStep: callbacks.onStep,
@@ -255,6 +256,7 @@ async function runPlanningRoomPipeline(
           profileId: 'planner',
           prompt: peerPrompt,
           modelId: plan.modelId,
+          fallbackModelIds: fallbackModelsForPhase(route, plan.modelId),
           workingDir,
           signal: callbacks.signal,
           onStep: callbacks.onStep,
@@ -324,6 +326,7 @@ async function runPlanningRoomPipeline(
       profileId: 'planner',
       prompt: synthesisPrompt,
       modelId: synthesisModel,
+      fallbackModelIds: fallbackModelsForPhase(route, synthesisModel),
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
@@ -583,6 +586,7 @@ async function runExecutePipeline(
       profileId: plannerProfile,
       prompt: plannerPrompt,
       modelId: plannerModel,
+      fallbackModelIds: fallbackModelsForPhase(route, plannerModel),
       workingDir,
       signal: callbacks.signal,
       timeoutMs: artifactCreation ? ARTIFACT_PLANNER_TIMEOUT_MS : undefined,
@@ -734,6 +738,7 @@ async function runExecutePipeline(
       profileId: implProfile,
       prompt: implPrompt,
       modelId: implModelId,
+      fallbackModelIds: fallbackModelsForPhase(route, implModelId),
       workingDir: implementationWorkingDir,
       signal: callbacks.signal,
       timeoutMs: artifactCreation ? ARTIFACT_IMPLEMENTER_TIMEOUT_MS : undefined,
@@ -798,6 +803,7 @@ async function runExecutePipeline(
         profileId: implProfile,
         prompt: retryPrompt,
         modelId: implModelId,
+        fallbackModelIds: fallbackModelsForPhase(route, implModelId),
         workingDir: implementationWorkingDir,
         signal: callbacks.signal,
         timeoutMs: ARTIFACT_RETRY_TIMEOUT_MS,
@@ -908,6 +914,7 @@ async function runExecutePipeline(
         profileId: implProfile,
         prompt: repairPrompt,
         modelId: implModelId,
+        fallbackModelIds: fallbackModelsForPhase(route, implModelId),
         workingDir: implementationWorkingDir,
         signal: callbacks.signal,
         timeoutMs: ARTIFACT_REPAIR_TIMEOUT_MS,
@@ -1003,6 +1010,7 @@ async function runExecutePipeline(
       profileId: reviewProfile,
       prompt: reviewPrompt,
       modelId: reviewModelId,
+      fallbackModelIds: fallbackModelsForPhase(route, reviewModelId),
       workingDir: implementationWorkingDir,
       signal: callbacks.signal,
       timeoutMs: artifactCreation ? ARTIFACT_REVIEW_TIMEOUT_MS : undefined,
@@ -1134,6 +1142,7 @@ async function runInvestigatePipeline(
       profileId: exploreProfile,
       prompt: explorePrompt,
       modelId: exploreModel,
+      fallbackModelIds: fallbackModelsForPhase(route, exploreModel),
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
@@ -1221,6 +1230,7 @@ async function runInvestigatePipeline(
       profileId: synthesisProfile,
       prompt: synthesisPrompt,
       modelId: synthesisModel,
+      fallbackModelIds: fallbackModelsForPhase(route, synthesisModel),
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
@@ -1673,6 +1683,7 @@ async function runComparePipeline(
         profileId: 'eval-judge',
         prompt: judgePrompt,
         modelId,
+        fallbackModelIds: fallbackModelsForPhase(route, modelId),
         workingDir,
         signal: callbacks.signal,
         onStep: callbacks.onStep,
@@ -1726,6 +1737,7 @@ async function runComparePipeline(
       profileId: 'eval-judge',
       prompt: judgePrompt,
       modelId: judgeModel,
+      fallbackModelIds: fallbackModelsForPhase(route, judgeModel),
       workingDir,
       signal: callbacks.signal,
       onStep: callbacks.onStep,
@@ -1987,6 +1999,19 @@ function resolveAgentModel(
   }
   if (isUsableModelId(fallback) && canResolveModel(config, fallback)) return fallback;
   return configuredProviderModels(config).find((modelId) => canResolveModel(config, modelId)) || '';
+}
+
+/** Candidate fallback models for a phase: the route's suggested models minus the chosen one. */
+function fallbackModelsForPhase(route: RouteDecision, primaryModelId: string): string[] {
+  const suggested = route.suggestedModels || [];
+  const chain: string[] = [];
+  const seen = new Set<string>([primaryModelId]);
+  for (const id of suggested) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    chain.push(id);
+  }
+  return chain;
 }
 
 function getProfileFromId(id: string) {
