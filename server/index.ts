@@ -698,6 +698,23 @@ function resolveSelectedModel(route: RouteDecision, requestedModelOverride?: str
   return autoModel || roleModel || getActiveModel();
 }
 
+/** Candidate fallback models for the main chat loop: route suggestions, then
+ *  active model, then role assignments. Excludes the primary and unresolvable. */
+function buildMainChatFallbackChain(primaryModelId: string, route: RouteDecision): string[] {
+  const seen = new Set<string>([primaryModelId]);
+  const chain: string[] = [];
+  const add = (id?: string) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    if (!resolveProviderForModel(id)) return;
+    chain.push(id);
+  };
+  (route.suggestedModels || []).forEach(add);
+  add(appConfig.activeModel);
+  Object.values(appConfig.roleAssignments || {}).forEach(add);
+  return chain.slice(0, 4);
+}
+
 function getPersonality(): string {
   return appConfig.personality || '';
 }
@@ -4515,20 +4532,46 @@ async function streamModel(
         ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
         : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
 
-      const response = await fetch(chatURL, {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + apiKey,
-          'x-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        signal: requestSignal,
-      });
+      // Provider failover: try the chosen model, retry with backoff on a transient
+      // error (529/429/5xx), then fall over to another configured model before
+      // surfacing an error to the user.
+      const mainFallbackChain = buildMainChatFallbackChain(effectiveModel, route);
+      const attemptModelRequest = async (modelRef: string): Promise<Response> => {
+        const resolved = resolveProviderForModel(modelRef);
+        const attemptChatURL = resolved?.chatURL ?? chatURL;
+        const attemptApiKey = resolved?.apiKey ?? apiKey;
+        const attemptApiModelId = splitModelRef(modelRef).bareModelId;
+        const attemptBody = { ...requestBody, model: attemptApiModelId };
+        const attemptResponse = await fetch(attemptChatURL, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + attemptApiKey,
+            'x-api-key': attemptApiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(attemptBody),
+          signal: requestSignal,
+        });
+        if (!attemptResponse.ok) {
+          const errText = await attemptResponse.text().catch(() => '');
+          throw Object.assign(new Error(`Provider returned ${attemptResponse.status}: ${errText.slice(0, 200)}`), { statusCode: attemptResponse.status });
+        }
+        return attemptResponse;
+      };
 
-      if (!response.ok) {
-        const err = await response.text();
-        const message = `${providerId} API error: ${response.status} ${err}`;
+      let response: Response;
+      try {
+        response = await agentRuntime.retryWithProviderFailover({
+          attempt: () => attemptModelRequest(effectiveModel),
+          isTransient: (err) => !abortSignal?.aborted && agentRuntime.isTransientProviderError(err),
+          backoffMs: [2000, 5000],
+          fallbackModelIds: mainFallbackChain,
+          fallbackAttempt: (fbModelId) => attemptModelRequest(fbModelId),
+          signal: abortSignal,
+        });
+      } catch (err: any) {
+        const statusCode = err?.statusCode;
+        const message = `${providerId} API error: ${statusCode ?? ''} ${err?.message ?? err}`.trim();
         recordRoutingAdherenceEvent({
           kind: 'error',
           phase: 'provider-stream',
@@ -4545,16 +4588,16 @@ async function streamModel(
           timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
           elapsedMs: Date.now() - providerStartedAt,
           error: message,
-          statusCode: response.status,
+          statusCode,
           lastEvent: 'model_request',
           retryable: true,
-          fallbackAttempted: propagateProviderErrors,
+          fallbackAttempted: mainFallbackChain.length > 0,
         });
         if (run) emitRunStep(res, run, { type: 'error', message });
         if (propagateProviderErrors) throw new Error(message);
         if (run) run.status = 'error';
         res.write('event: error\ndata: ' + JSON.stringify({ error: message }) + '\n\n');
-        persistAssistantError(session, assistantId, `Error: ${providerId} API returned ${response.status}. ${err}`, run);
+        persistAssistantError(session, assistantId, `Error: ${message}`, run);
         return;
       }
 
