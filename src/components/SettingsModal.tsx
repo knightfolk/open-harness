@@ -3098,7 +3098,7 @@ function fallbackRouterCard(modelId: string) {
   const lower = modelId.toLowerCase();
   if (lower.includes('claude')) return { cost: 1.0, supportsImages: true, supportsThinking: false, card: 'Claude-family model. Usually strong at code quality and tool use; cost and exact strengths depend on variant.' };
   if (lower.includes('gemini')) return { cost: 0.6, supportsImages: true, supportsThinking: false, card: 'Gemini-family model. Good for large-context and multimodal tasks; use Pro for harder reasoning.' };
-  if (lower.includes('deepseek')) return { cost: 0.25, supportsImages: false, supportsThinking: /\b(r1|r2|reasoner)\b/.test(lower), card: 'DeepSeek-family model. Strong low-cost text coding; image support depends on provider variant.' };
+  if (lower.includes('deepseek')) return { cost: 0.25, supportsImages: false, supportsThinking: /\b(v4|r1|r2|reasoner)\b/.test(lower), card: 'DeepSeek-family model. Strong low-cost long-context text coding; enable images only for explicit VL/provider vision variants.' };
   if (lower.includes('qwen')) return { cost: 0.25, supportsImages: false, supportsThinking: /thinking|think|qwen3.*max/.test(lower), card: 'Qwen-family model. Strong open coding and reasoning; hosting quality and variant matter.' };
   if (lower.includes('mistral') || lower.includes('codestral') || lower.includes('devstral')) return { cost: 0.45, supportsImages: false, supportsThinking: false, card: 'Mistral-family model. Good structured coding and review; reserve small models for routine tasks.' };
   if (lower.includes('grok')) return { cost: 0.8, supportsImages: true, supportsThinking: lower.includes('grok-4'), card: 'Grok-family model. Good creative coding and UI tasks; can be opinionated.' };

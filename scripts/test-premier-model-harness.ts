@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { findModelCatalogCard } from '../src/data/modelCatalog';
 import { modelAbilityStates, modelCapabilityFlags } from '../src/utils/modelCapabilities';
 
 const autoFlags = modelCapabilityFlags('Auto');
@@ -13,6 +14,22 @@ assert.deepEqual(
   ['thinking:true', 'vision:true', 'tools:true', 'context:true'],
   'Auto ability state should expose thinking, vision, tools, and long-context support',
 );
+
+const minimaxM3Card = findModelCatalogCard('MiniMax-M3', 'minimax');
+assert.equal(minimaxM3Card?.supportsImages, true, 'MiniMax M3 should remain categorized as native multimodal/vision-capable');
+assert.equal(minimaxM3Card?.supportsThinking, true, 'MiniMax M3 should expose thinking support');
+assert.equal(minimaxM3Card?.contextWindowTokens, 1_048_576, 'MiniMax M3 should keep 1M context in the model library');
+
+const deepseekReasonerCard = findModelCatalogCard('deepseek-reasoner', 'deepseek');
+assert.equal(deepseekReasonerCard?.id, 'deepseek-v4-flash', 'deepseek-reasoner should map to current V4 Flash thinking-mode alias');
+assert.equal(deepseekReasonerCard?.supportsImages, false, 'DeepSeek V4 Flash should stay text-only unless an explicit vision variant is configured');
+assert.equal(deepseekReasonerCard?.supportsThinking, true, 'DeepSeek V4 Flash should expose thinking-mode support');
+assert.equal(deepseekReasonerCard?.contextWindowTokens, 1_000_000, 'DeepSeek V4 Flash should use the current 1M context window');
+
+const deepseekProCard = findModelCatalogCard('deepseek-v4-pro', 'deepseek');
+assert.equal(deepseekProCard?.contextWindowTokens, 1_000_000, 'DeepSeek V4 Pro should use the current 1M context window');
+assert.equal(deepseekProCard?.supportsThinking, true, 'DeepSeek V4 Pro should expose thinking-mode support');
+assert.equal(deepseekProCard?.supportsImages, false, 'DeepSeek V4 Pro should stay text-only unless an explicit vision variant is configured');
 
 const settings = readFileSync('src/components/SettingsModal.tsx', 'utf-8');
 const routingLearning = readFileSync('src/components/RoutingLearningPane.tsx', 'utf-8');

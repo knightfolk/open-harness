@@ -41,8 +41,8 @@ Current external refresh anchors:
 | Gemini 2.5 Flash | Google | 1M | Tool Runner, Bug Fixer | Mid | Fast with huge context window |
 | MiniMax-M3 | MiniMax | 1M | Code Implementer, Planner | Low | Frontier multimodal coding and agent model; image/video input, thinking blocks, Anthropic-compatible API |
 | MiniMax-M2.7 | MiniMax | 204K | Code Implementer | Mid | Older coding fallback; M3 is the preferred MiniMax default |
-| DeepSeek V4 | DeepSeek | 128K | Code Implementer, Planner | Cheap | Top-tier open-weight, exceptional code quality |
-| DeepSeek V4 Flash | DeepSeek | 128K | Tool Runner, Bug Fixer | Cheap | Fast variant, great for iteration |
+| DeepSeek V4 Pro | DeepSeek | 1M | Code Implementer, Planner | Cheap | Top-tier long-context text model; tools, JSON output, and thinking mode; official API does not list native image input |
+| DeepSeek V4 Flash | DeepSeek | 1M | Tool Runner, Bug Fixer | Cheap | Fast long-context variant; tools, JSON output, and thinking mode; official API does not list native image input |
 | DeepSeek V3 | DeepSeek | 128K | Bug Fixer | Free | Solid older model, still competitive |
 | GLM-5.1 | Z.AI / Zhipu | 128K | Planner | Mid | Excellent at Chinese + English, good architecture sense |
 | GLM-5 | Z.AI / Zhipu | 128K | Code Implementer | Mid | Strong code generation |
@@ -60,7 +60,7 @@ Current external refresh anchors:
 | MiMo V2.5 Pro | Xiaomi | 128K | Code Reviewer | Cheap | Strong at code analysis |
 | GPT-5.3 Codex | OpenAI | 200K | Code Implementer | Premium | Specialized coding variant |
 | GPT-5.4 | OpenAI | 1M+ | Planner | Premium | Flagship, best overall reasoning |
-| DeepSeek R2 | DeepSeek | 128K | Planner, Code Reviewer | Cheap | Chain-of-thought reasoning specialist |
+| DeepSeek R1 | DeepSeek | 128K | Planner, Code Reviewer | Cheap | Chain-of-thought reasoning specialist; legacy `deepseek-reasoner` aliases now map to V4 Flash thinking mode in the official API |
 
 ## Agent Role Recommendations
 
