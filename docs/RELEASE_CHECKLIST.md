@@ -41,9 +41,22 @@ Use this checklist before every release, patch release, or milestone handoff tha
   - [ ] `npm run test:webbridge-runtime-regression`
   - [ ] One manual runtime pass using stable installed app artifact (no temporary regenerated `/tmp/*.app` bundles)
 - If `electron/`, packaging, or release scripts changed:
+  - [ ] `npm run test:auto-update-packaging`
   - [ ] `npm run pack`
   - [ ] `npm run dist`
   - [ ] Verify `release/` contains expected installer artifacts.
+
+### Auto-update release checks
+
+- [ ] Build from a version greater than the previously published app version.
+- [ ] Publish the Electron Builder update metadata with the release artifacts:
+  - macOS: `latest-mac.yml`, `.zip`, and `.dmg`
+  - Windows: `latest.yml`, NSIS `.exe`, and `.zip`
+  - Linux: `latest-linux.yml` and AppImage
+- [ ] Verify GitHub release artifacts are attached to `knightfolk/open-harness`.
+- [ ] In a stable installed app artifact, use **Check for Updates** and confirm the update prompt appears.
+- [ ] Confirm download progress completes, then choose **Restart and Install** and verify the app relaunches on the new version.
+- [ ] Do not use a temporary regenerated `/tmp/*.app` bundle for updater validation; use a stable installed app artifact so operating-system grants and updater cache state remain meaningful.
 
 ## 5) Feature and UX sanity
 

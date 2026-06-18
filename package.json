@@ -2,7 +2,7 @@
   "name": "openharness",
   "private": true,
   "license": "UNLICENSED",
-  "version": "1.0.0-alpha.monitor.1",
+  "version": "1.0.0-alpha.update.1",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -62,6 +62,7 @@
     "test:session-persistence": "tsx scripts/test-session-persistence-regression.ts",
     "test:sse-progress": "tsx scripts/test-sse-progress-regression.ts",
     "test:hardening": "tsx scripts/test-tool-policy.ts && tsx scripts/test-auto-router-context.ts && tsx scripts/test-router-learning-export.ts && tsx scripts/test-router-learning-import.ts && npm run test:theme-accessibility && tsx scripts/test-redaction.ts && tsx scripts/test-session-redaction.ts && tsx scripts/test-artifact-redaction.ts && tsx scripts/test-process-ledger-redaction.ts && tsx scripts/test-mcp-redaction.ts && tsx scripts/test-prompt-injection-boundaries.ts && tsx scripts/test-command-safety.ts",
+    "test:auto-update-packaging": "tsx scripts/test-auto-update-packaging.ts",
     "smoke:tool-boundaries": "node scripts/smoke-tool-boundaries.mjs",
     "smoke:browser-deep": "node scripts/smoke-browser-deep.mjs",
     "smoke:docker-ui": "node scripts/smoke-docker-ui.mjs",
@@ -76,9 +77,9 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac dmg zip --arm64 --x64",
-    "dist:win": "npm run build && electron-builder --win zip --x64 --arm64",
+    "dist:win": "npm run build && electron-builder --win nsis zip --x64 --arm64",
     "dist:linux": "npm run build && electron-builder --linux AppImage tar.gz --x64 --arm64",
-    "dist:all": "npm run build && electron-builder --mac dmg zip --win zip --linux AppImage tar.gz --arm64 --x64",
+    "dist:all": "npm run build && electron-builder --mac dmg zip --win nsis zip --linux AppImage tar.gz --arm64 --x64",
     "electron:prod": "npm run build && electron .",
     "check:live-tool-error-evidence": "tsx scripts/check-live-tool-error-evidence.ts",
     "run:live-tool-error-recovery": "tsx scripts/run-live-tool-error-recovery-scenario.ts",
@@ -88,6 +89,7 @@
     "allotment": "^1.20.5",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "electron-updater": "^6.8.9",
     "express": "^5.2.1",
     "highlight.js": "^11.11.1",
     "lucide-react": "^1.16.0",
@@ -132,6 +134,13 @@
       "package.json",
       "package-lock.json"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "knightfolk",
+        "repo": "open-harness"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
@@ -142,6 +151,7 @@
     },
     "win": {
       "target": [
+        "nsis",
         "zip"
       ],
       "artifactName": "OpenHarness-${version}-windows-${arch}.${ext}"

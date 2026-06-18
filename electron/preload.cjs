@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('OpenHarnessNative', {
     ipcRenderer.on('open-preferences', () => callback('open-preferences'));
     ipcRenderer.on('show-snap-zones', () => callback('show-snap-zones'));
   },
+  onUpdateStatus: (callback) => {
+    ipcRenderer.on('update-status', (_, status) => callback(status));
+  },
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
   snapToZone: (zoneName) => ipcRenderer.invoke('snap-to-zone', zoneName),
   getSnapZones: () => ipcRenderer.invoke('get-snap-zones'),
 });

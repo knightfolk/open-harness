@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, Menu, ipcMain } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
@@ -10,6 +11,9 @@ const isDev = !app.isPackaged;
 
 let mainWindow = null;
 let packagedServer = null;
+let updaterInitialized = false;
+let lastUpdateCheckWasManual = false;
+let updateReadyToInstall = false;
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -23,6 +27,137 @@ function send(channel, ...args) {
   }
 }
 
+function emitUpdateStatus(status, detail = {}) {
+  send('update-status', {
+    status,
+    at: new Date().toISOString(),
+    ...detail,
+  });
+}
+
+async function promptToDownloadUpdate(info) {
+  const version = info?.version ? ` ${info.version}` : '';
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    buttons: ['Download Update', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'OpenHarness update available',
+    message: `OpenHarness${version} is available.`,
+    detail: 'Download it in the background now? You can keep working while it downloads.',
+  });
+  if (result.response === 0) {
+    emitUpdateStatus('downloading', { version: info?.version });
+    await autoUpdater.downloadUpdate();
+  }
+}
+
+async function promptToInstallUpdate(info) {
+  updateReadyToInstall = true;
+  const version = info?.version ? ` ${info.version}` : '';
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    buttons: ['Restart and Install', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'OpenHarness update ready',
+    message: `OpenHarness${version} has been downloaded.`,
+    detail: 'Restart OpenHarness now to finish installing the update.',
+  });
+  if (result.response === 0) {
+    autoUpdater.quitAndInstall(false, true);
+  }
+}
+
+function initAutoUpdater() {
+  if (updaterInitialized) return;
+  updaterInitialized = true;
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = true;
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'knightfolk',
+    repo: 'open-harness',
+  });
+
+  autoUpdater.on('checking-for-update', () => {
+    emitUpdateStatus('checking');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    emitUpdateStatus('available', { version: info?.version });
+    lastUpdateCheckWasManual = false;
+    promptToDownloadUpdate(info).catch((error) => {
+      emitUpdateStatus('error', { message: error?.message || 'Failed to download update.' });
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    emitUpdateStatus('current', { version: info?.version || app.getVersion() });
+    if (lastUpdateCheckWasManual) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        buttons: ['OK'],
+        title: 'OpenHarness is up to date',
+        message: 'OpenHarness is up to date.',
+        detail: `Current version: ${app.getVersion()}`,
+      });
+    }
+    lastUpdateCheckWasManual = false;
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    emitUpdateStatus('downloading', {
+      percent: Math.round(progress.percent || 0),
+      bytesPerSecond: progress.bytesPerSecond,
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    emitUpdateStatus('downloaded', { version: info?.version });
+    promptToInstallUpdate(info).catch((error) => {
+      emitUpdateStatus('error', { message: error?.message || 'Failed to install update.' });
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    const message = error?.message || 'Update check failed.';
+    emitUpdateStatus('error', { message });
+    if (lastUpdateCheckWasManual) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        buttons: ['OK'],
+        title: 'Update check failed',
+        message: 'OpenHarness could not check for updates.',
+        detail: message,
+      });
+    }
+    lastUpdateCheckWasManual = false;
+  });
+}
+
+async function checkForUpdates(manual = false) {
+  if (isDev) {
+    emitUpdateStatus('disabled', { reason: 'Updates are checked only in packaged builds.' });
+    if (manual) {
+      await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        buttons: ['OK'],
+        title: 'Updates disabled in development',
+        message: 'Auto-update checks run only in packaged OpenHarness builds.',
+      });
+    }
+    return { ok: false, reason: 'development' };
+  }
+
+  initAutoUpdater();
+  lastUpdateCheckWasManual = manual;
+  await autoUpdater.checkForUpdates();
+  return { ok: true };
+}
+
 const template = [
   {
     label: app.name,
@@ -30,6 +165,7 @@ const template = [
       { role: 'about', label: 'About OpenHarness' },
       { type: 'separator' },
       { label: 'Preferences...', accelerator: 'Cmd+,', click: () => send('open-preferences') },
+      { label: 'Check for Updates...', accelerator: 'CmdOrCtrl+Shift+U', click: () => checkForUpdates(true) },
       { type: 'separator' },
       { role: 'quit' },
     ],
@@ -241,12 +377,25 @@ ipcMain.handle('get-snap-zones', () => {
   return getSnapZones();
 });
 
+ipcMain.handle('check-for-updates', () => checkForUpdates(true));
+
+ipcMain.handle('install-update', () => {
+  if (!updateReadyToInstall || isDev) return { ok: false };
+  autoUpdater.quitAndInstall(false, true);
+  return { ok: true };
+});
+
 // ── App Lifecycle ──────────────────────────────────────
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   await startPackagedServer();
   registerSnapShortcuts();
   createWindow();
+  setTimeout(() => {
+    checkForUpdates(false).catch((error) => {
+      emitUpdateStatus('error', { message: error?.message || 'Update check failed.' });
+    });
+  }, 3000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

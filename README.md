@@ -188,12 +188,25 @@ If server/runtime code changes, restart the running OpenHarness server before va
 
 ## Packaging
 
+Current prerelease: `1.0.0-alpha.update.1`.
+
 ```bash
 npm run pack
 npm run dist
+npm run dist:all
 ```
 
 Build output is written to `release/`. The web build output is written to `dist/`.
+
+Packaged desktop builds check GitHub Releases for updates. Release builds should
+publish the platform artifacts plus Electron Builder update metadata:
+
+- macOS: `.dmg`, `.zip`, `latest-mac.yml`, and blockmaps
+- Windows: NSIS `.exe`, `.zip`, `latest.yml`, and blockmaps
+- Linux: AppImage, `.tar.gz`, and `latest-linux.yml`
+
+Use **Check for Updates...** from the app menu to manually verify the update
+channel from a stable installed app artifact.
 
 ## Tech Stack
 
