@@ -1,0 +1,34 @@
+OpenHarness Source-Available Preview License
+
+Copyright (c) 2026 OpenHarness authors.
+All rights reserved.
+
+OpenHarness is currently published as a source-available preview so people can
+read the code, evaluate the project, open issues, discuss product direction, and
+submit feedback while the project is under active development.
+
+You may:
+
+- View and inspect the source code.
+- Clone the repository for personal, non-commercial evaluation.
+- Run the software locally for personal evaluation and feedback.
+- Submit issues, discussions, and pull requests to the upstream repository.
+
+You may not, without prior written permission from the project owner:
+
+- Redistribute, sublicense, sell, rent, lease, or otherwise transfer copies of
+  the software or substantial portions of the software.
+- Publish, host, or offer the software as a service for others.
+- Use the software or source code for commercial purposes.
+- Create or distribute derivative products based on the software.
+- Remove or alter copyright, license, or attribution notices.
+
+Contributions are accepted under the terms in CONTRIBUTING.md. If you submit a
+contribution, you grant the project owner permission to use, modify, distribute,
+and relicense that contribution as part of OpenHarness.
+
+This license does not grant trademark rights, patent rights, or any rights not
+explicitly stated here.
+
+If you want to use OpenHarness beyond the permissions above, please contact the
+project owner for written permission.

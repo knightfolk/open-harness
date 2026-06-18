@@ -6,6 +6,8 @@
 
 OpenHarness is a local-first AI workbench for running, routing, evaluating, and coordinating coding agents across model providers. It keeps chat, models, provider health, MCP tools, routing signals, and review surfaces in one dense workspace so you can see what the harness is doing while you work.
 
+> **Source-available preview:** OpenHarness is being built in public for evaluation, discussion, and feedback. It is not open-source licensed yet. Please do not redistribute, repackage, offer as a hosted service, or use the code commercially without written permission. See [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ![OpenHarness workspace](docs/screenshots/openharness-workspace.png)
 
 ## Why It Exists
@@ -215,4 +217,4 @@ Build output is written to `release/`. The web build output is written to `dist/
 
 ## License
 
-MIT
+OpenHarness is currently source-available, not open-source licensed. All rights are reserved unless explicit written permission is granted. Public feedback is welcome through issues, discussions, and pull requests under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).
