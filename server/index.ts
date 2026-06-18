@@ -4528,7 +4528,7 @@ async function streamModel(
         });
       }
 
-      const requestSignal = abortSignal
+      const createRequestSignal = () => abortSignal
         ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
         : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
 
@@ -4550,7 +4550,7 @@ async function streamModel(
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(attemptBody),
-          signal: requestSignal,
+          signal: createRequestSignal(),
         });
         if (!attemptResponse.ok) {
           const errText = await attemptResponse.text().catch(() => '');
