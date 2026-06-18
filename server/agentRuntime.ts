@@ -135,6 +135,8 @@ export interface BackgroundAgentRequest {
   invokeTool?: (toolName: string, args: Record<string, unknown>, workingDir?: string) => Promise<unknown>;
   maxToolRounds?: number;
   toolContinuationInstruction?: string;
+  /** Ordered model ids to try if the primary model fails with a transient error. */
+  fallbackModelIds?: string[];
 }
 
 export interface BackgroundAgentArtifact {
@@ -381,6 +383,36 @@ function providerCanAuthenticate(provider: StoredConfig['providers'][number]): b
     || !!provider.oauth?.accessToken;
 }
 
+function canResolveModelId(config: StoredConfig, modelId: string): boolean {
+  return pickProviderForModel(config, modelId) !== null;
+}
+
+/**
+ * Build an ordered fallback model chain for a primary model, drawing from the
+ * caller-supplied list first, then role assignments, the active model, and
+ * auto-router candidates. The primary model and unresolvable ids are excluded.
+ */
+function buildFallbackModelChain(
+  config: StoredConfig,
+  primaryModelId: string,
+  requested: string[] | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const chain: string[] = [];
+  const add = (id?: string) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    if (id === primaryModelId) return;
+    if (!canResolveModelId(config, id)) return;
+    chain.push(id);
+  };
+  (requested || []).forEach(add);
+  Object.values(config.roleAssignments || {}).forEach(add);
+  add(config.activeModel);
+  (config.autoRouter?.candidates || []).forEach((c) => add(c.modelId));
+  return chain.slice(0, 4);
+}
+
 /**
  * Run a single background agent. The returned handle lets callers cancel
  * the request mid-flight; the promise always resolves (never rejects) so
@@ -608,10 +640,23 @@ export async function runAgentPhase(
     ];
     let exhaustedToolRounds = false;
     const maxToolRounds = Math.max(0, Math.min(req.maxToolRounds ?? MAX_AGENT_TOOL_ROUNDS, MAX_AGENT_TOOL_ROUNDS));
+    const fallbackChain = buildFallbackModelChain(config, modelId, req.fallbackModelIds);
 
     for (let round = 0; round < maxToolRounds; round++) {
       req.onStep?.({ type: 'model_request', round: round + 1, model: modelId });
-      const modelResponse = await callAgentModel(provider, modelId, messages, profile.temperature, controller.signal, agentTools, requestTimeoutMs);
+      const modelResponse = await retryWithProviderFailover({
+        attempt: () => callAgentModel(provider, modelId, messages, profile.temperature, controller.signal, agentTools, requestTimeoutMs),
+        isTransient: (err) => !controller.signal.aborted && isTransientProviderError(err),
+        backoffMs: [2000, 5000],
+        fallbackModelIds: fallbackChain,
+        fallbackAttempt: (fbModelId) => {
+          const fbProvider = pickProviderForModel(config, fbModelId);
+          if (!fbProvider) throw new Error(`No provider for fallback model ${fbModelId}`);
+          notes.push(`recover-model=${fbModelId}`);
+          return callAgentModel(fbProvider, fbModelId, messages, profile.temperature, controller.signal, agentTools, requestTimeoutMs);
+        },
+        signal: req.signal,
+      });
       const text = modelResponse.text;
       if (text) req.onStep?.({ type: 'model_text', chars: text.length });
       const parsed = parseToolCallMarkup(text, knownToolNames);
@@ -706,17 +751,39 @@ export async function runAgentPhase(
 
     if (exhaustedToolRounds && !artifact.response.trim()) {
       req.onStep?.({ type: 'model_request', round: maxToolRounds + 1, model: modelId });
-      const finalResponse = await callAgentModel(provider, modelId, [
-        ...messages,
-        {
-          role: 'user',
-          content: [
-            `You have reached the read-only tool limit.`,
-            `Do not request more tools.`,
-            `Produce the final answer now from the evidence already gathered.`,
-          ].join('\n'),
+      const finalResponse = await retryWithProviderFailover({
+        attempt: () => callAgentModel(provider, modelId, [
+          ...messages,
+          {
+            role: 'user',
+            content: [
+              `You have reached the read-only tool limit.`,
+              `Do not request more tools.`,
+              `Produce the final answer now from the evidence already gathered.`,
+            ].join('\n'),
+          },
+        ], profile.temperature, controller.signal, [], requestTimeoutMs),
+        isTransient: (err) => !controller.signal.aborted && isTransientProviderError(err),
+        backoffMs: [2000, 5000],
+        fallbackModelIds: fallbackChain,
+        fallbackAttempt: (fbModelId) => {
+          const fbProvider = pickProviderForModel(config, fbModelId);
+          if (!fbProvider) throw new Error(`No provider for fallback model ${fbModelId}`);
+          notes.push(`recover-model=${fbModelId}`);
+          return callAgentModel(fbProvider, fbModelId, [
+            ...messages,
+            {
+              role: 'user',
+              content: [
+                `You have reached the read-only tool limit.`,
+                `Do not request more tools.`,
+                `Produce the final answer now from the evidence already gathered.`,
+              ].join('\n'),
+            },
+          ], profile.temperature, controller.signal, [], requestTimeoutMs);
         },
-      ], profile.temperature, controller.signal, [], requestTimeoutMs);
+        signal: req.signal,
+      });
       const finalText = finalResponse.text;
       if (finalText) req.onStep?.({ type: 'model_text', chars: finalText.length });
       artifact.response = stripAgentToolMarkup(finalText, knownToolNames);
