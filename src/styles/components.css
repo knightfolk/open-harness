@@ -1039,6 +1039,7 @@
   --chat-message-indent: 40px;
   --chat-content-right: 32px;
   --chat-content-max: 980px;
+  --chat-composer-max: min(760px, var(--chat-content-max));
 }
 
 .floating-super-panel {
@@ -5711,6 +5712,11 @@ button:focus-visible {
   flex: none;
   position: sticky;
   bottom: 0;
+  width: min(var(--chat-composer-max), max(0px, calc(100% - var(--chat-content-left) - var(--chat-message-indent) - var(--chat-content-right))));
+  max-width: max(0px, calc(100% - var(--chat-content-left) - var(--chat-message-indent) - var(--chat-content-right)));
+  min-width: 0;
+  margin-left: calc(var(--chat-content-left) + var(--chat-message-indent));
+  margin-right: auto;
   background: linear-gradient(to top, var(--bg-primary) 78%, rgba(13, 15, 17, 0));
   padding-top: 12px;
 }
@@ -5719,6 +5725,15 @@ button:focus-visible {
   min-height: 24px;
   max-height: 140px;
   overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+  .chat-panel-root .input-area {
+    width: calc(100% - 20px);
+    max-width: calc(100% - 20px);
+    margin-left: 10px;
+    margin-right: 10px;
+  }
 }
 
 .chat-panel-root .message {
