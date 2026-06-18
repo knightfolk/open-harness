@@ -444,7 +444,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                           aria-label={runAccessibleLabel}
                         >
                           <span className={`session-run-dot session-run-dot-${run.status}`} aria-hidden="true" />
-                          <span className="session-run-avatar" aria-hidden="true">{agent.avatar}</span>
+                          <span className="session-run-avatar agent-id-badge" aria-hidden="true">{agent.avatar}</span>
                           <span className="session-run-copy">
                             <span className="session-run-mainline">
                               <span className="session-run-name">{agent.name}<span className="session-run-role">{run.runTrace?.role || 'agent'}</span></span>
@@ -603,7 +603,7 @@ function SubAgentRow({
             : <ChevronRight size={12} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} aria-hidden="true" />
           }
         </button>
-        <span className="sub-agent-avatar" aria-hidden="true">{phaseAgent.avatar}</span>
+        <span className="sub-agent-avatar agent-id-badge" aria-hidden="true">{phaseAgent.avatar}</span>
         <span className={`sub-agent-name-text ${agent.status === 'running' ? 'running' : ''}`}>
           {label || agent.name}
         </span>

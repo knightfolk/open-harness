@@ -82,17 +82,14 @@ const senderNames = {
 
 function agentIcon(message: Message) {
   if (message.role !== 'assistant') return avatarIcons[message.role];
-  // Agents are the visible characters: render their emoji avatar as their face.
   const identity = agentIdentityForRole(message.agentRole);
-  return <span className="message-avatar-emoji" aria-hidden="true">{identity.avatar}</span>;
+  return <span className="message-avatar-emoji agent-id-badge compact" aria-hidden="true">{identity.avatar}</span>;
 }
 
 function senderName(message: Message, assistantName: string) {
   if (message.role === 'assistant') {
-    // Prefer the run's recorded agent name; fall back to the role's callsign
-    // (e.g. "Forge") so every reply reads as a named teammate, not a model ID.
     const identity = agentIdentityForRole(message.agentRole);
-    return message.agentName || identity.name || assistantName;
+    return message.agentRole ? identity.name : (message.agentName || identity.name || assistantName);
   }
   return senderNames[message.role];
 }

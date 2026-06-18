@@ -38,10 +38,12 @@ OpenHarness is built for:
 | **Transparent routing** | Auto-Router scores configured candidates for each task, applies cost and capability gates, and records why a model was selected. |
 | **Role-aware agents** | Planner, coder, reviewer, reasoner, summarizer, worker, and title roles can each use different models and model-family prompt strategies. |
 | **Visible run traces** | Active work exposes phase state, selected model, provider, tool calls, final-answer proof, replay artifacts, and recovery paths. |
+| **Goal loop supervision** | `/goal` turns long-running objectives into durable session context with criteria, evidence, blockers, progress, and guarded completion. |
 | **Provider failure handling** | Transient overloads, auth problems, missing models, and rate-limit-style failures are treated as runtime events that can be surfaced, retried, or routed around. |
 | **Vision fallback evidence** | Browser screenshots can be converted into bounded text evidence for models that do not accept native image input. |
 | **Tool reliability memory** | Tool-error recovery evidence is recorded so the harness can learn which model/tool/provider combinations recover cleanly. |
-| **Model trust surfaces** | Model Lab, Routing Learning, eval proof, prompt strategies, tool reliability, budgets, and provider rate limits are first-class UI surfaces. |
+| **Model trust surfaces** | Model Lab, Routing Learning, Auto-Router settings, eval proof, prompt strategies, tool reliability, budgets, and provider rate limits are first-class UI surfaces. |
+| **Compact agent badges** | Agent roles render as short famous-programmer ID badges such as `ADA`, `RITCHIE`, `HOPPER`, `KNUTH`, and `DIJKSTRA` for dense, scannable run lists. |
 | **Local-first desktop state** | Provider config, sessions, routing ledgers, and runtime state live locally rather than in a hosted control plane. |
 
 ## Screenshots
@@ -64,6 +66,7 @@ Auto-Router uses a classifier model to choose from active candidates, then layer
 | --- | --- |
 | **Auto-Router** | Chooses a model per task from configured candidates instead of forcing every request through one default model. |
 | **Agent Roles** | Assigns specialized models to coder, reviewer, planner, reasoner, summarizer, worker, and title generation roles. |
+| **Session Goal Loop** | Keeps `/goal` objectives active across turns, injects them into routing and prompts, records run evidence, surfaces progress in chat, and refuses premature completion when proof is missing. |
 | **Provider Hub** | Manages hosted and local providers, model fetching, enabled models, active model selection, health checks, budgets, and rate limits. |
 | **Live Orchestration** | Surfaces route decisions, agent phases, model requests, tool calls, recovery, and final-answer proof while work is happening. |
 | **Browser Visual Evidence** | Captures browser screenshot context as DOM text, headings, controls, image alt text, resource issues, and capture notes so non-vision models still receive usable evidence. |
@@ -80,9 +83,10 @@ Auto-Router uses a classifier model to choose from active candidates, then layer
 2. Fetch provider models and enable the ones you want available.
 3. Assign defaults for chat and role-specific agent work.
 4. Configure Auto-Router candidates, capability cards, thresholds, and cost preferences.
-5. Ask for direct answers, investigation, execution, review, or comparison.
-6. Watch active agents, traces, provider behavior, and proof as the answer is assembled.
-7. Feed outcomes back through Model Lab, Routing Learning, and tool reliability evidence.
+5. Optionally start a durable objective with `/goal <objective>` or a multiline criteria list.
+6. Ask for direct answers, investigation, execution, review, or comparison.
+7. Watch active agents, goal progress, traces, provider behavior, and proof as the answer is assembled.
+8. Feed outcomes back through Model Lab, Routing Learning, and tool reliability evidence.
 
 ## Quick Start
 
@@ -122,6 +126,8 @@ Recommended setup path:
 6. Use **Auto-Router** when you want task-level model selection.
 7. Use **Routing Learning** and **Model Lab** to inspect evidence and tune candidates over time.
 
+When the active model is **Auto**, the bottom status-bar Router control opens directly to **Settings → Auto-Router** so candidate tuning is one click away.
+
 OpenAI note: ChatGPT subscription labels are planning metadata only. OpenAI API model calls still require OpenAI Platform API credentials.
 
 ## Routing Architecture
@@ -134,6 +140,21 @@ OpenHarness has two routing layers:
 `server/orchestrator.ts` owns orchestration behavior. It coordinates research, execution, review, comparison, and synthesis paths while the server records trace events for the UI.
 
 When a task includes browser screenshot context, the router treats it as image-aware. If the selected model does not support native vision input, OpenHarness appends a sanitized visual-evidence summary to the model-facing prompt instead of sending raw image data.
+
+Active session goals are part of routing context too. Follow-up requests such as "continue" or "finish the next item" are routed with the current `/goal` objective, criteria, recent evidence, and blockers instead of being classified from the short message alone.
+
+## Goal Loop
+
+Use `/goal` to keep a larger objective alive across chat turns:
+
+```text
+/goal Ship the routing cleanup
+- Update router context
+- Verify the UI surface
+- Run lint and build
+```
+
+The active goal is stored with the session, shown above the chat composer, and appended to model prompts and Auto-Router task signals. Completed runs add evidence; failed runs add blockers. `/goal status` prints the current objective, criteria, evidence, and blockers. `/goal done` only completes when the recorded criteria and evidence support completion.
 
 ## Model Intelligence
 

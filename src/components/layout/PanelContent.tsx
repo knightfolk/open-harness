@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react';
-import type { HarnessRun, RunSteeringAction } from '../../types';
+import type { HarnessRun, RunSteeringAction, SessionGoal } from '../../types';
 import type { PanelId } from '../../types/layout';
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((m) => ({ default: m.ChatPanel })));
@@ -19,6 +19,7 @@ interface Props {
     terminalCommands: any[];
     focusedSubAgentId?: string | null;
     messages: any[];
+    activeGoal?: SessionGoal | null;
     isTyping: boolean;
     onSendMessage: (msg: string) => void;
     activeModel: string;
@@ -68,7 +69,7 @@ export function PanelContent({ panelId, context }: Props) {
   );
   switch (panelId) {
     case 'chat':
-      return wrapped(<ChatPanel messages={context.messages} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} environmentOpen={context.environmentOpen ?? false} onEnvironmentOpenChange={context.onEnvironmentOpenChange || (() => {})} onRunSteer={context.onRunSteer} />);
+      return wrapped(<ChatPanel messages={context.messages} activeGoal={context.activeGoal || null} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} environmentOpen={context.environmentOpen ?? false} onEnvironmentOpenChange={context.onEnvironmentOpenChange || (() => {})} onRunSteer={context.onRunSteer} />);
     case 'browser':
       return wrapped(<BrowserPanel workingDir={context.workingDir} onAskAboutScreenshot={context.onAskAboutScreenshot} />);
     case 'terminal':

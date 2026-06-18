@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRun, HarnessRunStep, ProjectProfile, SidebarTab, ThinkingEffort, RunSteeringAction } from './types';
+import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRun, HarnessRunStep, ProjectProfile, SidebarTab, ThinkingEffort, RunSteeringAction, SessionGoal } from './types';
 import type { PanelId } from './types/layout';
 import { ALL_PANELS } from './types/layout';
 import { Sidebar } from './components/Sidebar';
@@ -355,6 +355,7 @@ function App() {
   const [clickyEnabled, setClickyEnabled] = useState(loadClickyEnabled);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [activeGoal, setActiveGoal] = useState<SessionGoal | null>(null);
   const savedProofMessageIdsRef = useRef(new Set<string>());
   const [workingDir, setWorkingDir] = useState<string | null>(null);
   const [projectProfile, setProjectProfile] = useState<ProjectProfile | null>(null);
@@ -449,6 +450,7 @@ function App() {
   const [trustMode, setTrustMode] = useState('workspace-write');
   const [configPath, setConfigPath] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialCategory, setSettingsInitialCategory] = useState<string | undefined>(undefined);
   const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -480,7 +482,10 @@ function App() {
         setSnapOverlayVisible(true);
         setTimeout(() => setSnapOverlayVisible(false), 3000);
       }
-      if (action === 'open-preferences') setSettingsOpen(true);
+      if (action === 'open-preferences') {
+        setSettingsInitialCategory(undefined);
+        setSettingsOpen(true);
+      }
       if (action === 'new-session') {
         const session = await api.createSession();
         setSessions((prev) => [{
@@ -495,6 +500,7 @@ function App() {
         setActiveSessionId(session.id);
         setWorkingDir(session.workingDir || null);
         setMessages([]);
+        setActiveGoal(null);
         setLastAutoRouterStep(null);
         setSubAgents([]);
         setFocusedSubAgentId(null);
@@ -513,6 +519,7 @@ function App() {
         setActiveSessionId(session.id);
         setWorkingDir(path);
         setMessages([]);
+        setActiveGoal(null);
         setLastAutoRouterStep(null);
         setSubAgents([]);
         setFocusedSubAgentId(null);
@@ -892,6 +899,7 @@ function App() {
         setActiveSessionId(list[0].id);
         setWorkingDir(list[0].workingDir);
         const detail = await api.getSession(list[0].id);
+        setActiveGoal(detail.goal || null);
         applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
       } catch (err) {
         console.error('Failed to load sessions:', err);
@@ -907,10 +915,12 @@ function App() {
     try {
       const detail = await api.getSession(id);
       setWorkingDir(detail.workingDir || null);
+      setActiveGoal(detail.goal || null);
       applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
     } catch (err) {
       console.error('Failed to load session:', err);
       setMessages([]);
+      setActiveGoal(null);
       setLastAutoRouterStep(null);
       setSubAgents([]);
       setFocusedSubAgentId(null);
@@ -939,6 +949,7 @@ function App() {
         setActiveSessionId(next.id);
         setWorkingDir(next.workingDir || null);
         const detail = await api.getSession(next.id);
+        setActiveGoal(detail.goal || null);
         applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
       }
     } catch (err) {
@@ -969,6 +980,7 @@ function App() {
         setActiveSessionId(next.id);
         setWorkingDir(next.workingDir || null);
         const detail = await api.getSession(next.id);
+        setActiveGoal(detail.goal || null);
         applyLoadedMessages(detail.messages, setMessages, setLastAutoRouterStep, setSubAgents, setFocusedSubAgentId);
       }
     } catch (err) {
@@ -992,6 +1004,7 @@ function App() {
       setActiveSessionId(session.id);
       setWorkingDir(session.workingDir || null);
       setMessages([]);
+      setActiveGoal(null);
       setLastAutoRouterStep(null);
       setSubAgents([]);
       setFocusedSubAgentId(null);
@@ -1020,6 +1033,7 @@ function App() {
       setActiveSessionId(session.id);
       setWorkingDir(folderPath);
       setMessages([]);
+      setActiveGoal(null);
       setLastAutoRouterStep(null);
       setSubAgents([]);
       setFocusedSubAgentId(null);
@@ -1044,6 +1058,7 @@ function App() {
       }, ...prev]);
       setActiveSessionId(session.id);
       setWorkingDir(session.workingDir || null);
+      setActiveGoal(null);
       return session.id;
     } catch (err) {
       console.error('Failed to create session:', err);
@@ -1166,9 +1181,8 @@ function App() {
           }
         },
         onRunStart: (run) => {
-          // Stamp the assistant message with the run's agent role + callsign so
-          // the chat surfaces a named teammate (e.g. "Forge") instead of a
-          // model ID or a truncated default name.
+          // Stamp the assistant message with the run's agent role + badge so
+          // the chat surfaces a stable operator id instead of a raw model name.
           const runAgent = agentIdentityForRole(run.role);
           setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, runTrace: run, agentRole: run.role as Message['agentRole'], agentName: runAgent.name } : m)));
           // Promote the optimistic activity placeholder into the real run card
@@ -1348,6 +1362,7 @@ function App() {
           );
           setIsTyping(false);
           api.listSessions().then(setSessions).catch(() => {});
+          api.getSession(sessionId).then((detail) => setActiveGoal(detail.goal || null)).catch(() => {});
         },
       }, options);
     } catch (err) {
@@ -1651,6 +1666,11 @@ function App() {
     try { localStorage.setItem(CLICKY_ENABLED_KEY, enabled ? 'true' : 'false'); } catch { /* ignore */ }
   }, []);
 
+  const openSettings = useCallback((category?: string) => {
+    setSettingsInitialCategory(category);
+    setSettingsOpen(true);
+  }, []);
+
   const panelContext = {
     subAgents,
     plan: null,
@@ -1658,6 +1678,7 @@ function App() {
     terminalCommands: [],
     focusedSubAgentId,
     messages,
+    activeGoal,
     isTyping,
     onSendMessage: handleSendMessage,
     activeModel,
@@ -1727,7 +1748,7 @@ function App() {
         personalityText={personalityText}
         mcpServers={mcpServers}
         mcpStatus={mcpStatus}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettings()}
         onAddProvider={handleAddProvider}
         onTestProvider={handleTestProvider}
         onFetchModels={handleFetchModels}
@@ -1860,7 +1881,7 @@ function App() {
               runningModel={runningModel}
               autoRouterStep={lastAutoRouterStep}
               providerRateLimitWarning={providerRateLimitWarning}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={(category) => openSettings(category)}
             />
           </div>
         )}
@@ -1951,6 +1972,7 @@ function App() {
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        initialCategory={settingsInitialCategory}
         configPath={configPath}
         activeModel={activeModel}
         thinkingEffort={thinkingEffort}
@@ -2005,6 +2027,8 @@ function mapApiMessage(m: api.MessageInfo): Message {
       duration: tc.duration,
     })),
     runTrace: m.runTrace,
+    agentRole: m.runTrace?.role as Message['agentRole'] | undefined,
+    agentName: m.runTrace?.role ? agentIdentityForRole(m.runTrace.role).name : undefined,
   };
 }
 

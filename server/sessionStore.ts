@@ -36,8 +36,13 @@ export interface PersistedSession {
 }
 
 export interface SessionGoal {
+  id?: string;
   objective: string;
   status: 'active' | 'complete';
+  criteria?: Array<{ id: string; text: string; status: 'pending' | 'complete' | 'blocked' }>;
+  evidence?: Array<{ id: string; text: string; source?: string; createdAt: string }>;
+  blockers?: Array<{ id: string; text: string; createdAt: string; resolvedAt?: string }>;
+  progressNotes?: Array<{ id: string; text: string; createdAt: string }>;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;

@@ -56,7 +56,7 @@ import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
 import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins } from './promptPlugins';
 import type { PersistedMessage, PersistedSession, SessionGoal } from './sessionStore';
-import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from './sessionGoals';
+import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand, recordGoalRunEvidence } from './sessionGoals';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
 import { runShipReadiness } from './shipReadiness';
 import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './streamCleaner';
@@ -535,6 +535,31 @@ function completeHarnessRunAndTrace(run: HarnessRun, status: 'complete' | 'error
   emitRunTraceCompletion(completed);
   recordToolErrorRunEvents(completed);
   return completed;
+}
+
+function recordGoalEvidenceFromRun(session: SessionRow, run: HarnessRun): void {
+  if (!session.goal || session.goal.status !== 'active') return;
+  const artifactTitles = run.steps
+    .filter((step): step is Extract<HarnessRunStep, { type: 'artifact' }> => step.type === 'artifact')
+    .map((step) => step.artifact.title)
+    .filter(Boolean);
+  const validationCount = run.steps.filter((step) =>
+    (step.type === 'artifact' && step.artifact.type === 'validation_proof') ||
+    (step.type === 'tool_call' && /\b(test|lint|build|verify|check)\b/i.test(step.name))
+  ).length;
+  const errorStep = run.steps.find((step): step is Extract<HarnessRunStep, { type: 'error' }> => step.type === 'error');
+  const summary = run.status === 'error'
+    ? errorStep?.message || 'Run ended with an error'
+    : artifactTitles[0] || (run.steps.some((step) => step.type === 'final_answer') ? 'Run completed with final answer' : 'Run completed');
+  if (recordGoalRunEvidence(session, {
+    status: run.status === 'error' ? 'error' : 'complete',
+    runId: run.id,
+    summary,
+    artifacts: artifactTitles,
+    validationCount,
+  })) {
+    sessionStore.saveSession(session);
+  }
 }
 
 const STEERING_ACTIONS: RunSteeringAction[] = [
@@ -3419,6 +3444,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
 
   const requestedModel = requestedModelOverride || getActiveModel();
   const activeGoalPrompt = formatGoalForPrompt(session.goal);
+  const routeContent = [activeGoalPrompt, content].filter(Boolean).join('\n\n');
   const workspaceMismatch = openHarnessWorkspaceMismatch(content, session.workingDir);
   if (workspaceMismatch) {
     const guardRun = createHarnessRun({
@@ -3452,19 +3478,19 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   const artifactCount = session.messages.reduce((count, message) => (
     count + (message.runTrace?.steps.filter((step) => 'artifact' in step).length || 0)
   ), 0);
-  const route = await routeWithAutoRouter(content, appConfig, {
+  const route = await routeWithAutoRouter(routeContent || content, appConfig, {
     hasImages: Boolean(visualContext) || /\b(image|screenshot|photo|diagram)\b/i.test(content),
     turns: session.messages.filter((m) => m.role === 'user').length,
     toolCount: routeToolCount,
     estimatedInputTokens: estimateTokens([
-      content,
+      routeContent || content,
       ...session.messages.slice(-8).map((m) => m.content),
       sideChatPromptContext,
       visualContext ? appendVisualContextToContent('', visualContext, false) : undefined,
     ].filter(Boolean).join('\n\n')),
     artifactCount,
     dirtyGitState,
-    thinkingEffort: appConfig.roleThinking?.[routeRequest(content, requestedModel, appConfig.roleAssignments || {}).role] || appConfig.thinkingEffort || 'medium',
+    thinkingEffort: appConfig.roleThinking?.[routeRequest(routeContent || content, requestedModel, appConfig.roleAssignments || {}).role] || appConfig.thinkingEffort || 'medium',
   });
   const effectiveModel = resolveSelectedModel(route, requestedModelOverride);
   const resolved = resolveProviderForModel(effectiveModel);
@@ -3655,6 +3681,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   }
 
   completeHarnessRunAndTrace(run, run.status === 'error' ? 'error' : 'complete');
+  recordGoalEvidenceFromRun(session, run);
   persistAssistantRunTrace(session, assistantId, run);
   writeSSE(res, 'run_complete', run);
   writeSSE(res, 'done', {});

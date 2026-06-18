@@ -138,6 +138,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  initialCategory?: string;
   configPath?: string;
   activeModel: string;
   thinkingEffort: ThinkingEffort;
@@ -227,8 +228,9 @@ export function SettingsModal({
   onMcpStatusRefresh,
   clickyEnabled,
   onClickyEnabledChange,
+  initialCategory,
 }: Props) {
-  const [selectedCat, setSelectedCat] = useState('model');
+  const [selectedCat, setSelectedCat] = useState(initialCategory || 'model');
   const [selectedSub, setSelectedSub] = useState<string | null>(null);
 
   useEffect(() => {
@@ -237,6 +239,14 @@ export function SettingsModal({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen || !initialCategory) return;
+    const category = CATEGORIES.find((item) => item.id === initialCategory);
+    if (!category) return;
+    setSelectedCat(category.id);
+    setSelectedSub(category.subcategories?.[0]?.id || null);
+  }, [initialCategory, isOpen]);
 
   if (!isOpen) return null;
 

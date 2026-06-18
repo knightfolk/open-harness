@@ -10,7 +10,7 @@ import { parseToolCallMarkup } from '../server/toolCallMarkup';
 import { buildComparisonArtifact, buildEvidenceArtifact, buildInvestigationExplorePrompt, buildReviewFindingsArtifact, extractComparisonSubject, investigationSynthesisProfile, isScoringRubricOutput, normalizeCompareFinalOutput, normalizeExecuteFinalOutput, normalizeInvestigationFinalOutput } from '../server/orchestrator';
 import { filterMonologue, normalizeDirectAnswer, StreamCleaner } from '../server/streamCleaner';
 import { appendRunStep, createHarnessRun } from '../server/runTrace';
-import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from '../server/sessionGoals';
+import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand, recordGoalRunEvidence } from '../server/sessionGoals';
 
 function testPromptAssemblyMetadata() {
   const withoutMetadata = buildPromptForModel({
@@ -97,6 +97,18 @@ function testSessionGoalCommands() {
   const cleared = applyGoalCommand(session, parseGoalCommand('/goal clear')!, '2026-06-12T01:03:00.000Z');
   assert.match(cleared, /^## Goal Cleared/m);
   assert.equal(session.goal, null);
+
+  applyGoalCommand(session, parseGoalCommand('/goal Ship goal loop\n- Route with goal context\n- Show goal status\n- Guard completion')!, '2026-06-12T02:00:00.000Z');
+  assert.equal(session.goal?.createdAt, '2026-06-12T02:00:00.000Z');
+  assert.equal(session.goal?.criteria?.length, 3);
+  const guarded = applyGoalCommand(session, parseGoalCommand('/goal done')!, '2026-06-12T02:01:00.000Z');
+  assert.match(guarded, /^## Goal Not Ready/m);
+  assert.equal(session.goal?.status, 'active');
+  assert.equal(recordGoalRunEvidence(session, { status: 'complete', runId: 'run-1', summary: 'Routing context test passed', validationCount: 1 }, '2026-06-12T02:02:00.000Z'), true);
+  assert.equal(session.goal?.criteria?.[0].status, 'complete');
+  assert.match(formatGoalForPrompt(session.goal) || '', /Routing context test passed/);
+  applyGoalCommand(session, parseGoalCommand('/goal Replacement goal')!, '2026-06-12T03:00:00.000Z');
+  assert.equal(session.goal?.createdAt, '2026-06-12T03:00:00.000Z', 'replacing a goal should start fresh timestamps');
 }
 
 function testOutputStyleRunTraceMetadata() {

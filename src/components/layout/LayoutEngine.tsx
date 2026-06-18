@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
-import type { HarnessRun, RunSteeringAction } from '../../types';
+import type { HarnessRun, RunSteeringAction, SessionGoal } from '../../types';
 import { PanelWrapper } from './PanelWrapper';
 import { PanelContent } from './PanelContent';
 
@@ -14,6 +14,7 @@ interface Props {
   terminalCommands: any;
   focusedSubAgentId?: string | null;
   messages: any;
+  activeGoal?: SessionGoal | null;
   isTyping: boolean;
   onSendMessage: (msg: string) => void;
   activeModel: string;
@@ -50,6 +51,7 @@ export function LayoutEngine({
   terminalCommands,
   focusedSubAgentId,
   messages,
+  activeGoal,
   isTyping,
   onSendMessage,
   activeModel,
@@ -76,7 +78,7 @@ export function LayoutEngine({
     onRunSteer,
   }: Props) {
   return <RenderNode node={layout} onRemovePanel={onRemovePanel} onPopOutPanel={onPopOutPanel} context={{
-    subAgents, plan, fileChanges, terminalCommands, focusedSubAgentId, messages, isTyping,
+    subAgents, plan, fileChanges, terminalCommands, focusedSubAgentId, messages, activeGoal, isTyping,
     onSendMessage, activeModel, workingDir, projectProfile, sessionId,
     pendingPatchProposalId, clearPendingPatchProposalId,
     onSendToChat, onReviewDiff, onProposePatch, onExplainChange, onAskAboutScreenshot,

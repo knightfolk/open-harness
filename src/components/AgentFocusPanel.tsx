@@ -148,7 +148,7 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
                 <span className="agent-focus-list-status" style={{ color: statusColor(agent.status) }} aria-label={`Status: ${statusLabel}`}>
                   {isRunning ? <span className="agent-focus-pulse-dot" aria-hidden="true" /> : <Icon size={12} aria-hidden="true" />}
                 </span>
-                <span className="agent-focus-list-avatar" aria-hidden="true">{identity.avatar}</span>
+                <span className="agent-focus-list-avatar agent-id-badge" aria-hidden="true">{identity.avatar}</span>
                 <span className="agent-focus-list-main">
                   <span className="agent-focus-list-name">{identity.name}<span className="agent-focus-list-role">{agent.runTrace?.role || 'agent'}</span></span>
                   <span className="agent-focus-list-task" aria-label={`Agent objective: ${agent.task || 'No objective recorded'}`}>{agent.task || '—'}</span>

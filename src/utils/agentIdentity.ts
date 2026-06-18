@@ -1,10 +1,7 @@
-// Agent identity — gives every harness role a memorable, stable character.
+// Agent identity — gives every harness role a compact, stable badge.
 //
-// OpenHarness is agent-first: agents should be the visible characters, not an
-// afterthought shown as raw model IDs or "coder run". Each role maps to a
-// distinctive name, an emoji avatar, and a one-line role tagline. Mapping is
-// deterministic (keyed by role), so the same agent always looks the same —
-// which is what makes an agent feel like a real teammate rather than telemetry.
+// Each role maps to a famous programmer surname or id, capped at 8 characters
+// so dense lists read like clean operator badges instead of chat decoration.
 
 export type AgentRole =
   | 'planner'
@@ -17,36 +14,28 @@ export type AgentRole =
   | 'tool';
 
 export interface AgentIdentity {
-  /** Short, memorable display name (no spaces) — the agent's "callsign". */
+  /** Short programmer badge, 8 chars or less. */
   name: string;
-  /** Emoji avatar — the agent's face. Single grapheme, theme-proof. */
+  /** Same text rendered inside compact badge slots. */
   avatar: string;
   /** One-line role tagline, plain English. */
   tagline: string;
 }
 
 const ROLE_IDENTITY: Record<AgentRole, AgentIdentity> = {
-  // The strategist. Reads the room, breaks the problem apart, picks the path.
-  planner: { name: 'Atlas', avatar: '🧭', tagline: 'Plans the route and breaks down the work' },
-  // The builder. Writes, fixes, refactors — the hands of the harness.
-  coder: { name: 'Forge', avatar: '🔨', tagline: 'Writes and refactors the code' },
-  // The critic. Reads diffs and PRs for correctness and security.
-  reviewer: { name: 'Sentry', avatar: '🛡️', tagline: 'Reviews for correctness and security' },
-  // The deep thinker. Comparisons, tradeoffs, hard analysis.
-  reasoner: { name: 'Sage', avatar: '🦉', tagline: 'Reasons through tradeoffs and analysis' },
-  // The condenser. Distills long threads and files.
-  summarizer: { name: 'Quill', avatar: '✍️', tagline: 'Condenses threads and long outputs' },
-  // The runner. Fast shell, file, and utility tasks.
-  worker: { name: 'Dash', avatar: '⚡', tagline: 'Runs fast shell and file tasks' },
-  // The dispatcher. Picks the right model for each request.
-  router: { name: 'Compass', avatar: '🎯', tagline: 'Routes each request to the best model' },
-  // Generic tool-calling agent.
-  tool: { name: 'Wrench', avatar: '🔧', tagline: 'Calls tools on demand' },
+  planner: { name: 'ADA', avatar: 'ADA', tagline: 'Plans the route and breaks down the work' },
+  coder: { name: 'RITCHIE', avatar: 'RITCHIE', tagline: 'Writes and refactors the code' },
+  reviewer: { name: 'HOPPER', avatar: 'HOPPER', tagline: 'Reviews for correctness and security' },
+  reasoner: { name: 'TURING', avatar: 'TURING', tagline: 'Reasons through tradeoffs and analysis' },
+  summarizer: { name: 'KNUTH', avatar: 'KNUTH', tagline: 'Condenses threads and long outputs' },
+  worker: { name: 'KAY', avatar: 'KAY', tagline: 'Runs fast shell and file tasks' },
+  router: { name: 'DIJKSTRA', avatar: 'DIJKSTRA', tagline: 'Routes each request to the best model' },
+  tool: { name: 'LAMPORT', avatar: 'LAMPORT', tagline: 'Calls tools on demand' },
 };
 
 const DEFAULT_IDENTITY: AgentIdentity = {
-  name: 'Friday',
-  avatar: '🤖',
+  name: 'LOVELACE',
+  avatar: 'LOVELACE',
   tagline: 'Your harness assistant',
 };
 
@@ -66,9 +55,8 @@ export function agentIdentityForRole(role: string | undefined | null): AgentIden
 }
 
 /**
- * Initials for compact avatars where an emoji won't fit (status dots, dense
- * lists). Two letters, derived from the callsign.
+ * Badge text for compact slots.
  */
 export function agentInitials(identity: AgentIdentity): string {
-  return identity.name.slice(0, 2);
+  return identity.name.slice(0, 8);
 }

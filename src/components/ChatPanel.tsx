@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { Send, Paperclip, Image, AtSign, Command } from 'lucide-react';
-import type { HarnessRun, Message, RunSteeringAction } from '../types';
+import type { HarnessRun, Message, RunSteeringAction, SessionGoal } from '../types';
 import type { SubAgent } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { shortModelName } from '../utils/modelDisplay';
@@ -12,6 +12,7 @@ import { getActiveWorkState, type ActiveWorkState } from '../utils/agentWorkStat
 
 interface Props {
   messages: Message[];
+  activeGoal?: SessionGoal | null;
   isTyping: boolean;
   onSendMessage: (msg: string) => void;
   activeModel: string;
@@ -53,7 +54,7 @@ function saveSuperWidth(value: number) {
   }
 }
 
-export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, environmentOpen, onEnvironmentOpenChange, onRunSteer }: Props) {
+export function ChatPanel({ messages, activeGoal, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, environmentOpen, onEnvironmentOpenChange, onRunSteer }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
@@ -186,6 +187,13 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
           onOpenDetails={onFocusAgents}
         />
       )}
+      {activeGoal?.status === 'active' && (
+        <GoalLoopStrip
+          goal={activeGoal}
+          activeWorkVisible={Boolean(activeWorkState)}
+          onStatus={() => onSendMessage('/goal status')}
+        />
+      )}
       <div className={`floating-super-panel ${superHidden ? 'hidden' : ''}`} style={{ width: superWidth }} aria-hidden={superHidden}>
         <button
           className="floating-super-resize-handle"
@@ -205,6 +213,33 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
         />
       </div>
       <ChatInputInline onSend={onSendMessage} disabled={isTyping} onHeightChange={setInputHeight} />
+    </div>
+  );
+}
+
+function GoalLoopStrip({ goal, activeWorkVisible, onStatus }: { goal: SessionGoal; activeWorkVisible: boolean; onStatus: () => void }) {
+  const criteria = goal.criteria || [];
+  const completed = criteria.filter((item) => item.status === 'complete').length;
+  const blocked = (goal.blockers || []).filter((item) => !item.resolvedAt).length;
+  const evidence = goal.evidence?.length || 0;
+  const progress = criteria.length > 0 ? `${completed}/${criteria.length} criteria` : `${evidence} evidence item${evidence === 1 ? '' : 's'}`;
+  const metadata = [
+    progress,
+    blocked ? `${blocked} blocker${blocked === 1 ? '' : 's'}` : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <div className={`goal-loop-strip-host ${activeWorkVisible ? 'with-active-work' : ''}`} role="status" aria-live="polite" aria-label="Active session goal">
+      <button
+        className={`goal-loop-strip ${blocked ? 'has-blockers' : ''}`}
+        type="button"
+        onClick={onStatus}
+        title="Show goal status"
+        aria-label={`Active goal: ${goal.objective}. ${metadata}. Show goal status.`}
+      >
+        <span className="goal-loop-strip-kicker">Goal</span>
+        <span className="goal-loop-strip-objective">{goal.objective}</span>
+        <span className="goal-loop-strip-meta">{metadata}</span>
+      </button>
     </div>
   );
 }

@@ -8,7 +8,6 @@ import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 import { providerPlanLabel } from '../data/providerPlans';
 import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
-import { ROUTING_FEEDBACK_GUIDANCE, autoRouterDecisionLabel, candidateScoresUnavailableLabel, formatAutoRouterScoreList } from '../utils/autoRouterTrace';
 import type { HarnessRunStep, ThinkingEffort } from '../types';
 
 const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
@@ -49,7 +48,7 @@ interface Props {
     detail: string;
     resetSeconds?: number;
   } | null;
-  onOpenSettings?: () => void;
+  onOpenSettings?: (category?: string) => void;
 }
 
 const AUTO_MODEL_ID = 'Auto';
@@ -77,22 +76,6 @@ const TRUST_COLORS: Record<string, string> = {
 };
 
 const ALL_TRUST_MODES = ['chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local'];
-
-function autoRouterTitle(step?: Extract<HarnessRunStep, { type: 'auto_router' }> | null): string {
-  if (!step) return 'Auto: route each request to the best configured candidate model.';
-  const lines = [
-    `Auto selected: ${step.modelId}`,
-    `${autoRouterDecisionLabel({ fallback: step.fallback, cached: step.cached })}: ${step.reason}`,
-    step.classifierModel ? `Classifier: ${step.classifierModel}` : 'Classifier: unavailable',
-    step.cached ? 'Source: cached decision' : 'Source: fresh decision',
-    `Feedback: ${ROUTING_FEEDBACK_GUIDANCE}`,
-    'Top candidate scores:',
-    Object.keys(step.candidateScores || {}).length > 0
-      ? formatAutoRouterScoreList(step.candidateScores)
-      : candidateScoresUnavailableLabel({ fallback: step.fallback }),
-  ];
-  return lines.join('\n');
-}
 
 export function StatusBar({
   activeModel,
@@ -187,7 +170,6 @@ export function StatusBar({
   const concreteRunningModel = runningModel && runningModel !== AUTO_MODEL_ID ? runningModel : null;
   const visibleAutoModel = concreteRunningModel || autoRouterStep?.modelId;
   const autoModelLabel = visibleAutoModel ? `Auto · ${visibleAutoModel}` : 'Auto';
-  const autoTitle = autoRouterTitle(autoRouterStep);
   const configuredProviderNames = Array.from(new Set(models.map((m) => m.providerName).filter((name) => name && name !== 'Unknown')));
   const providerCount = configuredProviderCount ?? configuredProviderNames.length;
   const servingProvider = currentModel?.providerName || providerName;
@@ -290,7 +272,7 @@ export function StatusBar({
           <button
             className="status-bar-item status-bar-settings-btn"
             type="button"
-            onClick={onOpenSettings}
+            onClick={() => onOpenSettings()}
             title="Open settings"
             aria-label="Open settings"
           >
@@ -318,8 +300,17 @@ export function StatusBar({
         <button
           ref={modelBtnRef}
           className={`status-bar-item status-bar-model-btn ${isAuto ? 'status-bar-model-btn-auto' : ''}`}
-          title={isAuto ? autoTitle : modelCatalogTooltip(activeModel, providerName)}
+          title={isAuto ? 'Open Auto-Router settings' : modelCatalogTooltip(activeModel, providerName)}
+          aria-label={isAuto ? 'Open Auto-Router settings' : `Choose model, currently ${activeModel}`}
           onClick={() => {
+            if (isAuto && onOpenSettings) {
+              setModelPickerOpen(false);
+              setTrustPickerOpen(false);
+              setTerminalOpen(false);
+              setSearchQuery('');
+              onOpenSettings('auto-router');
+              return;
+            }
             const nextOpen = !modelPickerOpen;
             setModelPickerOpen(nextOpen);
             setTrustPickerOpen(false);
