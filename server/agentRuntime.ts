@@ -51,6 +51,78 @@ export function isTransientProviderError(err: unknown): boolean {
   return false;
 }
 
+// ── Provider failover: retry-with-backoff + cross-model failover ──
+export interface ProviderFailoverOptions<T> {
+  // Attempt the call for a given model. Throws on failure.
+  attempt: (modelId: string) => Promise<T>;
+  // Classify an error as transient. Non-transient errors propagate immediately.
+  isTransient: (err: unknown) => boolean;
+  // Backoff delays before each same-model retry (e.g. [2000, 5000] → 3 total attempts).
+  backoffMs: number[];
+  // Ordered fallback model ids to try (one attempt each) after same-model retries.
+  fallbackModelIds: string[];
+  // Attempt a fallback model. Same signature as `attempt`.
+  fallbackAttempt: (modelId: string) => Promise<T>;
+  // If provided, an abort signal that interrupts backoff sleeps immediately.
+  signal?: AbortSignal;
+  // Optional hooks for observability/tests.
+  onSleep?: (ms: number) => void;
+  onRetry?: (info: { modelId: string; attempt: number; error: unknown }) => void;
+  onFailover?: (info: { fromModelId: string; toModelId: string }) => void;
+}
+
+function abortSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new Error('Aborted before backoff'));
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('Backoff aborted'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export async function retryWithProviderFailover<T>(opts: ProviderFailoverOptions<T>): Promise<T> {
+  const { attempt, isTransient, backoffMs, fallbackModelIds, fallbackAttempt, signal } = opts;
+  const totalSameModelAttempts = backoffMs.length + 1; // initial + one per backoff slot
+  let lastErr: unknown;
+
+  // Phase 1: retry the primary model with backoff.
+  for (let i = 0; i < totalSameModelAttempts; i++) {
+    try {
+      return await attempt('__PRIMARY__');
+    } catch (err: unknown) {
+      lastErr = err;
+      if (!isTransient(err)) throw err;
+      opts.onRetry?.({ modelId: '__PRIMARY__', attempt: i + 1, error: err });
+      if (i < backoffMs.length) {
+        const delay = backoffMs[i];
+        opts.onSleep?.(delay);
+        await abortSleep(delay, signal); // throws on user-abort → propagates
+      }
+    }
+  }
+
+  // Phase 2: cross-model failover, one attempt per candidate. A non-transient
+  // error on a fallback model still advances to the next candidate (the
+  // fallback may itself be misconfigured) rather than aborting the whole turn.
+  for (const fallbackModelId of fallbackModelIds) {
+    try {
+      opts.onFailover?.({ fromModelId: '__PRIMARY__', toModelId: fallbackModelId });
+      return await fallbackAttempt(fallbackModelId);
+    } catch (err: unknown) {
+      lastErr = err;
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? 'All provider attempts failed'));
+}
+
 export interface BackgroundAgentRequest {
   profileId: AgentProfileId;
   prompt: string;
