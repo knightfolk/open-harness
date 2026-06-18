@@ -502,12 +502,15 @@ function getLatestCompletedEvalReport(): EvalReport | null {
 
 export function getLatestEvalRecommendations(): EvalRecommendation[] {
   const latest = getLatestCompletedEvalReport();
-  const reportRecommendations = ((latest?.summary?.recommendations || (latest as unknown as { recommendations?: unknown })?.recommendations) as
+  if (!latest?.summary) return [];
+
+  const summary = latest.summary;
+  const reportRecommendations = ((summary.recommendations || (latest as unknown as { recommendations?: unknown })?.recommendations) as
     | Array<{ role: string; modelId: string; reason: string }>
     | undefined) || [];
   if (reportRecommendations.length === 0) return [];
   const proofStatus = latest.proofReview?.status || 'unreviewed';
-  const compareRows = latest.summary.byPromptStrategy || {};
+  const compareRows = summary.byPromptStrategy || {};
   const comparedPromptStrategies = Object.entries(compareRows)
     .map(([key, value]) => {
       const [strategyId, variantId] = key.split(':');

@@ -38,8 +38,6 @@ interface Props {
     models?: Array<{ id: string; name: string }>;
     enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
     onApplyRoleRecommendation?: (roleId: string, modelId: string) => void;
-    pinnedTools?: PanelId[];
-    onOpenPinnedTool?: (id: PanelId) => void;
     environmentOpen?: boolean;
     onEnvironmentOpenChange?: (open: boolean) => void;
     onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;

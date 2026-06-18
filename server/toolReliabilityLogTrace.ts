@@ -93,12 +93,17 @@ function safeStat(path: string): ReturnType<typeof statSync> | null {
   }
 }
 
+function statNumber(value: number | bigint | undefined): number {
+  if (typeof value === 'bigint') return Number(value);
+  return typeof value === 'number' ? value : 0;
+}
+
 function collectSessionsFingerprint(): ToolReliabilitySourceFingerprint['sessions'] {
   try {
     const files = readdirSync(SESSIONS_DIR).filter((name) => name.endsWith('.json')).sort();
     const latestMtime = files
       .map((name) => safeStat(join(SESSIONS_DIR, name)))
-      .map((stat) => stat?.mtimeMs || 0)
+      .map((stat) => statNumber(stat?.mtimeMs))
       .reduce((max, value) => Math.max(max, value), 0);
     return {
       count: files.length,
@@ -131,8 +136,8 @@ function collectLogFingerprint(): ToolReliabilitySourceFingerprint['logs'] {
       .filter((path) => {
         const stat = safeStat(path);
         if (!stat || !stat.isFile()) return false;
-        latestMtime = Math.max(latestMtime, stat.mtimeMs);
-        totalLogBytes += stat.size;
+        latestMtime = Math.max(latestMtime, statNumber(stat.mtimeMs));
+        totalLogBytes += statNumber(stat.size);
         return true;
       })
       .map((path) => path.split(/[/\\]/).pop() || path)

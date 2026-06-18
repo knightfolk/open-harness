@@ -397,7 +397,7 @@ function buildSystemPrompt(config: ModelPromptConfig, options: BuildPromptOption
 
   switch (config.systemPromptStyle) {
     case 'xml-tagged':
-      return buildXMLPrompt(config, promptStrategy, personality, outputContract, options, shouldEmitExplicitThinking);
+      return buildXMLPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options, shouldEmitExplicitThinking);
     case 'structured':
       return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options, shouldEmitExplicitThinking);
     case 'concise':
@@ -556,7 +556,7 @@ function buildStructuredPrompt(
 }
 
 function buildConcisePrompt(
-  config: ModelPromptConfig,
+  _config: ModelPromptConfig,
   promptStrategy: PromptStrategyTrace,
   rolePrompt: string,
   personality: string | undefined,

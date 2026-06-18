@@ -1385,6 +1385,7 @@ function ProviderOAuthControls({ provider }: { provider: ProviderConfig }) {
   const [status, setStatus] = useState<api.ProviderOAuthState | null>(provider.oauth || null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [authUrl, setAuthUrl] = useState('');
   const plan = selectedProviderPlan(provider.id, provider.name, provider.accessMode, provider.planId);
   const shouldShow = provider.accessMode === 'subscription' && plan?.authMethod === 'oauth';
 
@@ -1404,13 +1405,28 @@ function ProviderOAuthControls({ provider }: { provider: ProviderConfig }) {
   const providerLabel = status?.provider ? status.provider[0].toUpperCase() + status.provider.slice(1) : provider.name;
 
   const startOAuth = async () => {
+    if (!configured) {
+      const missingProvider = providerLabel || provider.name;
+      setAuthUrl('');
+      setMessage(`${missingProvider} OAuth needs server client credentials before sign-in can start.`);
+      return;
+    }
     setBusy(true);
     setMessage('');
+    setAuthUrl('');
+    const oauthWindow = window.open('about:blank', '_blank', 'popup=yes,width=520,height=720');
     try {
       const result = await api.startProviderOAuth(provider.id);
-      window.open(result.authUrl, '_blank', 'noopener,noreferrer');
-      setMessage('OAuth sign-in opened in a browser tab. Refresh this provider after approving access.');
+      setAuthUrl(result.authUrl);
+      if (oauthWindow) {
+        oauthWindow.opener = null;
+        oauthWindow.location.href = result.authUrl;
+        setMessage('OAuth sign-in opened in a browser tab. Refresh this provider after approving access.');
+      } else {
+        setMessage('OAuth popup was blocked. Open the sign-in link below to continue.');
+      }
     } catch (err: any) {
+      oauthWindow?.close();
       setMessage(err?.message || 'OAuth setup failed');
     } finally {
       setBusy(false);
@@ -1442,7 +1458,7 @@ function ProviderOAuthControls({ provider }: { provider: ProviderConfig }) {
             : `${providerLabel} OAuth needs client credentials on the server before sign-in can start.`}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button className="settings-mini-button" onClick={startOAuth} disabled={busy || !configured}>
+        <button className="settings-mini-button" onClick={startOAuth} disabled={busy}>
           {busy ? <Loader size={11} className="spin" /> : <KeyRound size={11} />}
           {connected ? 'Reconnect OAuth' : 'Connect OAuth'}
         </button>
@@ -1470,6 +1486,11 @@ function ProviderOAuthControls({ provider }: { provider: ProviderConfig }) {
         </button>
       </div>
       {message && <div className={`test-result ${message.includes('failed') || message.includes('needs') || message.includes('unavailable') ? 'error' : 'success'}`}>{message}</div>}
+      {authUrl && (
+        <a className="settings-inline-link" href={authUrl} target="_blank" rel="noreferrer">
+          Open OAuth sign-in
+        </a>
+      )}
     </div>
   );
 }
@@ -1544,6 +1565,12 @@ function ProvidersPane({
           const enabledCount = provider.models.filter((m: any) => m.enabled).length;
           const totalCount = provider.models.length;
           const isActive = provider.models.some((m: any) => m.id === activeModel);
+          const draftKey = (providerKeyDraft[provider.id] || '').trim();
+          const canProbeProvider = provider.type === 'local' || provider.configured || draftKey.length > 0;
+          const apiKeyStatus = provider.hasKey ? 'stored' : provider.oauth?.connected ? 'OAuth connected' : 'not configured';
+          const missingCredentialMessage = provider.type === 'local'
+            ? ''
+            : 'Add an API key before testing or fetching models.';
 
           return (
             <div key={provider.id} className="prov-card" data-expanded={isExpanded || undefined}>
@@ -1595,8 +1622,8 @@ function ProvidersPane({
                         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
                             API key
-                            <span style={{ color: provider.configured ? 'var(--text-secondary)' : 'var(--warning)' }}>
-                              {provider.configured ? ' (stored)' : ' (not configured)'}
+                            <span style={{ color: provider.hasKey ? 'var(--text-secondary)' : provider.oauth?.connected ? 'var(--accent-success)' : 'var(--warning)' }}>
+                              {' '}({apiKeyStatus})
                             </span>
                           </span>
                           <div style={{ display: 'flex', gap: 6 }}>
@@ -1642,7 +1669,7 @@ function ProvidersPane({
                         </label>
                       </div>
                     )}
-                    {(healthByProvider[provider.id]?.summary || tr) && (
+                    {canProbeProvider && (healthByProvider[provider.id]?.summary || tr) && (
                       <ProviderHealthBadge
                         summary={healthByProvider[provider.id]?.summary}
                         lastTest={tr}
@@ -1653,20 +1680,21 @@ function ProvidersPane({
                     <button
                       className="settings-mini-button"
                       onClick={() => {
-                        const tempKey = (providerKeyDraft[provider.id] || '').trim() || undefined;
+                        const tempKey = draftKey || undefined;
                         setTestingProvider(provider.id);
                         onTest(provider.id, tempKey)
                           .then((r: any) => setTestResults((p) => ({ ...p, [provider.id]: r })))
                           .catch((e: any) => setTestResults((p) => ({ ...p, [provider.id]: { ok: false, error: e.message } })))
                           .finally(() => setTestingProvider(null));
                       }}
-                      disabled={testingProvider === provider.id}
+                      disabled={testingProvider === provider.id || !canProbeProvider}
+                      title={!canProbeProvider ? missingCredentialMessage : undefined}
                     >
                       {testingProvider === provider.id ? <Loader size={11} className="spin" /> : <Wifi size={11} />}
                       {testingProvider === provider.id ? 'Testing...' : 'Test'}
                     </button>
                     <button className="settings-mini-button" onClick={async () => {
-                      const tempKey = (providerKeyDraft[provider.id] || '').trim() || undefined;
+                      const tempKey = draftKey || undefined;
                       setFetchingModels(provider.id);
                       try {
                         const result = await onFetch(provider.id, tempKey);
@@ -1676,7 +1704,7 @@ function ProvidersPane({
                         setFetchResults((prev) => ({ ...prev, [provider.id]: { ok: false, msg: err?.message || 'Failed' } }));
                       }
                       setFetchingModels(null);
-                    }} disabled={fetchingModels === provider.id}>
+                    }} disabled={fetchingModels === provider.id || !canProbeProvider} title={!canProbeProvider ? missingCredentialMessage : undefined}>
                       {fetchingModels === provider.id ? <Loader size={11} className="spin" /> : <RefreshCw size={11} />}
                       {fetchingModels === provider.id ? 'Fetching...' : 'Fetch Models'}
                     </button>

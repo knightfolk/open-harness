@@ -64,6 +64,7 @@ import { getToolReliabilitySummaryCached, getToolReliabilityCacheMeta, invalidat
 import { getToolErrorLedgerSummary, getToolErrorLedgerEvents, recordToolErrorRunEvents } from './toolErrorLedger';
 import { buildRouterLearningExportPayload } from './routerLearningExport';
 import { buildRouterLearningImportPreview } from './routerLearningImport';
+import { appendVisualContextToContent, normalizeVisualContext, type VisualContext } from './visionFallback';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -84,6 +85,46 @@ function promptStrategyTraceForModel(modelId: string, promptStrategyId?: string)
   }
   const selection = getPromptStrategySelectionForModel(modelId);
   return toPromptStrategyTrace(selection.profile, undefined, selection.modelMatch);
+}
+
+function configuredModelSupportsNativeVision(modelId: string): boolean {
+  const bareModelId = splitModelRef(modelId).bareModelId;
+  const candidates = appConfig.autoRouter?.candidates || [];
+  const configured = candidates.find((candidate) => {
+    const candidateBareModelId = splitModelRef(candidate.modelId).bareModelId;
+    return candidate.modelId === modelId || candidateBareModelId === bareModelId;
+  });
+  if (configured) return configured.supportsImages === true;
+
+  const lower = bareModelId.toLowerCase();
+  return (
+    /\b(?:vision|vl|multimodal)\b/.test(lower) ||
+    lower.includes('gemini') ||
+    lower.includes('claude') ||
+    lower.includes('gpt-4o') ||
+    lower.includes('gpt-5') ||
+    lower.includes('grok') ||
+    lower.includes('minimax-m3') ||
+    /qwen.*(?:vl|omni)/.test(lower)
+  );
+}
+
+function buildVisualContextMessages(
+  messages: MessageRow[],
+  userMessageId: string,
+  visualContext: VisualContext | undefined,
+  modelId: string,
+): MessageRow[] {
+  if (!visualContext) return messages;
+  const supportsNativeVision = configuredModelSupportsNativeVision(modelId);
+  return messages.map((message) => (
+    message.id === userMessageId && message.role === 'user'
+      ? {
+        ...message,
+        content: appendVisualContextToContent(message.content, visualContext, supportsNativeVision),
+      }
+      : message
+  ));
 }
 
 interface EstimatedModelUsage {
@@ -3272,8 +3313,14 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
-  const { content, modelId, sideChat } = req.body as { content: string; modelId?: string; sideChat?: SideChatRequestContext };
+  const { content, modelId, sideChat, visualContext: rawVisualContext } = req.body as {
+    content: string;
+    modelId?: string;
+    sideChat?: SideChatRequestContext;
+    visualContext?: unknown;
+  };
   if (!content?.trim()) return res.status(400).json({ error: 'Content is required' });
+  const visualContext = normalizeVisualContext(rawVisualContext);
   const requestedModelOverride = normalizeModelOverride(modelId);
   const sideChatPromptContext = buildSideChatPromptContext(sideChat, session.id);
 
@@ -3397,13 +3444,14 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
     count + (message.runTrace?.steps.filter((step) => 'artifact' in step).length || 0)
   ), 0);
   const route = await routeWithAutoRouter(content, appConfig, {
-    hasImages: /\b(image|screenshot|photo|diagram)\b/i.test(content),
+    hasImages: Boolean(visualContext) || /\b(image|screenshot|photo|diagram)\b/i.test(content),
     turns: session.messages.filter((m) => m.role === 'user').length,
     toolCount: routeToolCount,
     estimatedInputTokens: estimateTokens([
       content,
       ...session.messages.slice(-8).map((m) => m.content),
       sideChatPromptContext,
+      visualContext ? appendVisualContextToContent('', visualContext, false) : undefined,
     ].filter(Boolean).join('\n\n')),
     artifactCount,
     dirtyGitState,
@@ -3539,7 +3587,7 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       const orchestrationContent = [
         activeGoalPrompt,
         sideChatPromptContext ? `${sideChatPromptContext}\n\n## Current Side Chat User Request` : undefined,
-        content,
+        appendVisualContextToContent(content, visualContext, configuredModelSupportsNativeVision(effectiveModel)),
       ].filter(Boolean).join('\n\n');
       const orchResult = await runOrchestratorPipeline(route, orchestrationContent, appConfig, session.workingDir || undefined, {
         onStep: (step) => emitVisibleStep(step),
@@ -3593,7 +3641,8 @@ app.post('/api/sessions/:id/messages', async (req, res) => {
       buildSteeringContext(takeRunSteeringNotes('agent'), 'agent', true),
     ].filter(Boolean).join('\n\n');
     const directContext = [sideChatPromptContext, directSteeringContext].filter(Boolean).join('\n\n') || undefined;
-    await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel, directContext, requestController.signal);
+    const modelMessages = buildVisualContextMessages(session.messages, userMsg.id, visualContext, effectiveModel);
+    await streamModelWithFallback(resolved, session, res, assistantId, run, route, effectiveModel, directContext, requestController.signal, modelMessages);
   }
 
   completeHarnessRunAndTrace(run, run.status === 'error' ? 'error' : 'complete');
@@ -6695,6 +6744,7 @@ async function streamModelWithFallback(
   overrideModelId?: string,
   systemTaskContext?: string,
   abortSignal?: AbortSignal,
+  modelMessages?: MessageRow[],
 ): Promise<void> {
   // Collect all providers that can serve the effective model
   const effectiveModel = overrideModelId || run?.effectiveModel || getActiveModel();
@@ -6755,7 +6805,7 @@ async function streamModelWithFallback(
         : p.providerId === resolveProviderForModel(appConfig.autoRouter?.defaultModel || '')?.providerId
           ? appConfig.autoRouter?.defaultModel
           : overrideModelId;
-      await streamModel(p.chatURL, p.apiKey, p.providerId, session.messages, res, assistantId, session, modelForAttempt, run, routeOverride, systemTaskContext, true, abortSignal);
+      await streamModel(p.chatURL, p.apiKey, p.providerId, modelMessages || session.messages, res, assistantId, session, modelForAttempt, run, routeOverride, systemTaskContext, true, abortSignal);
       // If here, streaming succeeded
       return;
     } catch (err: any) {

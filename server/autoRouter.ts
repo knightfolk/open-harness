@@ -15,7 +15,7 @@
  * avoid re-classifying tool-call round-trips.
  */
 
-import { getProviderForModel, splitModelRef } from './config';
+import { getProviderForModel, providerAuthToken, splitModelRef } from './config';
 import { suggestThresholdAdjustment } from './routerLearning';
 import { getLatestEvalRecommendations } from './evals';
 import type { EvalRecommendation } from './evals';
@@ -180,7 +180,7 @@ function annotateCandidatesWithEvalRecommendations(
   const byModel = new Map<string, Array<{
     role: string;
     reason: string;
-    proofReviewStatus: string;
+    proofReviewStatus: EvalRecommendation['proofReviewStatus'];
     proofTrusted: boolean;
     comparedPromptStrategies?: NonNullable<(typeof recs)[number]['comparedPromptStrategies']>;
     comparisonArtifactPath?: string;
@@ -213,9 +213,9 @@ function annotateCandidatesWithEvalRecommendations(
       if (r.proofReviewStatus === 'needs-attention') return `${r.role} (proof needs attention; do not trust yet): ${r.reason}`;
       return `${r.role} (proof unreviewed; verify before trusting): ${r.reason}`;
     }).join(' | ');
-    const evalEvidence = matchingRecs.map((r) => ({
+    const evalEvidence: AutoRouterCandidate['evalEvidence'] = matchingRecs.map((r) => ({
       role: r.role,
-      proofReviewStatus: (r.proofReviewStatus as EvalRecommendation['proofReviewStatus']) || 'unreviewed',
+      proofReviewStatus: r.proofReviewStatus,
       statusSummary: r.proofTrusted
         ? 'approved'
         : r.proofReviewStatus === 'needs-attention'
@@ -654,7 +654,7 @@ export async function generateSessionTitleWithClassifier(task: string, config: S
     const classifierResolved = getProviderForModel(config, titleModel);
     if (!classifierResolved) continue;
     try {
-      const provider = classifierResolved.provider;
+      const provider = { ...classifierResolved.provider, apiKey: classifierResolved.apiKey };
       const apiModelId = splitModelRef(titleModel).bareModelId;
       const responseText = provider.type === 'anthropic'
         ? await callAnthropicClassifier(provider, apiModelId, systemPrompt, userContent, 80, 20_000)
@@ -727,7 +727,7 @@ export async function routeTask(
 
   try {
     const classifierResult = await callClassifier(
-      classifierResolved.provider,
+      { ...classifierResolved.provider, apiKey: classifierResolved.apiKey },
       classifierModel,
       signal,
       candidates,
@@ -832,9 +832,10 @@ async function callOpenAICompatibleClassifier(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (provider.apiKey) {
-    headers['Authorization'] = `Bearer ${provider.apiKey}`;
-    headers['x-api-key'] = provider.apiKey;
+  const authToken = providerAuthToken(provider);
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+    headers['x-api-key'] = authToken;
   }
 
   const res = await fetch(url, {
@@ -876,8 +877,9 @@ async function callAnthropicClassifier(
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
   };
-  if (provider.apiKey) {
-    headers['x-api-key'] = provider.apiKey;
+  const authToken = providerAuthToken(provider);
+  if (authToken) {
+    headers['x-api-key'] = authToken;
   }
 
   const res = await fetch(url, {
@@ -920,8 +922,9 @@ async function callGoogleClassifier(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (provider.apiKey) {
-    headers['Authorization'] = `Bearer ${provider.apiKey}`;
+  const authToken = providerAuthToken(provider);
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
   }
 
   const res = await fetch(url, {

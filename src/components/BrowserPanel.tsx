@@ -3,7 +3,7 @@ import * as api from '../utils/api';
 
 interface Props {
   workingDir: string | null;
-  onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
+  onAskAboutScreenshot?: (screenshotBase64: string, url: string, visualContext?: api.VisualContextInfo) => void | Promise<void>;
 }
 
 export function BrowserPanel({ onAskAboutScreenshot }: Props) {
@@ -14,6 +14,7 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
   const [loading, setLoading] = useState(false);
   const [deepLoading, setDeepLoading] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [asking, setAsking] = useState(false);
 
   const handlePreview = useCallback(async () => {
     setLoading(true);
@@ -80,6 +81,38 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
       setChecking(false);
     }
   }, [url]);
+
+  const buildVisualContext = useCallback(async () => {
+    if (deepArtifact) return api.browserArtifactToVisualContext(deepArtifact, preview);
+    try {
+      const result = await api.captureDeepBrowser(url);
+      setDeepArtifact(result);
+      if (result.screenshotBase64) {
+        setPreview({
+          url: result.url,
+          screenshotPath: result.screenshotPath || '',
+          screenshotBase64: result.screenshotBase64,
+          title: result.title,
+          timestamp: result.capturedAt,
+          errors: result.errors,
+        });
+      }
+      return api.browserArtifactToVisualContext(result, preview);
+    } catch {
+      return preview ? api.previewToVisualContext(preview, url) : undefined;
+    }
+  }, [deepArtifact, preview, url]);
+
+  const handleAskAboutScreenshot = useCallback(async () => {
+    if (!preview?.screenshotBase64 || !onAskAboutScreenshot || asking) return;
+    setAsking(true);
+    try {
+      const visualContext = await buildVisualContext();
+      await onAskAboutScreenshot(preview.screenshotBase64, url, visualContext);
+    } finally {
+      setAsking(false);
+    }
+  }, [asking, buildVisualContext, onAskAboutScreenshot, preview, url]);
 
   const quickUrls = ['localhost:5173', 'localhost:3000', 'localhost:4173', 'localhost:3001'];
 
@@ -259,14 +292,16 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
           {onAskAboutScreenshot && preview.screenshotBase64 && (
             <button
               type="button"
-              onClick={() => onAskAboutScreenshot(preview.screenshotBase64!, url)}
+              onClick={handleAskAboutScreenshot}
+              disabled={asking}
               aria-label="Ask AI about this browser screenshot"
               style={{
                 background: 'var(--accent-primary)', color: '#fff', border: 'none',
-                borderRadius: 3, padding: '2px 8px', fontSize: 10, cursor: 'pointer',
+                borderRadius: 3, padding: '2px 8px', fontSize: 10, cursor: asking ? 'wait' : 'pointer',
+                opacity: asking ? 0.72 : 1,
               }}
             >
-              Ask AI about this
+              {asking ? 'Preparing...' : 'Ask AI about this'}
             </button>
           )}
           <button

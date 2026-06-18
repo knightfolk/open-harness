@@ -1,8 +1,8 @@
 
 import {
-  ArrowLeft, Bot, CheckCircle2, ChevronRight, Circle, AlertCircle, Loader, Clock, Zap,
+  Bot, CheckCircle2, Circle, AlertCircle, Loader, Clock, Zap, X,
 } from 'lucide-react';
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useMemo } from 'react';
 import type { HarnessRun, RunSteeringAction, SubAgent } from '../types';
 import { agentIdentityForRole } from '../utils/agentIdentity';
 
@@ -52,11 +52,28 @@ function agentStatusLabel(status: SubAgent['status']): string {
   return status;
 }
 
+function agentVisibilityRank(status: SubAgent['status']): number {
+  if (status === 'running') return 0;
+  if (status === 'blocked') return 1;
+  if (status === 'idle') return 2;
+  if (status === 'error') return 3;
+  return 4;
+}
+
 export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer }: Props) {
+  const orderedAgents = useMemo(
+    () => [...agents].sort((a, b) => {
+      const rankDelta = agentVisibilityRank(a.status) - agentVisibilityRank(b.status);
+      if (rankDelta !== 0) return rankDelta;
+      return b.startTime.getTime() - a.startTime.getTime();
+    }),
+    [agents],
+  );
+
   // Pick focused agent, fall back to first running, then first agent.
   const focused = agents.find((a) => a.id === focusedId)
-    || agents.find((a) => a.status === 'running')
-    || agents[0] || null;
+    || orderedAgents.find((a) => a.status === 'running' || a.status === 'blocked' || a.status === 'idle')
+    || orderedAgents[0] || null;
 
   if (!focused) {
     return (
@@ -65,8 +82,8 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
           <Bot size={22} className="agent-focus-empty-icon" aria-hidden="true" />
           <div className="agent-focus-empty-title">No agents running</div>
           <div className="agent-focus-empty-sub">Active run details will appear here when work starts.</div>
-          <button className="agent-focus-back" type="button" onClick={onExit} aria-label="Back to chat">
-            <ArrowLeft size={14} aria-hidden="true" /> Back to chat
+          <button className="agent-focus-empty-close" type="button" onClick={onExit} aria-label="Close Agent detail">
+            <X size={14} aria-hidden="true" /> Close
           </button>
         </div>
       </div>
@@ -82,10 +99,6 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
   return (
     <div className="agent-focus-root" role="complementary" aria-label="Agent detail inspector">
       <div className="agent-focus-header">
-        <button className="agent-focus-back" type="button" onClick={onExit} aria-label="Back to chat">
-          <ArrowLeft size={14} aria-hidden="true" />
-          <span>Back to chat</span>
-        </button>
         <div className="agent-focus-header-title">
           <Bot size={16} aria-hidden="true" />
           <span>Agent detail</span>
@@ -102,62 +115,55 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
           <span className="agent-focus-pill complete">{complete} complete</span>
           {failed > 0 && <span className="agent-focus-pill error">{failed} failed</span>}
         </div>
+        <button className="agent-focus-close" type="button" onClick={onExit} aria-label="Close Agent detail" title="Close Agent detail">
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="agent-focus-list" role="list" aria-label="Agent detail list">
+        {orderedAgents.map((agent) => {
+          const Icon = StatusIcon[agent.status];
+          const isActive = agent.id === focused.id;
+          const isRunning = agent.status === 'running';
+          const statusLabel = agentStatusLabel(agent.status);
+          const identity = agentIdentityForRole(agent.runTrace?.role);
+          const listMetaLabel = `Agent list metadata: ${formatTokens(agent.tokensUsed)} tokens, duration ${formatDuration(agent.startTime, agent.endTime)}`;
+          const agentLabel = [
+            `${isActive ? 'Current agent detail' : 'Open agent detail'} ${identity.name}, ${identity.tagline}`,
+            `status ${statusLabel}`,
+            agent.task ? `task ${agent.task}` : null,
+            agent.runTrace?.providerId ? `provider ${agent.runTrace.providerId}` : null,
+            agent.runTrace?.effectiveModel || agent.model ? `model ${agent.runTrace?.effectiveModel || agent.model}` : null,
+          ].filter(Boolean).join('. ');
+          return (
+            <div key={agent.id} role="listitem" className="agent-focus-list-cell">
+              <button
+                type="button"
+                className={`agent-focus-list-item ${isActive ? 'active' : ''} ${isRunning ? 'has-pulse' : ''}`}
+                onClick={() => onFocus(agent.id)}
+                title={`${identity.name} — ${identity.tagline}`}
+                aria-current={isActive ? 'true' : undefined}
+                aria-label={agentLabel}
+              >
+                <span className="agent-focus-list-status" style={{ color: statusColor(agent.status) }} aria-label={`Status: ${statusLabel}`}>
+                  {isRunning ? <span className="agent-focus-pulse-dot" aria-hidden="true" /> : <Icon size={12} aria-hidden="true" />}
+                </span>
+                <span className="agent-focus-list-avatar" aria-hidden="true">{identity.avatar}</span>
+                <span className="agent-focus-list-main">
+                  <span className="agent-focus-list-name">{identity.name}<span className="agent-focus-list-role">{agent.runTrace?.role || 'agent'}</span></span>
+                  <span className="agent-focus-list-task" aria-label={`Agent objective: ${agent.task || 'No objective recorded'}`}>{agent.task || '—'}</span>
+                </span>
+                <span className="agent-focus-list-meta" role="group" aria-label={listMetaLabel}>
+                  <span><Zap size={10} aria-hidden="true" /> {formatTokens(agent.tokensUsed)}</span>
+                  <span><Clock size={10} aria-hidden="true" /> {formatDuration(agent.startTime, agent.endTime)}</span>
+                </span>
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <div className="agent-focus-body">
-        <aside className="agent-focus-list" role="list" aria-label="Agent detail list">
-          {agents.map((agent) => {
-            const Icon = StatusIcon[agent.status];
-            const isActive = agent.id === focused.id;
-            const isRunning = agent.status === 'running';
-            const statusLabel = agentStatusLabel(agent.status);
-            const identity = agentIdentityForRole(agent.runTrace?.role);
-            const listMetaLabel = `Agent list metadata: ${formatTokens(agent.tokensUsed)} tokens, duration ${formatDuration(agent.startTime, agent.endTime)}`;
-            const agentLabel = [
-              `${isActive ? 'Current agent detail' : 'Open agent detail'} ${identity.name}, ${identity.tagline}`,
-              `status ${statusLabel}`,
-              agent.task ? `task ${agent.task}` : null,
-              agent.runTrace?.providerId ? `provider ${agent.runTrace.providerId}` : null,
-              agent.runTrace?.effectiveModel || agent.model ? `model ${agent.runTrace?.effectiveModel || agent.model}` : null,
-            ].filter(Boolean).join('. ');
-            return (
-              <div key={agent.id} role="listitem">
-                <button
-                  type="button"
-                  className={`agent-focus-list-item ${isActive ? 'active' : ''} ${isRunning ? 'has-pulse' : ''}`}
-                  onClick={() => onFocus(agent.id)}
-                  title={`${identity.name} — ${identity.tagline}`}
-                  aria-current={isActive ? 'true' : undefined}
-                  aria-label={agentLabel}
-                >
-                  <span className="agent-focus-list-status" style={{ color: statusColor(agent.status) }} aria-label={`Status: ${statusLabel}`}>
-                    {isRunning ? <span className="agent-focus-pulse-dot" aria-hidden="true" /> : <Icon size={12} aria-hidden="true" />}
-                  </span>
-                  <span className="agent-focus-list-avatar" aria-hidden="true">{identity.avatar}</span>
-                  <span className="agent-focus-list-main">
-                    <span className="agent-focus-list-name">{identity.name}<span className="agent-focus-list-role">{agent.runTrace?.role || 'agent'}</span></span>
-                    <span className="agent-focus-list-task" aria-label={`Agent objective: ${agent.task || 'No objective recorded'}`}>{agent.task || '—'}</span>
-                    <span
-                      className="agent-focus-list-model"
-                      aria-label={[
-                        agent.runTrace?.providerId ? `Provider: ${agent.runTrace.providerId}` : null,
-                        agent.runTrace?.effectiveModel || agent.model ? `Model: ${agent.runTrace?.effectiveModel || agent.model}` : null,
-                      ].filter(Boolean).join('. ')}
-                    >
-                      {[agent.runTrace?.providerId, agent.runTrace?.effectiveModel || agent.model].filter(Boolean).join(' · ')}
-                    </span>
-                  </span>
-                  <span className="agent-focus-list-meta" role="group" aria-label={listMetaLabel}>
-                    <span><Zap size={10} aria-hidden="true" /> {formatTokens(agent.tokensUsed)}</span>
-                    <span><Clock size={10} aria-hidden="true" /> {formatDuration(agent.startTime, agent.endTime)}</span>
-                  </span>
-                  <ChevronRight size={12} className="agent-focus-list-arrow" aria-hidden="true" />
-                </button>
-              </div>
-            );
-          })}
-        </aside>
-
         <section
           className="agent-focus-detail"
           aria-label={`Selected agent detail: ${focused.runTrace ? `${focused.runTrace.role} run` : focused.name}`}

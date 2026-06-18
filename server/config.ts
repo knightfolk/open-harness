@@ -392,6 +392,10 @@ export interface ResolvedProvider {
   chatURL: string;
 }
 
+export function providerAuthToken(provider: StoredProvider): string {
+  return provider.apiKey || provider.oauth?.accessToken || '';
+}
+
 /** Find the provider that owns a given model, and build its chat completions URL. */
 export function getProviderForModel(config: StoredConfig, modelId: string): ResolvedProvider | null {
   const { providerId, bareModelId } = splitModelRef(modelId);
@@ -402,7 +406,7 @@ export function getProviderForModel(config: StoredConfig, modelId: string): Reso
     if (match) {
       return {
         provider,
-        apiKey: provider.apiKey,
+        apiKey: providerAuthToken(provider),
         chatURL: buildChatURL(provider),
       };
     }

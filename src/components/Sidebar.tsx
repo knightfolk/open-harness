@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -54,6 +54,7 @@ interface Props {
   onOpenFolder?: () => void;
   onFocusAgent?: (agentId: string) => void;
   width?: number;
+  onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onDeleteSession?: (id: string) => void;
   onDeleteProject?: (workingDir: string | null) => void;
   clickyEnabled: boolean;
@@ -143,6 +144,7 @@ export function Sidebar({
   onOpenFolder,
   onFocusAgent,
   width,
+  onResizeStart,
   onDeleteSession,
   onDeleteProject,
   activeModel,
@@ -176,6 +178,15 @@ export function Sidebar({
       aria-label="Project and chat navigation"
       style={width ? ({ width, minWidth: width, ['--sidebar-width']: `${width}px` } as CSSProperties & { '--sidebar-width'?: string }) : undefined}
     >
+      {onResizeStart && (
+        <button
+          type="button"
+          className="sidebar-resize-handle"
+          aria-label="Resize left sidebar"
+          title="Resize left sidebar"
+          onPointerDown={onResizeStart}
+        />
+      )}
       <div className="sidebar-tabs" role="group" aria-label="Sidebar panels">
         {tabConfig.map(({ key, icon: Icon, label }) => (
           <button

@@ -1,10 +1,12 @@
-import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRun, HarnessRunStep, ProjectProfile, SidebarTab, ThinkingEffort, RunSteeringAction } from './types';
 import type { PanelId } from './types/layout';
 import { ALL_PANELS } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { LayoutEngine } from './components/layout/LayoutEngine';
+import { PanelContent } from './components/layout/PanelContent';
+import { PanelWrapper } from './components/layout/PanelWrapper';
 import { StatusBar } from './components/StatusBar';
 import { AgentFocusPanel } from './components/AgentFocusPanel';
 import { useLayoutState } from './components/layout/useLayoutState';
@@ -31,45 +33,40 @@ const OnboardingWizard = lazy(() => import('./components/OnboardingWizard').then
 const ReviewChangesFlyout = lazy(() => import('./components/ReviewChangesFlyout').then((m) => ({ default: m.ReviewChangesFlyout })));
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const FIXED_SIDEBAR_WIDTH = 260;
-const PINNED_TOOLS_KEY = 'openharness.pinned-tools.v1';
-const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v1';
+const DEFAULT_SIDEBAR_WIDTH = 260;
+const DEFAULT_AGENT_FOCUS_WIDTH = 460;
+const DEFAULT_STATUS_BAR_HEIGHT = 48;
+const SIDEBAR_WIDTH_KEY = 'openharness.sidebar-width.v1';
+const AGENT_FOCUS_WIDTH_KEY = 'openharness.agent-focus-width.v1';
+const STATUS_BAR_HEIGHT_KEY = 'openharness.status-bar-height.v1';
+const SIDEBAR_WIDTH_RANGE = { min: 220, max: 420 };
+const AGENT_FOCUS_WIDTH_RANGE = { min: 320, max: 760 };
+const STATUS_BAR_HEIGHT_RANGE = { min: 40, max: 92 };
+const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v2';
 const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
 const THEME_TEXTURE_OPACITY_OVERRIDE_KEY = 'openharness.theme.texture-opacity-override.v1';
 const NARROW_SIDEBAR_AUTO_CLOSE_WIDTH = 640;
-const FORCE_HIDDEN_TOOL_PANELS: PanelId[] = ['sub-agents'];
+const POPOUT_PANEL_PARAM = 'popoutPanel';
 
-function sanitizePinnedTools(value: unknown): PanelId[] {
-  const knownPanels = new Set<string>(ALL_PANELS);
-  const forcedHidden = new Set<string>(FORCE_HIDDEN_TOOL_PANELS);
-  if (!Array.isArray(value)) return [];
-  return value.filter((id): id is PanelId => (
-    typeof id === 'string'
-    && knownPanels.has(id)
-    && !forcedHidden.has(id)
-  ));
-}
-
-function loadPinnedTools(): PanelId[] {
+function getRequestedPopoutPanel(): PanelId | null {
   try {
-    const parsed = JSON.parse(localStorage.getItem(PINNED_TOOLS_KEY) || '[]');
-    const sanitized = sanitizePinnedTools(parsed);
-    if (JSON.stringify(parsed) !== JSON.stringify(sanitized)) {
-      localStorage.setItem(PINNED_TOOLS_KEY, JSON.stringify(sanitized));
+    const requested = new URLSearchParams(window.location.search).get(POPOUT_PANEL_PARAM);
+    if (requested && requested !== 'chat' && ALL_PANELS.includes(requested as PanelId)) {
+      return requested as PanelId;
     }
-    return sanitized;
   } catch {
-    return [];
+    // Ignore malformed URLs and render the normal app.
   }
+  return null;
 }
 
 function loadEnvironmentOpen() {
   try {
     const raw = localStorage.getItem(ENVIRONMENT_HIDDEN_KEY);
-    if (raw === null) return false;
+    if (raw === null) return true;
     return raw !== 'true';
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -78,6 +75,27 @@ function loadClickyEnabled() {
     return localStorage.getItem(CLICKY_ENABLED_KEY) === 'true';
   } catch {
     return false;
+  }
+}
+
+function clampDimension(value: number, range: { min: number; max: number }) {
+  return Math.min(range.max, Math.max(range.min, Math.round(value)));
+}
+
+function loadDimension(key: string, fallback: number, range: { min: number; max: number }) {
+  try {
+    const parsed = Number(localStorage.getItem(key));
+    return Number.isFinite(parsed) ? clampDimension(parsed, range) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveDimension(key: string, value: number) {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // Non-essential preference storage can fail in restricted browser contexts.
   }
 }
 
@@ -133,7 +151,7 @@ function basename(p: string) {
 }
 
 function providerIsConfigured(provider: any): boolean {
-  return !!provider.hasKey || provider.type === 'local' || provider.accessMode === 'subscription';
+  return !!provider.hasKey || provider.type === 'local' || !!provider.oauth?.connected;
 }
 
 function formatStreamError(error: string): string {
@@ -328,9 +346,11 @@ function defaultRoleThinking(): Record<string, ThinkingEffort> {
 }
 
 function App() {
+  const popoutPanelId = useMemo(getRequestedPopoutPanel, []);
   const [sessions, setSessions] = useState<api.SessionInfo[]>([]);
-  const sidebarWidth = FIXED_SIDEBAR_WIDTH;
-  const [pinnedTools, setPinnedTools] = useState<PanelId[]>(loadPinnedTools);
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadDimension(SIDEBAR_WIDTH_KEY, DEFAULT_SIDEBAR_WIDTH, SIDEBAR_WIDTH_RANGE));
+  const [agentFocusWidth, setAgentFocusWidth] = useState(() => loadDimension(AGENT_FOCUS_WIDTH_KEY, DEFAULT_AGENT_FOCUS_WIDTH, AGENT_FOCUS_WIDTH_RANGE));
+  const [statusBarHeight, setStatusBarHeight] = useState(() => loadDimension(STATUS_BAR_HEIGHT_KEY, DEFAULT_STATUS_BAR_HEIGHT, STATUS_BAR_HEIGHT_RANGE));
   const [environmentOpen, setEnvironmentOpen] = useState(loadEnvironmentOpen);
   const [clickyEnabled, setClickyEnabled] = useState(loadClickyEnabled);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -355,6 +375,64 @@ function App() {
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
 
+  useEffect(() => saveDimension(SIDEBAR_WIDTH_KEY, sidebarWidth), [sidebarWidth]);
+  useEffect(() => saveDimension(AGENT_FOCUS_WIDTH_KEY, agentFocusWidth), [agentFocusWidth]);
+  useEffect(() => saveDimension(STATUS_BAR_HEIGHT_KEY, statusBarHeight), [statusBarHeight]);
+
+  const beginSidebarResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    document.body.classList.add('is-resizing-column');
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(clampDimension(startWidth + moveEvent.clientX - startX, SIDEBAR_WIDTH_RANGE));
+    };
+    const handleUp = () => {
+      document.body.classList.remove('is-resizing-column');
+      window.removeEventListener('pointermove', handleMove);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp, { once: true });
+  }, [sidebarWidth]);
+
+  const beginAgentFocusResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = agentFocusWidth;
+    document.body.classList.add('is-resizing-column');
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      setAgentFocusWidth(clampDimension(startWidth - (moveEvent.clientX - startX), AGENT_FOCUS_WIDTH_RANGE));
+    };
+    const handleUp = () => {
+      document.body.classList.remove('is-resizing-column');
+      window.removeEventListener('pointermove', handleMove);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp, { once: true });
+  }, [agentFocusWidth]);
+
+  const beginStatusBarResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = statusBarHeight;
+    document.body.classList.add('is-resizing-row');
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      setStatusBarHeight(clampDimension(startHeight - (moveEvent.clientY - startY), STATUS_BAR_HEIGHT_RANGE));
+    };
+    const handleUp = () => {
+      document.body.classList.remove('is-resizing-row');
+      window.removeEventListener('pointermove', handleMove);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp, { once: true });
+  }, [statusBarHeight]);
+
   useEffect(() => {
     const closeSidebarForNarrowScreens = () => {
       if (window.innerWidth <= NARROW_SIDEBAR_AUTO_CLOSE_WIDTH) {
@@ -369,7 +447,6 @@ function App() {
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
   const [contextWarning, setContextWarning] = useState<string | null>(null);
   const [trustMode, setTrustMode] = useState('workspace-write');
-  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>([]);
   const [configPath, setConfigPath] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
@@ -530,7 +607,6 @@ function App() {
             api.updateConfig({ activeTheme: resolvedTheme }).catch(() => {});
           }
           setPersonalityText(config.personality || '');
-          setFavoriteModelIds(Array.isArray(config.favoriteModels) ? config.favoriteModels : []);
           if (config.providers?.length > 0) {
             setProviders(config.providers.map((p: any) => ({
               id: p.id,
@@ -538,6 +614,7 @@ function App() {
               type: p.type || 'openai-compatible',
               endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
               configured: providerIsConfigured(p),
+              hasKey: !!p.hasKey,
               accessMode: p.accessMode,
               planId: p.planId,
               oauth: p.oauth,
@@ -640,6 +717,7 @@ function App() {
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
       configured: providerIsConfigured(p),
+              hasKey: !!p.hasKey,
       accessMode: p.accessMode,
       planId: p.planId,
       oauth: p.oauth,
@@ -666,16 +744,6 @@ function App() {
     setRoleThinking((prev) => {
       const next = { ...prev, [roleId]: effort };
       api.updateConfig({ roleThinking: next }).catch(() => {});
-      return next;
-    });
-  }, []);
-
-  const handleToggleFavoriteModel = useCallback((modelId: string) => {
-    setFavoriteModelIds((prev) => {
-      const next = prev.includes(modelId)
-        ? prev.filter((id) => id !== modelId)
-        : [...prev, modelId];
-      api.updateConfig({ favoriteModels: next }).catch(() => {});
       return next;
     });
   }, []);
@@ -738,6 +806,7 @@ function App() {
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
       configured: providerIsConfigured(p),
+              hasKey: !!p.hasKey,
       accessMode: p.accessMode,
       planId: p.planId,
       oauth: p.oauth,
@@ -760,6 +829,7 @@ function App() {
       type: p.type || 'openai-compatible',
       endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
       configured: providerIsConfigured(p),
+              hasKey: !!p.hasKey,
       accessMode: p.accessMode,
       planId: p.planId,
       oauth: p.oauth,
@@ -777,6 +847,7 @@ function App() {
         type: p.type || 'openai-compatible',
         endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
         configured: providerIsConfigured(p),
+              hasKey: !!p.hasKey,
         accessMode: p.accessMode,
         planId: p.planId,
         oauth: p.oauth,
@@ -980,7 +1051,7 @@ function App() {
     }
   }, [activeSessionId, workingDir]);
 
-  const handleSendMessage = useCallback(async (content: string) => {
+  const handleSendMessage = useCallback(async (content: string, options: api.SendMessageOptions = {}) => {
     if (isTyping) return;
     const sessionId = await ensureSession();
     if (!sessionId) return;
@@ -1278,7 +1349,7 @@ function App() {
           setIsTyping(false);
           api.listSessions().then(setSessions).catch(() => {});
         },
-      });
+      }, options);
     } catch (err) {
       console.error('Send failed:', err);
       setIsTyping(false);
@@ -1346,8 +1417,8 @@ function App() {
     await handleSendMessage(`Explain what changed in \`${filePath}\` and why.`);
   }, [handleSendMessage]);
 
-  const handleAskAboutScreenshot = useCallback(async (_screenshotBase64: string, url: string) => {
-    await handleSendMessage(`I have a screenshot of ${url}. The screenshot shows the current state of the page. What issues or improvements do you see?`);
+  const handleAskAboutScreenshot = useCallback(async (_screenshotBase64: string, url: string, visualContext?: api.VisualContextInfo) => {
+    await handleSendMessage(`Review the browser screenshot for ${url}. What issues or improvements do you see?`, { visualContext });
   }, [handleSendMessage]);
 
   const handleCompareModel = useCallback(async () => {
@@ -1534,15 +1605,6 @@ function App() {
   const focusSubAgentInPanel = (agentId: string | null) => {
     openAgentFocusPanel(agentId);
   };
-  const togglePinnedTool = useCallback((id: PanelId) => {
-    if (FORCE_HIDDEN_TOOL_PANELS.includes(id)) return;
-    setPinnedTools((prev) => {
-      const current = sanitizePinnedTools(prev);
-      const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
-      try { localStorage.setItem(PINNED_TOOLS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
   const setChatEnvironmentOpen = useCallback((open: boolean) => {
     setEnvironmentOpen(open);
     try { localStorage.setItem(ENVIRONMENT_HIDDEN_KEY, open ? 'false' : 'true'); } catch { /* ignore */ }
@@ -1550,11 +1612,32 @@ function App() {
   const openAgentFocusPanel = useCallback((agentId: string | null) => {
     if (agentId) setFocusedSubAgentId(agentId);
     setAgentFocusOpen(true);
-    if (environmentOpen) setChatEnvironmentOpen(false);
-  }, [environmentOpen, setChatEnvironmentOpen]);
+  }, []);
   const closeAgentFocusPanel = useCallback(() => {
     setAgentFocusOpen(false);
     setFocusedSubAgentId(null);
+  }, []);
+
+  const handlePopOutPanel = useCallback((panelId: PanelId) => {
+    if (panelId === 'chat') return;
+    const url = new URL(window.location.href);
+    url.searchParams.set(POPOUT_PANEL_PARAM, panelId);
+    const popup = window.open(
+      url.toString(),
+      `openharness-${panelId}-panel`,
+      'popup=yes,width=980,height=720,resizable=yes,scrollbars=no',
+    );
+    popup?.focus();
+  }, []);
+
+  const handleClosePopoutPanel = useCallback(() => {
+    if (window.opener) {
+      window.close();
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete(POPOUT_PANEL_PARAM);
+    window.location.href = url.toString();
   }, []);
 
   useEffect(() => {
@@ -1567,6 +1650,64 @@ function App() {
     setClickyEnabled(enabled);
     try { localStorage.setItem(CLICKY_ENABLED_KEY, enabled ? 'true' : 'false'); } catch { /* ignore */ }
   }, []);
+
+  const panelContext = {
+    subAgents,
+    plan: null,
+    fileChanges: [],
+    terminalCommands: [],
+    focusedSubAgentId,
+    messages,
+    isTyping,
+    onSendMessage: handleSendMessage,
+    activeModel,
+    workingDir,
+    projectProfile,
+    sessionId: activeSessionId,
+    pendingPatchProposalId,
+    clearPendingPatchProposalId,
+    onSendToChat: handleSendToChat,
+    onReviewDiff: handleReviewDiff,
+    onProposePatch: handleProposePatch,
+    onExplainChange: handleExplainChange,
+    onAskAboutScreenshot: handleAskAboutScreenshot,
+    onCompareModel: handleCompareModel,
+    onReviewChanges: () => openReviewChanges('summary'),
+    onFocusAgents: () => {
+      const activeRun = pickActiveRunAndPhases(subAgents)?.run.id;
+      const next = activeRun || subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
+      if (!next) return;
+      focusSubAgentInPanel(next);
+    },
+    onFocusSubAgent: (agentId: string) => focusSubAgentInPanel(agentId),
+    trustMode,
+    models: Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id })),
+    enabledModels: enabledModelsForPanels,
+    onApplyRoleRecommendation: handleAssignRoleModel,
+    environmentOpen,
+    onEnvironmentOpenChange: setChatEnvironmentOpen,
+    onRunSteer: handleRunSteer,
+  };
+
+  if (popoutPanelId) {
+    return (
+      <div className="panel-popout-app">
+        {loading ? (
+          <div className="welcome-screen">
+            <div className="typing-indicator">
+              <div className="typing-dot" />
+              <div className="typing-dot" />
+              <div className="typing-dot" />
+            </div>
+          </div>
+        ) : (
+          <PanelWrapper panelId={popoutPanelId} onClose={handleClosePopoutPanel}>
+            <PanelContent panelId={popoutPanelId} context={panelContext} />
+          </PanelWrapper>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="app-layout">
@@ -1603,6 +1744,7 @@ function App() {
         onOpenFolder={handleOpenFolder}
         onFocusAgent={(id) => focusSubAgentInPanel(id)}
         width={sidebarWidth}
+        onResizeStart={beginSidebarResize}
         onDeleteSession={handleDeleteSession}
         onDeleteProject={handleDeleteProject}
         clickyEnabled={clickyEnabled}
@@ -1621,8 +1763,6 @@ function App() {
           workingDir={workingDir}
           environmentOpen={environmentOpen}
           onToggleEnvironment={() => setChatEnvironmentOpen(!environmentOpen)}
-          pinnedTools={pinnedTools}
-          onTogglePinnedTool={togglePinnedTool}
         />
 
         <div className="content-area">
@@ -1636,106 +1776,93 @@ function App() {
             </div>
           ) : (
             <>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, position: 'relative' }}>
-              <>
+            <div className="workspace-shell">
                 <LayoutEngine
                   layout={layout}
                   onRemovePanel={removePanel}
-                  subAgents={subAgents}
-                  plan={null}
-                  fileChanges={[]}
-                  terminalCommands={[]}
-                  focusedSubAgentId={focusedSubAgentId}
-                  messages={messages}
-                  isTyping={isTyping}
-                  onSendMessage={handleSendMessage}
-                  activeModel={activeModel}
-                  workingDir={workingDir}
-                  projectProfile={projectProfile}
-                  sessionId={activeSessionId}
-                  pendingPatchProposalId={pendingPatchProposalId}
-                  clearPendingPatchProposalId={clearPendingPatchProposalId}
-                  onSendToChat={handleSendToChat}
-                  onReviewDiff={handleReviewDiff}
-                  onProposePatch={handleProposePatch}
-                  onExplainChange={handleExplainChange}
-                  onAskAboutScreenshot={handleAskAboutScreenshot}
-                  onCompareModel={handleCompareModel}
-                  onReviewChanges={() => openReviewChanges('summary')}
-                  onFocusAgents={() => {
-                    const activeRun = pickActiveRunAndPhases(subAgents)?.run.id;
-                    const next = activeRun || subAgents.find((a) => a.status === 'running')?.id || subAgents[0]?.id || null;
-                    if (!next) return;
-                    focusSubAgentInPanel(next);
-                  }}
-                  onFocusSubAgent={(agentId: string) => focusSubAgentInPanel(agentId)}
-                  trustMode={trustMode}
-                  models={Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id }))}
-                  enabledModels={enabledModelsForPanels}
-                  onApplyRoleRecommendation={handleAssignRoleModel}
-                  pinnedTools={pinnedTools}
-                  onOpenPinnedTool={addPanel}
-                  environmentOpen={environmentOpen}
-                  onEnvironmentOpenChange={setChatEnvironmentOpen}
+                  onPopOutPanel={handlePopOutPanel}
+                  {...panelContext}
+                />
+            </div>
+            {agentFocusOpen && (
+              <div
+                className="agent-focus-shell"
+                role="region"
+                aria-label="Right-hand Agent detail pane"
+                style={{
+                  width: agentFocusWidth,
+                  ['--agent-focus-width']: `${agentFocusWidth}px`,
+                } as CSSProperties & { '--agent-focus-width'?: string }}
+              >
+                <button
+                  type="button"
+                  className="agent-focus-resize-handle"
+                  aria-label="Resize Agent detail pane"
+                  title="Resize Agent detail pane"
+                  onPointerDown={beginAgentFocusResize}
+                />
+                <AgentFocusPanel
+                  agents={subAgents}
+                  focusedId={focusedSubAgentId}
+                  onFocus={openAgentFocusPanel}
+                  onExit={closeAgentFocusPanel}
                   onRunSteer={handleRunSteer}
                 />
-
-                {agentFocusOpen && (
-                  <div className="agent-focus-overlay" role="region" aria-label="Right-hand Agent detail pane">
-                    <AgentFocusPanel
-                      agents={subAgents}
-                      focusedId={focusedSubAgentId}
-                      onFocus={openAgentFocusPanel}
-                      onExit={closeAgentFocusPanel}
-                      onRunSteer={handleRunSteer}
-                    />
-                  </div>
-                )}
-              </>
-            </div>
+              </div>
+            )}
           </>
           )}
         </div>
 
         {/* Enhanced Status Bar */}
         {shouldShowStatusBar && (
-          <StatusBar
-            activeModel={activeModel}
-            providerName={activeModel.toLowerCase() === 'auto'
-              ? 'Router'
-              : providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
-            activeProviderId={providers.find(p => p.models?.some(m => m.id === activeModel))?.id}
-            activeProviderAccessMode={providers.find(p => p.models?.some(m => m.id === activeModel))?.accessMode}
-            activeProviderPlanId={providers.find(p => p.models?.some(m => m.id === activeModel))?.planId}
-            thinkingEffort={thinkingEffort}
-            connected={providers.some(p => p.configured)}
-            messageCount={msgCount}
-            workingDir={workingDir}
-            models={Array.from(modelContextWindows.entries()).map(([id, ctx]) => {
-              const prov = providers.find(p => p.models?.some(m => m.id === id));
-              return {
-                id,
-                name: id,
-                providerName: prov?.name || 'Unknown',
-                providerId: prov?.id,
-                accessMode: prov?.accessMode,
-                planId: prov?.planId,
-                contextWindow: ctx,
-              };
-            })}
-            onModelChange={handleSelectModel}
-            onThinkingEffortChange={handleThinkingEffortChange}
-            favoriteModelIds={favoriteModelIds}
-            onToggleFavoriteModel={handleToggleFavoriteModel}
-            enabledToolCount={enabledToolCount}
-            configuredProviderCount={providers.filter(p => p.configured).length}
-            trustMode={trustMode}
-            onTrustModeChange={handleTrustModeChange}
-            runningModel={runningModel}
-            autoRouterStep={lastAutoRouterStep}
-            providerRateLimitWarning={providerRateLimitWarning}
-            onOpenSettings={() => setSettingsOpen(true)}
-          />
+          <div
+            className="status-bar-shell"
+            style={{ ['--status-bar-height']: `${statusBarHeight}px` } as CSSProperties & { '--status-bar-height'?: string }}
+          >
+            <button
+              type="button"
+              className="status-bar-resize-handle"
+              aria-label="Resize bottom status bar"
+              title="Resize bottom status bar"
+              onPointerDown={beginStatusBarResize}
+            />
+            <StatusBar
+              activeModel={activeModel}
+              providerName={activeModel.toLowerCase() === 'auto'
+                ? 'Router'
+                : providers.find(p => p.models?.some(m => m.id === activeModel))?.name || ''}
+              activeProviderId={providers.find(p => p.models?.some(m => m.id === activeModel))?.id}
+              activeProviderAccessMode={providers.find(p => p.models?.some(m => m.id === activeModel))?.accessMode}
+              activeProviderPlanId={providers.find(p => p.models?.some(m => m.id === activeModel))?.planId}
+              thinkingEffort={thinkingEffort}
+              connected={providers.some(p => p.configured)}
+              messageCount={msgCount}
+              workingDir={workingDir}
+              models={Array.from(modelContextWindows.entries()).map(([id, ctx]) => {
+                const prov = providers.find(p => p.models?.some(m => m.id === id));
+                return {
+                  id,
+                  name: id,
+                  providerName: prov?.name || 'Unknown',
+                  providerId: prov?.id,
+                  accessMode: prov?.accessMode,
+                  planId: prov?.planId,
+                  contextWindow: ctx,
+                };
+              })}
+              onModelChange={handleSelectModel}
+              onThinkingEffortChange={handleThinkingEffortChange}
+              enabledToolCount={enabledToolCount}
+              configuredProviderCount={providers.filter(p => p.configured).length}
+              trustMode={trustMode}
+              onTrustModeChange={handleTrustModeChange}
+              runningModel={runningModel}
+              autoRouterStep={lastAutoRouterStep}
+              providerRateLimitWarning={providerRateLimitWarning}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          </div>
         )}
       </main>
 
@@ -1770,6 +1897,7 @@ function App() {
                 type: p.type || 'openai-compatible',
                 endpointLabel: p.baseURL?.replace(/^https?:\/\//, '') || '',
                 configured: providerIsConfigured(p),
+              hasKey: !!p.hasKey,
                 accessMode: p.accessMode,
                 planId: p.planId,
                 oauth: p.oauth,

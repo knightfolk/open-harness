@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
+import type { LayoutNode, SplitNode, PanelId, PanelPlacement } from '../../types/layout';
 import { DEFAULT_LAYOUT, ALL_PANELS } from '../../types/layout';
 
 const STORAGE_KEY = 'openharness-layout.v7';
@@ -62,14 +62,18 @@ function removePanelFromTree(node: LayoutNode, id: PanelId): LayoutNode | null {
   return { ...split, children: newChildren };
 }
 
-/** Insert a new panel beside the root layout in a stable vertical split. */
-function appendPanel(node: LayoutNode, id: PanelId): LayoutNode {
+/** Insert a new panel beside the root layout in the requested pane direction. */
+function appendPanel(node: LayoutNode, id: PanelId, placement: PanelPlacement = 'bottom'): LayoutNode {
+  const direction = placement === 'right' ? 'horizontal' : 'vertical';
   if (typeof node === 'string') {
-    return { direction: 'vertical', children: [node, id] };
+    return { direction, children: [node, id] };
   }
 
   const split = node as SplitNode;
-  return { ...split, direction: 'vertical', children: [...split.children, id] };
+  if (split.direction === direction) {
+    return { ...split, children: [...split.children, id] };
+  }
+  return { direction, children: [node, id] };
 }
 
 
@@ -90,10 +94,10 @@ export function useLayoutState() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [layout]);
 
-  const addPanel = useCallback((id: PanelId) => {
+  const addPanel = useCallback((id: PanelId, placement: PanelPlacement = 'bottom') => {
     setLayout((prev) => {
       if (containsPanel(prev, id)) return prev;
-      return appendPanel(prev, id);
+      return appendPanel(prev, id, placement);
     });
   }, [setLayout]);
 
@@ -105,13 +109,13 @@ export function useLayoutState() {
     });
   }, [setLayout]);
 
-  const togglePanel = useCallback((id: PanelId) => {
+  const togglePanel = useCallback((id: PanelId, placement: PanelPlacement = 'bottom') => {
     setLayout((prev) => {
       if (containsPanel(prev, id)) {
         const result = removePanelFromTree(prev, id);
         return result ?? structuredClone(DEFAULT_LAYOUT);
       }
-      return appendPanel(prev, id);
+      return appendPanel(prev, id, placement);
     });
   }, [setLayout]);
 

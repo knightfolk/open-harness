@@ -346,6 +346,7 @@ export interface StreamCallbacks {
 
 export interface SendMessageOptions {
   modelId?: string;
+  visualContext?: VisualContextInfo;
   sideChat?: {
     includeMainChat?: boolean;
     mainSessionId?: string;
@@ -688,7 +689,10 @@ export async function fetchProviderModels(providerId: string, tempKey?: string, 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ apiKey: tempKey, baseURL: tempURL }),
   });
-  if (!res.ok) throw new Error(`Fetch models failed: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Fetch models failed: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -1032,7 +1036,7 @@ export async function sendMessage(sessionId: string, content: string, callbacks:
   const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, modelId: options.modelId, sideChat: options.sideChat }),
+    body: JSON.stringify({ content, modelId: options.modelId, sideChat: options.sideChat, visualContext: options.visualContext }),
   });
 
   if (!res.ok) {
@@ -1376,6 +1380,57 @@ export interface DeepBrowserArtifact {
     metaDescription?: string;
   };
   resourceHealth?: Array<{ url: string; status: number; ok: boolean }>;
+}
+
+export interface VisualContextInfo {
+  kind: 'browser-screenshot';
+  url: string;
+  title?: string;
+  capturedAt?: string;
+  screenshot?: {
+    present: boolean;
+    path?: string;
+  };
+  bodyTextPreview?: string;
+  a11yNodes?: Array<{ tag: string; label: string; role?: string }>;
+  domStructure?: DeepBrowserArtifact['domStructure'];
+  resourceHealth?: DeepBrowserArtifact['resourceHealth'];
+  errors?: DeepBrowserArtifact['errors'];
+}
+
+export function browserArtifactToVisualContext(
+  artifact: DeepBrowserArtifact,
+  fallbackPreview?: BrowserPreviewInfo | null,
+): VisualContextInfo {
+  return {
+    kind: 'browser-screenshot',
+    url: artifact.url || fallbackPreview?.url || '',
+    title: artifact.title || fallbackPreview?.title,
+    capturedAt: artifact.capturedAt || fallbackPreview?.timestamp,
+    screenshot: {
+      present: Boolean(artifact.screenshotBase64 || fallbackPreview?.screenshotBase64),
+      path: artifact.screenshotPath || fallbackPreview?.screenshotPath,
+    },
+    bodyTextPreview: artifact.bodyTextPreview,
+    a11yNodes: artifact.a11yNodes,
+    domStructure: artifact.domStructure,
+    resourceHealth: artifact.resourceHealth,
+    errors: artifact.errors?.length ? artifact.errors : fallbackPreview?.errors,
+  };
+}
+
+export function previewToVisualContext(preview: BrowserPreviewInfo, url: string): VisualContextInfo {
+  return {
+    kind: 'browser-screenshot',
+    url,
+    title: preview.title,
+    capturedAt: preview.timestamp,
+    screenshot: {
+      present: Boolean(preview.screenshotBase64),
+      path: preview.screenshotPath,
+    },
+    errors: preview.errors,
+  };
 }
 
 export async function captureBrowserPreview(url: string): Promise<BrowserPreviewInfo> {

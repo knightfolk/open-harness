@@ -44,9 +44,9 @@ export const PROVIDER_PLAN_CATALOG: ProviderPlanCatalogEntry[] = [
       { id: 'usage-tier-4-plus', label: 'API tier 4+', accessMode: 'api-key', description: 'High-volume API usage tier; check the OpenAI dashboard for exact limits.' },
       { id: 'priority', label: 'Priority processing', accessMode: 'api-key', description: 'Usage-based API with reliable high-speed processing where available.' },
       { id: 'scale-enterprise', label: 'Scale / Enterprise', accessMode: 'api-key', description: 'Reserved capacity, data residency, SLA, or custom enterprise terms.' },
-      { id: 'chatgpt-plus', label: 'ChatGPT Plus', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed ChatGPT Plus account access; not equivalent to OpenAI API billing.' },
-      { id: 'chatgpt-pro', label: 'ChatGPT Pro', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed ChatGPT Pro account access for subscription-aware routing and account state.' },
-      { id: 'chatgpt-team', label: 'ChatGPT Team', accessMode: 'subscription', authMethod: 'oauth', description: 'OAuth-backed ChatGPT Team workspace access where an OAuth client is configured.' },
+      { id: 'chatgpt-plus', label: 'ChatGPT Plus', accessMode: 'subscription', description: 'Plan label only. OpenHarness still needs an OpenAI Platform API key for normal API model calls.' },
+      { id: 'chatgpt-pro', label: 'ChatGPT Pro', accessMode: 'subscription', description: 'Plan label only. ChatGPT subscription sign-in does not authorize OpenAI API requests in OpenHarness.' },
+      { id: 'chatgpt-team', label: 'ChatGPT Team', accessMode: 'subscription', description: 'Plan label only. Use an OpenAI Platform API key unless a dedicated enterprise token path is added.' },
     ],
   },
   {

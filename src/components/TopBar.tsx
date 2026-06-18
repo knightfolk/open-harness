@@ -1,38 +1,70 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, RotateCcw,
   ChevronDown, Check, Wrench,
-  Heart, Activity,
+  Activity, PanelBottom, PanelRight, ArrowLeftRight,
 } from 'lucide-react';
-import type { PanelId } from '../types/layout';
-import { ALL_PANELS } from '../types/layout';
+import type { PanelId, PanelPlacement } from '../types/layout';
+import { ALL_PANELS, defaultPanelPlacement, oppositePanelPlacement } from '../types/layout';
 import { getPanelIcon, getPanelConfig } from './layout/panelRegistry';
+
+const PANEL_PLACEMENT_OVERRIDES_KEY = 'openharness.panel-placement-overrides.v1';
+
+function isPanelPlacement(value: unknown): value is PanelPlacement {
+  return value === 'right' || value === 'bottom';
+}
+
+function loadPanelPlacementOverrides(): Partial<Record<PanelId, PanelPlacement>> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PANEL_PLACEMENT_OVERRIDES_KEY) || '{}') as Record<string, unknown>;
+    const panelIds = new Set<string>(ALL_PANELS);
+    const next: Partial<Record<PanelId, PanelPlacement>> = {};
+    for (const [id, placement] of Object.entries(parsed)) {
+      if (panelIds.has(id) && isPanelPlacement(placement)) {
+        next[id as PanelId] = placement;
+      }
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function savePanelPlacementOverrides(overrides: Partial<Record<PanelId, PanelPlacement>>) {
+  try {
+    localStorage.setItem(PANEL_PLACEMENT_OVERRIDES_KEY, JSON.stringify(overrides));
+  } catch {
+    // Non-essential preference storage can fail in restricted browser contexts.
+  }
+}
+
+function placementLabel(placement: PanelPlacement) {
+  return placement === 'right' ? 'right pane' : 'bottom pane';
+}
 
 interface Props {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   visiblePanels: Set<PanelId>;
-  onTogglePanel: (id: PanelId) => void;
-  onOpenPanel: (id: PanelId) => void;
+  onTogglePanel: (id: PanelId, placement?: PanelPlacement) => void;
+  onOpenPanel: (id: PanelId, placement?: PanelPlacement) => void;
   onResetLayout: () => void;
   activeModel: string;
   sessionTitle: string;
   workingDir: string | null;
   environmentOpen: boolean;
   onToggleEnvironment: () => void;
-  pinnedTools: PanelId[];
-  onTogglePinnedTool: (id: PanelId) => void;
 }
 
 export function TopBar({
   sidebarOpen, onToggleSidebar, visiblePanels, onTogglePanel, onOpenPanel, onResetLayout,
   activeModel, sessionTitle, workingDir,
   environmentOpen, onToggleEnvironment,
-  pinnedTools, onTogglePinnedTool,
 }: Props) {
   const modelLabel = activeModel.toLowerCase() === 'auto' ? 'Router' : activeModel;
   const modelDetailPanel: PanelId = activeModel.toLowerCase() === 'auto' ? 'routing-learning' : 'model-lab';
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
+  const [panelPlacementOverrides, setPanelPlacementOverrides] = useState(loadPanelPlacementOverrides);
   const menuRef = useRef<HTMLDivElement>(null);
   const panelMenuIds = useMemo(() =>
     ALL_PANELS.filter((id) => id !== 'chat' && id !== 'sub-agents'),
@@ -54,42 +86,65 @@ export function TopBar({
     return () => document.removeEventListener('mousedown', handler);
   }, [panelMenuOpen]);
 
+  const resolvedPanelPlacement = useCallback((id: PanelId): PanelPlacement => (
+    panelPlacementOverrides[id] ?? defaultPanelPlacement(id)
+  ), [panelPlacementOverrides]);
+
+  const flipPanelPlacement = useCallback((id: PanelId) => {
+    setPanelPlacementOverrides((prev) => {
+      const current = prev[id] ?? defaultPanelPlacement(id);
+      const nextPlacement = oppositePanelPlacement(current);
+      const next = { ...prev, [id]: nextPlacement };
+      if (nextPlacement === defaultPanelPlacement(id)) {
+        delete next[id];
+      }
+      savePanelPlacementOverrides(next);
+      return next;
+    });
+  }, []);
+
   const panelMenuItems = useMemo(() => panelMenuIds.map((id) => {
     const Icon = getPanelIcon(id);
     const config = getPanelConfig(id);
     const active = visiblePanels.has(id);
+    const placement = resolvedPanelPlacement(id);
+    const opposite = oppositePanelPlacement(placement);
+    const PlacementIcon = placement === 'bottom' ? PanelBottom : PanelRight;
+    const isCustomPlacement = placement !== defaultPanelPlacement(id);
+    const placementTitle = `${config.label} opens in the ${placementLabel(placement)} by default.`;
+    const flipTitle = `Change ${config.label} default to the ${placementLabel(opposite)}.`;
     return (
-      <button
+      <div
         key={id}
-        className={'panel-menu-item' + (active ? ' active' : '')}
+        className={'panel-menu-row' + (active ? ' active' : '')}
         data-panel-menu-id={id}
-        onClick={() => { onTogglePanel(id); setPanelMenuOpen(false); }}
       >
-        <Icon size={14} />
-        <span className="panel-menu-item-label">{config.label}</span>
-        <span
-          className={'panel-menu-heart' + (pinnedTools.includes(id) ? ' pinned' : '')}
-          role="button"
-          tabIndex={0}
-          title={pinnedTools.includes(id) ? 'Remove from sidebar' : 'Add to sidebar'}
-          aria-label={pinnedTools.includes(id) ? `Remove ${config.label} from sidebar` : `Add ${config.label} to sidebar`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePinnedTool(id);
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            e.preventDefault();
-            e.stopPropagation();
-            onTogglePinnedTool(id);
-          }}
+        <button
+          type="button"
+          className={'panel-menu-item panel-menu-main' + (active ? ' active' : '')}
+          onClick={() => { onTogglePanel(id, placement); setPanelMenuOpen(false); }}
+          title={placementTitle}
+          aria-label={`${config.label}. ${placementTitle}`}
         >
-          <Heart size={13} />
-        </span>
-        {active && <Check size={14} className="panel-menu-check" aria-hidden="true" />}
-      </button>
+          <Icon size={14} />
+          <span className="panel-menu-item-label">{config.label}</span>
+          <span className={`panel-menu-placement ${placement}${isCustomPlacement ? ' custom' : ''}`} title={placementTitle} aria-label={placementTitle}>
+            <PlacementIcon size={13} aria-hidden="true" />
+          </span>
+          {active && <Check size={14} className="panel-menu-check" aria-hidden="true" />}
+        </button>
+        <button
+          type="button"
+          className="panel-menu-flip"
+          onClick={() => flipPanelPlacement(id)}
+          title={flipTitle}
+          aria-label={flipTitle}
+        >
+          <ArrowLeftRight size={13} aria-hidden="true" />
+        </button>
+      </div>
     );
-  }), [panelMenuIds, visiblePanels, pinnedTools, onTogglePanel, onTogglePinnedTool]);
+  }), [panelMenuIds, visiblePanels, resolvedPanelPlacement, onTogglePanel, flipPanelPlacement]);
 
   return (
     <div className="top-bar">
@@ -110,7 +165,7 @@ export function TopBar({
         type="button"
         data-model-evidence-entry="true"
         data-model-evidence-panel={modelDetailPanel}
-        onClick={() => onOpenPanel(modelDetailPanel)}
+        onClick={() => onOpenPanel(modelDetailPanel, resolvedPanelPlacement(modelDetailPanel))}
         title={activeModel.toLowerCase() === 'auto' ? 'Open Routing Learning for router evidence' : `Open Model Lab for ${activeModel}`}
         aria-label={activeModel.toLowerCase() === 'auto' ? 'Open Routing Learning for router evidence' : `Open Model Lab for model ${activeModel}`}
       >

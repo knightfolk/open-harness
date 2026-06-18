@@ -10,7 +10,7 @@
 // provider adapter for the cheapest possible path. That keeps the
 // "background Explorer" / "background Reviewer" buttons cheap to fire.
 import { listAgentProfiles, getAgentProfile, type AgentProfile, type AgentProfileId } from './agentProfiles';
-import { type StoredConfig } from "./config";
+import { providerAuthToken, type StoredConfig } from "./config";
 import { v4 as uuid } from 'uuid';
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'fs';
 import { extname, isAbsolute, join, resolve } from 'path';
@@ -360,7 +360,7 @@ function pickProviderForModel(config: StoredConfig, modelId: string): { baseURL:
     if (p.models.some((m) => m.id === modelId || m.id === bareId)) {
       return {
         baseURL: p.baseURL,
-        apiKey: p.apiKey,
+        apiKey: providerAuthToken(p),
         providerId: p.id,
         providerType: p.type,
       };
@@ -371,7 +371,7 @@ function pickProviderForModel(config: StoredConfig, modelId: string): { baseURL:
   if (!first) return null;
   return {
     baseURL: first.baseURL,
-    apiKey: first.apiKey,
+    apiKey: providerAuthToken(first),
     providerId: first.id,
     providerType: first.type,
   };

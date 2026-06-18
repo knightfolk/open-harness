@@ -1,5 +1,6 @@
 import type { ProviderAdapter, ProviderChatRequest, ProviderEvent, ProviderStreamOptions } from './types';
 import type { StoredProvider } from '../config';
+import { providerAuthToken } from '../config';
 import { OpenAIAdapter } from './openai';
 import { AnthropicAdapter } from './anthropic';
 import { GeminiAdapter } from './gemini';
@@ -35,7 +36,7 @@ export async function* streamWithAdapter(
 
   const options: ProviderStreamOptions = {
     baseURL: provider.baseURL,
-    apiKey: provider.apiKey,
+    apiKey: providerAuthToken(provider),
     signal,
   };
 

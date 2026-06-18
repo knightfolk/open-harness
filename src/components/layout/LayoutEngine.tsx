@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
 import type { HarnessRun, RunSteeringAction } from '../../types';
 import { PanelWrapper } from './PanelWrapper';
@@ -6,6 +7,7 @@ import { PanelContent } from './PanelContent';
 interface Props {
   layout: LayoutNode;
   onRemovePanel: (id: PanelId) => void;
+  onPopOutPanel?: (id: PanelId) => void;
   subAgents: any;
   plan: any;
   fileChanges: any;
@@ -32,8 +34,6 @@ interface Props {
   models?: Array<{ id: string; name: string }>;
   enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
   onApplyRoleRecommendation?: (roleId: string, modelId: string) => void;
-  pinnedTools?: PanelId[];
-  onOpenPinnedTool?: (id: PanelId) => void;
   environmentOpen?: boolean;
   onEnvironmentOpenChange?: (open: boolean) => void;
   onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;
@@ -43,6 +43,7 @@ interface Props {
 export function LayoutEngine({
   layout,
   onRemovePanel,
+  onPopOutPanel,
   subAgents,
   plan,
   fileChanges,
@@ -70,13 +71,11 @@ export function LayoutEngine({
     models,
     enabledModels,
     onApplyRoleRecommendation,
-    pinnedTools,
-    onOpenPinnedTool,
     environmentOpen,
     onEnvironmentOpenChange,
     onRunSteer,
   }: Props) {
-  return <RenderNode node={layout} onRemovePanel={onRemovePanel} context={{
+  return <RenderNode node={layout} onRemovePanel={onRemovePanel} onPopOutPanel={onPopOutPanel} context={{
     subAgents, plan, fileChanges, terminalCommands, focusedSubAgentId, messages, isTyping,
     onSendMessage, activeModel, workingDir, projectProfile, sessionId,
     pendingPatchProposalId, clearPendingPatchProposalId,
@@ -89,8 +88,6 @@ export function LayoutEngine({
     models,
     enabledModels,
     onApplyRoleRecommendation,
-    pinnedTools,
-    onOpenPinnedTool,
     environmentOpen,
     onEnvironmentOpenChange,
     onRunSteer,
@@ -100,26 +97,98 @@ export function LayoutEngine({
 interface RenderProps {
   node: LayoutNode;
   onRemovePanel: (id: PanelId) => void;
+  onPopOutPanel?: (id: PanelId) => void;
   context: any;
 }
 
-function RenderNode({ node, onRemovePanel, context }: RenderProps) {
+function RenderNode({ node, onRemovePanel, onPopOutPanel, context }: RenderProps) {
   if (typeof node === 'string') {
     const panelId = node as PanelId;
     return (
-      <PanelWrapper panelId={panelId} onClose={onRemovePanel}>
+      <PanelWrapper panelId={panelId} onClose={onRemovePanel} onPopOut={onPopOutPanel}>
         <PanelContent panelId={panelId} context={context} />
       </PanelWrapper>
     );
   }
 
   const split = node as SplitNode;
+  return <SplitRenderer split={split} onRemovePanel={onRemovePanel} onPopOutPanel={onPopOutPanel} context={context} />;
+}
+
+function equalSizes(count: number): number[] {
+  if (count <= 0) return [];
+  return Array.from({ length: count }, () => 100 / count);
+}
+
+function SplitRenderer({ split, onRemovePanel, onPopOutPanel, context }: {
+  split: SplitNode;
+  onRemovePanel: (id: PanelId) => void;
+  onPopOutPanel?: (id: PanelId) => void;
+  context: any;
+}) {
+  const splitRef = useRef<HTMLDivElement>(null);
+  const [sizes, setSizes] = useState(() => equalSizes(split.children.length));
   const flexDirection = split.direction === 'vertical' ? 'column' : 'row';
+
+  useEffect(() => {
+    setSizes(equalSizes(split.children.length));
+  }, [split.direction, split.children.length]);
+
+  const beginResize = (index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const container = splitRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const mainSize = split.direction === 'horizontal' ? rect.width : rect.height;
+    if (mainSize <= 0) return;
+
+    const startCoord = split.direction === 'horizontal' ? event.clientX : event.clientY;
+    const startSizes = [...sizes];
+    const pairTotal = startSizes[index] + startSizes[index + 1];
+    const minSize = Math.min(42, Math.max(12, pairTotal * 0.18));
+    document.body.classList.add(split.direction === 'horizontal' ? 'is-resizing-column' : 'is-resizing-row');
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const coord = split.direction === 'horizontal' ? moveEvent.clientX : moveEvent.clientY;
+      const delta = ((coord - startCoord) / mainSize) * 100;
+      const first = Math.min(pairTotal - minSize, Math.max(minSize, startSizes[index] + delta));
+      const second = pairTotal - first;
+      setSizes((prev) => {
+        const next = [...prev];
+        next[index] = first;
+        next[index + 1] = second;
+        return next;
+      });
+    };
+
+    const handleUp = () => {
+      document.body.classList.remove('is-resizing-column', 'is-resizing-row');
+      window.removeEventListener('pointermove', handleMove);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp, { once: true });
+  };
+
   return (
-    <div className="layout-split" style={{ flex: 1, display: 'flex', flexDirection, minWidth: 0, minHeight: 0 }}>
+    <div ref={splitRef} className={`layout-split layout-split--${split.direction}`} style={{ flex: 1, display: 'flex', flexDirection, minWidth: 0, minHeight: 0 }}>
       {split.children.map((child, i) => (
-        <div key={typeof child === 'string' ? child : `split-${i}`} style={{ minWidth: 0, minHeight: 0, flex: 1 }}>
-          <RenderNode node={child} onRemovePanel={onRemovePanel} context={context} />
+        <div
+          key={typeof child === 'string' ? child : `split-${i}`}
+          className="layout-split-child"
+          style={{ flex: `${sizes[i] ?? 1} ${sizes[i] ?? 1} 0`, minWidth: 0, minHeight: 0 }}
+        >
+          <RenderNode node={child} onRemovePanel={onRemovePanel} onPopOutPanel={onPopOutPanel} context={context} />
+          {i < split.children.length - 1 && (
+            <button
+              type="button"
+              className={`layout-split-resizer layout-split-resizer--${split.direction}`}
+              aria-label={split.direction === 'horizontal' ? 'Resize side panes' : 'Resize stacked panes'}
+              title={split.direction === 'horizontal' ? 'Resize side panes' : 'Resize stacked panes'}
+              onPointerDown={(event) => beginResize(i, event)}
+            />
+          )}
         </div>
       ))}
     </div>

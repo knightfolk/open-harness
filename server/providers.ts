@@ -1,7 +1,7 @@
 /**
  * Provider connection testing and model fetching
  */
-import type { StoredProvider } from './config';
+import { providerAuthToken, type StoredProvider } from './config';
 
 // ── Test provider connection ───────────────────────────
 
@@ -17,14 +17,22 @@ export async function testProviderConnection(provider: StoredProvider): Promise<
 
   try {
     const url = buildModelsURL(provider);
+    const authToken = providerAuthToken(provider);
+    if (provider.type !== 'local' && !authToken) {
+      return {
+        ok: false,
+        error: 'Add an API key or connect OAuth before testing this provider.',
+        latencyMs: Date.now() - start,
+      };
+    }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-  if (provider.apiKey) {
-    headers['Authorization'] = `Bearer ${provider.apiKey}`;
-    headers['x-api-key'] = provider.apiKey;
-  }
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+      headers['x-api-key'] = authToken;
+    }
 
     const response = await fetch(url, {
       method: 'GET',
@@ -70,14 +78,18 @@ export interface FetchedModel {
 export async function fetchProviderModels(provider: StoredProvider): Promise<FetchedModel[]> {
   try {
     const url = buildModelsURL(provider);
+    const authToken = providerAuthToken(provider);
+    if (provider.type !== 'local' && !authToken) {
+      throw new Error('Add an API key or connect OAuth before fetching models.');
+    }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-  if (provider.apiKey) {
-    headers['Authorization'] = `Bearer ${provider.apiKey}`;
-    headers['x-api-key'] = provider.apiKey;
-  }
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+      headers['x-api-key'] = authToken;
+    }
 
     const response = await fetch(url, {
       method: 'GET',

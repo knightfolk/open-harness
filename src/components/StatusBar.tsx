@@ -1,8 +1,8 @@
-import { Suspense, lazy, useState, useRef, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Wifi, WifiOff, ChevronUp, Cpu, Brain, DollarSign,
-  Check, Search, Shield, Settings, Star, Eye, Wrench, Layers, Terminal, AlertTriangle,
+  Check, Search, Shield, Settings, Eye, Wrench, Layers, Terminal, AlertTriangle,
 } from 'lucide-react';
 import { estimateModelCost } from '../utils/api';
 import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
@@ -39,8 +39,6 @@ interface Props {
   configuredProviderCount?: number;
   onModelChange: (modelId: string) => void;
   onThinkingEffortChange: (effort: ThinkingEffort) => void;
-  favoriteModelIds?: string[];
-  onToggleFavoriteModel?: (modelId: string) => void;
   onTrustModeChange?: (mode: string) => void;
   runningModel?: string | null;
   autoRouterStep?: Extract<HarnessRunStep, { type: 'auto_router' }> | null;
@@ -112,8 +110,6 @@ export function StatusBar({
   configuredProviderCount,
   onModelChange,
   onThinkingEffortChange,
-  favoriteModelIds,
-  onToggleFavoriteModel,
   onTrustModeChange,
   runningModel,
   autoRouterStep,
@@ -168,9 +164,7 @@ export function StatusBar({
   );
   const hasSearch = searchQuery.trim().length > 0;
   const autoModel: ModelOption = { id: AUTO_MODEL_ID, name: AUTO_MODEL_LABEL, providerName: 'Router', contextWindow: 0 };
-  const favoriteSet = useMemo(() => new Set(favoriteModelIds || []), [favoriteModelIds]);
-  const favoriteModels = filtered.filter((m) => m.id !== AUTO_MODEL_ID && favoriteSet.has(m.id));
-  const regularModels = filtered.filter((m) => m.id !== AUTO_MODEL_ID && !favoriteSet.has(m.id));
+  const regularModels = filtered.filter((m) => m.id !== AUTO_MODEL_ID);
 
   const groupModelsByProvider = (list: ModelOption[]) => {
     const grouped = new Map<string, ModelOption[]>();
@@ -181,13 +175,9 @@ export function StatusBar({
     }
     return Array.from(grouped.entries());
   };
-  const groupedFavorites = groupModelsByProvider(favoriteModels);
   const groupedRegular = groupModelsByProvider(regularModels);
 
   const modelGroups: Array<{ label: string; models: ModelOption[] }> = [];
-  if (groupedFavorites.length > 0) {
-    modelGroups.push({ label: 'Favorites', models: groupedFavorites.flatMap(([_, list]) => list) });
-  }
   for (const [provider, providerModels] of groupedRegular) {
     modelGroups.push({ label: provider, models: providerModels });
   }
@@ -387,7 +377,6 @@ export function StatusBar({
                 <div key={label} className="model-picker-group">
                   <div className="model-picker-group-label">{label}</div>
                   {providerModels.map((m) => {
-                    const isFavorite = favoriteSet.has(m.id);
                     const description = modelCatalogSummary(m.id, m.providerName);
                     const rowTitle = m.id === AUTO_MODEL_ID ? '' : modelCatalogTooltip(m.id, m.providerName);
                     const rowLabel = `${m.providerName} • ${m.id}`;
@@ -398,30 +387,6 @@ export function StatusBar({
                         onClick={() => { onModelChange(m.id); setModelPickerOpen(false); setSearchQuery(''); }}
                         title={rowTitle || rowLabel}
                       >
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          aria-pressed={isFavorite}
-                          className="model-picker-favorite-btn"
-                          title={isFavorite ? `Unfavorite ${m.id}` : `Favorite ${m.id}`}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onToggleFavoriteModel?.(m.id);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              onToggleFavoriteModel?.(m.id);
-                            }
-                          }}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                          }}
-                        >
-                          {isFavorite ? <Star size={14} fill="currentColor" color="var(--accent-primary)" /> : <Star size={14} />}
-                        </span>
                         <span className="model-picker-item-main">
                           <span className="model-picker-item-name">{m.name}</span>
                           {description && <span className="model-picker-item-desc">{description}</span>}

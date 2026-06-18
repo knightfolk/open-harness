@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { Send, Paperclip, Image, AtSign, Command } from 'lucide-react';
 import type { HarnessRun, Message, RunSteeringAction } from '../types';
 import type { SubAgent } from '../types';
@@ -29,15 +29,38 @@ interface Props {
 }
 
 const CHAT_SUPER_WIDTH = 330;
+const CHAT_SUPER_WIDTH_KEY = 'openharness.environment-width.v1';
+const CHAT_SUPER_WIDTH_RANGE = { min: 210, max: 520 };
+
+function clampSuperWidth(value: number) {
+  return Math.min(CHAT_SUPER_WIDTH_RANGE.max, Math.max(CHAT_SUPER_WIDTH_RANGE.min, Math.round(value)));
+}
+
+function loadSuperWidth() {
+  try {
+    const parsed = Number(localStorage.getItem(CHAT_SUPER_WIDTH_KEY));
+    return Number.isFinite(parsed) ? clampSuperWidth(parsed) : CHAT_SUPER_WIDTH;
+  } catch {
+    return CHAT_SUPER_WIDTH;
+  }
+}
+
+function saveSuperWidth(value: number) {
+  try {
+    localStorage.setItem(CHAT_SUPER_WIDTH_KEY, String(value));
+  } catch {
+    // Width is a convenience preference; ignore restricted storage failures.
+  }
+}
 
 export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, environmentOpen, onEnvironmentOpenChange, onRunSteer }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const [inputHeight, setInputHeight] = useState(112);
+  const [superWidth, setSuperWidth] = useState(loadSuperWidth);
   const activeWorkState = useMemo(() => getActiveWorkState(subAgents), [subAgents]);
   const superHidden = !environmentOpen;
-  const superWidth = CHAT_SUPER_WIDTH;
   const userScrolledUpRef = useRef(false);
   const previousMessageCountRef = useRef(0);
   const previousLastContentLengthRef = useRef(0);
@@ -89,6 +112,26 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
   const hideSuperPanel = useCallback(() => {
     onEnvironmentOpenChange(false);
   }, [onEnvironmentOpenChange]);
+
+  useEffect(() => saveSuperWidth(superWidth), [superWidth]);
+
+  const beginSuperResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = superWidth;
+    document.body.classList.add('is-resizing-column');
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      setSuperWidth(clampSuperWidth(startWidth - (moveEvent.clientX - startX)));
+    };
+    const handleUp = () => {
+      document.body.classList.remove('is-resizing-column');
+      window.removeEventListener('pointermove', handleMove);
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp, { once: true });
+  }, [superWidth]);
 
   return (
     <div ref={rootRef} className={`chat-panel-root ${superHidden ? 'has-hidden-super' : 'has-floating-super'}`} style={{ '--floating-super-width': `${superWidth}px`, '--chat-input-height': `${inputHeight}px` } as CSSProperties}>
@@ -144,6 +187,13 @@ export function ChatPanel({ messages, isTyping, onSendMessage, activeModel, work
         />
       )}
       <div className={`floating-super-panel ${superHidden ? 'hidden' : ''}`} style={{ width: superWidth }} aria-hidden={superHidden}>
+        <button
+          className="floating-super-resize-handle"
+          type="button"
+          aria-label="Resize Environment panel"
+          title="Resize Environment panel"
+          onPointerDown={beginSuperResize}
+        />
         <EnvironmentRail
           workingDir={workingDir || null}
           trustMode={trustMode}
