@@ -410,6 +410,7 @@ import type { ProviderChatRequest, ProviderMessage } from './providers/types';
 const app = express();
 const UI_PORT = process.env.OPENHARNESS_VITE_PORT || process.env.VITE_PORT || '5173';
 const UI_ORIGIN = process.env.OPENHARNESS_UI_URL || `http://localhost:${UI_PORT}`;
+const STATIC_DIR = process.env.OPENHARNESS_STATIC_DIR;
 const MODEL_REQUEST_TIMEOUT_MS = 90_000;
 const SERVER_LISTEN_HOST = process.env.OPENHARNESS_LISTEN_HOST || process.env.OPENHARNESS_BIND_HOST || '127.0.0.1';
 const LOCAL_CONTROL_TOKEN = (
@@ -434,7 +435,15 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 
+if (STATIC_DIR && existsSync(STATIC_DIR)) {
+  app.use(express.static(STATIC_DIR));
+}
+
 app.get('/', (_req, res) => {
+  if (STATIC_DIR && existsSync(join(STATIC_DIR, 'index.html'))) {
+    res.sendFile(join(STATIC_DIR, 'index.html'));
+    return;
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(
     [

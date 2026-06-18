@@ -1,5 +1,7 @@
 const { app, BrowserWindow, dialog, Menu, ipcMain } = require('electron');
 const path = require('path');
+const http = require('http');
+const { spawn } = require('child_process');
 
 // ── Config ─────────────────────────────────────────────
 const SERVER_PORT = process.env.OPENHARNESS_SERVER_PORT || 3001;
@@ -7,6 +9,7 @@ const VITE_PORT = process.env.OPENHARNESS_VITE_PORT || 5173;
 const isDev = !app.isPackaged;
 
 let mainWindow = null;
+let packagedServer = null;
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -103,6 +106,65 @@ function createWindow() {
   }
 }
 
+function checkServer() {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${SERVER_PORT}/api/config`, (res) => {
+      res.resume();
+      resolve(res.statusCode >= 200 && res.statusCode < 500);
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(1000, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+async function waitForPackagedServer(timeoutMs = 20000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await checkServer()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return false;
+}
+
+async function startPackagedServer() {
+  if (isDev) return;
+  if (await checkServer()) {
+    console.log(`[main] Reusing OpenHarness server on port ${SERVER_PORT}`);
+    return;
+  }
+
+  const appPath = app.getAppPath();
+  const serverEntry = path.join(appPath, 'dist-server', 'index.js');
+  const staticDir = path.join(appPath, 'dist');
+  console.log(`[main] Starting bundled server ${serverEntry}`);
+
+  packagedServer = spawn(process.execPath, [serverEntry], {
+    cwd: app.getPath('userData'),
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      PORT: String(SERVER_PORT),
+      OPENHARNESS_STATIC_DIR: staticDir,
+      OPENHARNESS_UI_URL: `http://localhost:${SERVER_PORT}`,
+      OPENHARNESS_LISTEN_HOST: '127.0.0.1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  packagedServer.stdout.on('data', (data) => process.stdout.write(`[server] ${data}`));
+  packagedServer.stderr.on('data', (data) => process.stderr.write(`[server:err] ${data}`));
+  packagedServer.on('exit', (code) => {
+    console.log(`[main] Bundled server exited (${code})`);
+    packagedServer = null;
+  });
+
+  if (!(await waitForPackagedServer())) {
+    dialog.showErrorBox('OpenHarness could not start', `The bundled server did not become ready on port ${SERVER_PORT}.`);
+  }
+}
+
 // ── Window Snap Zones (FancyZones-style) ───────────────
 const { globalShortcut, screen } = require('electron');
 
@@ -180,8 +242,9 @@ ipcMain.handle('get-snap-zones', () => {
 });
 
 // ── App Lifecycle ──────────────────────────────────────
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  await startPackagedServer();
   registerSnapShortcuts();
   createWindow();
 
@@ -202,4 +265,10 @@ app.on('second-instance', () => {
 app.on('window-all-closed', () => {
   globalShortcut.unregisterAll();
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  if (packagedServer && !packagedServer.killed) {
+    packagedServer.kill();
+  }
 });

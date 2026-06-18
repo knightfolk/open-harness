@@ -285,9 +285,9 @@ try {
 } finally {
   process.env.HOME = priorHome;
   rmSync(tempHome, { recursive: true, force: true });
-  if (evalBlockError) {
-    throw evalBlockError;
-  }
+}
+if (evalBlockError) {
+  throw evalBlockError;
 }
 
 let classifierRequests = 0;

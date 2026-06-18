@@ -2,12 +2,13 @@
   "name": "openharness",
   "private": true,
   "license": "UNLICENSED",
-  "version": "1.0.0",
+  "version": "1.0.0-alpha.monitor.1",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run build:server",
+    "build:server": "node scripts/build-server.mjs",
     "lint": "eslint .",
     "test:auto-router-trace-ui": "tsx scripts/test-auto-router-trace-ui.ts",
     "test:auto-router-context": "tsx scripts/test-auto-router-context.ts",
@@ -74,6 +75,10 @@
     "start": "node scripts/start.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --arm64 --x64",
+    "dist:win": "npm run build && electron-builder --win zip --x64 --arm64",
+    "dist:linux": "npm run build && electron-builder --linux AppImage tar.gz --x64 --arm64",
+    "dist:all": "npm run build && electron-builder --mac dmg zip --win zip --linux AppImage tar.gz --arm64 --x64",
     "electron:prod": "npm run build && electron .",
     "check:live-tool-error-evidence": "tsx scripts/check-live-tool-error-evidence.ts",
     "run:live-tool-error-recovery": "tsx scripts/run-live-tool-error-recovery-scenario.ts",
@@ -122,14 +127,32 @@
     },
     "files": [
       "dist/**",
+      "dist-server/**",
       "electron/**",
-      "server/**",
       "package.json",
       "package-lock.json"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": "dmg"
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "OpenHarness-${version}-mac-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "artifactName": "OpenHarness-${version}-windows-${arch}.${ext}"
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "artifactName": "OpenHarness-${version}-linux-${arch}.${ext}"
     }
   }
 }
