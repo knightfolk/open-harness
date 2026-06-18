@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { Suspense, lazy } from 'react';
 import type { HarnessRun, RunSteeringAction, SubAgent } from '../types';
+import { agentIdentityForRole } from '../utils/agentIdentity';
 
 const SubAgentTracker = lazy(() => import('./SubAgentTracker').then((m) => ({ default: m.SubAgentTracker })));
 
@@ -110,9 +111,10 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
             const isActive = agent.id === focused.id;
             const isRunning = agent.status === 'running';
             const statusLabel = agentStatusLabel(agent.status);
+            const identity = agentIdentityForRole(agent.runTrace?.role);
             const listMetaLabel = `Agent list metadata: ${formatTokens(agent.tokensUsed)} tokens, duration ${formatDuration(agent.startTime, agent.endTime)}`;
             const agentLabel = [
-              `${isActive ? 'Current agent detail' : 'Open agent detail'} ${agent.runTrace ? `${agent.runTrace.role} run` : agent.name}`,
+              `${isActive ? 'Current agent detail' : 'Open agent detail'} ${identity.name}, ${identity.tagline}`,
               `status ${statusLabel}`,
               agent.task ? `task ${agent.task}` : null,
               agent.runTrace?.providerId ? `provider ${agent.runTrace.providerId}` : null,
@@ -124,15 +126,16 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
                   type="button"
                   className={`agent-focus-list-item ${isActive ? 'active' : ''} ${isRunning ? 'has-pulse' : ''}`}
                   onClick={() => onFocus(agent.id)}
-                  title={agent.task || agent.name}
+                  title={`${identity.name} — ${identity.tagline}`}
                   aria-current={isActive ? 'true' : undefined}
                   aria-label={agentLabel}
                 >
                   <span className="agent-focus-list-status" style={{ color: statusColor(agent.status) }} aria-label={`Status: ${statusLabel}`}>
                     {isRunning ? <span className="agent-focus-pulse-dot" aria-hidden="true" /> : <Icon size={12} aria-hidden="true" />}
                   </span>
+                  <span className="agent-focus-list-avatar" aria-hidden="true">{identity.avatar}</span>
                   <span className="agent-focus-list-main">
-                    <span className="agent-focus-list-name">{agent.runTrace ? `${agent.runTrace.role} run` : agent.name}</span>
+                    <span className="agent-focus-list-name">{identity.name}<span className="agent-focus-list-role">{agent.runTrace?.role || 'agent'}</span></span>
                     <span className="agent-focus-list-task" aria-label={`Agent objective: ${agent.task || 'No objective recorded'}`}>{agent.task || '—'}</span>
                     <span
                       className="agent-focus-list-model"

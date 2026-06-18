@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from 'react';
-import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Route, ShieldCheck, Sparkles, Wrench, Zap, FileText, Play, RefreshCw, Download } from 'lucide-react';
+import { Bot, Brain, User, Cpu, ChevronDown, ChevronRight, Wrench, FileText, Play, RefreshCw, Download } from 'lucide-react';
 import type { HarnessRun, Message, ToolCall, ProjectProfile, RunSteeringAction, WorkProductArtifact } from '../types';
 import { ToolCallComponent } from './ToolCall';
 import { NextBestActions } from './NextBestActions';
@@ -7,6 +7,7 @@ import { ConfidenceMeter } from './ConfidenceMeter';
 import { PromptMicroscope } from './PromptMicroscope';
 import { ArtifactDrawer } from './ArtifactDrawer';
 import { analyzeConfidence, deriveNextActions } from '../utils/runSignals';
+import { agentIdentityForRole } from '../utils/agentIdentity';
 import { MarkdownContent } from './MarkdownContent';
 import * as api from '../utils/api';
 
@@ -81,19 +82,18 @@ const senderNames = {
 
 function agentIcon(message: Message) {
   if (message.role !== 'assistant') return avatarIcons[message.role];
-  switch (message.agentRole) {
-    case 'planner': return <Route size={14} />;
-    case 'reviewer': return <ShieldCheck size={14} />;
-    case 'reasoner': return <Brain size={14} />;
-    case 'worker': return <Zap size={14} />;
-    case 'tool': return <Wrench size={14} />;
-    case 'router': return <Sparkles size={14} />;
-    default: return <Bot size={14} />;
-  }
+  // Agents are the visible characters: render their emoji avatar as their face.
+  const identity = agentIdentityForRole(message.agentRole);
+  return <span className="message-avatar-emoji" aria-hidden="true">{identity.avatar}</span>;
 }
 
 function senderName(message: Message, assistantName: string) {
-  if (message.role === 'assistant') return message.agentName || assistantName;
+  if (message.role === 'assistant') {
+    // Prefer the run's recorded agent name; fall back to the role's callsign
+    // (e.g. "Forge") so every reply reads as a named teammate, not a model ID.
+    const identity = agentIdentityForRole(message.agentRole);
+    return message.agentName || identity.name || assistantName;
+  }
   return senderNames[message.role];
 }
 

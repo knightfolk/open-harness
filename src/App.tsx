@@ -11,6 +11,7 @@ import { useLayoutState } from './components/layout/useLayoutState';
 import * as api from './utils/api';
 import { normalizeThinkingEffort } from './utils/modelCapabilities';
 import { pickActiveRunAndPhases } from './utils/agentWorkState';
+import { agentIdentityForRole } from './utils/agentIdentity';
 import {
   applyTheme,
   getInstalledThemePluginManifests,
@@ -1094,7 +1095,11 @@ function App() {
           }
         },
         onRunStart: (run) => {
-          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, runTrace: run } : m)));
+          // Stamp the assistant message with the run's agent role + callsign so
+          // the chat surfaces a named teammate (e.g. "Forge") instead of a
+          // model ID or a truncated default name.
+          const runAgent = agentIdentityForRole(run.role);
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, runTrace: run, agentRole: run.role as Message['agentRole'], agentName: runAgent.name } : m)));
           // Promote the optimistic activity placeholder into the real run card
           // so a single active task does not render as two agents.
           setSubAgents((prev) => {

@@ -19,6 +19,7 @@ import type { Message } from '../types';
 import type { SessionInfo } from '../utils/api';
 import { SideChatPanel } from './SideChatPanel';
 import { buildRunTree, phaseLabel, runLabel } from '../utils/agentWorkState';
+import { agentIdentityForRole } from '../utils/agentIdentity';
 
 interface Props {
   isOpen: boolean;
@@ -411,6 +412,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                       const steeringAvailable = canSteerRun(run);
                       const proof = latestRunProof(run);
                       const statusText = formatRunStatus(run.status);
+                      const agent = agentIdentityForRole(run.runTrace?.role);
                       const runChildrenId = `session-run-children-${safeDomId(run.id)}`;
                       const runAccessibleLabel = [
                         `Focus ${normalizeRunLabel(run)}`,
@@ -431,10 +433,10 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                           aria-label={runAccessibleLabel}
                         >
                           <span className={`session-run-dot session-run-dot-${run.status}`} aria-hidden="true" />
-                          <Bot size={13} className="session-run-icon" aria-hidden="true" />
+                          <span className="session-run-avatar" aria-hidden="true">{agent.avatar}</span>
                           <span className="session-run-copy">
                             <span className="session-run-mainline">
-                              <span className="session-run-name">{normalizeRunLabel(run)}</span>
+                              <span className="session-run-name">{agent.name}<span className="session-run-role">{run.runTrace?.role || 'agent'}</span></span>
                               <span className={`session-run-status ${run.status === 'error' ? 'session-run-status-needs-attention' : `session-run-status-${run.status}`}`}>
                                 <span aria-label={`${normalizeRunLabel(run)} status: ${statusText}`}>{statusText}</span>
                               </span>
@@ -485,6 +487,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                               agent={agent}
                               onFocus={onFocusAgent ? () => onFocusAgent(agent.id) : undefined}
                               label={normalizePhaseLabel(agent)}
+                              parentRole={run.runTrace?.role}
                               compact
                             />
                           ))}
@@ -532,14 +535,17 @@ function SubAgentRow({
   agent,
   onFocus,
   label,
+  parentRole,
   compact,
 }: {
   agent: SubAgent;
   onFocus?: () => void;
   label?: string;
+  parentRole?: string | null;
   compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const phaseAgent = agentIdentityForRole(parentRole);
   const statusColor = {
     idle: 'var(--text-tertiary)',
     running: 'var(--accent-primary)',
@@ -586,7 +592,7 @@ function SubAgentRow({
             : <ChevronRight size={12} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} aria-hidden="true" />
           }
         </button>
-        <Bot size={13} style={{ color: statusColor, flexShrink: 0 }} aria-hidden="true" />
+        <span className="sub-agent-avatar" aria-hidden="true">{phaseAgent.avatar}</span>
         <span className={`sub-agent-name-text ${agent.status === 'running' ? 'running' : ''}`}>
           {label || agent.name}
         </span>
