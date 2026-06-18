@@ -22,6 +22,35 @@ import { getAdapter } from './providers/registry';
 import type { ProviderMessage, ProviderTool } from './providers/types';
 import { isPathWithin } from './toolPolicy';
 
+// ── Provider failover: transient-error classification ──
+// A provider error is "transient" if a short retry or a model switch could
+// plausibly recover it: server overload (529/5xx), rate limits (429), and
+// network failures. Client errors that won't self-heal (400/401/403/404) and
+// user-driven aborts are NOT transient and must propagate immediately.
+const TRANSIENT_HTTP_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
+const TRANSIENT_BODY_MARKERS = ['overloaded_error', 'rate_limit_error'];
+
+export function isTransientProviderError(err: unknown): boolean {
+  if (!err) return false;
+  const message = err instanceof Error ? err.message : String(err);
+  // Body markers (Anthropic-style JSON bodies forwarded by the native adapter).
+  if (TRANSIENT_BODY_MARKERS.some((marker) => message.includes(marker))) return true;
+  // HTTP status parsed from "Provider returned NNN: ..." or "… status NNN …".
+  const statusMatch = message.match(/(?:returned\s+|status\s+)(\d{3})/i);
+  if (statusMatch) {
+    const status = Number(statusMatch[1]);
+    return TRANSIENT_HTTP_STATUSES.has(status);
+  }
+  // Network-layer failures (no HTTP status, thrown by fetch itself).
+  if (err instanceof TypeError) return true;
+  // Timeout-abort errors are transient; callers distinguish a user-driven abort
+  // (by checking their own AbortSignal first) before invoking the retry wrapper,
+  // so any AbortError/TimeoutError that reaches here is treated as recoverable.
+  const name = (err as Error)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') return true;
+  return false;
+}
+
 export interface BackgroundAgentRequest {
   profileId: AgentProfileId;
   prompt: string;
