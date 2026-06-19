@@ -10,6 +10,7 @@ export interface PromptPluginSummary {
   name: string;
   version: string;
   description: string;
+  enabled: boolean;
   source: string;
   trust: PromptPluginTrust;
   location: 'project' | 'user' | 'imported';
@@ -102,7 +103,7 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-function summarizeManifest(raw: any, path: string, location: PromptPluginSummary['location']): PromptPluginSummary {
+function summarizeManifest(raw: any, path: string, location: PromptPluginSummary['location'], disabledPluginIds: Set<string> = new Set()): PromptPluginSummary {
   const issues: string[] = [];
   for (const key of ['schemaVersion', 'id', 'name', 'version', 'description', 'provenance', 'targets', 'renderers', 'sections', 'safety']) {
     if (raw?.[key] === undefined) issues.push(`Missing ${key}`);
@@ -117,11 +118,14 @@ function summarizeManifest(raw: any, path: string, location: PromptPluginSummary
   const canOverride = raw?.safety?.canOverrideProjectInstructions === true;
   if (canOverride) issues.push('Cannot override project instructions');
 
+  const id = String(raw?.id || `invalid:${path}`);
+  const enabled = !disabledPluginIds.has(id) && !disabledPluginIds.has(`prompt-plugin.${id}`);
   return {
-    id: String(raw?.id || `invalid:${path}`),
+    id,
     name: String(raw?.name || 'Invalid prompt plugin'),
     version: String(raw?.version || '0.0.0'),
     description: redactSecrets(String(raw?.description || '')).redacted,
+    enabled,
     source: String(raw?.provenance?.source || location),
     trust,
     location,
@@ -218,19 +222,22 @@ export function importSkillAsPromptPlugin(projectDir: string, sourcePath: string
   return { ok: true, manifestPath, plugin };
 }
 
-export function listPromptPlugins(projectDir?: string): PromptPluginRegistry {
+export function listPromptPlugins(projectDir?: string, disabledPluginIds: string[] = []): PromptPluginRegistry {
   const roots = pluginRoots(projectDir);
   const plugins: PromptPluginSummary[] = [];
+  const disabled = new Set(disabledPluginIds);
   for (const root of roots) {
     for (const manifest of findManifestFiles(root.path)) {
       try {
-        plugins.push(summarizeManifest(JSON.parse(readFileSync(manifest, 'utf-8')), manifest, root.location));
+        plugins.push(summarizeManifest(JSON.parse(readFileSync(manifest, 'utf-8')), manifest, root.location, disabled));
       } catch (err) {
+        const id = `invalid:${manifest}`;
         plugins.push({
-          id: `invalid:${manifest}`,
+          id,
           name: 'Invalid prompt plugin',
           version: '0.0.0',
           description: '',
+          enabled: !disabled.has(id) && !disabled.has(`prompt-plugin.${id}`),
           source: root.location,
           trust: 'review-required',
           location: root.location,
@@ -249,6 +256,7 @@ export function listPromptPlugins(projectDir?: string): PromptPluginRegistry {
 
   const packs = new Map<string, { id: string; name: string; pluginIds: string[]; pluginCount: number; trust: PromptPluginTrust; sources: string[] }>();
   for (const plugin of plugins) {
+    if (!plugin.enabled || plugin.status !== 'ready') continue;
     for (const pack of plugin.packs) {
       const current = packs.get(pack.id);
       const trust = current && TRUST_ORDER[current.trust] > TRUST_ORDER[plugin.trust] ? current.trust : plugin.trust;

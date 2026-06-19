@@ -53,6 +53,7 @@ import { wrapUntrustedBlock } from './untrustedContent';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, listRoutingAdherenceEvents, recordRoutingAdherenceEvent } from './routingAdherence';
 import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins } from './promptPlugins';
+import { listCapabilities, setCapabilityEnabled, type CapabilityKind } from './capabilities';
 import type { PersistedMessage, PersistedSession, SessionGoal } from './sessionStore';
 import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand, recordGoalRunEvidence } from './sessionGoals';
 import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './sessionKinds';
@@ -1355,6 +1356,19 @@ app.put('/api/config', (req, res) => {
         }))
         .filter((entry: any) => entry.providerId)
       : [];
+  }
+  if (updates.capabilitySettings !== undefined) {
+    const raw = updates.capabilitySettings || {};
+    const normalizeIds = (value: unknown) => Array.isArray(value)
+      ? [...new Set(value
+        .filter((entry: unknown): entry is string => typeof entry === 'string')
+        .map((entry: string) => entry.trim())
+        .filter(Boolean))]
+      : [];
+    appConfig.capabilitySettings = {
+      disabledSkills: normalizeIds(raw.disabledSkills),
+      disabledPlugins: normalizeIds(raw.disabledPlugins),
+    };
   }
   if (updates.autoRouter !== undefined) {
     (appConfig as any).autoRouter = updates.autoRouter;
@@ -5803,11 +5817,33 @@ app.get('/api/evals/recommendations', (_req, res) => {
   res.json(evals.getLatestEvalRecommendations());
 });
 
+app.get('/api/capabilities', (req, res) => {
+  const workingDir = typeof req.query.workingDir === 'string' ? req.query.workingDir : undefined;
+  const targetWorkspace = workingDir ? ensureKnownWorkspace(workingDir) : { ok: true as const, dir: undefined };
+  if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+  res.json(listCapabilities(appConfig.capabilitySettings, listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins)));
+});
+
+app.put('/api/capabilities/:kind/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+  const kind = req.params.kind as CapabilityKind;
+  if (kind !== 'skills' && kind !== 'plugins') return res.status(400).json({ error: 'kind must be skills or plugins' });
+  const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  appConfig.capabilitySettings = setCapabilityEnabled(appConfig.capabilitySettings, kind, id, req.body?.enabled === true);
+  saveConfig(appConfig);
+  const workingDir = typeof req.body?.workingDir === 'string' ? req.body.workingDir : undefined;
+  const targetWorkspace = workingDir ? ensureKnownWorkspace(workingDir) : { ok: true as const, dir: undefined };
+  if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+  res.json(listCapabilities(appConfig.capabilitySettings, listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins)));
+});
+
 app.get('/api/prompt-plugins', (req, res) => {
   const workingDir = typeof req.query.workingDir === 'string' ? req.query.workingDir : undefined;
   const targetWorkspace = workingDir ? ensureKnownWorkspace(workingDir) : { ok: true as const, dir: undefined };
   if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
-  res.json(listPromptPlugins(targetWorkspace.dir));
+  res.json(listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins));
 });
 
 app.post('/api/prompt-plugins/ensure-roots', (req, res) => {
@@ -5815,7 +5851,7 @@ app.post('/api/prompt-plugins/ensure-roots', (req, res) => {
   const targetWorkspace = workingDir ? ensureKnownWorkspace(workingDir) : { ok: true as const, dir: undefined };
   if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
   ensurePromptPluginRoots(targetWorkspace.dir);
-  res.json(listPromptPlugins(targetWorkspace.dir));
+  res.json(listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins));
 });
 
 app.post('/api/prompt-plugins/import-skill', (req, res) => {
@@ -5827,7 +5863,7 @@ app.post('/api/prompt-plugins/import-skill', (req, res) => {
   if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
   const result = importSkillAsPromptPlugin(targetWorkspace.dir, sourcePath);
   if (!result.ok) return res.status(400).json(result);
-  res.status(201).json({ ...result, registry: listPromptPlugins(targetWorkspace.dir) });
+  res.status(201).json({ ...result, registry: listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins) });
 });
 
 app.get('/api/sessions/:sessionId/messages/:messageId/debug-bundle', (req, res) => {

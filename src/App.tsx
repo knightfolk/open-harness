@@ -2282,6 +2282,7 @@ function App() {
         onMcpStatusRefresh={refreshMcpStatus}
         clickyEnabled={clickyEnabled}
         onClickyEnabledChange={handleClickyEnabledChange}
+        workingDir={workingDir}
       />
       </Suspense>
     </div>

@@ -430,6 +430,30 @@ export interface ProviderRateLimit {
   onExceeded: 'block' | 'warn' | 'allow';
 }
 
+export interface CapabilitySettings {
+  disabledSkills: string[];
+  disabledPlugins: string[];
+}
+
+export interface CapabilityItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  source: 'curated' | 'prompt-plugin';
+  enabled: boolean;
+  configurable: boolean;
+  status: 'ready' | 'blocked' | 'invalid';
+  path?: string;
+  issue?: string;
+}
+
+export interface CapabilityRegistry {
+  skills: CapabilityItem[];
+  plugins: CapabilityItem[];
+  settings: CapabilitySettings;
+}
+
 export interface ProviderRateLimitStatus {
   windowSeconds: number;
   providers: Array<{
@@ -474,6 +498,7 @@ export interface AppConfig {
   contextConfig?: ContextConfig;
   modelBudgets?: ModelBudget[];
   providerRateLimits?: ProviderRateLimit[];
+  capabilitySettings?: CapabilitySettings;
 }
 
 export interface PersonalizationProfile {
@@ -552,12 +577,30 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests' | 'modelBudgets' | 'providerRateLimits'>> & { onboardingStep?: number }): Promise<void> {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests' | 'modelBudgets' | 'providerRateLimits' | 'capabilitySettings'>> & { onboardingStep?: number }): Promise<void> {
   await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   });
+}
+
+export async function getCapabilities(workingDir?: string | null): Promise<CapabilityRegistry> {
+  const query = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : '';
+  const res = await fetch(`${API_BASE}/api/capabilities${query}`);
+  if (!res.ok) throw new Error(`Failed to get capabilities: ${res.status}`);
+  return res.json();
+}
+
+export async function setCapabilityEnabled(kind: 'skills' | 'plugins', id: string, enabled: boolean, workingDir?: string | null): Promise<CapabilityRegistry> {
+  const res = await fetch(`${API_BASE}/api/capabilities/${kind}/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, workingDir: workingDir || undefined }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to update capability: ${res.status}`);
+  return body;
 }
 
 export async function getPersonalization(): Promise<PersonalizationResponse> {
@@ -2152,6 +2195,7 @@ export interface PromptPluginSummary {
   name: string;
   version: string;
   description: string;
+  enabled: boolean;
   source: string;
   trust: 'trusted' | 'review-required' | 'blocked';
   location: 'project' | 'user' | 'imported';

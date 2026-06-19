@@ -2620,6 +2620,7 @@ function PromptPacksTab({ registry, prompts, onPrepare, onImportSkill, onSelectE
               <div style={{ marginTop: 2, fontSize: 10, color: 'var(--text-tertiary)' }}>{plugin.description || plugin.id}</div>
             </div>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <EnabledPill enabled={plugin.enabled} />
               <TrustPill trust={plugin.trust} />
               <StatusPill status={plugin.status} />
             </div>
@@ -2652,6 +2653,13 @@ function TrustPill({ trust }: { trust: api.PromptPluginSummary['trust'] }) {
       ? { background: 'rgba(239,68,68,0.14)', color: 'var(--accent-error)' }
       : { background: 'rgba(245,158,11,0.14)', color: 'var(--accent-warning)' };
   return <span style={{ ...pillStyle, ...colors }} aria-label={`Prompt pack trust: ${trust}`}>{trust}</span>;
+}
+
+function EnabledPill({ enabled }: { enabled: boolean }) {
+  const colors = enabled
+    ? { background: 'rgba(34,197,94,0.14)', color: 'var(--accent-success)' }
+    : { background: 'rgba(148,163,184,0.14)', color: 'var(--text-tertiary)' };
+  return <span style={{ ...pillStyle, ...colors }} aria-label={`Prompt pack manifest is ${enabled ? 'enabled' : 'disabled'}`}>{enabled ? 'on' : 'off'}</span>;
 }
 
 function StatusPill({ status }: { status: api.PromptPluginSummary['status'] }) {

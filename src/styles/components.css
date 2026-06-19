@@ -4300,7 +4300,7 @@ button:focus-visible {
 
 .assistant-capability-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr) 34px;
   gap: 10px;
   align-items: start;
   padding: 9px 10px;
@@ -4311,6 +4311,10 @@ button:focus-visible {
 
 .assistant-capability-row.muted {
   opacity: 0.55;
+}
+
+.assistant-capability-row.blocked {
+  border-color: var(--border-primary);
 }
 
 .assistant-capability-icon {
@@ -4336,12 +4340,42 @@ button:focus-visible {
   font-weight: 700;
 }
 
+.assistant-capability-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.assistant-capability-pill {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-primary);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.assistant-capability-pill.on {
+  border-color: var(--accent-success);
+  color: var(--accent-success);
+}
+
 .assistant-capability-desc,
-.assistant-capability-path {
+.assistant-capability-path,
+.assistant-capability-meta {
   color: var(--text-tertiary);
   font-size: 11px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.assistant-capability-meta {
+  color: var(--text-secondary);
 }
 
 .assistant-capability-path {
@@ -6500,7 +6534,39 @@ button:focus-visible {
   width: 30px;
   height: 17px;
   border-radius: 9px;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  cursor: pointer;
   flex-shrink: 0;
+  position: relative;
+  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.compact-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.compact-toggle.active {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+}
+
+.compact-toggle.active::after {
+  transform: translateX(13px);
+  background: var(--accent-primary);
+}
+
+.compact-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 /* Show more/less button */

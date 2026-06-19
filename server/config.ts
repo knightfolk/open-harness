@@ -140,6 +140,11 @@ export interface ProviderRateLimit {
   onExceeded: 'block' | 'warn' | 'allow';
 }
 
+export interface CapabilitySettings {
+  disabledSkills: string[];
+  disabledPlugins: string[];
+}
+
 export interface StoredConfig {
   version: number;
   providers: StoredProvider[];
@@ -156,6 +161,7 @@ export interface StoredConfig {
   contextConfig?: Partial<ContextConfig>;
   modelBudgets?: ModelBudget[];
   providerRateLimits?: ProviderRateLimit[];
+  capabilitySettings?: CapabilitySettings;
   trustMode: string; // TrustMode
 }
 
@@ -209,6 +215,10 @@ const DEFAULT_CONFIG: StoredConfig = {
   },
   modelBudgets: [],
   providerRateLimits: [],
+  capabilitySettings: {
+    disabledSkills: [],
+    disabledPlugins: [],
+  },
 };
 
 // ── Read / Write ───────────────────────────────────────
@@ -265,10 +275,27 @@ export function loadConfig(): StoredConfig {
       },
       modelBudgets: normalizeModelBudgets((parsed as any).modelBudgets),
       providerRateLimits: normalizeProviderRateLimits((parsed as any).providerRateLimits),
+      capabilitySettings: normalizeCapabilitySettings((parsed as any).capabilitySettings),
     };
   } catch {
     return cloneDefaultConfig();
   }
+}
+
+function normalizeCapabilitySettings(value: unknown): CapabilitySettings {
+  const settings = value && typeof value === 'object' ? value as any : {};
+  return {
+    disabledSkills: normalizeIdList(settings.disabledSkills),
+    disabledPlugins: normalizeIdList(settings.disabledPlugins),
+  };
+}
+
+function normalizeIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter(Boolean))];
 }
 
 function normalizeProviderRateLimits(value: unknown): ProviderRateLimit[] {

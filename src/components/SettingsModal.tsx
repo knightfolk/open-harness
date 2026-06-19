@@ -6,14 +6,14 @@ import {
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
   Check, ChevronDown, ChevronRight, CheckCircle2, Bot, Container,
   ArrowRight, BookOpen, Search, Sparkles, Zap, FileText, Globe, Layout, Command,
-  Grid, Layers, Eye, Wrench, DollarSign, AlertCircle, Download, Moon,
+  Grid, Layers, Eye, Wrench, DollarSign, AlertCircle, Download, Moon, Lock,
 } from 'lucide-react';
-import type { ProviderConfig, CodingRoleAssignment, MCPServerItem, Skill, Plugin, MemoryEntry } from '../types';
+import type { ProviderConfig, CodingRoleAssignment, MCPServerItem, MemoryEntry } from '../types';
 import type { ThinkingEffort } from '../types';
 import type { ThemeTextureRecipe } from '../theme/themeTokens';
 import * as api from '../utils/api';
 import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
-import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
+import { mockMemoryEntries } from '../utils/mockData';
 import {
   findModelCatalogCard,
   formatContextWindow,
@@ -90,6 +90,7 @@ const CATEGORIES: SettingsCategory[] = [
     { id: 'personalization', label: 'Personalization' },
     { id: 'clicky', label: 'Clicky' },
     { id: 'skills', label: 'Skills' },
+    { id: 'plugins', label: 'Plugins' },
     { id: 'memory', label: 'Memory' },
   ]},
   { id: 'mcp', label: 'MCP Servers', icon: Server, subcategories: [
@@ -179,6 +180,7 @@ interface Props {
   onMcpStatusRefresh: () => Promise<void>;
   clickyEnabled: boolean;
   onClickyEnabledChange: (enabled: boolean) => void;
+  workingDir?: string | null;
 }
 
 // ── Model recommendation map ──
@@ -239,6 +241,7 @@ export function SettingsModal({
   clickyEnabled,
   onClickyEnabledChange,
   initialCategory,
+  workingDir,
 }: Props) {
   const [selectedCat, setSelectedCat] = useState(initialCategory || 'model');
   const [selectedSub, setSelectedSub] = useState<string | null>(null);
@@ -367,7 +370,8 @@ export function SettingsModal({
               {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} roleThinking={roleThinking} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} onAssignRoleThinking={onAssignRoleThinking} />}
               {contentKey === 'assistant/personalization' && <PersonalizationPane />}
               {contentKey === 'assistant/clicky' && <ClickySettingsPane enabled={clickyEnabled} onChange={onClickyEnabledChange} />}
-              {contentKey === 'assistant/skills' && <AssistantSkillsPane skills={mockSkills} plugins={mockPlugins} />}
+              {contentKey === 'assistant/skills' && <AssistantCapabilityPane kind="skills" workingDir={workingDir} />}
+              {contentKey === 'assistant/plugins' && <AssistantCapabilityPane kind="plugins" workingDir={workingDir} />}
               {contentKey === 'assistant/memory' && <AssistantMemoryPane entries={mockMemoryEntries} />}
               {contentKey === 'mcp/docker' && <DockerMCPPane mcpServers={mcpServers} mcpStatus={mcpStatus} onRefresh={onMcpStatusRefresh} />}
               {contentKey === 'mcp/curated' && <CuratedMCPPane />}
@@ -559,47 +563,131 @@ function ClickySettingsPane({ enabled, onChange }: { enabled: boolean; onChange:
   );
 }
 
-function AssistantSkillsPane({ skills, plugins }: { skills: Skill[]; plugins: Plugin[] }) {
-  const [showPlugins, setShowPlugins] = useState(false);
+function AssistantCapabilityPane({ kind, workingDir }: { kind: 'skills' | 'plugins'; workingDir?: string | null }) {
+  const [registry, setRegistry] = useState<api.CapabilityRegistry | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const isSkills = kind === 'skills';
+  const items = registry?.[kind] || [];
+  const enabledCount = items.filter((item) => item.enabled).length;
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setMessage('');
+    try {
+      setRegistry(await api.getCapabilities(workingDir));
+    } catch (err: any) {
+      setMessage(err?.message || 'Could not load capabilities.');
+    } finally {
+      setLoading(false);
+    }
+  }, [workingDir]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setMessage('');
+    api.getCapabilities(workingDir)
+      .then((next) => {
+        if (!cancelled) setRegistry(next);
+      })
+      .catch((err) => {
+        if (!cancelled) setMessage(err?.message || 'Could not load capabilities.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [workingDir]);
+
+  const toggle = async (item: api.CapabilityItem) => {
+    if (!item.configurable) return;
+    setSavingId(item.id);
+    setMessage('');
+    try {
+      setRegistry(await api.setCapabilityEnabled(kind, item.id, !item.enabled, workingDir));
+      setMessage(`${item.name} ${item.enabled ? 'turned off' : 'turned on'}.`);
+    } catch (err: any) {
+      setMessage(err?.message || `Could not update ${item.name}.`);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   return (
     <>
-      <PaneTitle>Skills</PaneTitle>
-      <PaneDesc>Demo capability inventory. Live skill/plugin discovery is not wired into this Settings pane yet.</PaneDesc>
+      <PaneTitle>{isSkills ? 'Skills' : 'Plugins'}</PaneTitle>
+      <PaneDesc>
+        {isSkills
+          ? 'Top assistant skills available to the harness. Turn off anything you do not want surfaced for future assisted work.'
+          : 'Top plugin groups and discovered prompt plugins. Prompt plugins are listed from the active project, user, and imported plugin folders.'}
+      </PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
         <div className="settings-section-header">
-          <div className="settings-section-title">Demo Skills ({skills.length})</div>
+          <div>
+            <div className="settings-section-title">
+              {isSkills ? 'Top 20 Skills' : 'Plugin System'} {items.length > 0 ? `(${enabledCount}/${items.length} on)` : ''}
+            </div>
+            <div className="settings-item-desc">
+              {isSkills ? 'Curated defaults stay local to OpenHarness settings.' : 'Curated plugin groups appear first; project prompt plugins follow when present.'}
+            </div>
+          </div>
+          <button className="settings-mini-button" type="button" onClick={refresh} disabled={loading || !!savingId} aria-label={`Refresh ${isSkills ? 'skills' : 'plugins'}`}>
+            {loading ? <Loader size={11} className="spin" aria-hidden="true" /> : <RefreshCw size={11} aria-hidden="true" />}
+            Refresh
+          </button>
         </div>
-        <div className="assistant-capability-list">
-          {skills.map((skill) => {
-            const Icon = skillCategoryIcons[skill.category] || Command;
+        {loading ? (
+          <div className="settings-item-desc" role="status">Loading {isSkills ? 'skills' : 'plugins'}...</div>
+        ) : items.length === 0 ? (
+          <div className="settings-item-desc" role="status">No {isSkills ? 'skills' : 'plugins'} found.</div>
+        ) : (
+          <div className="assistant-capability-list" role="list" aria-label={`${items.length} ${isSkills ? 'skills' : 'plugins'}`}>
+            {items.map((item) => {
+            const Icon = item.status === 'blocked' || item.status === 'invalid'
+              ? Lock
+              : skillCategoryIcons[item.category] || (isSkills ? Command : Grid);
             return (
-              <div key={skill.name} className="assistant-capability-row">
-                <span className="assistant-capability-icon"><Icon size={14} /></span>
+              <div
+                key={item.id}
+                className={`assistant-capability-row ${item.enabled ? '' : 'muted'} ${item.status !== 'ready' ? 'blocked' : ''}`}
+                role="listitem"
+                aria-label={`${item.name}, ${item.enabled ? 'on' : 'off'}, ${item.status}`}
+              >
+                <span className="assistant-capability-icon"><Icon size={14} aria-hidden="true" /></span>
                 <span className="assistant-capability-main">
-                  <span className="assistant-capability-name">{skill.name}</span>
-                  <span className="assistant-capability-desc">{skill.description}</span>
+                  <span className="assistant-capability-title-row">
+                    <span className="assistant-capability-name">{item.name}</span>
+                    <span className={`assistant-capability-pill ${item.enabled ? 'on' : ''}`}>
+                      {item.enabled ? 'On' : 'Off'}
+                    </span>
+                  </span>
+                  <span className="assistant-capability-desc">{item.description}</span>
+                  <span className="assistant-capability-meta">
+                    {item.source === 'prompt-plugin' ? 'Prompt plugin' : item.category}
+                    {item.status !== 'ready' ? ` · ${item.status}` : ''}
+                    {item.issue ? ` · ${item.issue}` : ''}
+                  </span>
+                  {item.path && <span className="assistant-capability-path">{item.path}</span>}
                 </span>
+                <button
+                  className={`compact-toggle ${item.enabled ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => toggle(item)}
+                  disabled={!item.configurable || savingId === item.id}
+                  title={item.configurable ? `${item.enabled ? 'Turn off' : 'Turn on'} ${item.name}` : `${item.name} cannot be toggled until its issues are fixed`}
+                  aria-label={`${item.enabled ? 'Turn off' : 'Turn on'} ${item.name}`}
+                  aria-pressed={item.enabled}
+                />
               </div>
             );
-          })}
-        </div>
-        <button className="settings-mini-button" style={{ marginTop: 12 }} onClick={() => setShowPlugins(!showPlugins)}>
-          {showPlugins ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          Demo Plugins ({plugins.length})
-        </button>
-        {showPlugins && (
-          <div className="assistant-capability-list" style={{ marginTop: 8 }}>
-            {plugins.map((plugin) => (
-              <div key={plugin.name} className={`assistant-capability-row ${plugin.enabled ? '' : 'muted'}`}>
-                <span className="assistant-capability-icon"><Grid size={14} /></span>
-                <span className="assistant-capability-main">
-                  <span className="assistant-capability-name">{plugin.name}</span>
-                  <span className="assistant-capability-desc">{plugin.description}</span>
-                </span>
-              </div>
-            ))}
+            })}
           </div>
         )}
+        <div className="settings-item-desc" role={message ? 'status' : undefined} style={{ marginTop: 12 }}>
+          {message || 'Changes are saved immediately.'}
+        </div>
       </div>
     </>
   );

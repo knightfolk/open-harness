@@ -17,6 +17,7 @@
     "test:personalization-store": "tsx scripts/test-personalization-store.ts",
     "test:release-notes": "tsx scripts/test-release-notes.ts",
     "test:crash-reports": "tsx scripts/test-crash-reports.ts",
+    "test:capability-settings": "tsx scripts/test-capability-settings.ts",
     "test:system-theme-default": "tsx scripts/test-system-theme-default.ts",
     "test:router-learning-import": "tsx scripts/test-router-learning-import.ts",
     "test:router-learning-outcomes": "tsx scripts/test-router-learning-outcome-persistence.ts",
