@@ -1,4 +1,7 @@
 export type RelativeModelCost = 'free' | 'budget' | 'low' | 'mid' | 'premium' | 'luxury';
+export type ModelCatalogSourceKind = 'official-provider' | 'gateway-metadata' | 'benchmark' | 'project-editorial';
+export type ModelCatalogConfidence = 'high' | 'medium' | 'low';
+export type ModelCatalogFreshnessStatus = 'fresh' | 'stale' | 'advisory' | 'unverified';
 export type ModelBestCategory =
   | 'coding'
   | 'reasoning'
@@ -34,11 +37,36 @@ export interface ModelCatalogCard {
   bestFor: string[];
   avoidFor: string[];
   benchmarkHighlights: string[];
+  verifiedAt?: string;
+  sourceKind?: ModelCatalogSourceKind;
+  sourceLabel?: string;
+  sourceUrl?: string;
+  metadataConfidence?: ModelCatalogConfidence;
 }
 
 export const MODEL_CATALOG_UPDATED_AT = '2026-06-18';
 
 export const MODEL_CATALOG_SOURCES = [
+  {
+    label: 'OpenAI model docs',
+    url: 'https://developers.openai.com/api/docs/models/all',
+    note: 'Official OpenAI model listing. Refreshed 2026-06-19 before post-alpha routing claims.',
+  },
+  {
+    label: 'Anthropic model overview',
+    url: 'https://platform.claude.com/docs/en/about-claude/models/overview',
+    note: 'Official Claude model IDs, context, and output limits. Refreshed 2026-06-19.',
+  },
+  {
+    label: 'Gemini API models',
+    url: 'https://ai.google.dev/gemini-api/docs/models',
+    note: 'Official Gemini stable and preview model table. Refreshed 2026-06-19.',
+  },
+  {
+    label: 'Mistral model overview',
+    url: 'https://docs.mistral.ai/models/overview',
+    note: 'Official Mistral and Codestral model overview. Refreshed 2026-06-19.',
+  },
   {
     label: 'Vellum LLM Leaderboard',
     url: 'https://www.vellum.ai/llm-leaderboard',
@@ -1191,7 +1219,89 @@ export const TOP_MODEL_CATALOG: ModelCatalogCard[] = [
 ];
 
 export const MODEL_CATALOG_MAINTENANCE_NOTE =
-  'When adding provider presets, role defaults, router candidates, or model-specific prompt behavior, add or refresh the matching model catalog card and compactDescription in src/data/modelCatalog.ts.';
+  'When adding provider presets, role defaults, router candidates, or model-specific prompt behavior, add or refresh the matching model catalog card, compactDescription, source freshness, and verified-at evidence in src/data/modelCatalog.ts.';
+
+export const MODEL_CATALOG_FRESHNESS_REVIEWED_AT = '2026-06-19';
+export const MODEL_CATALOG_FRESH_DAYS = 45;
+
+const OFFICIAL_PROVIDER_SOURCES: Array<{
+  match: RegExp;
+  label: string;
+  url: string;
+  verifiedAt: string;
+}> = [
+  { match: /openai|gpt|codex/i, label: 'OpenAI model docs', url: 'https://developers.openai.com/api/docs/models/all', verifiedAt: '2026-06-19' },
+  { match: /anthropic|claude/i, label: 'Anthropic model overview', url: 'https://platform.claude.com/docs/en/about-claude/models/overview', verifiedAt: '2026-06-19' },
+  { match: /google|gemini|gemma/i, label: 'Gemini API models', url: 'https://ai.google.dev/gemini-api/docs/models', verifiedAt: '2026-06-19' },
+  { match: /mistral|codestral|devstral/i, label: 'Mistral model overview', url: 'https://docs.mistral.ai/models/overview', verifiedAt: '2026-06-19' },
+  { match: /deepseek/i, label: 'DeepSeek API pricing', url: 'https://api-docs.deepseek.com/quick_start/pricing', verifiedAt: '2026-06-18' },
+  { match: /minimax/i, label: 'MiniMax M3 model page', url: 'https://huggingface.co/MiniMaxAI/MiniMax-M3', verifiedAt: '2026-06-18' },
+];
+
+export function modelCatalogSource(card: ModelCatalogCard) {
+  if (card.sourceLabel && card.sourceUrl) {
+    return {
+      label: card.sourceLabel,
+      url: card.sourceUrl,
+      kind: card.sourceKind || 'project-editorial' as ModelCatalogSourceKind,
+      verifiedAt: card.verifiedAt,
+      confidence: card.metadataConfidence || 'medium' as ModelCatalogConfidence,
+    };
+  }
+  const official = OFFICIAL_PROVIDER_SOURCES.find((source) => source.match.test(`${card.provider} ${card.family} ${card.id}`));
+  if (official) {
+    return {
+      label: official.label,
+      url: official.url,
+      kind: 'official-provider' as ModelCatalogSourceKind,
+      verifiedAt: official.verifiedAt,
+      confidence: 'high' as ModelCatalogConfidence,
+    };
+  }
+  if (card.providerHints.some((hint) => /openrouter|ollama|lmstudio/i.test(hint))) {
+    return {
+      label: 'OpenRouter model metadata',
+      url: 'https://openrouter.ai/api/v1/models',
+      kind: 'gateway-metadata' as ModelCatalogSourceKind,
+      verifiedAt: '2026-06-18',
+      confidence: 'medium' as ModelCatalogConfidence,
+    };
+  }
+  return {
+    label: 'OpenHarness model landscape',
+    url: 'docs/MODEL_LANDSCAPE.md',
+    kind: 'project-editorial' as ModelCatalogSourceKind,
+    verifiedAt: card.verifiedAt,
+    confidence: 'low' as ModelCatalogConfidence,
+  };
+}
+
+function daysBetween(start: string, end: string): number | null {
+  const startMs = Date.parse(`${start}T00:00:00Z`);
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+  return Math.max(0, Math.floor((endMs - startMs) / 86_400_000));
+}
+
+export function modelCatalogFreshness(card: ModelCatalogCard, now = MODEL_CATALOG_FRESHNESS_REVIEWED_AT) {
+  const source = modelCatalogSource(card);
+  const ageDays = source.verifiedAt ? daysBetween(source.verifiedAt, now) : null;
+  const status: ModelCatalogFreshnessStatus = !source.verifiedAt
+    ? 'unverified'
+    : source.kind !== 'official-provider'
+      ? 'advisory'
+      : ageDays != null && ageDays <= MODEL_CATALOG_FRESH_DAYS
+        ? 'fresh'
+        : 'stale';
+  const label = status === 'fresh'
+    ? `Fresh official source, verified ${source.verifiedAt}`
+    : status === 'stale'
+      ? `Stale official source, verified ${source.verifiedAt}`
+      : status === 'advisory'
+        ? `Advisory ${source.kind.replace('-', ' ')}, checked ${source.verifiedAt}`
+        : `Unverified editorial card`;
+  return { ...source, ageDays, status, label };
+}
 
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
@@ -1221,10 +1331,11 @@ export function findModelCatalogCard(modelId?: string | null, providerId = ''): 
 export function modelCatalogTooltip(modelId?: string | null, providerId = ''): string {
   const card = findModelCatalogCard(modelId, providerId);
   if (!card) return 'No catalog card matched yet. Add one in src/data/modelCatalog.ts when this model becomes a supported default.';
+  const freshness = modelCatalogFreshness(card);
   const cost = card.inputCostPerMTok != null && card.outputCostPerMTok != null
     ? `$${card.inputCostPerMTok}/$${card.outputCostPerMTok} per 1M tokens`
     : `${card.relativeCost} relative cost`;
-  return `${card.displayName}: ${card.compactDescription} Cost: ${cost}. Comparable to ${card.comparableTo.join(', ')}.`;
+  return `${card.displayName}: ${card.compactDescription} Cost: ${cost}. Source: ${freshness.label}. Comparable to ${card.comparableTo.join(', ')}.`;
 }
 
 export function modelCatalogSummary(modelId?: string | null, providerId = ''): string | null {

@@ -14,9 +14,11 @@ You are **Friday**, the AI assistant for OpenHarness. Follow all rules in `AGENT
 
 ## Current Top Priority
 
-Use `docs/PREMIER_HARNESS_KICKOFF.md` as the source of truth for the current overhaul. The product direction is chat-first by default, active agent work visible where users already look, right-hand detail only when selected, one Review Changes flow, quiet message chrome, and steering controls that write structured run-trace events.
+Use `docs/POST_ALPHA_RELEASE_PLAN_2026-06-19.md` as the source of truth for the current two-week post-alpha push. It builds on `docs/PREMIER_HARNESS_KICKOFF.md` and keeps the same product direction: chat-first by default, active agent work visible where users already look, right-hand detail only when selected, one Review Changes flow, quiet message chrome, flatter UI, better texture behavior, and steering controls that write structured run-trace events.
 
-Keep `docs/UI_CLEANUP_PLAN.md` as the detailed declutter reference, `docs/HARNESS_WORK_ROADMAP.md` as the broader capability roadmap, and `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` as the reusable closeout checklist for proof runs, manual UI review, runtime scenario proof, and final validation gates.
+Use `docs/PREMIER_HARNESS_KICKOFF.md` as the source of truth for the underlying Premier Harness overhaul and stop-condition language.
+
+Keep `docs/PREMIER_HARNESS_KICKOFF.md` as the overhaul source document, `docs/UI_CLEANUP_PLAN.md` as the detailed declutter reference, `docs/HARNESS_WORK_ROADMAP.md` as the broader capability roadmap, and `docs/PREMIER_HARNESS_PROOF_CHECKLIST.md` as the reusable closeout checklist for proof runs, manual UI review, runtime scenario proof, and final validation gates.
 
 Closeout evidence should name durable proof artifacts directly. The `Premier Harness Closeout Evidence` template now asks for proof artifact paths, screenshot/artifact paths, runtime trace/export paths, and gate log/artifact paths so final acceptance evidence is findable outside chat.
 

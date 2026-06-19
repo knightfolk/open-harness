@@ -585,7 +585,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialCategory, setSettingsInitialCategory] = useState<string | undefined>(undefined);
   const [releaseNotes, setReleaseNotes] = useState<api.ReleaseNotesPayload | null>(null);
-  const [patchNotesOpen, setPatchNotesOpen] = useState(false);
+  const [patchNotesBannerOpen, setPatchNotesBannerOpen] = useState(false);
   const [patchNotesOptOut, setPatchNotesOptOut] = useState(false);
   const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
@@ -1907,7 +1907,7 @@ function App() {
         const optedOut = releaseNotesOptedOut();
         setPatchNotesOptOut(optedOut);
         if (!optedOut && payload.currentVersion && releaseNotesLastSeenVersion() !== payload.currentVersion) {
-          setPatchNotesOpen(true);
+          setPatchNotesBannerOpen(true);
         }
       })
       .catch(() => {
@@ -1921,7 +1921,7 @@ function App() {
       rememberReleaseNotesSeen(releaseNotes.currentVersion, optOut);
     }
     setPatchNotesOptOut(optOut);
-    setPatchNotesOpen(false);
+    setPatchNotesBannerOpen(false);
   }, [patchNotesOptOut, releaseNotes]);
 
   const openReleaseNotesSettings = useCallback(() => {
@@ -2229,8 +2229,8 @@ function App() {
         </Suspense>
       )}
 
-      {patchNotesOpen && releaseNotes && (
-        <PatchNotesModal
+      {patchNotesBannerOpen && releaseNotes && (
+        <PatchNotesBanner
           releaseNotes={releaseNotes}
           optOut={patchNotesOptOut}
           onOptOutChange={setPatchNotesOptOut}
@@ -2288,7 +2288,7 @@ function App() {
   );
 }
 
-function PatchNotesModal({
+function PatchNotesBanner({
   releaseNotes,
   optOut,
   onOptOutChange,
@@ -2303,38 +2303,25 @@ function PatchNotesModal({
 }) {
   const release = releaseNotes.releases.find((entry) => entry.current) || releaseNotes.releases[0];
   return (
-    <div className="patch-notes-overlay" role="dialog" aria-modal="true" aria-labelledby="patch-notes-title">
-      <div className="patch-notes-modal">
-        <div className="patch-notes-header">
-          <div>
-            <div className="patch-notes-kicker">Updated</div>
-            <h2 id="patch-notes-title">What's new in OpenHarness</h2>
-            <div className="patch-notes-version">Version {releaseNotes.currentVersion}</div>
-          </div>
-          <button className="settings-modal-close" onClick={onClose} aria-label="Close patch notes">X</button>
+    <div className="patch-notes-banner" role="status" aria-live="polite" aria-labelledby="patch-notes-title">
+      <div className="patch-notes-banner-copy">
+        <div className="patch-notes-kicker">Updated</div>
+        <div id="patch-notes-title" className="patch-notes-banner-title">
+          {release?.title || `Version ${releaseNotes.currentVersion}`}
         </div>
-        <div className="patch-notes-body">
-          <div className="patch-notes-release-title">{release?.title || `Version ${releaseNotes.currentVersion}`}</div>
-          <ul className="patch-notes-items">
-            {(release?.notes || ['No patch notes recorded for this release.']).map((note, index) => (
-              <li key={`${release?.version || releaseNotes.currentVersion}-${index}`}>{note}</li>
-            ))}
-          </ul>
-        </div>
-        <div className="patch-notes-footer">
-          <label className="settings-toggle-row patch-notes-opt-out">
-            <input
-              type="checkbox"
-              checked={optOut}
-              onChange={(event) => onOptOutChange(event.target.checked)}
-            />
-            <span>Do not show patch notes automatically</span>
-          </label>
-          <div className="patch-notes-actions">
-            <button className="settings-mini-button" onClick={onViewAll}>View all</button>
-            <button className="settings-mini-button patch-notes-primary" onClick={onClose}>Done</button>
-          </div>
-        </div>
+        <div className="patch-notes-version">Version {releaseNotes.currentVersion}</div>
+      </div>
+      <label className="patch-notes-opt-out">
+        <input
+          type="checkbox"
+          checked={optOut}
+          onChange={(event) => onOptOutChange(event.target.checked)}
+        />
+        <span>Do not show again</span>
+      </label>
+      <div className="patch-notes-actions">
+        <button className="settings-mini-button" onClick={onViewAll}>View notes</button>
+        <button className="settings-mini-button patch-notes-primary" onClick={onClose}>Dismiss</button>
       </div>
     </div>
   );

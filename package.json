@@ -140,6 +140,7 @@
       "dist/**",
       "dist-server/**",
       "electron/**",
+      "CHANGELOG.md",
       "package.json",
       "package-lock.json"
     ],

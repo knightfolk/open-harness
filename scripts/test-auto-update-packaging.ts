@@ -5,6 +5,7 @@ const pkg = JSON.parse(readFileSync('package.json', 'utf-8')) as {
   dependencies?: Record<string, string>;
   scripts?: Record<string, string>;
   build?: {
+    files?: string[];
     publish?: Array<Record<string, string>>;
     mac?: { target?: string[] };
     win?: { target?: string[] };
@@ -39,6 +40,14 @@ assert.ok(
   'Linux builds must include AppImage for electron-updater support',
 );
 assert.ok(
+  pkg.build?.files?.includes('package.json'),
+  'packaged builds must include package.json so release notes can resolve the current version',
+);
+assert.ok(
+  pkg.build?.files?.includes('CHANGELOG.md'),
+  'packaged builds must include CHANGELOG.md so Settings release notes use the real release history',
+);
+assert.ok(
   pkg.scripts?.['dist:win']?.includes('--win nsis zip'),
   'dist:win should build both NSIS and zip Windows artifacts',
 );
@@ -53,6 +62,7 @@ for (const expected of [
   'autoUpdater.autoInstallOnAppQuit = true',
   'autoUpdater.allowPrerelease = true',
   'autoUpdater.setFeedURL',
+  'OPENHARNESS_APP_ROOT',
   "provider: 'github'",
   "owner: 'knightfolk'",
   "repo: 'open-harness'",

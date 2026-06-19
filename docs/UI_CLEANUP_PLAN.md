@@ -137,13 +137,13 @@ Actions
 Behavior:
 
 - Summary tab groups changes by purpose when possible: UI, server, docs, config.
-- Files tab shows the current `DiffViewer` content in a flatter two-column layout.
+- Files tab shows current diff content inside `ReviewChangesFlyout` in a flatter two-column layout.
 - Patch proposals tab hosts the current `PatchReviewPanel`.
 - Validate tab shows suggested commands and last results.
 - Commit tab shows generated commit message, staged files, and push/PR actions.
 
 Implementation note:
-- Keep existing `DiffViewer` and `PatchReviewPanel` logic, but mount them inside a new `ReviewChangesFlyout`.
+- `ReviewChangesFlyout` is the canonical current surface for diffs, patch proposals, validation proof, and commit prep. Historical `DiffViewer` notes are superseded names, not current targets.
 - Do not rebuild diff parsing or patch proposal APIs.
 
 ## Component-Level Cleanup
@@ -239,8 +239,8 @@ Done when:
 ### Phase 2: Smart Diff Flyout
 
 Scope:
-- Add `ReviewChangesFlyout`.
-- Move `DiffViewer` and `PatchReviewPanel` into tabs inside the flyout.
+- Keep `ReviewChangesFlyout` as the canonical Review Changes surface.
+- Keep diff viewing and `PatchReviewPanel` behavior inside the flyout tabs.
 - Add a single "Review changes" entry point in the right rail.
 - Keep old panel IDs temporarily for backward compatibility.
 
@@ -316,11 +316,10 @@ Deliverables:
 ## Suggested Second PR
 
 Title:
-`Move diff and patch review into smart changes flyout`
+`Polish Review Changes as the canonical diff and patch flow`
 
 Files:
 - `src/components/ReviewChangesFlyout.tsx`
-- `src/components/DiffViewer.tsx`
 - `src/components/PatchReviewPanel.tsx`
 - `src/components/EnvironmentRail.tsx`
 - `src/App.tsx`

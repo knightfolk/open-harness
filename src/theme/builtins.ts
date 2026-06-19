@@ -131,16 +131,18 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         diffRemoved: '#ef4444',
       },
       shadow: {
-        sm: '0 1px 2px rgba(0, 0, 0, 0.34)',
-        md: '0 6px 18px rgba(0, 0, 0, 0.42)',
-        lg: '0 12px 34px rgba(0, 0, 0, 0.52)',
+        sm: '0 1px 2px rgba(0, 0, 0, 0.22)',
+        md: '0 4px 12px rgba(0, 0, 0, 0.24)',
+        lg: '0 10px 24px rgba(0, 0, 0, 0.30)',
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'low-noise-matte',
+        textureOpacity: 0.025,
         reducedTransparencyFallback: {
           surfaceColor: '#212530',
           borderColor: '#262a33',
-          shadow: '0 1px 2px rgba(0, 0, 0, 0.34)',
+          shadow: '0 1px 2px rgba(0, 0, 0, 0.22)',
         },
       },
     },
@@ -225,9 +227,9 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         diffRemoved: '#ef4444',
       },
       shadow: {
-        sm: '0 1px 2px rgba(0, 0, 0, 0.35)',
-        md: '0 4px 12px rgba(0, 0, 0, 0.45)',
-        lg: '0 8px 24px rgba(0, 0, 0, 0.55)',
+        sm: '0 1px 2px rgba(0, 0, 0, 0.22)',
+        md: '0 4px 12px rgba(0, 0, 0, 0.24)',
+        lg: '0 10px 24px rgba(0, 0, 0, 0.30)',
       },
       effects: {
         ...DEFAULT_EFFECTS,
@@ -236,7 +238,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         reducedTransparencyFallback: {
           surfaceColor: '#27272a',
           borderColor: '#2e2e32',
-          shadow: '0 1px 2px rgba(0, 0, 0, 0.35)',
+          shadow: '0 1px 2px rgba(0, 0, 0, 0.22)',
         },
       },
     },
@@ -321,16 +323,18 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         diffRemoved: '#ef4444',
       },
       shadow: {
-        sm: '0 1px 2px rgba(0, 0, 0, 0.35)',
-        md: '0 4px 12px rgba(0, 0, 0, 0.45)',
-        lg: '0 8px 24px rgba(0, 0, 0, 0.55)',
+        sm: '0 1px 2px rgba(0, 0, 0, 0.22)',
+        md: '0 4px 12px rgba(0, 0, 0, 0.24)',
+        lg: '0 10px 24px rgba(0, 0, 0, 0.30)',
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'low-noise-matte',
+        textureOpacity: 0.025,
         reducedTransparencyFallback: {
           surfaceColor: '#1a2b22',
           borderColor: '#1e3028',
-          shadow: '0 1px 2px rgba(0, 0, 0, 0.35)',
+          shadow: '0 1px 2px rgba(0, 0, 0, 0.22)',
         },
       },
     },
@@ -415,16 +419,18 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
         diffRemoved: '#ef4444',
       },
       shadow: {
-        sm: '0 1px 2px rgba(0, 0, 0, 0.35)',
-        md: '0 4px 12px rgba(0, 0, 0, 0.45)',
-        lg: '0 8px 24px rgba(0, 0, 0, 0.55)',
+        sm: '0 1px 2px rgba(0, 0, 0, 0.22)',
+        md: '0 4px 12px rgba(0, 0, 0, 0.24)',
+        lg: '0 10px 24px rgba(0, 0, 0, 0.30)',
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'low-noise-matte',
+        textureOpacity: 0.025,
         reducedTransparencyFallback: {
           surfaceColor: '#2b1b1f',
           borderColor: '#302024',
-          shadow: '0 1px 2px rgba(0, 0, 0, 0.35)',
+          shadow: '0 1px 2px rgba(0, 0, 0, 0.22)',
         },
       },
     },
@@ -516,7 +522,7 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
       effects: {
         ...DEFAULT_EFFECTS,
         textureRecipe: 'paper-grain',
-        textureOpacity: 0.03,
+        textureOpacity: 0.02,
         reducedTransparencyFallback: {
           surfaceColor: '#ffffff',
           borderColor: '#d0d5dd',
@@ -611,6 +617,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'paper-grain',
+        textureOpacity: 0.02,
         reducedTransparencyFallback: {
           surfaceColor: '#ffffff',
           borderColor: '#c8d2dc',
@@ -705,6 +713,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'paper-grain',
+        textureOpacity: 0.02,
         reducedTransparencyFallback: {
           surfaceColor: '#ffffff',
           borderColor: '#c2d4cb',
@@ -799,6 +809,8 @@ const RAW_BUILTIN_THEME_REGISTRY: ThemeRegistry = [
       },
       effects: {
         ...DEFAULT_EFFECTS,
+        textureRecipe: 'paper-grain',
+        textureOpacity: 0.02,
         reducedTransparencyFallback: {
           surfaceColor: '#ffffff',
           borderColor: '#d4c4c9',

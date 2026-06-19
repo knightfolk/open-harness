@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { findModelCatalogCard } from '../src/data/modelCatalog';
+import { findModelCatalogCard, modelCatalogFreshness } from '../src/data/modelCatalog';
 import { modelAbilityStates, modelCapabilityFlags } from '../src/utils/modelCapabilities';
 
 const autoFlags = modelCapabilityFlags('Auto');
@@ -19,12 +19,14 @@ const minimaxM3Card = findModelCatalogCard('MiniMax-M3', 'minimax');
 assert.equal(minimaxM3Card?.supportsImages, true, 'MiniMax M3 should remain categorized as native multimodal/vision-capable');
 assert.equal(minimaxM3Card?.supportsThinking, true, 'MiniMax M3 should expose thinking support');
 assert.equal(minimaxM3Card?.contextWindowTokens, 1_048_576, 'MiniMax M3 should keep 1M context in the model library');
+assert.equal(modelCatalogFreshness(minimaxM3Card!).status, 'fresh', 'MiniMax M3 should expose a recently checked official/provider source');
 
 const deepseekReasonerCard = findModelCatalogCard('deepseek-reasoner', 'deepseek');
 assert.equal(deepseekReasonerCard?.id, 'deepseek-v4-flash', 'deepseek-reasoner should map to current V4 Flash thinking-mode alias');
 assert.equal(deepseekReasonerCard?.supportsImages, false, 'DeepSeek V4 Flash should stay text-only unless an explicit vision variant is configured');
 assert.equal(deepseekReasonerCard?.supportsThinking, true, 'DeepSeek V4 Flash should expose thinking-mode support');
 assert.equal(deepseekReasonerCard?.contextWindowTokens, 1_000_000, 'DeepSeek V4 Flash should use the current 1M context window');
+assert.equal(modelCatalogFreshness(deepseekReasonerCard!).status, 'fresh', 'DeepSeek catalog cards should expose source freshness before routing claims');
 
 const deepseekProCard = findModelCatalogCard('deepseek-v4-pro', 'deepseek');
 assert.equal(deepseekProCard?.contextWindowTokens, 1_000_000, 'DeepSeek V4 Pro should use the current 1M context window');
@@ -77,6 +79,12 @@ for (const expected of [
   'Privacy and deployment posture ${signals.privacy}',
   'Local availability ${signals.localAvailability}',
   'core capability scorecard: coding, reasoning, review, planning, tool use, vision, long context, speed, cost, privacy, and local availability',
+  'modelCatalogFreshness(card)',
+  'Source freshness',
+  'Fresh source',
+  'Stale source',
+  'Advisory source',
+  'Stale or advisory cards are routing hints, not strong recommendations.',
 ]) {
   assert.ok(
     settings.includes(expected),

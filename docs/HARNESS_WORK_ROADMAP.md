@@ -436,7 +436,7 @@ Show real work products: terminal commands, diffs, validation results, browser p
 - [x] Add `GET /api/git/diff`
 - [x] Add `POST /api/git/stage`
 - [x] Add `POST /api/git/commit`
-- [x] Update `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
+- [x] Update the canonical Review Changes diff surface (`ReviewChangesFlyout` backed by `PatchReviewPanel`)
 - [x] Show changed files
 - [x] Show inline diff
 - [x] Add “review this diff”
@@ -1349,8 +1349,8 @@ Files:
 - `/Users/kevink/Projects/OpenHarness/server/index.ts`
 - `/Users/kevink/Projects/OpenHarness/src/types/index.ts`
 - `/Users/kevink/Projects/OpenHarness/src/utils/api.ts`
+- `/Users/kevink/Projects/OpenHarness/src/components/ReviewChangesFlyout.tsx`
 - `/Users/kevink/Projects/OpenHarness/src/components/PatchReviewPanel.tsx`
-- `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
 
 Definition of done:
 
@@ -1412,7 +1412,7 @@ Files:
 - `/Users/kevink/Projects/OpenHarness/server/checkpoints.ts`
 - `/Users/kevink/Projects/OpenHarness/server/orchestrator.ts`
 - `/Users/kevink/Projects/OpenHarness/server/git.ts`
-- `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/ReviewChangesFlyout.tsx`
 
 Definition of done:
 
@@ -1503,7 +1503,7 @@ Files and areas to inspect:
 - `/Users/kevink/Projects/OpenHarness/server/patchApply.ts`
 - `/Users/kevink/Projects/OpenHarness/server/browserPreview.ts`
 - `/Users/kevink/Projects/OpenHarness/server/evals.ts`
-- `/Users/kevink/Projects/OpenHarness/src/components/DiffViewer.tsx`
+- `/Users/kevink/Projects/OpenHarness/src/components/ReviewChangesFlyout.tsx`
 - `/Users/kevink/Projects/OpenHarness/src/components/SubAgentTracker.tsx`
 - `/Users/kevink/Projects/OpenHarness/src/components/PlanTracker.tsx`
 - `/Users/kevink/Projects/OpenHarness/src/components/InlineComment.tsx`
@@ -1555,7 +1555,7 @@ Inspect at minimum:
 - server/patchApply.ts
 - server/browserPreview.ts
 - server/evals.ts
-- src/components/DiffViewer.tsx
+- src/components/ReviewChangesFlyout.tsx
 - src/components/SubAgentTracker.tsx
 - src/components/PlanTracker.tsx
 - src/components/InlineComment.tsx
@@ -1615,7 +1615,7 @@ No M13/M14/M15 implementation work was started by this documentation update. The
 
 Next-work options on the table:
 
-- [ ] **M15 P0 — Patch Review UI**: build on `server/patchApply.ts` and `DiffViewer.tsx` to add file-by-file / hunk-by-hunk accept-reject plus post-apply validation. Also closes the M4 patch-proposal gap.
+- [x] **M15 P0 — Patch Review UI**: Review Changes is now the canonical diff, patch proposal, validation, and commit-prep surface. Historical `DiffViewer.tsx` references are superseded by `ReviewChangesFlyout` and `PatchReviewPanel`; remaining work is polish/proof, not a separate permanent patch-review panel.
 - [ ] **M14 P0 — Upgraded Browser Capture**: replace the curl+screencapture hack in `server/browserPreview.ts` with real DOM, a11y tree, console, and network-failure capture.
 - [ ] **M13 P0 — Agent Profiles**: create `server/agentProfiles.ts` with built-in profiles (explorer, planner, implementer, reviewer, debugger, browser-tester, eval-judge) and add per-agent traces.
 - [ ] **Assignment 1 (Recommended Assignment Order)**: close the M4 patch-proposal gap from the assignment backlog. Effectively M15 P0.

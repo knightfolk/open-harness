@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## [1.0.0-alpha.update.2] - 2026-06-19
+
+- Flattened the default workspace shell by quieting global shadows, lowering passive elevation, and keeping the Environment panel in the workspace plane.
+- Fixed the narrow Environment overlay reservation so chat remains readable on phone-width viewports.
+- Upgraded built-in shell texture defaults with calmer recipes, safer opacity, and larger representative Settings previews.
+- Replaced ordinary first-launch patch-note modal behavior with a quiet release-note banner while keeping full history in Settings.
+- Marked user-visible Settings sample skills, plugins, and memory content as demo data.
+- Added source freshness, verified-at metadata, and stale/advisory labels for model catalog cards and Auto-Router candidates.
+- Added optional Attention Inbox and Workflows panels for completed, blocked, failed, waiting, and reusable local workflow work without bypassing trust mode.
+- Reconciled stale roadmap references around Review Changes, Agent detail, and superseded component names.
 
 - Added structured review findings artifacts for routed review and execute outputs, including severity, file/line evidence, and suggested action metadata when available.
 - Documented the collapsed artifact drawer behavior for review and investigation evidence in the README.

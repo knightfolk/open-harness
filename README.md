@@ -223,7 +223,7 @@ Personalization is opt-in from **Settings -> Assistant -> Personalization**. Whe
 
 ## 3. Release Notes, Crash Reports, And Setup
 
-After an update, OpenHarness can show patch notes once on first launch. Users can opt out of automatic patch-note popups, and all release notes remain available later in **Settings -> Release Notes**.
+After an update, OpenHarness can show a quiet release-note banner once on first launch. Users can opt out of automatic release-note banners, and all release notes remain available later in **Settings -> Release Notes**.
 
 Crash reporting is local and user-driven. **Settings -> Crash Reports** shows local crash/log sources, recent crash-related files, and an export button for a redacted JSON report. Reports are not uploaded automatically; Crashpad/minidump content is listed as metadata only, and text excerpts are limited to redacted error/crash lines.
 
@@ -231,7 +231,7 @@ The setup wizard defaults to system appearance, with dark mode as the safe fallb
 
 ## Packaging
 
-Current prerelease: `1.0.0-alpha.update.1`.
+Current prerelease: `1.0.0-alpha.update.2`.
 
 ```bash
 npm run pack

@@ -5,8 +5,8 @@ import { ALL_PANELS, DEFAULT_LAYOUT } from '../src/types/layout';
 assert.equal(DEFAULT_LAYOUT, 'chat', 'Premier shell should default to chat-only layout');
 assert.deepEqual(
   ALL_PANELS,
-  ['chat', 'browser', 'terminal', 'files', 'model-lab', 'routing-learning', 'safety'],
-  'Default Tools panels should not include the permanent sub-agents split',
+  ['chat', 'browser', 'terminal', 'files', 'model-lab', 'routing-learning', 'safety', 'attention-inbox', 'workflows'],
+  'Default Tools panels should include optional attention/workflow panels without restoring the permanent sub-agents split',
 );
 
 const useLayoutState = readFileSync('src/components/layout/useLayoutState.ts', 'utf-8');
@@ -154,6 +154,8 @@ for (const expected of [
   "'sub-agents':{ id: 'sub-agents',  label: 'Agent Work'",
   "chat:        { id: 'chat',        label: 'Chat'",
   "'routing-learning': { id: 'routing-learning', label: 'Routing Learning'",
+  "'attention-inbox': { id: 'attention-inbox', label: 'Attention Inbox'",
+  "workflows: { id: 'workflows', label: 'Workflows'",
 ]) {
   assert.ok(
     panelRegistry.includes(expected),
@@ -225,10 +227,53 @@ for (const expected of [
 for (const expected of [
   'activeModel="Auto"',
   "onOpenPanel={(panel) => console.log('Open evidence panel', panel)}",
+  "name: 'Demo imagegen'",
+  "name: 'Demo GitHub'",
 ]) {
   assert.ok(
     mockData.includes(expected),
     `Mock layout snippet should not teach the obsolete passive TopBar contract: ${expected}`,
+  );
+}
+
+const panelContent = readFileSync('src/components/layout/PanelContent.tsx', 'utf-8');
+const attentionInboxPanel = readFileSync('src/components/AttentionInboxPanel.tsx', 'utf-8');
+const workflowHooksPanel = readFileSync('src/components/WorkflowHooksPanel.tsx', 'utf-8');
+
+for (const expected of [
+  "const AttentionInboxPanel = lazy(() => import('../AttentionInboxPanel')",
+  "const WorkflowHooksPanel = lazy(() => import('../WorkflowHooksPanel')",
+  "case 'attention-inbox':",
+  '<AttentionInboxPanel agents={context.subAgents} onFocusAgent={context.onFocusSubAgent} onReviewChanges={context.onReviewChanges} />',
+  "case 'workflows':",
+  '<WorkflowHooksPanel trustMode={context.trustMode || \'workspace-write\'} />',
+]) {
+  assert.ok(
+    panelContent.includes(expected),
+    `Panel content should mount optional attention/workflow panels without adding default chrome: ${expected}`,
+  );
+}
+
+for (const expected of [
+  'Background work that finished, blocked, failed, or is waiting.',
+  'Open Agent detail for ${item.title}',
+  'Open Review Changes from ${item.title}',
+]) {
+  assert.ok(
+    attentionInboxPanel.includes(expected),
+    `Attention inbox should summarize background work with proof and review/detail actions: ${expected}`,
+  );
+}
+
+for (const expected of [
+  'Safe local templates for repeated agent work.',
+  'Pre-run hooks may gather context and propose commands, but trust mode still gates file, network, and process access.',
+  'Post-run hooks may write proof summaries and attention items, but they cannot silently approve provider spend.',
+  'Hook output is logged as proof metadata before it can affect routing or workflow status.',
+]) {
+  assert.ok(
+    workflowHooksPanel.includes(expected),
+    `Workflow/hook MVP should stay inspectable and trust-bounded: ${expected}`,
   );
 }
 

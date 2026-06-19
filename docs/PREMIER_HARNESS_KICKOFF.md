@@ -299,7 +299,7 @@ Files:
 - `server/agentRuntime.ts`
 - `src/App.tsx`
 - `src/components/Sidebar.tsx`
-- `src/components/RunningAgentsStrip.tsx`
+- `src/components/Sidebar.tsx` and `src/components/ChatPanel.tsx` active-work affordances
 - `src/components/SubAgentTracker.tsx`
 
 Tasks:
@@ -329,7 +329,7 @@ Files:
 
 - `src/components/AgentFocusPanel.tsx`
 - `src/components/SubAgentTracker.tsx`
-- `src/components/RightPanel.tsx`
+- `src/components/AgentFocusPanel.tsx` as the right-hand Agent detail inspector
 - `src/utils/api.ts`
 - `server/index.ts`
 - `server/orchestrator.ts`

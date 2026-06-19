@@ -92,37 +92,37 @@ export const mockTerminalCommands: TerminalCommand[] = [
 ];
 
 export const mockMemoryEntries: MemoryEntry[] = [
-  { id: uid(), type: 'file', name: 'MEMORY_SUMMARY', path: '~/.codex/memories/memory_summary.md', description: 'User profile and preferences memory', lastAccessed: new Date() },
-  { id: uid(), type: 'skill', name: 'build-macos-apps', path: '~/.codex/plugins/build-macos-apps', description: 'Build, run, and debug macOS apps', lastAccessed: new Date() },
-  { id: uid(), type: 'context', name: 'Project Context', path: '/Users/kevink/Projects/OpenHarness', description: 'Current working directory and repo state', lastAccessed: new Date() },
-  { id: uid(), type: 'plugin', name: 'GitHub', path: '~/.codex/plugins/github', description: 'Repository and PR management', lastAccessed: new Date() },
-  { id: uid(), type: 'skill', name: 'agent-browser', path: '~/.agents/skills/agent-browser', description: 'Browser automation for web interactions', lastAccessed: new Date() },
-  { id: uid(), type: 'context', name: 'Memory Layout', description: 'General -> specific memory hierarchy' },
+  { id: uid(), type: 'file', name: 'Demo MEMORY_SUMMARY', path: '~/.codex/memories/memory_summary.md', description: 'Demo user profile and preferences memory', lastAccessed: new Date() },
+  { id: uid(), type: 'skill', name: 'Demo build-macos-apps', path: '~/.codex/plugins/build-macos-apps', description: 'Demo skill for macOS build/debug workflows', lastAccessed: new Date() },
+  { id: uid(), type: 'context', name: 'Demo Project Context', path: '/Users/kevink/Projects/OpenHarness', description: 'Demo current working directory and repo state', lastAccessed: new Date() },
+  { id: uid(), type: 'plugin', name: 'Demo GitHub', path: '~/.codex/plugins/github', description: 'Demo repository and PR management plugin', lastAccessed: new Date() },
+  { id: uid(), type: 'skill', name: 'Demo agent-browser', path: '~/.agents/skills/agent-browser', description: 'Demo browser automation skill', lastAccessed: new Date() },
+  { id: uid(), type: 'context', name: 'Demo Memory Layout', description: 'Demo general -> specific memory hierarchy' },
 ];
 
 export const mockSkills: Skill[] = [
-  { name: 'imagegen', description: 'Generate or edit raster images', category: 'media', enabled: true },
-  { name: 'openai-docs', description: 'Up-to-date OpenAI API docs', category: 'reference', enabled: true },
-  { name: 'plugin-creator', description: 'Create Codex plugin scaffolds', category: 'meta', enabled: true },
-  { name: 'skill-creator', description: 'Create effective skills', category: 'meta', enabled: true },
-  { name: 'agent-browser', description: 'Browser automation CLI', category: 'automation', enabled: true },
-  { name: 'frontend-design', description: 'Production-grade frontend interfaces', category: 'web', enabled: true },
-  { name: 'zen-review', description: 'Expert code reviewer', category: 'review', enabled: true },
-  { name: 'cross-review', description: 'Cross model code review', category: 'review', enabled: true },
-  { name: 'research', description: 'Fast codebase exploration', category: 'tools', enabled: true },
-  { name: 'plan', description: 'Task breakdown and planning', category: 'tools', enabled: true },
+  { name: 'Demo imagegen', description: 'Demo raster image generation skill', category: 'media', enabled: true },
+  { name: 'Demo openai-docs', description: 'Demo official documentation lookup skill', category: 'reference', enabled: true },
+  { name: 'Demo plugin-creator', description: 'Demo plugin scaffold skill', category: 'meta', enabled: true },
+  { name: 'Demo skill-creator', description: 'Demo skill authoring helper', category: 'meta', enabled: true },
+  { name: 'Demo agent-browser', description: 'Demo browser automation skill', category: 'automation', enabled: true },
+  { name: 'Demo frontend-design', description: 'Demo frontend interface design skill', category: 'web', enabled: true },
+  { name: 'Demo zen-review', description: 'Demo expert code review skill', category: 'review', enabled: true },
+  { name: 'Demo cross-review', description: 'Demo cross-model code review skill', category: 'review', enabled: true },
+  { name: 'Demo research', description: 'Demo codebase exploration skill', category: 'tools', enabled: true },
+  { name: 'Demo plan', description: 'Demo task planning skill', category: 'tools', enabled: true },
 ];
 
 export const mockPlugins: Plugin[] = [
-  { name: 'Browser', description: 'In-app browser automation', enabled: true, skills: [{ name: 'browser', description: 'Navigate and inspect local web targets', category: 'browser', enabled: true }] },
-  { name: 'Build macOS Apps', description: 'Xcode and SwiftUI workflows', enabled: true },
-  { name: 'Chrome', description: 'Chrome browser automation', enabled: true },
-  { name: 'Computer Use', description: 'Control desktop apps on macOS', enabled: true },
-  { name: 'Documents', description: 'Create and edit document artifacts', enabled: true },
-  { name: 'GitHub', description: 'Repository and PR management', enabled: true },
-  { name: 'Netlify', description: 'Deploy and manage web projects', enabled: false },
-  { name: 'Presentations', description: 'Build PowerPoint slide decks', enabled: true },
-  { name: 'Spreadsheets', description: 'Create and analyze spreadsheets', enabled: true },
+  { name: 'Demo Browser', description: 'Demo in-app browser automation plugin', enabled: true, skills: [{ name: 'Demo browser', description: 'Demo local web target inspection', category: 'browser', enabled: true }] },
+  { name: 'Demo Build macOS Apps', description: 'Demo Xcode and SwiftUI workflows', enabled: true },
+  { name: 'Demo Chrome', description: 'Demo Chrome browser automation', enabled: true },
+  { name: 'Demo Computer Use', description: 'Demo macOS desktop control', enabled: true },
+  { name: 'Demo Documents', description: 'Demo document artifact creation', enabled: true },
+  { name: 'Demo GitHub', description: 'Demo repository and PR management', enabled: true },
+  { name: 'Demo Netlify', description: 'Demo deploy and site management', enabled: false },
+  { name: 'Demo Presentations', description: 'Demo PowerPoint deck creation', enabled: true },
+  { name: 'Demo Spreadsheets', description: 'Demo spreadsheet creation and analysis', enabled: true },
 ];
 
 export const createMockMessages = (): Message[] => [

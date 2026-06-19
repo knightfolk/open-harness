@@ -2,7 +2,7 @@ import type { PanelId, PanelConfig } from '../../types/layout';
 import {
   MessageSquare, Globe, Terminal,
   FolderOpen, FlaskConical, Shield, Brain,
-  UsersRound,
+  UsersRound, Inbox, Workflow,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -18,6 +18,8 @@ const iconMap: Record<PanelId, ComponentType<{ size?: number; 'aria-hidden'?: bo
   'model-lab': FlaskConical,
   'routing-learning': Brain,
   'safety': Shield,
+  'attention-inbox': Inbox,
+  workflows: Workflow,
   'sub-agents': UsersRound,
 };
 
@@ -29,6 +31,8 @@ export const panelConfigs: Record<PanelId, PanelConfig> = {
   'model-lab': { id: 'model-lab',   label: 'Model Lab',   icon: 'FlaskConical',  defaultSize: 400, minSize: 260 },
   'routing-learning': { id: 'routing-learning', label: 'Routing Learning', icon: 'Brain', defaultSize: 420, minSize: 280 },
   'safety':     { id: 'safety',       label: 'Safety',      icon: 'Shield',        defaultSize: 420, minSize: 280 },
+  'attention-inbox': { id: 'attention-inbox', label: 'Attention Inbox', icon: 'Inbox', defaultSize: 360, minSize: 280 },
+  workflows: { id: 'workflows', label: 'Workflows', icon: 'Workflow', defaultSize: 380, minSize: 280 },
   'sub-agents':{ id: 'sub-agents',  label: 'Agent Work', icon: 'UsersRound', defaultSize: 420, minSize: 280 },
 };
 

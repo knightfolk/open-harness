@@ -50,6 +50,7 @@ assert.ok(
 );
 
 const narrow640 = mediaSections('(max-width: 640px)');
+const narrow480 = mediaSections('(max-width: 480px)');
 const routing680 = mediaSections('(max-width: 680px)');
 const panel760 = mediaSections('(max-width: 760px)');
 const split1080 = mediaSections('(max-width: 1080px)');
@@ -67,6 +68,21 @@ for (const expected of [
   assert.ok(
     narrow640.includes(expected),
     `narrow composer rules should include ${expected}`,
+  );
+}
+
+for (const expected of [
+  '.chat-panel-root.has-floating-super',
+  '--chat-content-right: 12px',
+  '.chat-panel-root.has-floating-super .message-wrapper.user',
+  'margin-right: var(--chat-content-right)',
+  '.floating-super-panel',
+  'width: auto !important',
+  'min-width: 0',
+]) {
+  assert.ok(
+    narrow480.includes(expected),
+    `phone Environment overlay should not reserve desktop chat width: ${expected}`,
   );
 }
 

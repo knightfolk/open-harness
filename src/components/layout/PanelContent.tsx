@@ -9,6 +9,8 @@ const FilesPanel = lazy(() => import('../FilesPanel').then((m) => ({ default: m.
 const ModelLabPanel = lazy(() => import('../ModelLabPanel').then((m) => ({ default: m.ModelLabPanel })));
 const RoutingLearningPane = lazy(() => import('../RoutingLearningPane').then((m) => ({ default: m.RoutingLearningPane })));
 const SafetyPanel = lazy(() => import('../SafetyPanel').then((m) => ({ default: m.SafetyPanel })));
+const AttentionInboxPanel = lazy(() => import('../AttentionInboxPanel').then((m) => ({ default: m.AttentionInboxPanel })));
+const WorkflowHooksPanel = lazy(() => import('../WorkflowHooksPanel').then((m) => ({ default: m.WorkflowHooksPanel })));
 
 interface Props {
   panelId: PanelId;
@@ -82,6 +84,10 @@ export function PanelContent({ panelId, context }: Props) {
       return wrapped(<RoutingLearningPane enabledModels={context.enabledModels || []} onApplyRoleRecommendation={context.onApplyRoleRecommendation} />);
     case 'safety':
       return wrapped(<SafetyPanel workingDir={context.workingDir} />);
+    case 'attention-inbox':
+      return wrapped(<AttentionInboxPanel agents={context.subAgents} onFocusAgent={context.onFocusSubAgent} onReviewChanges={context.onReviewChanges} />);
+    case 'workflows':
+      return wrapped(<WorkflowHooksPanel trustMode={context.trustMode || 'workspace-write'} />);
     default:
       return <EmptyState text="Unknown panel" />;
   }

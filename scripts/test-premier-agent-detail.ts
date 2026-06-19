@@ -6,7 +6,9 @@ const subAgentTracker = readFileSync('src/components/SubAgentTracker.tsx', 'utf-
 const appShell = readFileSync('src/App.tsx', 'utf-8');
 
 for (const expected of [
-  'className="agent-focus-overlay" role="region" aria-label="Right-hand Agent detail pane"',
+  'className="agent-focus-shell"',
+  'role="region"',
+  'aria-label="Right-hand Agent detail pane"',
   '<AgentFocusPanel',
   'onRunSteer={handleRunSteer}',
 ]) {
@@ -19,7 +21,7 @@ for (const expected of [
 for (const expected of [
   "const SubAgentTracker = lazy(() => import('./SubAgentTracker')",
   'role="complementary" aria-label="Agent detail inspector"',
-  'aria-label="Back to chat"',
+  'aria-label="Close Agent detail"',
   '<span>Agent detail</span>',
   'role="status"',
   'aria-live="polite"',

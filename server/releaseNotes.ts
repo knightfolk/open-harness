@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 export interface ReleaseNoteEntry {
   version: string;
@@ -15,7 +15,13 @@ export interface ReleaseNotesPayload {
   releases: ReleaseNoteEntry[];
 }
 
-const ROOT_DIR = process.cwd();
+function releaseRoot(): string {
+  if (process.env.OPENHARNESS_APP_ROOT) return process.env.OPENHARNESS_APP_ROOT;
+  if (process.env.OPENHARNESS_STATIC_DIR) return dirname(process.env.OPENHARNESS_STATIC_DIR);
+  return process.cwd();
+}
+
+const ROOT_DIR = releaseRoot();
 const PACKAGE_PATH = join(ROOT_DIR, 'package.json');
 const CHANGELOG_PATH = join(ROOT_DIR, 'CHANGELOG.md');
 

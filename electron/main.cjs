@@ -293,6 +293,7 @@ async function startPackagedServer() {
       ELECTRON_RUN_AS_NODE: '1',
       PORT: String(SERVER_PORT),
       OPENHARNESS_STATIC_DIR: staticDir,
+      OPENHARNESS_APP_ROOT: appPath,
       OPENHARNESS_UI_URL: `http://localhost:${SERVER_PORT}`,
       OPENHARNESS_LISTEN_HOST: '127.0.0.1',
       OPENHARNESS_ELECTRON_HANDSHAKE: packagedServerHandshake,

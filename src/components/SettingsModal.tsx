@@ -22,6 +22,7 @@ import {
   MODEL_CATALOG_SOURCES,
   MODEL_CATALOG_UPDATED_AT,
   MODEL_CATEGORY_META,
+  modelCatalogFreshness,
   modelBestCategory,
   modelCatalogTooltip,
   normalizeModelCatalogKey,
@@ -563,10 +564,10 @@ function AssistantSkillsPane({ skills, plugins }: { skills: Skill[]; plugins: Pl
   return (
     <>
       <PaneTitle>Skills</PaneTitle>
-      <PaneDesc>Assistant capabilities and available plugin bundles.</PaneDesc>
+      <PaneDesc>Demo capability inventory. Live skill/plugin discovery is not wired into this Settings pane yet.</PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
         <div className="settings-section-header">
-          <div className="settings-section-title">Skills ({skills.length})</div>
+          <div className="settings-section-title">Demo Skills ({skills.length})</div>
         </div>
         <div className="assistant-capability-list">
           {skills.map((skill) => {
@@ -584,7 +585,7 @@ function AssistantSkillsPane({ skills, plugins }: { skills: Skill[]; plugins: Pl
         </div>
         <button className="settings-mini-button" style={{ marginTop: 12 }} onClick={() => setShowPlugins(!showPlugins)}>
           {showPlugins ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          Plugins ({plugins.length})
+          Demo Plugins ({plugins.length})
         </button>
         {showPlugins && (
           <div className="assistant-capability-list" style={{ marginTop: 8 }}>
@@ -608,10 +609,10 @@ function AssistantMemoryPane({ entries }: { entries: MemoryEntry[] }) {
   return (
     <>
       <PaneTitle>Memory</PaneTitle>
-      <PaneDesc>Reference context currently surfaced to the assistant.</PaneDesc>
+      <PaneDesc>Demo memory examples. Live Codex memory inventory is not wired into this Settings pane yet.</PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
         <div className="settings-section-header">
-          <div className="settings-section-title">Active Memory</div>
+          <div className="settings-section-title">Demo Memory</div>
         </div>
         <div className="assistant-capability-list">
           {entries.map((entry) => {
@@ -1223,6 +1224,11 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
     acc[category] = (acc[category] || 0) + 1;
     return acc;
   }, {});
+  const freshnessCounts = TOP_MODEL_CATALOG.reduce<Record<string, number>>((acc, card) => {
+    const status = modelCatalogFreshness(card).status;
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
 
   const filtered = TOP_MODEL_CATALOG.filter((card) => {
     const access = getCatalogAccess(card.id, providers);
@@ -1297,12 +1303,15 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
         </button>
       </div>
 
-      <div className="model-library-summary" role="status" aria-label={`Model library summary: ${TOP_MODEL_CATALOG.length} catalog cards, ${providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length} enabled provider models, ${audit?.missingCatalogCards.length || 0} missing catalog cards, ${audit?.metadataDisagreements.length || 0} metadata differences, ${audit?.suggestedCatalogCards.length || 0} draft cards, updated ${MODEL_CATALOG_UPDATED_AT}`}>
+      <div className="model-library-summary" role="status" aria-label={`Model library summary: ${TOP_MODEL_CATALOG.length} catalog cards, ${providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length} enabled provider models, ${audit?.missingCatalogCards.length || 0} missing catalog cards, ${audit?.metadataDisagreements.length || 0} metadata differences, ${audit?.suggestedCatalogCards.length || 0} draft cards, ${freshnessCounts.fresh || 0} fresh official cards, ${freshnessCounts.stale || 0} stale official cards, ${freshnessCounts.advisory || 0} advisory cards, updated ${MODEL_CATALOG_UPDATED_AT}`}>
         <div><strong>{TOP_MODEL_CATALOG.length}</strong> catalog cards</div>
         <div><strong>{providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length}</strong> enabled provider models</div>
         <div><strong>{audit?.missingCatalogCards.length ?? '...'}</strong> missing cards</div>
         <div><strong>{audit?.metadataDisagreements.length ?? '...'}</strong> metadata diffs</div>
         <div><strong>{audit?.suggestedCatalogCards.length ?? '...'}</strong> draft cards</div>
+        <div><strong>{freshnessCounts.fresh || 0}</strong> fresh official</div>
+        <div><strong>{freshnessCounts.stale || 0}</strong> stale official</div>
+        <div><strong>{freshnessCounts.advisory || 0}</strong> advisory</div>
         <div>Updated {MODEL_CATALOG_UPDATED_AT}</div>
       </div>
       {auditStatus === 'error' && (
@@ -1336,12 +1345,13 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
           const accessClass = access.label.toLowerCase();
           const fit = modelHarnessFit(card);
           const signals = modelScorecardSignals(card);
+          const freshness = modelCatalogFreshness(card);
           return (
             <article
               key={card.id}
               className="model-card"
               role="listitem"
-              aria-label={`${card.displayName} capability scorecard. Provider ${card.provider}. ${categoryMeta.label}. Access ${access.label}${access.providerLabel ? ` via ${access.providerLabel}` : ''}. Harness fit ${fit.score} percent, ${fit.label}. Coding ${signals.coding}. Reasoning ${signals.reasoning}. Review ${signals.review}. Planning ${signals.planning}. Tool use ${card.supportsTools ? 'supported' : 'basic'}. Vision ${card.supportsImages ? 'yes' : 'no'}. Long context ${formatContextWindow(card.contextWindowTokens)}. Speed ${signals.speed}. Cost ${formatModelCost(card)}. Privacy ${signals.privacy}. Local availability ${signals.localAvailability}.`}
+              aria-label={`${card.displayName} capability scorecard. Provider ${card.provider}. ${categoryMeta.label}. Access ${access.label}${access.providerLabel ? ` via ${access.providerLabel}` : ''}. Source ${freshness.label}. Harness fit ${fit.score} percent, ${fit.label}. Coding ${signals.coding}. Reasoning ${signals.reasoning}. Review ${signals.review}. Planning ${signals.planning}. Tool use ${card.supportsTools ? 'supported' : 'basic'}. Vision ${card.supportsImages ? 'yes' : 'no'}. Long context ${formatContextWindow(card.contextWindowTokens)}. Speed ${signals.speed}. Cost ${formatModelCost(card)}. Privacy ${signals.privacy}. Local availability ${signals.localAvailability}.`}
               style={{ ['--model-category-color' as any]: categoryMeta.color, ['--model-category-bg' as any]: categoryMeta.background }}
               title={modelCatalogTooltip(card.id)}
             >
@@ -1356,6 +1366,10 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
                 </div>
               </div>
               <div className="model-card-category">{categoryMeta.label}</div>
+              <div className={`model-card-freshness ${freshness.status}`} aria-label={`${card.displayName} source freshness: ${freshness.label}; confidence ${freshness.confidence}; source ${freshness.label}`}>
+                {freshness.status === 'fresh' ? 'Fresh source' : freshness.status === 'stale' ? 'Stale source' : freshness.status === 'advisory' ? 'Advisory source' : 'Unverified source'}
+                <span>{freshness.label}</span>
+              </div>
               <p className="model-card-compact">{card.compactDescription}</p>
               <div className="model-card-metrics" role="list" aria-label={`${card.displayName} core capability scorecard: coding, reasoning, review, planning, tool use, vision, long context, speed, cost, privacy, and local availability`}>
                 <div role="listitem" aria-label={`Coding capability ${signals.coding}`}><span>Coding</span><strong>{signals.coding}</strong></div>
@@ -2999,12 +3013,12 @@ function textureLabel(recipe?: string, opacity?: number): string {
 
 const TEXTURE_OPTIONS: Array<{ id: ThemeTextureRecipe; label: string; desc: string }> = [
   { id: 'none', label: 'None', desc: 'Clean flat shell' },
+  { id: 'low-noise-matte', label: 'Calm matte', desc: 'Quiet default surface' },
   { id: 'soft-marble', label: 'Soft marble', desc: 'Subtle cloudy paper' },
   { id: 'brushed-plaster', label: 'Brushed plaster', desc: 'Fine directional sweep' },
   { id: 'paper-fiber', label: 'Paper fiber', desc: 'Soft woven flecks' },
   { id: 'frosted-noise', label: 'Frosted noise', desc: 'Light diffuse grain' },
   { id: 'paper-grain', label: 'Paper grain', desc: 'Classic speckle' },
-  { id: 'low-noise-matte', label: 'Low-noise matte', desc: 'Quiet matte surface' },
   { id: 'fine-grid', label: 'Fine grid', desc: 'Technical linework' },
   { id: 'blueprint-grid', label: 'Blueprint grid', desc: 'Structured drafting grid' },
   { id: 'terminal-scanline', label: 'Scanline', desc: 'CRT-style bands' },
@@ -3270,7 +3284,7 @@ const TOP_ROUTER_MODEL_CARDS: RouterModelCard[] = TOP_MODEL_CATALOG.map((card) =
   cost: card.routerCost,
   supportsImages: card.supportsImages,
   supportsThinking: card.supportsThinking,
-  card: card.compactDescription,
+  card: `${card.compactDescription} Source freshness: ${modelCatalogFreshness(card).label}. Treat stale or advisory cards as routing hints, not strong recommendations.`,
 }));
 
 const normalizeModelKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -3987,6 +4001,8 @@ function AutoRouterPane() {
                 const retryReduction = routerRetryReductionForModel(routerLearningSummary, c.modelId);
                 const toolPairRisks = routerToolPairRisksForModel(routerLearningSummary, c.modelId);
                 const promptStrategyReliability = routerPromptStrategyReliabilityForModel(routerLearningSummary, c.modelId);
+                const catalogCard = findModelCatalogCard(c.modelId);
+                const freshness = catalogCard ? modelCatalogFreshness(catalogCard) : null;
                 const toolReliabilityTone = toolReliability && toolReliability.total > 0
                   ? toolReliability.errorRate > 0.2
                     ? 'custom'
@@ -3999,7 +4015,7 @@ function AutoRouterPane() {
                   key={c.modelId}
                   title={source.detail}
                   role="listitem"
-                  aria-label={`Auto-router candidate ${i + 1}: ${c.modelId}. Source ${source.label}. Effective cost ${c.cost}. Images ${c.supportsImages ? 'supported' : 'not supported'}. Thinking ${c.supportsThinking ? 'supported' : 'not supported'}.${isClassifier ? ' Used as classifier model.' : ''}${isDefault ? ' Used as default fallback model.' : ''}${evalRecommendation ? ` Eval recommendation ${evalProofStatusCopy(evalRecommendation)} for ${evalRecommendation.role}.` : ''}`}
+                  aria-label={`Auto-router candidate ${i + 1}: ${c.modelId}. Source ${source.label}. ${freshness ? `Catalog freshness ${freshness.label}. ` : ''}Effective cost ${c.cost}. Images ${c.supportsImages ? 'supported' : 'not supported'}. Thinking ${c.supportsThinking ? 'supported' : 'not supported'}.${isClassifier ? ' Used as classifier model.' : ''}${isDefault ? ' Used as default fallback model.' : ''}${evalRecommendation ? ` Eval recommendation ${evalProofStatusCopy(evalRecommendation)} for ${evalRecommendation.role}.` : ''}`}
                   style={{
                   display: 'grid',
                   gridTemplateColumns: 'minmax(0, 1fr) auto',
@@ -4014,6 +4030,9 @@ function AutoRouterPane() {
                         {c.modelId}
                       </span>
                       <span role="listitem" aria-label={`${c.modelId} source ${source.label}`} style={routerSourceBadgeStyle(source.tone)}>{source.label}</span>
+                      {freshness && <span role="listitem" aria-label={`${c.modelId} catalog freshness: ${freshness.label}. Stale or advisory cards are routing hints, not strong recommendations.`} style={routerSourceBadgeStyle(freshness.status === 'fresh' ? 'ok' : freshness.status === 'stale' ? 'custom' : 'catalog')}>
+                        {freshness.status === 'fresh' ? 'Fresh card' : freshness.status === 'stale' ? 'Stale card' : freshness.status === 'advisory' ? 'Advisory card' : 'Unverified card'}
+                      </span>}
                       {isClassifier && <span role="listitem" aria-label={`${c.modelId} is the classifier model`} style={routerSourceBadgeStyle('catalog')}>Classifier</span>}
                       {isDefault && <span role="listitem" aria-label={`${c.modelId} is the default fallback model`} style={routerSourceBadgeStyle('custom')}>Default</span>}
                       {evalRecommendation && <span role="listitem" aria-label={`${c.modelId} eval recommendation status: ${evalProofStatusCopy(evalRecommendation)}`} style={routerSourceBadgeStyle(evalRecommendation.proofReviewStatus === 'approved' ? 'ok' : 'custom')}>
