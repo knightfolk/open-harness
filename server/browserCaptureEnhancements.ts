@@ -4,6 +4,7 @@
  * Import and use in captureDeepBrowser or from index.ts endpoints.
  */
 
+import { isLoopbackUrl } from './browserPreview';
 
 
 // ── Types ──────────────────────────────────────────────
@@ -208,6 +209,7 @@ export async function checkResourceHealth(
   baseUrl: string,
 ): Promise<ResourceHealthEntry[]> {
   const urls = new Set<string>();
+  if (!isLoopbackUrl(baseUrl)) return [];
 
   for (const s of extractScriptSources(html)) {
     urls.add(s.startsWith('http') ? s : new URL(s, baseUrl).href);
@@ -223,6 +225,10 @@ export async function checkResourceHealth(
   const results: ResourceHealthEntry[] = [];
 
   for (const url of urlArray) {
+    if (!isLoopbackUrl(url)) {
+      results.push({ url: url.slice(0, 300), status: 0, ok: false });
+      continue;
+    }
     try {
       const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(3000) });
       results.push({ url: url.slice(0, 300), status: res.status, ok: res.ok });

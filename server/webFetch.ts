@@ -7,6 +7,7 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_TIMEOUT_MS = 12_000;
 const DEFAULT_MAX_BYTES = 220_000;
 const HARD_MAX_BYTES = 550_000;
+const MAX_REDIRECTS = 5;
 
 export const webFetchToolDefinition = {
   type: 'function',
@@ -52,35 +53,19 @@ export async function safeWebFetch(args: Record<string, unknown>): Promise<WebFe
     return { error: 'Only http and https URLs are allowed' };
   }
 
-  const policy = await validatePublicHost(url);
-  if (!policy.allowed) return { error: policy.reason };
-
-  const domainPolicy = checkDomainPolicy(url.hostname);
-  if (!domainPolicy.allowed) return { error: domainPolicy.reason };
+  const initialPolicy = await validatePublicHttpUrl(url);
+  if (!initialPolicy.allowed) return { error: initialPolicy.reason };
 
   const timeoutMs = clampNumber(args.timeoutMs, DEFAULT_TIMEOUT_MS, 1_000, MAX_TIMEOUT_MS);
   const maxBytes = clampNumber(args.maxBytes, DEFAULT_MAX_BYTES, 20_000, HARD_MAX_BYTES);
 
   let response: Response;
+  let finalUrl: URL;
   try {
-    response = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        Accept: 'text/html, text/plain, application/json, application/xml;q=0.9, */*;q=0.5',
-        'User-Agent': 'OpenHarness-web-fetch/1.0',
-      },
-    });
+    ({ response, finalUrl } = await fetchPublicWithCheckedRedirects(url, timeoutMs));
   } catch (err: any) {
     return { error: `Fetch failed: ${err?.message || err}` };
   }
-
-  const finalUrl = new URL(response.url || url.toString());
-  const finalPolicy = await validatePublicHost(finalUrl);
-  if (!finalPolicy.allowed) return { error: `Redirect blocked: ${finalPolicy.reason}` };
-  const finalDomainPolicy = checkDomainPolicy(finalUrl.hostname);
-  if (!finalDomainPolicy.allowed) return { error: `Redirect blocked: ${finalDomainPolicy.reason}` };
 
   const contentType = response.headers.get('content-type') || 'unknown';
   if (!isReadableContentType(contentType)) {
@@ -117,6 +102,33 @@ export async function safeWebFetch(args: Record<string, unknown>): Promise<WebFe
   };
 }
 
+async function fetchPublicWithCheckedRedirects(
+  initialUrl: URL,
+  timeoutMs: number,
+): Promise<{ response: Response; finalUrl: URL }> {
+  let current = initialUrl;
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+    const policy = await validatePublicHttpUrl(current);
+    if (!policy.allowed) throw new Error(redirects === 0 ? policy.reason : `Redirect blocked: ${policy.reason}`);
+    const response = await fetch(current, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        Accept: 'text/html, text/plain, application/json, application/xml;q=0.9, */*;q=0.5',
+        'User-Agent': 'OpenHarness-web-fetch/1.0',
+      },
+    });
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      return { response, finalUrl: current };
+    }
+    const location = response.headers.get('location');
+    if (!location) return { response, finalUrl: current };
+    current = new URL(location, current);
+  }
+  throw new Error(`Too many redirects (max ${MAX_REDIRECTS})`);
+}
+
 function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -147,6 +159,17 @@ function checkDomainPolicy(hostname: string): { allowed: boolean; reason: string
 function domainMatches(host: string, pattern: string): boolean {
   const clean = pattern.replace(/^\*\./, '');
   return host === clean || host.endsWith(`.${clean}`);
+}
+
+export async function validatePublicHttpUrl(url: URL): Promise<{ allowed: boolean; reason: string }> {
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    return { allowed: false, reason: 'Only http and https URLs are allowed' };
+  }
+  const hostPolicy = await validatePublicHost(url);
+  if (!hostPolicy.allowed) return hostPolicy;
+  const domainPolicy = checkDomainPolicy(url.hostname);
+  if (!domainPolicy.allowed) return domainPolicy;
+  return { allowed: true, reason: '' };
 }
 
 async function validatePublicHost(url: URL): Promise<{ allowed: boolean; reason: string }> {

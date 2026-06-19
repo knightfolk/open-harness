@@ -9,7 +9,7 @@ import { isIP } from 'net';
 import { homedir } from 'os';
 import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef, getConfigPath } from './config';
 import type { StoredMCPServer, StoredProvider } from './config';
-import { testProviderConnection, fetchProviderModels } from './providers';
+import { assertProviderBaseURLAllowed, testProviderConnection, fetchProviderModels } from './providers';
 import { mcpManager, parseStdioEndpoint } from './mcp';
 import { checkDockerReadiness } from './dockerReadiness';
 import { dockerDesktopEnv } from './dockerDesktopEnv';
@@ -1339,7 +1339,7 @@ app.post('/api/sessions/:sessionId/validation-proof-artifacts', (req, res) => {
 
 // ── Config endpoints ───────────────────────────────────
 
-app.get('/api/config', (_req, res) => {
+app.get('/api/config', (req, res) => {
   const safeConfig = {
     ...appConfig,
     configPath: getConfigPath(),
@@ -1347,6 +1347,7 @@ app.get('/api/config', (_req, res) => {
       ...p,
       apiKey: p.apiKey ? '••••' + p.apiKey.slice(-4) : '', // mask the key
       hasKey: !!p.apiKey,
+      oauth: maskProviderOAuth(p.oauth),
     })),
     mcpServers: appConfig.mcpServers.map((s) => ({
       ...s,
@@ -1354,10 +1355,16 @@ app.get('/api/config', (_req, res) => {
     })),
   };
   (safeConfig as any).autoRouter = appConfig.autoRouter;
+  const electronHandshake = process.env.OPENHARNESS_ELECTRON_HANDSHAKE || '';
+  if (electronHandshake && req.get('x-openharness-electron-handshake') === electronHandshake) {
+    res.setHeader('x-openharness-electron-handshake-ok', '1');
+  }
   res.json(safeConfig);
 });
 
 app.put('/api/config', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const updates = req.body;
   // Only allow updating safe fields
   if (updates.personality !== undefined) appConfig.personality = updates.personality;
@@ -1470,6 +1477,8 @@ app.get('/api/router/state', (_req, res) => {
 });
 
 app.post('/api/router/configure', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const routerConfig = req.body;
   (appConfig as any).autoRouter = routerConfig;
   configureAutoRouter(appConfig);
@@ -1477,7 +1486,9 @@ app.post('/api/router/configure', (req, res) => {
   res.json({ ok: true, state: getAutoRouterState() });
 });
 
-app.post('/api/router/clear-cache', (_req, res) => {
+app.post('/api/router/clear-cache', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   clearRouterCache();
   res.json({ ok: true });
 });
@@ -1600,9 +1611,11 @@ app.post('/api/router/learning/tool-reliability/cache/refresh', (_req, res) => {
 });
 
 app.post('/api/router/learning/import', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const body = req.body || {};
   const dryRun = body.dryRun === true || req.query.dryRun === 'true';
-  const datasetKind = body.datasetKind === 'benchmark' || req.query.datasetKind === 'benchmark' ? 'benchmark' : 'production';
+  const datasetKind = body.datasetKind === 'production' || req.query.datasetKind === 'production' ? 'production' : 'benchmark';
   const { events, importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview } = buildRouterLearningImportPreview(body);
   if (!Array.isArray(events)) return res.status(400).json({ error: 'events array required' });
   res.json({ ok: true, ...importRoutingEvents(events, { dryRun, datasetKind }), importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview });
@@ -1737,6 +1750,8 @@ app.get('/api/providers/:id/oauth/status', (req, res) => {
 });
 
 app.post('/api/providers/:id/oauth/start', (req, res) => {
+  const control = ensureLocalControl(req);
+  if (!control.ok) return res.status(control.status).json({ error: control.error });
   const provider = appConfig.providers.find((p) => p.id === req.params.id);
   if (!provider) return res.status(404).json({ error: 'Provider not found' });
   const oauthProviderId = oauthProviderForStoredProvider(provider);
@@ -1809,6 +1824,8 @@ app.get('/api/providers/oauth/:oauthProvider/callback', async (req, res) => {
 });
 
 app.delete('/api/providers/:id/oauth', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const provider = appConfig.providers.find((p) => p.id === req.params.id);
   if (!provider) return res.status(404).json({ error: 'Provider not found' });
   provider.oauth = undefined;
@@ -1819,6 +1836,8 @@ app.delete('/api/providers/:id/oauth', (req, res) => {
 
 // Save multiple providers in one call (used by guided onboarding)
 app.post('/api/providers/batch', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const list = (req.body?.providers || []) as any[];
   if (!Array.isArray(list) || list.length === 0) {
     return res.status(400).json({ error: 'providers array is required' });
@@ -1840,6 +1859,11 @@ app.post('/api/providers/batch', (req, res) => {
       planId: typeof raw.planId === 'string' && raw.planId ? raw.planId : existing?.planId,
       models: incomingModels && incomingModels.length > 0 ? incomingModels : (existing?.models || []),
     };
+    try {
+      assertProviderBaseURLAllowed(provider);
+    } catch (err: any) {
+      return res.status(400).json({ error: err?.message || 'Provider URL is not allowed' });
+    }
     appConfig = upsertProvider(appConfig, provider);
     created.push({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey, oauth: maskProviderOAuth(provider.oauth) });
   }
@@ -1848,6 +1872,8 @@ app.post('/api/providers/batch', (req, res) => {
 });
 
 app.post('/api/providers', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { id, name, type, apiKey, baseURL, accessMode, planId, models } = req.body as any;
   if (!name || !type || !baseURL) {
     return res.status(400).json({ error: 'name, type, and baseURL are required' });
@@ -1863,12 +1889,19 @@ app.post('/api/providers', (req, res) => {
     planId: typeof planId === 'string' && planId ? planId : undefined,
     models: models || [],
   };
+  try {
+    assertProviderBaseURLAllowed(provider);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Provider URL is not allowed' });
+  }
   appConfig = upsertProvider(appConfig, provider);
   saveConfig(appConfig);
   res.status(201).json({ ...provider, apiKey: '••••', hasKey: !!provider.apiKey, oauth: maskProviderOAuth(provider.oauth) });
 });
 
 app.put('/api/providers/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const existing = appConfig.providers.find((p) => p.id === req.params.id);
   if (!existing) return res.status(404).json({ error: 'Provider not found' });
 
@@ -1883,6 +1916,11 @@ app.put('/api/providers/:id', (req, res) => {
     existing.apiKey = updates.apiKey.trim();
   }
   if (updates.models !== undefined) existing.models = updates.models;
+  try {
+    assertProviderBaseURLAllowed(existing);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Provider URL is not allowed' });
+  }
 
   appConfig = upsertProvider(appConfig, existing);
   saveConfig(appConfig);
@@ -1890,6 +1928,8 @@ app.put('/api/providers/:id', (req, res) => {
 });
 
 app.delete('/api/providers/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   appConfig = removeProvider(appConfig, req.params.id);
   saveConfig(appConfig);
   res.status(204).end();
@@ -1898,6 +1938,8 @@ app.delete('/api/providers/:id', (req, res) => {
 // ── Test provider connection ───────────────────────────
 
 app.post('/api/providers/:id/test', async (req, res) => {
+  const control = ensureLocalControl(req);
+  if (!control.ok) return res.status(control.status).json({ error: control.error });
   const provider = appConfig.providers.find((p) => p.id === req.params.id);
   if (!provider) return res.status(404).json({ error: 'Provider not found' });
 
@@ -1907,6 +1949,11 @@ app.post('/api/providers/:id/test', async (req, res) => {
     testProvider.apiKey = req.body.apiKey.trim();
   }
   if (req.body?.baseURL) testProvider.baseURL = req.body.baseURL;
+  try {
+    assertProviderBaseURLAllowed(testProvider);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Provider URL is not allowed' });
+  }
 
   const result = await testProviderConnection(testProvider);
   res.json(result);
@@ -1915,6 +1962,8 @@ app.post('/api/providers/:id/test', async (req, res) => {
 // ── Fetch models from provider ─────────────────────────
 
 app.post('/api/providers/:id/models', async (req, res) => {
+  const control = ensureLocalControl(req);
+  if (!control.ok) return res.status(control.status).json({ error: control.error });
   const provider = appConfig.providers.find((p) => p.id === req.params.id);
   if (!provider) return res.status(404).json({ error: 'Provider not found' });
 
@@ -1924,6 +1973,11 @@ app.post('/api/providers/:id/models', async (req, res) => {
     fetchProvider.apiKey = req.body.apiKey.trim();
   }
   if (req.body?.baseURL) fetchProvider.baseURL = req.body.baseURL;
+  try {
+    assertProviderBaseURLAllowed(fetchProvider);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Provider URL is not allowed' });
+  }
 
   try {
     const fetchedModels = await fetchProviderModels(fetchProvider);
@@ -2380,6 +2434,8 @@ app.post('/api/terminal/sessions', (req, res) => {
 });
 
 app.get('/api/terminal/sessions/:sessionId/history', (req, res) => {
+  const control = ensureLocalControl(req);
+  if (!control.ok) return res.status(control.status).json({ error: control.error });
   const entries = getTermHistory(req.params.sessionId);
   res.json(entries);
 });
@@ -2411,6 +2467,8 @@ app.post('/api/terminal/commands/:commandId/cancel', (req, res) => {
 });
 
 app.get('/api/terminal/commands/:commandId', (req, res) => {
+  const control = ensureLocalControl(req);
+  if (!control.ok) return res.status(control.status).json({ error: control.error });
   const entry = getTermEntry(req.params.commandId);
   if (!entry) return res.status(404).json({ error: 'Command not found' });
   res.json(entry);
@@ -2467,7 +2525,7 @@ app.get('/api/git/file-diff', (req, res) => {
 app.post('/api/git/stage', (req, res) => {
   const { dir, paths } = req.body as { dir: string; paths: string[] };
   if (!dir || !paths?.length) return res.status(400).json({ error: 'dir and paths are required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const pathCheck = validateRepoRelativePaths(paths, workspace.dir);
   if (!pathCheck.ok) return res.status(pathCheck.status).json({ error: pathCheck.error });
@@ -2482,7 +2540,7 @@ app.post('/api/git/stage', (req, res) => {
 app.post('/api/git/unstage', (req, res) => {
   const { dir, paths } = req.body as { dir: string; paths: string[] };
   if (!dir || !paths?.length) return res.status(400).json({ error: 'dir and paths are required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const pathCheck = validateRepoRelativePaths(paths, workspace.dir);
   if (!pathCheck.ok) return res.status(pathCheck.status).json({ error: pathCheck.error });
@@ -2497,7 +2555,7 @@ app.post('/api/git/unstage', (req, res) => {
 app.post('/api/git/commit', (req, res) => {
   const { dir, message } = req.body as { dir: string; message: string };
   if (!dir || !message?.trim()) return res.status(400).json({ error: 'dir and message are required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
     const result = git.commit(workspace.dir, message);
@@ -2568,6 +2626,8 @@ app.post('/api/patches/apply', (req, res) => {
   if (!patch?.trim()) return res.status(400).json({ error: 'patch is required' });
   const wd = workingDir || process.cwd();
   const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  const workspace = ensureWorkspaceMutationAllowed(req, wd);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
 
   // Trust-mode gate: refuse outright if the mode forbids writes, so the
   // gate fires even when the parser returns an empty file list.
@@ -2592,8 +2652,8 @@ app.post('/api/patches/apply', (req, res) => {
     }
   } else {
     for (const f of parsed) {
-      const candidate = join(wd, f.filePath);
-      const check = isPathAllowed(candidate, trustMode, wd);
+      const candidate = join(workspace.dir, f.filePath);
+      const check = isPathAllowed(candidate, trustMode, workspace.dir);
       if (!check.allowed) {
         return res.status(400).json({ error: check.reason || 'Path refused' });
       }
@@ -2601,7 +2661,7 @@ app.post('/api/patches/apply', (req, res) => {
   }
 
   try {
-    const result = nodeApplyPatch(patch, wd);
+    const result = nodeApplyPatch(patch, workspace.dir);
     res.json(result);
   } catch (err: any) {
     res.status(502).json({ error: err.message });
@@ -2712,10 +2772,10 @@ function ensureLocalMutationWithControl(req: express.Request): { ok: true } | { 
   return ensureLocalControl(req);
 }
 
-function ensureWorkspaceMutationAllowed(dir: string): { ok: true; dir: string } | { ok: false; status: number; error: string } {
+function ensureWorkspaceMutationAllowed(req: express.Request, dir: string): { ok: true; dir: string } | { ok: false; status: number; error: string } {
   const workspace = ensureKnownWorkspace(dir);
   if (!workspace.ok) return workspace;
-  const mutation = ensureLocalMutationAllowed();
+  const mutation = ensureLocalMutationWithControl(req);
   if (!mutation.ok) return mutation;
   return workspace;
 }
@@ -2852,8 +2912,10 @@ app.post('/api/patch-proposals', (req, res) => {
   if (!patch?.trim()) return res.status(400).json({ error: 'patch is required' });
   if (!workingDir?.trim()) return res.status(400).json({ error: 'workingDir is required' });
   if (!sessionId?.trim()) return res.status(400).json({ error: 'sessionId is required' });
+  const workspace = ensureWorkspaceMutationAllowed(req, workingDir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
-    scopeCheckOrThrow(workingDir);
+    scopeCheckOrThrow(workspace.dir);
   } catch (err: any) {
     return res.status(err.statusCode || 400).json({ error: err.message });
   }
@@ -2863,7 +2925,7 @@ app.post('/api/patch-proposals', (req, res) => {
   let verificationCommands = body.verificationCommands;
   if (!verificationCommands || verificationCommands.length === 0) {
     try {
-      const profile = getProjectProfile(workingDir);
+      const profile = getProjectProfile(workspace.dir);
       const defaults: string[] = [];
       if (profile.validation.lint) defaults.push(profile.validation.lint);
       if (profile.validation.typecheck) defaults.push(profile.validation.typecheck);
@@ -2877,7 +2939,7 @@ app.post('/api/patch-proposals', (req, res) => {
   try {
     const proposal = createProposal({
       patch,
-      workingDir,
+      workingDir: workspace.dir,
       sessionId,
       runId: body.runId,
       explanation: body.explanation,
@@ -2902,6 +2964,8 @@ app.get('/api/patch-proposals/:id', (req, res) => {
 });
 
 function setHunkFromBody(req: any, res: any, status: 'accepted' | 'rejected') {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const hunkId = (req.body as { hunkId?: string }).hunkId;
   if (!hunkId || typeof hunkId !== 'string') {
     return res.status(400).json({ error: 'hunkId is required in body' });
@@ -2920,12 +2984,16 @@ app.post('/api/patch-proposals/:id/hunks/:fileId/reject', (req, res) => {
 });
 
 app.post('/api/patch-proposals/:id/accept-all', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const p = acceptAllHunks(req.params.id);
   if (!p) return res.status(404).json({ error: 'Proposal not found' });
   res.json(p);
 });
 
 app.post('/api/patch-proposals/:id/reject-all', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const p = rejectAllHunks(req.params.id);
   if (!p) return res.status(404).json({ error: 'Proposal not found' });
   res.json(p);
@@ -2940,6 +3008,8 @@ app.post('/api/patch-proposals/:id/isolate', (req, res) => {
   if (proposal.sandbox?.status === 'ready') {
     return res.json({ proposal, sandbox: proposal.sandbox, appliedFiles: [], errors: [] });
   }
+  const workspace = ensureWorkspaceMutationAllowed(req, proposal.workingDir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
 
   const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
   if (trustMode === 'read-only' || trustMode === 'chat-only') {
@@ -2995,6 +3065,8 @@ app.post('/api/patch-proposals/:id/isolate', (req, res) => {
 app.post('/api/patch-proposals/:id/discard', (req, res) => {
   const proposal = getProposal(req.params.id);
   if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+  const workspace = ensureWorkspaceMutationAllowed(req, proposal.workingDir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   if (proposal.sandbox?.worktreeId && proposal.sandbox.status === 'ready') {
     try {
       worktrees.removeWorktree(proposal.workingDir, proposal.sandbox.worktreeId, { force: true });
@@ -3014,6 +3086,8 @@ app.post('/api/patch-proposals/:id/apply', async (req, res) => {
   if (proposal.status !== 'open') {
     return res.status(409).json({ error: `Proposal is ${proposal.status}` });
   }
+  const workspace = ensureWorkspaceMutationAllowed(req, proposal.workingDir);
+  if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
 
   // Trust-mode gate: refuse outright if the mode forbids writes.
@@ -5297,7 +5371,7 @@ app.get('/api/project/memory', (req, res) => {
 app.put('/api/project/memory', (req, res) => {
   const { path, content } = req.body as { path: string; content: string };
   if (!path || content == null) return res.status(400).json({ error: 'path and content are required' });
-  const workspace = ensureWorkspaceMutationAllowed(path);
+  const workspace = ensureWorkspaceMutationAllowed(req, path);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   projectMemory.saveMemory(workspace.dir, content);
   res.json({ ok: true });
@@ -5306,7 +5380,7 @@ app.put('/api/project/memory', (req, res) => {
 app.post('/api/project/memory/append', (req, res) => {
   const { path, content } = req.body as { path: string; content: string };
   if (!path || !content) return res.status(400).json({ error: 'path and content are required' });
-  const workspace = ensureWorkspaceMutationAllowed(path);
+  const workspace = ensureWorkspaceMutationAllowed(req, path);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   projectMemory.appendToMemory(workspace.dir, content);
   res.json({ ok: true });
@@ -5406,6 +5480,8 @@ app.get('/api/tasks/:id', (req, res) => {
 });
 
 app.post('/api/tasks', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const validated = validateHarnessTaskInput(req.body);
   if (!validated.ok) return res.status(validated.status).json({ error: validated.error });
   const task = harnessTasks.createTask(validated.task);
@@ -5413,6 +5489,8 @@ app.post('/api/tasks', (req, res) => {
 });
 
 app.put('/api/tasks/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const existing = harnessTasks.getTask(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Task not found' });
   const validated = validateHarnessTaskInput({ ...existing, ...req.body }, existing.workingDir);
@@ -5423,11 +5501,15 @@ app.put('/api/tasks/:id', (req, res) => {
 });
 
 app.delete('/api/tasks/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   if (!harnessTasks.deleteTask(req.params.id)) return res.status(404).json({ error: 'Task not found' });
   res.status(204).end();
 });
 
 app.post('/api/tasks/seed', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { workingDir } = req.body as { workingDir?: string };
   const workspace = ensureKnownWorkspace(workingDir || process.cwd());
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
@@ -5448,11 +5530,15 @@ app.get('/api/task-suites/:id', (req, res) => {
 });
 
 app.post('/api/task-suites', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const suite = harnessTasks.createSuite(req.body);
   res.status(201).json(suite);
 });
 
 app.delete('/api/task-suites/:id', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   if (!harnessTasks.deleteSuite(req.params.id)) return res.status(404).json({ error: 'Suite not found' });
   res.status(204).end();
 });
@@ -5464,6 +5550,8 @@ app.get('/api/task-suites/:id/export', (req, res) => {
 });
 
 app.post('/api/task-suites/import', (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   try {
     const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks : [];
     const validatedTasks = [];
@@ -5530,6 +5618,8 @@ app.get('/api/bench/runs/:id/export', (req, res) => {
 });
 
 app.post('/api/bench/run', async (req, res) => {
+  const mutation = ensureLocalMutationWithControl(req);
+  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
   const { name, taskIds, modelIds, suiteId, workingDir, includePlanningRoomBaseline } = req.body as {
     name?: string;
     taskIds: string[];
@@ -6222,7 +6312,7 @@ app.post('/api/evals/run', async (req, res) => {
 app.post('/api/checkpoints', (req, res) => {
   const { dir, label } = req.body as { dir: string; label?: string };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
     const cp = checkpoints.createCheckpoint(workspace.dir, { label });
@@ -6257,7 +6347,7 @@ app.get('/api/checkpoints/:id', (req, res) => {
 app.delete('/api/checkpoints/:id', (req, res) => {
   const dir = (req.query.dir as string) || '';
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   if (!checkpoints.deleteCheckpoint(workspace.dir, req.params.id)) {
     return res.status(404).json({ error: 'Checkpoint not found' });
@@ -6268,7 +6358,7 @@ app.delete('/api/checkpoints/:id', (req, res) => {
 app.post('/api/checkpoints/:id/restore', (req, res) => {
   const { dir, mode } = req.body as { dir: string; mode?: 'reset' | 'apply' };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const op = mode === 'apply' ? checkpoints.applyCheckpointDiff : checkpoints.restoreCheckpoint;
   try {
@@ -6289,7 +6379,7 @@ app.post('/api/worktrees', (req, res) => {
     dir: string; label?: string; baseBranch?: string; reuseBranch?: boolean;
   };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
     const wt = worktrees.createWorktree(workspace.dir, { label, baseBranch, reuseBranch });
@@ -6333,7 +6423,7 @@ app.delete('/api/worktrees/:id', (req, res) => {
   const dir = (req.query.dir as string) || '';
   const force = req.query.force === '1' || req.query.force === 'true';
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   if (!worktrees.removeWorktree(workspace.dir, req.params.id, { force })) {
     return res.status(404).json({ error: 'Worktree not found' });
@@ -6346,7 +6436,7 @@ app.post('/api/worktrees/:id/promote', (req, res) => {
     dir: string; targetBranch?: string; force?: boolean;
   };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
     res.json(worktrees.promoteWorktree(workspace.dir, req.params.id, { targetBranch, force }));
@@ -6358,7 +6448,7 @@ app.post('/api/worktrees/:id/promote', (req, res) => {
 app.post('/api/worktrees/:id/validate', async (req, res) => {
   const { dir, commands } = req.body as { dir: string; commands?: string[] };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const wt = worktrees.getWorktreeStatus(workspace.dir, req.params.id);
   if (!wt) return res.status(404).json({ error: 'Worktree not found' });
@@ -6380,6 +6470,13 @@ app.post('/api/worktrees/:id/validate', async (req, res) => {
   if (validationCommands.length === 0) {
     return res.status(400).json({ error: 'No validation commands configured for this worktree' });
   }
+  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
+  for (const command of validationCommands) {
+    const policy = checkCommandPolicy(command, trustMode);
+    if (!policy.allowed) {
+      return res.status(403).json({ error: `Validation command refused: ${policy.reason || 'Command not allowed'}` });
+    }
+  }
 
   try {
     const results = await benchRuns.runValidation(validationCommands, wt.path);
@@ -6396,7 +6493,7 @@ app.post('/api/worktrees/:id/validate', async (req, res) => {
 app.post('/api/worktrees/auto-clean', (req, res) => {
   const { dir } = req.body as { dir: string };
   if (!dir) return res.status(400).json({ error: 'dir is required' });
-  const workspace = ensureWorkspaceMutationAllowed(dir);
+  const workspace = ensureWorkspaceMutationAllowed(req, dir);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   try {
     res.json(worktrees.autoCleanEmptyWorktrees(workspace.dir));
@@ -6461,6 +6558,8 @@ app.get('/api/processes/:pid', (req, res) => {
 });
 
 app.get('/api/processes/:pid/log', (req, res) => {
+  const control = ensureLocalControl(req);
+  if (!control.ok) return res.status(control.status).json({ error: control.error });
   const pid = parseInt(req.params.pid, 10);
   const maxBytes = parseInt((req.query.maxBytes as string) || '32768', 10);
   const tail = processLedger.tailLog(pid, maxBytes);
@@ -6811,7 +6910,7 @@ app.post('/api/prompt/estimate', (req, res) => {
 app.post('/api/project/memory/archive', (req, res) => {
   const path = (req.body as { path?: string })?.path;
   if (!path) return res.status(400).json({ error: 'path is required' });
-  const workspace = ensureWorkspaceMutationAllowed(path);
+  const workspace = ensureWorkspaceMutationAllowed(req, path);
   if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   projectMemory.saveMemory(workspace.dir, projectMemory.loadMemory(workspace.dir));

@@ -1,3 +1,5 @@
+import { wrapUntrustedBlock } from './untrustedContent';
+
 export interface BrowserVisualContext {
   kind: 'browser-screenshot';
   url: string;
@@ -148,7 +150,7 @@ export function formatVisualContextForPrompt(context: VisualContext, modelSuppor
   }
 
   lines.push('When giving visual feedback, distinguish observations supported by this text evidence from anything that would require pixel-level inspection.');
-  return lines.join('\n');
+  return wrapUntrustedBlock('browser visual evidence', lines.join('\n'));
 }
 
 export function appendVisualContextToContent(

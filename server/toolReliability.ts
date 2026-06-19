@@ -1,5 +1,6 @@
 import type { HarnessRun, HarnessRunStep } from './runTrace';
 import { getPromptStrategySelectionForModel, toPromptStrategyTrace } from './promptStrategies';
+import { redactSecrets } from './sectionRedaction';
 
 export type ToolReliabilityStatus = 'running' | 'complete' | 'error' | 'skipped';
 export type ToolReliabilityEvidenceSource = 'saved_session_trace' | 'log_trace' | 'imported_trace';
@@ -555,7 +556,7 @@ export function buildToolReliabilitySummary(sessions: ToolReliabilitySession[]):
           finalAnswerCaptured,
           recoveryRounds,
           retryDistance,
-          error: firstErrorStep.error || firstErrorStep.outputPreview,
+          error: redactSecrets(firstErrorStep.error || firstErrorStep.outputPreview || '').redacted,
           timestamp: message.timestamp || run.completedAt || run.startedAt,
         });
         if (runRecovered) {
@@ -572,7 +573,7 @@ export function buildToolReliabilitySummary(sessions: ToolReliabilitySession[]):
             providerId: failedProviderId,
             tool: firstErrorStep.name || 'unknown',
             round: firstErrorStep.round,
-            error: firstErrorStep.error || firstErrorStep.outputPreview,
+            error: redactSecrets(firstErrorStep.error || firstErrorStep.outputPreview || '').redacted,
           },
           recoveredBy: laterCompleteSteps.map((step) => ({
             model: step.model || run.effectiveModel || 'unknown',
@@ -641,7 +642,7 @@ export function buildToolReliabilitySummary(sessions: ToolReliabilitySession[]):
             promptStrategyId: promptStrategyKey,
             promptStrategyVariantId: promptStrategyVariantId,
             round: step.round,
-            error: step.error || step.outputPreview,
+            error: redactSecrets(step.error || step.outputPreview || '').redacted,
             timestamp: message.timestamp || run.completedAt || run.startedAt,
           });
         }
@@ -899,7 +900,7 @@ export function buildErrorSignatures(
       fallbackRecoveryRuns: 0,
       promptStrategies: [],
       promptStrategyVariants: [],
-      sampleError: error.error,
+      sampleError: redactSecrets(error.error || '').redacted,
       latestTimestamp: error.timestamp,
       workedBy: [],
       exampleSessionIds: [],
@@ -946,7 +947,7 @@ export function buildErrorSignatures(
 
     if (Date.parse(error.timestamp) >= Date.parse(current.latestTimestamp)) {
       current.latestTimestamp = error.timestamp;
-      current.sampleError = error.error;
+      current.sampleError = redactSecrets(error.error || '').redacted;
     }
     if (current.exampleSessionIds.length < 4 && !current.exampleSessionIds.includes(error.sessionId)) current.exampleSessionIds.push(error.sessionId);
     if (current.exampleRunIds.length < 4 && !current.exampleRunIds.includes(error.runId)) current.exampleRunIds.push(error.runId);

@@ -30,8 +30,12 @@ class WebBridge: NSObject, WKScriptMessageHandler {
                     || normalizedPath.contains("/resources/dist"))
         }
         if scheme == "http" || scheme == "https" {
+            #if !DEBUG
+            return false
+            #else
             let host = url.host?.lowercased()
             return (host == "localhost" || host == "127.0.0.1") && (url.port == 5173 || url.port == nil)
+            #endif
         }
         return false
     }
@@ -153,7 +157,7 @@ class WebBridge: NSObject, WKScriptMessageHandler {
     private func normalizedWorkspacePath(_ path: String) -> String? {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let url = URL(fileURLWithPath: trimmed).standardizedFileURL
+        let url = URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath()
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return nil }
@@ -163,7 +167,7 @@ class WebBridge: NSObject, WKScriptMessageHandler {
     private func normalizeCandidatePath(_ path: String) -> String? {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return URL(fileURLWithPath: trimmed).standardizedFileURL.path
+        return URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     private func ensurePathUnderAllowedWorkspace(_ path: String) -> String? {
@@ -282,7 +286,10 @@ class WebBridge: NSObject, WKScriptMessageHandler {
                 replyError(callbackID, message: "Invalid workingDir")
                 return
             }
-            _ = registerWorkspaceRoot(normalizedDir)
+            guard isPathAllowed(normalizedDir) else {
+                replyError(callbackID, message: "Open the folder before creating a session in it")
+                return
+            }
             let session = BackendService.shared.createSession(title: title, workingDir: normalizedDir)
             reply(callbackID: callbackID, data: [
                 "id": session.id,
@@ -360,9 +367,11 @@ class WebBridge: NSObject, WKScriptMessageHandler {
         panel.allowsMultipleSelection = false
         panel.prompt = "Open Folder"
 
-        if panel.runModal() == .OK, let url = panel.url {
-            _ = registerWorkspaceRoot(url.path)
-            reply(callbackID: callbackID, data: ["path": url.path])
+        if panel.runModal() == .OK,
+           let url = panel.url,
+           let normalized = normalizedWorkspacePath(url.path) {
+            _ = registerWorkspaceRoot(normalized)
+            reply(callbackID: callbackID, data: ["path": normalized])
         } else {
             reply(callbackID: callbackID, data: ["path": NSNull()])
         }

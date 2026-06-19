@@ -13,7 +13,7 @@
   --sidebar-width-collapsed: 0px;
   --sidebar-drawer-z: 50;
   --panel-width: clamp(260px, 28vw, 440px);
-  --topbar-height: 44px;
+  --topbar-height: 52px;
   --surface-flat: transparent;
   --surface-subtle: var(--bg-tertiary);
   --border-subtle: var(--border-secondary);

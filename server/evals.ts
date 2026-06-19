@@ -1,6 +1,6 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
 import { redactSecrets } from './sectionRedaction';
@@ -186,6 +186,12 @@ function ensureDirs() {
 }
 
 ensureDirs();
+
+function safeArtifactId(id: string): string | null {
+  if (typeof id !== 'string') return null;
+  const trimmed = id.trim();
+  return /^[a-zA-Z0-9._-]{1,120}$/.test(trimmed) && !trimmed.includes('..') ? trimmed : null;
+}
 
 // ── Built-in Prompt Suites ─────────────────────────────
 
@@ -392,16 +398,22 @@ export function saveReport(report: EvalReport): void {
 }
 
 export function getEvalArtifactPath(id: string): string | undefined {
+  const safeId = safeArtifactId(id);
+  if (!safeId) return undefined;
   for (const dir of getReportsDirs()) {
-    const path = join(dir, `${id}.json`);
+    const path = join(dir, `${safeId}.json`);
+    if (!resolve(path).startsWith(resolve(dir) + '/')) continue;
     if (existsSync(path)) return path;
   }
   return undefined;
 }
 
 export function loadReport(id: string): EvalReport | null {
+  const safeId = safeArtifactId(id);
+  if (!safeId) return null;
   for (const dir of getReportsDirs()) {
-    const path = join(dir, `${id}.json`);
+    const path = join(dir, `${safeId}.json`);
+    if (!resolve(path).startsWith(resolve(dir) + '/')) continue;
     if (!existsSync(path)) continue;
     return JSON.parse(readFileSync(path, 'utf-8'));
   }

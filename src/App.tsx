@@ -44,6 +44,11 @@ const STATUS_BAR_HEIGHT_KEY = 'openharness.status-bar-height.v1';
 const SIDEBAR_WIDTH_RANGE = { min: 220, max: 420 };
 const AGENT_FOCUS_WIDTH_RANGE = { min: 320, max: 760 };
 const STATUS_BAR_HEIGHT_RANGE = { min: 40, max: 92 };
+const COMPACT_SIDEBAR_WIDTH = 220;
+const PANEL_PRESSURE_CHAT_MIN_WIDTH = 560;
+const PANEL_PRESSURE_AUX_PANEL_WIDTH = 300;
+const PANEL_PRESSURE_ENVIRONMENT_WIDTH = 426;
+const PANEL_PRESSURE_SHELL_PADDING = 80;
 const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v2';
 const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
 const THEME_TEXTURE_OPACITY_OVERRIDE_KEY = 'openharness.theme.texture-opacity-override.v1';
@@ -129,6 +134,26 @@ function saveDimension(key: string, value: number) {
   } catch {
     // Non-essential preference storage can fail in restricted browser contexts.
   }
+}
+
+function isEmptyUntitledSession(session: api.SessionInfo): boolean {
+  return session.title === 'New Session' &&
+    !session.workingDir &&
+    session.messageCount === 0 &&
+    !session.preview;
+}
+
+function compactVisibleSessions(list: api.SessionInfo[], activeId?: string | null): api.SessionInfo[] {
+  const meaningful = list.filter((session) => !isEmptyUntitledSession(session));
+  if (meaningful.length === 0) {
+    const activePlaceholder = activeId ? list.find((session) => session.id === activeId) : null;
+    return activePlaceholder ? [activePlaceholder] : list.slice(0, 1);
+  }
+
+  const activePlaceholder = activeId
+    ? list.find((session) => session.id === activeId && isEmptyUntitledSession(session))
+    : null;
+  return activePlaceholder ? [activePlaceholder, ...meaningful] : meaningful;
 }
 
 function clampThemeTextureOpacity(value: number) {
@@ -466,6 +491,8 @@ function App() {
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
   const [mcpStatus, setMcpStatus] = useState<api.MCPServerStatus[]>([]);
+  const sidebarWidthBeforePressureRef = useRef<number | null>(null);
+  const environmentAutoCollapsedRef = useRef(false);
 
   useEffect(() => saveDimension(SIDEBAR_WIDTH_KEY, sidebarWidth), [sidebarWidth]);
   useEffect(() => saveDimension(AGENT_FOCUS_WIDTH_KEY, agentFocusWidth), [agentFocusWidth]);
@@ -526,19 +553,29 @@ function App() {
   }, [statusBarHeight]);
 
   useEffect(() => {
-    const handleResizeForSidebar = () => {
-      const isNarrow = window.innerWidth <= NARROW_SIDEBAR_AUTO_CLOSE_WIDTH;
-      if (isNarrow && sidebarOpen && !sidebarAutoCollapsed) {
-        setSidebarOpen(false);
-        setSidebarAutoCollapsed(true);
-      } else if (!isNarrow && sidebarAutoCollapsed) {
+    const closeSidebarForNarrowScreens = () => {
+      if (window.innerWidth <= NARROW_SIDEBAR_AUTO_CLOSE_WIDTH) {
+        if (sidebarOpen && !sidebarAutoCollapsed) {
+          setSidebarOpen(false);
+          setSidebarAutoCollapsed(true);
+        }
+      } else if (window.innerWidth > NARROW_SIDEBAR_AUTO_CLOSE_WIDTH && sidebarAutoCollapsed) {
         setSidebarOpen(true);
         setSidebarAutoCollapsed(false);
       }
     };
-    handleResizeForSidebar();
-    window.addEventListener('resize', handleResizeForSidebar);
-    return () => window.removeEventListener('resize', handleResizeForSidebar);
+    closeSidebarForNarrowScreens();
+    window.addEventListener('resize', closeSidebarForNarrowScreens);
+    window.visualViewport?.addEventListener('resize', closeSidebarForNarrowScreens);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(closeSidebarForNarrowScreens)
+      : null;
+    resizeObserver?.observe(document.documentElement);
+    return () => {
+      window.removeEventListener('resize', closeSidebarForNarrowScreens);
+      window.visualViewport?.removeEventListener('resize', closeSidebarForNarrowScreens);
+      resizeObserver?.disconnect();
+    };
   }, [sidebarOpen, sidebarAutoCollapsed]);
   const [providerRateLimitStatus, setProviderRateLimitStatus] = useState<api.ProviderRateLimitStatus | null>(null);
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
@@ -587,7 +624,7 @@ function App() {
       }
       if (action === 'new-session') {
         const session = await api.createSession();
-        setSessions((prev) => [{
+        setSessions((prev) => compactVisibleSessions([{
           id: session.id,
           title: session.title,
           workingDir: session.workingDir || null,
@@ -595,7 +632,7 @@ function App() {
           updatedAt: session.updatedAt,
           preview: '',
           messageCount: 0,
-        }, ...prev]);
+        }, ...prev], session.id));
         setActiveSessionId(session.id);
         setWorkingDir(session.workingDir || null);
         setMessages([]);
@@ -606,7 +643,7 @@ function App() {
       }
       if (action === 'open-folder' && path) {
         const session = await api.createSession(basename(path), path);
-        setSessions((prev) => [{
+        setSessions((prev) => compactVisibleSessions([{
           id: session.id,
           title: basename(path),
           workingDir: path,
@@ -614,7 +651,7 @@ function App() {
           updatedAt: session.updatedAt,
           preview: '',
           messageCount: 0,
-        }, ...prev]);
+        }, ...prev], session.id));
         setActiveSessionId(session.id);
         setWorkingDir(path);
         setMessages([]);
@@ -1027,6 +1064,7 @@ function App() {
             messageCount: 0,
           }];
         }
+        list = compactVisibleSessions(list);
         setSessions(list);
         setActiveSessionId(list[0].id);
         setWorkingDir(list[0].workingDir);
@@ -1075,6 +1113,7 @@ function App() {
           messageCount: 0,
         }];
       }
+      fresh = compactVisibleSessions(fresh);
       setSessions(fresh);
       if (id === activeSessionId) {
         const next = fresh[0];
@@ -1106,6 +1145,7 @@ function App() {
           messageCount: 0,
         }];
       }
+      fresh = compactVisibleSessions(fresh);
       setSessions(fresh);
       if (targets.some((session) => session.id === activeSessionId)) {
         const next = fresh[0];
@@ -1124,7 +1164,7 @@ function App() {
     try {
       const sessionWorkingDir = targetWorkingDir === undefined ? workingDir : targetWorkingDir;
       const session = await api.createSession(undefined, sessionWorkingDir || undefined);
-      setSessions((prev) => [{
+      setSessions((prev) => compactVisibleSessions([{
         id: session.id,
         title: session.title,
         workingDir: session.workingDir || null,
@@ -1132,7 +1172,7 @@ function App() {
         updatedAt: session.updatedAt,
         preview: '',
         messageCount: 0,
-      }, ...prev]);
+      }, ...prev], session.id));
       setActiveSessionId(session.id);
       setWorkingDir(session.workingDir || null);
       setMessages([]);
@@ -1161,7 +1201,7 @@ function App() {
         preview: '',
         messageCount: 0,
       };
-      setSessions((prev) => [sessionInfo, ...prev]);
+      setSessions((prev) => compactVisibleSessions([sessionInfo, ...prev], session.id));
       setActiveSessionId(session.id);
       setWorkingDir(folderPath);
       setMessages([]);
@@ -1179,7 +1219,7 @@ function App() {
     if (activeSessionId) return activeSessionId;
     try {
       const session = await api.createSession(undefined, workingDir || undefined);
-      setSessions((prev) => [{
+      setSessions((prev) => compactVisibleSessions([{
         id: session.id,
         title: session.title,
         workingDir: session.workingDir || null,
@@ -1187,7 +1227,7 @@ function App() {
         updatedAt: session.updatedAt,
         preview: '',
         messageCount: 0,
-      }, ...prev]);
+      }, ...prev], session.id));
       setActiveSessionId(session.id);
       setWorkingDir(session.workingDir || null);
       setActiveGoal(null);
@@ -1493,7 +1533,7 @@ function App() {
             )
           );
           setIsTyping(false);
-          api.listSessions().then(setSessions).catch(() => {});
+          api.listSessions().then((list) => setSessions(compactVisibleSessions(list, sessionId))).catch(() => {});
           api.getSession(sessionId).then((detail) => setActiveGoal(detail.goal || null)).catch(() => {});
         },
       }, options);
@@ -1704,6 +1744,60 @@ function App() {
     return set;
   }, [layout]);
 
+  useEffect(() => {
+    const rebalancePanelPressure = () => {
+      const auxiliaryPanelCount = Math.max(0, visiblePanels.size - 1);
+      const preferredSidebarWidth = sidebarWidthBeforePressureRef.current ?? sidebarWidth;
+      const sidebarBudget = sidebarOpen ? preferredSidebarWidth : 0;
+      const environmentBudget = (environmentOpen || environmentAutoCollapsedRef.current)
+        ? PANEL_PRESSURE_ENVIRONMENT_WIDTH
+        : 0;
+      const agentFocusBudget = agentFocusOpen ? agentFocusWidth : 0;
+      const requiredWidth =
+        PANEL_PRESSURE_CHAT_MIN_WIDTH +
+        (auxiliaryPanelCount * PANEL_PRESSURE_AUX_PANEL_WIDTH) +
+        sidebarBudget +
+        environmentBudget +
+        agentFocusBudget +
+        PANEL_PRESSURE_SHELL_PADDING;
+      const isUnderPressure = auxiliaryPanelCount > 0 && window.innerWidth < requiredWidth;
+
+      if (isUnderPressure) {
+        if (environmentOpen) {
+          environmentAutoCollapsedRef.current = true;
+          setEnvironmentOpen(false);
+        }
+        if (sidebarOpen && sidebarWidth > COMPACT_SIDEBAR_WIDTH) {
+          sidebarWidthBeforePressureRef.current ??= sidebarWidth;
+          setSidebarWidth(COMPACT_SIDEBAR_WIDTH);
+        }
+        return;
+      }
+
+      if (environmentAutoCollapsedRef.current && !environmentOpen) {
+        environmentAutoCollapsedRef.current = false;
+        setEnvironmentOpen(true);
+      }
+      if (sidebarWidthBeforePressureRef.current !== null) {
+        setSidebarWidth(sidebarWidthBeforePressureRef.current);
+        sidebarWidthBeforePressureRef.current = null;
+      }
+    };
+
+    rebalancePanelPressure();
+    window.addEventListener('resize', rebalancePanelPressure);
+    window.visualViewport?.addEventListener('resize', rebalancePanelPressure);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(rebalancePanelPressure)
+      : null;
+    resizeObserver?.observe(document.documentElement);
+    return () => {
+      window.removeEventListener('resize', rebalancePanelPressure);
+      window.visualViewport?.removeEventListener('resize', rebalancePanelPressure);
+      resizeObserver?.disconnect();
+    };
+  }, [agentFocusOpen, agentFocusWidth, environmentOpen, sidebarOpen, sidebarWidth, visiblePanels]);
+
   // Compute enabled tool count: 3 built-in + MCP tools from running servers
   const builtinToolCount = trustMode === "chat-only" ? 0 : trustMode === "read-only" ? 2 : 3;
   const mcpToolCount = mcpStatus
@@ -1753,6 +1847,7 @@ function App() {
     openAgentFocusPanel(agentId);
   };
   const setChatEnvironmentOpen = useCallback((open: boolean) => {
+    environmentAutoCollapsedRef.current = false;
     setEnvironmentOpen(open);
     try { localStorage.setItem(ENVIRONMENT_HIDDEN_KEY, open ? 'false' : 'true'); } catch { /* ignore */ }
   }, []);

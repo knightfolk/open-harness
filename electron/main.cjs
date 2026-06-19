@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
+const { randomBytes } = require('crypto');
 
 // ── Config ─────────────────────────────────────────────
 const SERVER_PORT = process.env.OPENHARNESS_SERVER_PORT || 3001;
@@ -14,6 +15,7 @@ let packagedServer = null;
 let updaterInitialized = false;
 let lastUpdateCheckWasManual = false;
 let updateReadyToInstall = false;
+const packagedServerHandshake = randomBytes(24).toString('hex');
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -244,9 +246,16 @@ function createWindow() {
 
 function checkServer() {
   return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${SERVER_PORT}/api/config`, (res) => {
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port: SERVER_PORT,
+      path: '/api/config',
+      headers: isDev ? {} : { 'x-openharness-electron-handshake': packagedServerHandshake },
+    }, (res) => {
       res.resume();
-      resolve(res.statusCode >= 200 && res.statusCode < 500);
+      const statusOk = res.statusCode >= 200 && res.statusCode < 500;
+      const handshakeOk = isDev || res.headers['x-openharness-electron-handshake-ok'] === '1';
+      resolve(statusOk && handshakeOk);
     });
     req.on('error', () => resolve(false));
     req.setTimeout(1000, () => {
@@ -286,6 +295,7 @@ async function startPackagedServer() {
       OPENHARNESS_STATIC_DIR: staticDir,
       OPENHARNESS_UI_URL: `http://localhost:${SERVER_PORT}`,
       OPENHARNESS_LISTEN_HOST: '127.0.0.1',
+      OPENHARNESS_ELECTRON_HANDSHAKE: packagedServerHandshake,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

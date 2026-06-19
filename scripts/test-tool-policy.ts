@@ -145,6 +145,16 @@ assert.equal(
   'workspace-write should reject dynamic MCP execution calls',
 );
 assert.equal(
+  checkToolActionPolicy('mcp_exec', { name: 'subagent-security', arguments: {} }, 'workspace-write', '/tmp/project').allowed,
+  false,
+  'workspace-write should reject underscore MCP execution tool names',
+);
+assert.equal(
+  checkToolActionPolicy('mcp_config_set', { server: 'docker', config: {} }, 'workspace-write', '/tmp/project').allowed,
+  false,
+  'workspace-write should reject underscore MCP gateway mutation tool names',
+);
+assert.equal(
   checkToolActionPolicy('browser_run_code_unsafe', { code: 'async (page) => page.title()' }, 'full-local', '/tmp/project').allowed,
   true,
   'full-local should allow direct unsafe browser code calls',

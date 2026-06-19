@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import type { HarnessRun, HarnessRunStep } from './runTrace';
 import { getToolReliabilitySessions } from './toolReliabilityLogTrace';
 import { normalizeToolStatus } from './toolReliability';
+import { redactSecrets } from './sectionRedaction';
 
 type ToolErrorEvidenceSource = 'saved_session_trace' | 'log_trace' | 'imported_trace';
 
@@ -169,7 +170,7 @@ export function buildToolErrorLedgerEventsFromRun(run: HarnessRun, evidenceSourc
       failedProviderId,
       failedTool,
       round: step.round,
-      error: step.error || step.outputPreview,
+      error: redactSecrets(step.error || step.outputPreview || '').redacted,
       runRecovered: run.status === 'complete' && Boolean(recoveredBy),
       finalStatus: run.status,
       finalAnswerCaptured,
@@ -430,7 +431,7 @@ export function buildToolFailureTrainingExportPayload({
       providerId: event.failedProviderId || 'unknown',
       tool: event.failedTool || 'unknown',
       round: event.round,
-      message: cleanFailureMessage(event.error),
+      message: cleanFailureMessage(redactSecrets(event.error || '').redacted),
     },
     workaround: workaroundForEvent(event),
   }));

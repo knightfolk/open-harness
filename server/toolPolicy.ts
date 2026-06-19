@@ -52,6 +52,13 @@ const HIGH_RISK_TOOLS = [
   // lets models invent orchestration-like tool calls instead of using the
   // built-in OpenHarness orchestration path.
   'mcp-exec',
+  'code_mode',
+  'mcp_add',
+  'mcp_remove',
+  'mcp_config_set',
+  'mcp_create_profile',
+  'mcp_activate_profile',
+  'mcp_exec',
 ];
 
 // ── Tool filtering by trust mode ───────────────────────
@@ -79,10 +86,11 @@ function getToolName(tool: { name?: string; function?: { name?: string } }): str
 }
 
 function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {
+  const normalizedToolName = normalizeToolName(toolName);
   const isRead = READ_TOOLS.includes(toolName);
   const isWrite = WRITE_TOOLS.includes(toolName);
   const isTerminal = TERMINAL_TOOLS.includes(toolName);
-  const isHighRisk = HIGH_RISK_TOOLS.includes(toolName);
+  const isHighRisk = HIGH_RISK_TOOLS.includes(toolName) || HIGH_RISK_TOOLS.includes(normalizedToolName);
 
   switch (trustMode) {
     case 'chat-only':
@@ -98,6 +106,10 @@ function isToolAllowed(toolName: string, trustMode: TrustMode): boolean {
     default:
       return false;
   }
+}
+
+function normalizeToolName(toolName: string): string {
+  return toolName.replace(/_/g, '-');
 }
 
 // ── Write path validation ──────────────────────────────
@@ -273,7 +285,7 @@ export function checkToolActionPolicy(
     return { allowed: false, reason: 'Tools not allowed in chat-only mode' };
   }
 
-  if (HIGH_RISK_TOOLS.includes(toolName) && trustMode !== 'full-local') {
+  if ((HIGH_RISK_TOOLS.includes(toolName) || HIGH_RISK_TOOLS.includes(normalizeToolName(toolName))) && trustMode !== 'full-local') {
     return { allowed: false, reason: `${toolName} requires full-local trust mode` };
   }
 

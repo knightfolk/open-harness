@@ -17,6 +17,7 @@ import { createWorktree, refreshWorktreeState, removeWorktree, type Worktree } f
 import { existsSync, statSync } from 'fs';
 import { dirname, extname, isAbsolute, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
+import { wrapUntrustedBlock } from './untrustedContent';
 
 export interface OrchestrationResult {
   /** The final merged text to show the user */
@@ -696,7 +697,7 @@ async function runExecutePipeline(
         implementationWorktree ? `Isolation: write and validation tools are scoped to isolated worktree ${implementationWorktree.id}; do not write to the base checkout.` : '',
         ``,
         `## Planner Notes (advisory only)`,
-        plannerArtifact?.response || '(plan generation failed — proceed directly)',
+        plannerArtifact?.response ? wrapUntrustedBlock('planner phase output', plannerArtifact.response) : '(plan generation failed — proceed directly)',
         ``,
         `Create the requested artifact directly in the workspace when write_file is available.`,
         `For a new app/game/site, make its own folder, write complete runnable files, and keep dependencies minimal.`,
@@ -706,7 +707,7 @@ async function runExecutePipeline(
       ].join('\n')
       : [
         `## Plan`,
-        plannerArtifact?.response || '(plan generation failed — proceed directly)',
+        plannerArtifact?.response ? wrapUntrustedBlock('planner phase output', plannerArtifact.response) : '(plan generation failed — proceed directly)',
         '',
         `## Task (from user)`,
         userMessage,
@@ -1192,6 +1193,7 @@ async function runInvestigatePipeline(
   }
 
   const explorerResponse = exploreArtifact?.response || '';
+  const explorerEvidence = explorerResponse ? wrapUntrustedBlock('explorer phase output', explorerResponse) : '';
   const synthesisProfile = investigationSynthesisProfile(route);
   const synthesisModel = resolveAgentModel(config, synthesisProfile, route, config.activeModel || '');
   const synthesisPrompt = appendSteeringNotesToPrompt([
@@ -1199,7 +1201,7 @@ async function runInvestigatePipeline(
     userMessage,
     '',
     `## Explorer Evidence`,
-    explorerResponse,
+    explorerEvidence,
     '',
     `## Synthesis Instructions`,
     route.role === 'reviewer'
@@ -1721,7 +1723,7 @@ async function runComparePipeline(
     `## Model Responses`,
     ...responses.map((r) => [
       `### ${r.model}`,
-      r.text || '(no response)',
+      r.text ? wrapUntrustedBlock(`model response:${r.model}`, r.text) : '(no response)',
     ].join('\n')),
     '',
     `## Task`,

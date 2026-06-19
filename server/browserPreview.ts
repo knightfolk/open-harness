@@ -26,7 +26,7 @@ function ensureCacheDir() {
   if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
 }
 
-function isLoopbackUrl(rawUrl: string): boolean {
+export function isLoopbackUrl(rawUrl: string): boolean {
   let normalized = rawUrl.trim();
   if (!normalized) return false;
   if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(normalized)) {
@@ -158,6 +158,9 @@ except Exception as e:
 export function checkServerHealth(url: string): { reachable: boolean; statusCode?: number; latencyMs: number } {
   const fullUrl = url.startsWith('http') ? url : `http://${url}`;
   const start = Date.now();
+  if (!isLoopbackUrl(fullUrl)) {
+    return { reachable: false, latencyMs: Date.now() - start };
+  }
   try {
     const code = execFileSync(
       'curl',

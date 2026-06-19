@@ -21,6 +21,7 @@ import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
 import { getAdapter } from './providers/registry';
 import type { ProviderMessage, ProviderTool } from './providers/types';
 import { isPathWithin } from './toolPolicy';
+import { wrapUntrustedBlock } from './untrustedContent';
 
 // ── Provider failover: transient-error classification ──
 // A provider error is "transient" if a short retry or a model switch could
@@ -709,14 +710,14 @@ export async function runAgentPhase(
           `### ${call.name}`,
           `Input: ${JSON.stringify(call.arguments)}`,
           `Output:`,
-          output,
+          wrapUntrustedBlock(`tool result:${call.name}`, output),
         ].join('\n');
         if (call.source === 'native') {
           messages.push({
             role: 'tool',
             tool_call_id: call.id,
             name: call.name,
-            content: output,
+            content: wrapUntrustedBlock(`tool result:${call.name}`, output),
           });
         }
         return resultText;

@@ -13,10 +13,51 @@ export interface TestResult {
   modelsCount?: number;
 }
 
+export function assertProviderBaseURLAllowed(provider: StoredProvider): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(provider.baseURL);
+  } catch {
+    throw new Error('Provider baseURL must be a valid URL');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Provider baseURL must use http or https');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Provider baseURL must not include credentials');
+  }
+  const authToken = providerAuthToken(provider);
+  if (provider.type === 'local' || !authToken) return;
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Credentialed remote providers must use https');
+  }
+  if (isPrivateProviderHost(parsed.hostname)) {
+    throw new Error('Credentialed remote providers cannot target local or private network hosts');
+  }
+}
+
+function isPrivateProviderHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+  if (host === '::1' || host === '[::1]' || host === '::') return true;
+  const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!ipv4) return false;
+  const a = Number(ipv4[1]);
+  const b = Number(ipv4[2]);
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || a >= 224;
+}
+
 export async function testProviderConnection(provider: StoredProvider): Promise<TestResult> {
   const start = Date.now();
 
   try {
+    assertProviderBaseURLAllowed(provider);
     const url = buildModelsURL(provider);
     const authToken = providerAuthToken(provider);
     if (provider.type !== 'local' && !authToken) {
@@ -87,6 +128,7 @@ export interface FetchedModel {
 
 export async function fetchProviderModels(provider: StoredProvider): Promise<FetchedModel[]> {
   try {
+    assertProviderBaseURLAllowed(provider);
     const url = buildModelsURL(provider);
     const authToken = providerAuthToken(provider);
     if (provider.type !== 'local' && !authToken) {

@@ -3,6 +3,7 @@ import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
 import type { HarnessRun, RunSteeringAction, SessionGoal } from '../../types';
 import { PanelWrapper } from './PanelWrapper';
 import { PanelContent } from './PanelContent';
+import { getPanelConfig } from './panelRegistry';
 
 interface Props {
   layout: LayoutNode;
@@ -122,6 +123,45 @@ function equalSizes(count: number): number[] {
   return Array.from({ length: count }, () => 100 / count);
 }
 
+function normalizeSizes(sizes: number[]): number[] {
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  if (total <= 0) return equalSizes(sizes.length);
+  return sizes.map((size) => (size / total) * 100);
+}
+
+function nodeMinSize(node: LayoutNode, direction: SplitNode['direction']): number {
+  if (typeof node === 'string') {
+    const config = getPanelConfig(node as PanelId);
+    return config.minSize;
+  }
+
+  const split = node as SplitNode;
+  const childSizes = split.children.map((child) => nodeMinSize(child, direction));
+  if (split.direction === direction) {
+    return childSizes.reduce((total, size) => total + size, 0);
+  }
+  return Math.max(...childSizes, 0);
+}
+
+function nodeDefaultSize(node: LayoutNode, direction: SplitNode['direction']): number {
+  if (typeof node === 'string') {
+    const config = getPanelConfig(node as PanelId);
+    return config.defaultSize;
+  }
+
+  const split = node as SplitNode;
+  const childSizes = split.children.map((child) => nodeDefaultSize(child, direction));
+  if (split.direction === direction) {
+    return childSizes.reduce((total, size) => total + size, 0);
+  }
+  return Math.max(...childSizes, 0);
+}
+
+function preferredSizes(split: SplitNode): number[] {
+  if (split.children.length <= 0) return [];
+  return normalizeSizes(split.children.map((child) => nodeDefaultSize(child, split.direction)));
+}
+
 function SplitRenderer({ split, onRemovePanel, onPopOutPanel, context }: {
   split: SplitNode;
   onRemovePanel: (id: PanelId) => void;
@@ -129,12 +169,12 @@ function SplitRenderer({ split, onRemovePanel, onPopOutPanel, context }: {
   context: any;
 }) {
   const splitRef = useRef<HTMLDivElement>(null);
-  const [sizes, setSizes] = useState(() => equalSizes(split.children.length));
+  const [sizes, setSizes] = useState(() => preferredSizes(split));
   const flexDirection = split.direction === 'vertical' ? 'column' : 'row';
 
   useEffect(() => {
-    setSizes(equalSizes(split.children.length));
-  }, [split.direction, split.children.length]);
+    setSizes(preferredSizes(split));
+  }, [split]);
 
   const beginResize = (index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -148,13 +188,16 @@ function SplitRenderer({ split, onRemovePanel, onPopOutPanel, context }: {
     const startCoord = split.direction === 'horizontal' ? event.clientX : event.clientY;
     const startSizes = [...sizes];
     const pairTotal = startSizes[index] + startSizes[index + 1];
-    const minSize = Math.min(42, Math.max(12, pairTotal * 0.18));
+    const firstMinPx = nodeMinSize(split.children[index], split.direction);
+    const secondMinPx = nodeMinSize(split.children[index + 1], split.direction);
+    const firstMin = Math.min(pairTotal * 0.48, (firstMinPx / mainSize) * 100);
+    const secondMin = Math.min(pairTotal * 0.48, (secondMinPx / mainSize) * 100);
     document.body.classList.add(split.direction === 'horizontal' ? 'is-resizing-column' : 'is-resizing-row');
 
     const handleMove = (moveEvent: PointerEvent) => {
       const coord = split.direction === 'horizontal' ? moveEvent.clientX : moveEvent.clientY;
       const delta = ((coord - startCoord) / mainSize) * 100;
-      const first = Math.min(pairTotal - minSize, Math.max(minSize, startSizes[index] + delta));
+      const first = Math.min(pairTotal - secondMin, Math.max(firstMin, startSizes[index] + delta));
       const second = pairTotal - first;
       setSizes((prev) => {
         const next = [...prev];

@@ -983,7 +983,7 @@
   border-bottom: 1px solid var(--border-secondary);
   display: flex;
   align-items: center;
-  padding: 0 16px 0 78px;  /* left inset clears macOS traffic lights */
+  padding: 8px 16px 0 12px;
   padding-right: calc(16px + var(--safe-area-right, 0px));
   gap: 12px;
   z-index: 10;
@@ -1093,7 +1093,7 @@
 /* ── Top bar responsive ─────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .top-bar {
-    padding: 0 12px 0 78px;
+    padding: 8px 12px 0 12px;
     gap: 8px;
   }
 
@@ -1104,7 +1104,7 @@
 
 @media (max-width: 768px) {
   .top-bar {
-    padding: 0 8px 0 78px;
+    padding: 8px 8px 0 8px;
     gap: 4px;
   }
 
@@ -1130,7 +1130,7 @@
 
 @media (max-width: 480px) {
   .top-bar {
-    padding: 0 4px 0 68px;
+    padding: 8px 4px 0 4px;
     gap: 2px;
   }
 
@@ -3696,7 +3696,7 @@ button:focus-visible {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 1080px) {
   .layout-split--horizontal {
     flex-direction: column !important;
   }

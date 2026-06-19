@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>OpenHarness - Checkup Report</title>
+	<script src="https://cdn.tailwindcss.com"></script>
+	<style>
+		body { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+		.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+		.report-section { border: 1px solid #222226; background: #0a0a0b; position: relative; }
+		.corner-box { position: absolute; width: 20px; height: 20px; border: 1px solid #222226; background: #000; }
+	</style>
+</head>
+<body class="bg-black text-[#fafafa]">
+	<main class="mx-auto w-full max-w-6xl px-5 py-8 md:px-10 md:py-12">
+		<header class="report-section mb-8 p-6 md:p-8">
+			<div class="corner-box left-0 top-0 -translate-x-1/2 -translate-y-1/2"></div>
+			<div class="corner-box right-0 top-0 translate-x-1/2 -translate-y-1/2"></div>
+			<div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+				<div>
+					<div class="mono mb-2 text-xs tracking-widest text-[#666]">// CHECKUP</div>
+					<h1 class="text-4xl font-bold tracking-tight md:text-6xl">OpenHarness</h1>
+				</div>
+				<div class="mono text-left text-xs text-[#666] md:text-right">
+					<div>COMMANDCODE REPORT</div>
+					<div class="text-[#444]">2026-06-19</div>
+				</div>
+			</div>
+		</header>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="corner-box left-0 top-0 -translate-x-1/2 -translate-y-1/2"></div>
+			<div class="corner-box right-0 top-0 translate-x-1/2 -translate-y-1/2"></div>
+			<div class="grid gap-8 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+				<div>
+					<div class="mono mb-2 text-xs tracking-widest text-[#666]">// OVERALL</div>
+					<div class="text-6xl font-bold tracking-tight md:text-7xl">35</div>
+					<div class="mt-1 text-lg text-[#666]">/ 60</div>
+					<div class="mt-4 inline-flex border border-[#fbbf24]/30 bg-[#fbbf24]/10 px-3 py-1 text-sm text-[#fbbf24]">WATCH</div>
+				</div>
+				<div>
+					<div class="mono mb-3 text-xs tracking-widest text-[#666]">// TL;DR</div>
+					<p class="text-sm leading-6 text-[#a0a0a0]">OpenHarness has a genuinely crafted dark-theme design system with strong typography and performance discipline. The primary concern is <strong class="text-[#fafafa]">responsiveness</strong> — the interface is built for desktop only — and <strong class="text-[#fafafa]">product identity drift</strong>, where the palette blends into the generic AI-tool visual lane.</p>
+					<p class="mt-4 text-sm leading-6 text-[#fbbf24]">NEXT: Apply responsive orchestration via relayout, then establish an owned palette via recolor.</p>
+				</div>
+			</div>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// HEURISTIC SCORES</div>
+			<div class="overflow-x-auto">
+				<table class="w-full min-w-[720px] border-collapse text-sm">
+					<thead>
+						<tr class="border-b border-[#222226] text-left mono text-xs text-[#666]">
+							<th class="py-3 pr-4 font-normal">#</th>
+							<th class="py-3 pr-4 font-normal">HEURISTIC</th>
+							<th class="py-3 pr-4 font-normal">SCORE</th>
+							<th class="py-3 font-normal">STATUS</th>
+							<th class="py-3 font-normal">KEY FINDING</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">1</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Intentionality</td>
+							<td class="py-4 pr-4 text-[#fbbf24]">5/10</td>
+							<td class="py-4 pr-4"><span class="text-[#fbbf24]">WATCH</span></td>
+							<td class="py-4 text-[#a0a0a0]">Crafted by hand but the indigo-violet accent echoes every other AI tool. Themes are labeled but visually identical in defaults.</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">2</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Readability</td>
+							<td class="py-4 pr-4 text-[#34d399]">10/10</td>
+							<td class="py-4 pr-4"><span class="text-[#34d399]">HEALTHY</span></td>
+							<td class="py-4 text-[#a0a0a0]">Inter 14px at 1.65 leading, constrained measure, strong contrast, proper hierarchy. Best vital in the report.</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">3</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Usability</td>
+							<td class="py-4 pr-4 text-[#fbbf24]">5/10</td>
+							<td class="py-4 pr-4"><span class="text-[#fbbf24]">WATCH</span></td>
+							<td class="py-4 text-[#a0a0a0]">~15 distinct surfaces, 8 panel types, 3 modals, 2 flyouts. Powerful for experts, overwhelming for first contact.</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">4</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Responsiveness</td>
+							<td class="py-4 pr-4 text-[#ef4444]">0/10</td>
+							<td class="py-4 pr-4"><span class="text-[#ef4444]">CRITICAL</span></td>
+							<td class="py-4 text-[#a0a0a0]">Desktop-only. Fixed panel widths, no container queries, no input-mode detection, no mobile navigation pattern.</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">5</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Speed</td>
+							<td class="py-4 pr-4 text-[#34d399]">10/10</td>
+							<td class="py-4 pr-4"><span class="text-[#34d399]">HEALTHY</span></td>
+							<td class="py-4 text-[#a0a0a0]">Lazy-loaded overlays, GPU-animated transitions, FOUC prevention, will-change hints. Built-in performance discipline.</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">6</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Accessibility</td>
+							<td class="py-4 pr-4 text-[#fbbf24]">5/10</td>
+							<td class="py-4 pr-4"><span class="text-[#fbbf24]">WATCH</span></td>
+							<td class="py-4 text-[#a0a0a0]">Focus-visible and reduced-motion handled. No skip links, no aria landmarks, no colorblind simulation, no modal focus trapping.</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// COGNITIVE LOAD / RISK</div>
+			<div class="grid gap-6 md:grid-cols-2">
+				<div>
+					<div class="mb-3 text-xl font-semibold">HIGH</div>
+					<ul class="space-y-3 text-sm text-[#a0a0a0]">
+						<li><span class="mono mr-2 text-[#34d399]">PASS</span>Performance discipline is built into the architecture — lazy loading, GPU animations, FOUC prevention.</li>
+						<li><span class="mono mr-2 text-[#fbbf24]">WATCH</span>Surface count (~15 distinct panels/overlays) creates a steep learning curve for new users.</li>
+						<li><span class="mono mr-2 text-[#ef4444]">FAIL</span>No mobile adaptation — fixed-width layout engine, no container queries, no input-mode detection.</li>
+						<li><span class="mono mr-2 text-[#ef4444]">FAIL</span>Accent color and gradient scheme is visually interchangeable with most other AI tools.</li>
+					</ul>
+				</div>
+				<div>
+					<div class="mono mb-3 text-xs tracking-widest text-[#666]">// NEXT MODES</div>
+					<div class="flex flex-wrap gap-2">
+						<span class="border border-[#333] px-3 py-1 text-sm text-[#a0a0a0]">/design relayout</span>
+						<span class="border border-[#333] px-3 py-1 text-sm text-[#a0a0a0]">/design recolor</span>
+						<span class="border border-[#333] px-3 py-1 text-sm text-[#a0a0a0]">/design interaction</span>
+						<span class="border border-[#333] px-3 py-1 text-sm text-[#a0a0a0]">/design surface</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// WHAT'S WORKING</div>
+			<div class="grid gap-4 md:grid-cols-3">
+				<article class="border border-[#1f1f24] p-4">
+					<h2 class="mb-2 text-sm font-semibold">Type System</h2>
+					<p class="text-sm leading-6 text-[#a0a0a0]">Inter at 14px / 1.65 leading with constrained measure. Code in JetBrains Mono. Proper hierarchy with the Hierarchy Rule of 3 observed. Light-on-dark compensation present.</p>
+				</article>
+				<article class="border border-[#1f1f24] p-4">
+					<h2 class="mb-2 text-sm font-semibold">Performance Architecture</h2>
+					<p class="text-sm leading-6 text-[#a0a0a0]">Lazy-loaded heavy overlays, GPU-animated transitions, FOUC prevention, will-change hints, flex overflow discipline. Built for speed from the start.</p>
+				</article>
+				<article class="border border-[#1f1f24] p-4">
+					<h2 class="mb-2 text-sm font-semibold">Layout Engine</h2>
+					<p class="text-sm leading-6 text-[#a0a0a0]">Recursive split-pane system with resize handles, collapsible panels, pop-out support, and localStorage persistence. Genuinely flexible workspace.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// PRIORITY ISSUES</div>
+			<div class="space-y-5">
+				<article class="border border-[#2a1d22] bg-[#110b0d] p-5">
+					<div class="mono mb-2 text-xs text-[#f43f5e]">P0</div>
+					<h2 class="mb-2 text-lg font-semibold">Desktop-only layout structure</h2>
+					<p class="mb-4 text-sm leading-6 text-[#a0a0a0]">The layout engine is built on fixed-dimension split panes. Sidebar (280px), panels (360px), top bar (44px), and status bar (48px) are all hardcoded. No container queries, no input-mode detection. The sidebar collapses at 640px but this is a band-aid on a desktop-first architecture. The responsive media queries that exist cover only 640px and 720px — no 320px, 375px, 768px, 1024px, or 2560px handling.</p>
+					<div class="border-l border-[#fbbf24] pl-4 text-sm leading-6 text-[#fbbf24]">FIX: /design relayout — Introduce container queries, mobile navigation pattern, breakpoint-aware panel recomposition, and input-mode detection.</div>
+				</article>
+				<article class="border border-[#2a1d22] bg-[#110b0d] p-5">
+					<div class="mono mb-2 text-xs text-[#f43f5e]">P1</div>
+					<h2 class="mb-2 text-lg font-semibold">Generic AI-tool visual identity</h2>
+					<p class="mb-4 text-sm leading-6 text-[#a0a0a0]">The accent color (#6366f1 indigo) with violet gradient overlay is the default "tech" palette shared by most AI developer tools. The sidebar logo, welcome logo, and focus indicators all use the same `linear-gradient(135deg, var(--accent-primary), #a855f7)`. The `[data-theme]` selectors all collapse to identical variable values — themes are labeled but visually indistinguishable. If you replace the logo and "OpenHarness" with another product name, nothing else would look wrong.</p>
+					<div class="border-l border-[#fbbf24] pl-4 text-sm leading-6 text-[#fbbf24]">FIX: /design recolor — Build an owned palette in OKLCH with a non-obvious hue. Run colorblind simulation after. Make themes visually distinct.</div>
+				</article>
+				<article class="border border-[#2a1d22] bg-[#110b0d] p-5">
+					<div class="mono mb-2 text-xs text-[#f43f5e]">P2</div>
+					<h2 class="mb-2 text-lg font-semibold">Missing accessibility infrastructure</h2>
+					<p class="mb-4 text-sm leading-6 text-[#a0a0a0]">Focus-visible styles and reduced-motion handling exist, but the foundation is missing: no skip-to-content link, no aria landmarks or roles in the layout engine, no focus trapping in modal overlays, no colorblind simulation, no keyboard-only navigation test. The accent-indigo and success-green would merge in deuteranopia. Screen reader users would find the split-pane layout opaque.</p>
+					<div class="border-l border-[#fbbf24] pl-4 text-sm leading-6 text-[#fbbf24]">FIX: /design interaction — Add skip links, aria landmarks, modal focus trapping, keyboard navigation for layout engine, and WCAG contrast verification.</div>
+				</article>
+			</div>
+		</section>
+
+		<footer class="mono py-8 text-center text-xs tracking-widest text-[#444]">
+			Generated with CommandCode — 2026-06-19
+		</footer>
+	</main>
+</body>
+</html>

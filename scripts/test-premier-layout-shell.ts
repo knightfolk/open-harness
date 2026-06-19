@@ -24,7 +24,7 @@ for (const expected of [
   "const DEFAULT_HIDDEN_PANELS: PanelId[] = ALL_PANELS.filter((id): id is PanelId => id !== 'chat')",
   "const FORCE_HIDDEN_PANELS: PanelId[] = ['sub-agents']",
   'removePanelFromTree(next, panelId)',
-  'return appendPanel(prev, id)',
+  'return appendPanel(prev, id, placement)',
   'setLayout(structuredClone(DEFAULT_LAYOUT))',
 ]) {
   assert.ok(
@@ -71,8 +71,8 @@ for (const expected of [
   'data-model-evidence-entry="true"',
   'data-model-evidence-panel={modelDetailPanel}',
   "aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}",
-  'onOpenPanel: (id: PanelId) => void',
-  'onClick={() => onOpenPanel(modelDetailPanel)}',
+  'onOpenPanel: (id: PanelId, placement?: PanelPlacement) => void',
+  'onClick={() => onOpenPanel(modelDetailPanel, resolvedPanelPlacement(modelDetailPanel))}',
   "title={activeModel.toLowerCase() === 'auto' ? 'Open Routing Learning for router evidence' : `Open Model Lab for ${activeModel}`}",
   "aria-label={activeModel.toLowerCase() === 'auto' ? 'Open Routing Learning for router evidence' : `Open Model Lab for model ${activeModel}`}",
   'aria-label="Open Tools and panels menu"',
@@ -93,6 +93,7 @@ for (const expected of [
 }
 
 const styles = readFileSync('src/styles/components.css', 'utf-8');
+const globalStyles = readFileSync('src/styles/global.css', 'utf-8');
 for (const expected of [
   '.top-bar-model:hover',
   '.top-bar-model:focus-visible',
@@ -103,6 +104,51 @@ for (const expected of [
     `Top-bar model/router evidence button should preserve hover and keyboard focus affordances: ${expected}`,
   );
 }
+
+for (const expected of [
+  'function isEmptyUntitledSession',
+  "session.title === 'New Session'",
+  'function compactVisibleSessions',
+  'compactVisibleSessions(list)',
+  'compactVisibleSessions(fresh)',
+  'compactVisibleSessions([sessionInfo, ...prev], session.id)',
+  'api.listSessions().then((list) => setSessions(compactVisibleSessions(list, sessionId)))',
+]) {
+  assert.ok(
+    app.includes(expected),
+    `App should hide stale empty New Session placeholders once real sessions exist: ${expected}`,
+  );
+}
+
+for (const expected of [
+  '--topbar-height: 52px',
+]) {
+  assert.ok(
+    globalStyles.includes(expected),
+    `Top bar should sit lower with enough vertical room: ${expected}`,
+  );
+}
+
+for (const expected of [
+  'padding: 8px 16px 0 12px',
+  'padding: 8px 12px 0 12px',
+  'padding: 8px 8px 0 8px',
+  'padding: 8px 4px 0 4px',
+]) {
+  assert.ok(
+    styles.includes(expected),
+    `Top bar controls/title should stay left aligned with the panel instead of using a traffic-light inset: ${expected}`,
+  );
+}
+
+assert.equal(
+  styles.includes('padding: 0 16px 0 78px') ||
+    styles.includes('padding: 0 12px 0 78px') ||
+    styles.includes('padding: 0 8px 0 78px') ||
+    styles.includes('padding: 0 4px 0 68px'),
+  false,
+  'Top bar should not keep the old far-right traffic-light left padding',
+);
 
 for (const expected of [
   "'sub-agents':{ id: 'sub-agents',  label: 'Agent Work'",
@@ -129,11 +175,6 @@ for (const expected of [
 }
 
 for (const expected of [
-  "const FORCE_HIDDEN_TOOL_PANELS: PanelId[] = ['sub-agents']",
-  'function sanitizePinnedTools',
-  '&& !forcedHidden.has(id)',
-  'localStorage.setItem(PINNED_TOOLS_KEY, JSON.stringify(sanitized))',
-  'if (FORCE_HIDDEN_TOOL_PANELS.includes(id)) return;',
   'const shouldShowStatusBar = Boolean(',
   'contextWarning ||',
   'terminalPanelOpen ||',
@@ -148,6 +189,15 @@ for (const expected of [
   assert.ok(
     app.includes(expected),
     `App shell should only mount bottom status chrome for warnings/background work/user-opened terminal: ${expected}`,
+  );
+}
+
+for (const expected of [
+  "ALL_PANELS.filter((id) => id !== 'chat' && id !== 'sub-agents')",
+]) {
+  assert.ok(
+    topBar.includes(expected),
+    `TopBar should keep forced-hidden tool panels out of the Tools menu: ${expected}`,
   );
 }
 
