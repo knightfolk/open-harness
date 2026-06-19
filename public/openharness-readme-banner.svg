@@ -1,0 +1,97 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">OpenHarness README banner</title>
+  <desc id="desc">A dark technical banner for an open-source, agent-first harness with model routing, agent lanes, and proof signals.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#090d15"/>
+      <stop offset="0.42" stop-color="#101724"/>
+      <stop offset="1" stop-color="#0b1020"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="167" y1="92" x2="984" y2="252" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3dd6ff"/>
+      <stop offset="0.46" stop-color="#7c6dff"/>
+      <stop offset="1" stop-color="#28e08b"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="132" y1="48" x2="1046" y2="326" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#182132" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#111827" stop-opacity="0.88"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 112) rotate(38) scale(240 108)">
+      <stop stop-color="#3dd6ff" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#3dd6ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(913 238) rotate(-25) scale(268 126)">
+      <stop stop-color="#28e08b" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#28e08b" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="#94a3b8" stroke-opacity="0.09"/>
+    </pattern>
+    <filter id="softShadow" x="-12%" y="-24%" width="124%" height="148%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="360" rx="28" fill="url(#bg)"/>
+  <rect width="1200" height="360" rx="28" fill="url(#grid)"/>
+  <rect width="1200" height="360" rx="28" fill="url(#glowA)"/>
+  <rect width="1200" height="360" rx="28" fill="url(#glowB)"/>
+
+  <g filter="url(#softShadow)">
+    <rect x="72" y="48" width="1056" height="264" rx="22" fill="url(#panel)" stroke="#263246"/>
+    <path d="M96 88H1104" stroke="#ffffff" stroke-opacity="0.07"/>
+    <path d="M96 272H1104" stroke="#ffffff" stroke-opacity="0.07"/>
+  </g>
+
+  <g opacity="0.95">
+    <path d="M176 178C238 112 295 112 352 178C414 250 477 250 544 178C608 112 672 112 736 178C803 250 866 250 928 178C978 122 1025 115 1072 156" stroke="url(#signal)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M176 178C238 112 295 112 352 178C414 250 477 250 544 178C608 112 672 112 736 178C803 250 866 250 928 178C978 122 1025 115 1072 156" stroke="#ffffff" stroke-opacity="0.18" stroke-width="13" stroke-linecap="round"/>
+  </g>
+
+  <g>
+    <rect x="129" y="128" width="112" height="68" rx="16" fill="#0f172a" stroke="#3dd6ff" stroke-opacity="0.45"/>
+    <text x="185" y="155" text-anchor="middle" fill="#dbeafe" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="700">ROUTER</text>
+    <text x="185" y="177" text-anchor="middle" fill="#8aa4bd" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11">model fit</text>
+  </g>
+
+  <g>
+    <rect x="416" y="126" width="112" height="72" rx="16" fill="#0f172a" stroke="#7c6dff" stroke-opacity="0.52"/>
+    <text x="472" y="154" text-anchor="middle" fill="#ddd6fe" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="700">AGENTS</text>
+    <text x="472" y="177" text-anchor="middle" fill="#9ca3af" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11">planner coder</text>
+  </g>
+
+  <g>
+    <rect x="698" y="126" width="116" height="72" rx="16" fill="#0f172a" stroke="#38bdf8" stroke-opacity="0.48"/>
+    <text x="756" y="154" text-anchor="middle" fill="#dbeafe" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="700">PROOF</text>
+    <text x="756" y="177" text-anchor="middle" fill="#9ca3af" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11">traces evals</text>
+  </g>
+
+  <g>
+    <rect x="952" y="126" width="116" height="72" rx="16" fill="#0f172a" stroke="#28e08b" stroke-opacity="0.5"/>
+    <text x="1010" y="154" text-anchor="middle" fill="#dcfce7" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="700">LEARN</text>
+    <text x="1010" y="177" text-anchor="middle" fill="#9ca3af" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11">provider wins</text>
+  </g>
+
+  <g>
+    <circle cx="600" cy="166" r="56" fill="#0b1220" stroke="url(#signal)" stroke-width="3"/>
+    <path d="M572 171L596 145L628 165L604 191L572 171Z" fill="#111827" stroke="#e5e7eb" stroke-width="2"/>
+    <path d="M596 145V191" stroke="#7c6dff" stroke-width="3" stroke-linecap="round"/>
+    <path d="M572 171L628 165" stroke="#3dd6ff" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="572" cy="171" r="6" fill="#3dd6ff"/>
+    <circle cx="596" cy="145" r="6" fill="#7c6dff"/>
+    <circle cx="628" cy="165" r="6" fill="#28e08b"/>
+    <circle cx="604" cy="191" r="6" fill="#f8fafc"/>
+  </g>
+
+  <g>
+    <text x="600" y="257" text-anchor="middle" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="52" font-weight="800" letter-spacing="0">OpenHarness</text>
+    <text x="600" y="286" text-anchor="middle" fill="#a7b4c7" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" font-weight="600">open-source agent-first optimized harness</text>
+  </g>
+
+  <g opacity="0.76">
+    <rect x="98" y="70" width="10" height="10" rx="5" fill="#ef4444"/>
+    <rect x="116" y="70" width="10" height="10" rx="5" fill="#f59e0b"/>
+    <rect x="134" y="70" width="10" height="10" rx="5" fill="#22c55e"/>
+    <text x="168" y="80" fill="#64748b" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="12">harness://route-agent-proof</text>
+  </g>
+</svg>

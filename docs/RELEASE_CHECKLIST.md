@@ -42,8 +42,10 @@ Use this checklist before every release, patch release, or milestone handoff tha
   - [ ] One manual runtime pass using stable installed app artifact (no temporary regenerated `/tmp/*.app` bundles)
 - If `electron/`, packaging, or release scripts changed:
   - [ ] `npm run test:auto-update-packaging`
+  - [ ] `npm run notarize:check`
   - [ ] `npm run pack`
   - [ ] `npm run dist`
+  - [ ] `npm run notarize:verify` after a notarized macOS package build
   - [ ] Verify `release/` contains expected installer artifacts.
 
 ### Auto-update release checks
@@ -53,6 +55,7 @@ Use this checklist before every release, patch release, or milestone handoff tha
   - macOS: `latest-mac.yml`, `.zip`, and `.dmg`
   - Windows: `latest.yml`, NSIS `.exe`, and `.zip`
   - Linux: `latest-linux.yml` and AppImage
+- [ ] For public macOS distribution, build with `npm run dist:mac:notarized` and confirm Gatekeeper does not report `Unnotarized Developer ID`.
 - [ ] Verify GitHub release artifacts are attached to `knightfolk/open-harness`.
 - [ ] In a stable installed app artifact, use **Check for Updates** and confirm the update prompt appears.
 - [ ] Confirm download progress completes, then choose **Restart and Install** and verify the app relaunches on the new version.

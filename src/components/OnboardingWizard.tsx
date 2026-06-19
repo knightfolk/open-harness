@@ -281,7 +281,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           </div>
           <h1 className="onboarding-title">Welcome to OpenHarness</h1>
           <p className="onboarding-subtitle">
-            Your local-first AI workbench. Connect supported providers, pick an agent style, and start building.
+            Your open-source, agent-first harness. Connect supported providers, pick an agent style, and start building.
           </p>
 
           <div className="onboarding-features">

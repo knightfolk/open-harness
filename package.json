@@ -77,9 +77,13 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac dmg zip --arm64 --x64",
+    "dist:mac:notarized": "npm run notarize:check && npm run dist:mac && npm run notarize:verify",
+    "dist:mac:notarized:local": "APPLE_KEYCHAIN_PROFILE=openharness-notary npm run dist:mac:notarized",
     "dist:win": "npm run build && electron-builder --win nsis zip --x64 --arm64",
     "dist:linux": "npm run build && electron-builder --linux AppImage tar.gz --x64 --arm64",
     "dist:all": "npm run build && electron-builder --mac dmg zip --win nsis zip --linux AppImage tar.gz --arm64 --x64",
+    "notarize:check": "node scripts/check-notarization-env.mjs",
+    "notarize:verify": "node scripts/verify-macos-notarization.mjs",
     "electron:prod": "npm run build && electron .",
     "check:live-tool-error-evidence": "tsx scripts/check-live-tool-error-evidence.ts",
     "run:live-tool-error-recovery": "tsx scripts/run-live-tool-error-recovery-scenario.ts",
@@ -143,6 +147,10 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "notarize": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "target": [
         "dmg",
         "zip"

@@ -3949,12 +3949,12 @@ function AboutPane({ configPath }: { configPath?: string }) {
   return (
     <>
       <PaneTitle>About OpenHarness</PaneTitle>
-      <PaneDesc>A local-first AI workbench for routing, evaluating, and coordinating coding agents.</PaneDesc>
+      <PaneDesc>An open-source, agent-first, optimized harness for routing, evaluating, and coordinating coding agents.</PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>OpenHarness</div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 12 }}>Version 1.0.0</div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          An Electron + React + Express workbench for local-first agent workflows with MCP tool integration, model routing, and multi-panel operations.
+          An Electron + React + Express harness for agent-first workflows with MCP tool integration, model routing, and multi-panel operations.
         </div>
         <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
           <div style={{ marginBottom: 4, fontWeight: 600 }}>Active config file</div>

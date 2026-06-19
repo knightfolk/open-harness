@@ -1,14 +1,14 @@
 # OpenHarness
 
 <p align="center">
-  <img src="public/openharness-icon.png" alt="OpenHarness icon" width="96" height="96">
+  <img src="public/openharness-readme-banner.svg" alt="OpenHarness banner: open-source, agent-first, optimized harness" width="100%">
 </p>
 
 <p align="center">
-  <strong>A local-first AI workbench for routing models, running agents, inspecting proof, and learning which providers perform best.</strong>
+  <strong>An open-source, agent-first, optimized harness for routing models, running agents, inspecting proof, and learning which providers perform best.</strong>
 </p>
 
-OpenHarness is a desktop control plane for people who work across multiple AI models, providers, tools, and coding agents. It keeps the chat surface, model routing, provider health, MCP tools, agent traces, eval feedback, and review evidence in one dense workspace so the harness is visible while it works.
+OpenHarness is an agent-first desktop harness for people who work across multiple AI models, providers, tools, and coding agents. It keeps the chat surface, model routing, provider health, MCP tools, agent traces, eval feedback, and review evidence in one dense workspace so the harness is visible while it works.
 
 > **Source-available public preview:** OpenHarness is being built in public for feedback, discussion, and evaluation. It is not open-source licensed yet. Please do not fork for redistribution, repackage, offer as a hosted service, or use the code commercially without written permission. See [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -29,7 +29,7 @@ OpenHarness is built for:
 - Watching agent work as structured runs rather than loose chat messages.
 - Debugging provider failures, tool failures, retries, and fallback decisions.
 - Capturing evidence so routing can improve from real outcomes instead of guesswork.
-- Keeping everything local-first while still making the project visible for public feedback.
+- Keeping the harness open, agent-first, and optimized for provider choice without hiding the proof trail.
 
 ## What Makes It Different
 
@@ -215,6 +215,8 @@ Current prerelease: `1.0.0-alpha.update.1`.
 npm run pack
 npm run dist
 npm run dist:all
+npm run dist:mac:notarized
+npm run dist:mac:notarized:local
 ```
 
 Build output is written to `release/`. The web build output is written to `dist/`.
@@ -228,6 +230,12 @@ publish the platform artifacts plus Electron Builder update metadata:
 
 Use **Check for Updates...** from the app menu to manually verify the update
 channel from a stable installed app artifact.
+
+For notarized macOS release builds, use `npm run dist:mac:notarized`. On this
+machine, the notarization credential is stored as the `openharness-notary`
+keychain profile, so `npm run dist:mac:notarized:local` runs the local notarized
+build directly. Setup notes and Apple credential links are in
+[docs/MACOS_NOTARIZATION.md](docs/MACOS_NOTARIZATION.md).
 
 ## Tech Stack
 
