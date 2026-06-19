@@ -61,9 +61,12 @@ import { isMainSessionKind, normalizeSessionKind, type SessionKind } from './ses
 import { runShipReadiness } from './shipReadiness';
 import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './streamCleaner';
 import { getToolReliabilitySummaryCached, getToolReliabilityCacheMeta, invalidateToolReliabilitySummaryCache } from './toolReliabilityStore';
-import { getToolErrorLedgerSummary, getToolErrorLedgerEvents, recordToolErrorRunEvents } from './toolErrorLedger';
+import { buildToolFailureTrainingExportPayload, getToolErrorLedgerSummary, getToolErrorLedgerEvents, recordToolErrorRunEvents } from './toolErrorLedger';
 import { buildRouterLearningExportPayload } from './routerLearningExport';
 import { buildRouterLearningImportPreview } from './routerLearningImport';
+import { deletePersonalizationProfile, formatPersonalizationForPrompt, getPersonalizationProfilePath, loadPersonalizationProfile, savePersonalizationProfile } from './personalization';
+import { getReleaseNotes } from './releaseNotes';
+import { buildCrashReportBundle, getCrashReportSummary } from './crashReports';
 import { appendVisualContextToContent, normalizeVisualContext, type VisualContext } from './visionFallback';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
@@ -1417,6 +1420,47 @@ app.put('/api/config', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/personalization', (_req, res) => {
+  res.json({
+    profile: loadPersonalizationProfile(),
+    path: getPersonalizationProfilePath(),
+  });
+});
+
+app.put('/api/personalization', (req, res) => {
+  const profile = savePersonalizationProfile(req.body || {});
+  res.json({
+    ok: true,
+    profile,
+    path: getPersonalizationProfilePath(),
+  });
+});
+
+app.delete('/api/personalization', (_req, res) => {
+  deletePersonalizationProfile();
+  res.json({
+    ok: true,
+    profile: loadPersonalizationProfile(),
+    path: getPersonalizationProfilePath(),
+  });
+});
+
+app.get('/api/release-notes', (_req, res) => {
+  res.json(getReleaseNotes());
+});
+
+app.get('/api/crash-reports', (_req, res) => {
+  res.json(getCrashReportSummary());
+});
+
+app.get('/api/crash-reports/export', (_req, res) => {
+  const bundle = buildCrashReportBundle();
+  const stamp = bundle.generatedAt.replace(/[:.]/g, '-');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="openharness-crash-report-${stamp}.json"`);
+  res.send(JSON.stringify(bundle, null, 2));
+});
+
 
 // ── Auto-Router endpoints ──────────────────────────
 
@@ -1527,6 +1571,16 @@ app.get('/api/router/learning/tool-errors', (req, res) => {
     }),
   };
   res.json(payload);
+});
+
+app.get('/api/router/learning/tool-error-training-export', (req, res) => {
+  const model = req.query.model as string | undefined;
+  const providerId = req.query.providerId as string | undefined;
+  const tool = req.query.tool as string | undefined;
+  const evidenceSource = req.query.evidenceSource as 'saved_session_trace' | 'log_trace' | 'imported_trace' | undefined;
+  const limit = Math.max(1, Math.min(1000, parseInt(String(req.query.limit || '300'), 10) || 300));
+  const events = getToolErrorLedgerEvents({ model, providerId, tool, evidenceSource, limit });
+  res.json(buildToolFailureTrainingExportPayload({ events }));
 });
 
 app.get('/api/router/learning/tool-reliability/cache', (_req, res) => {
@@ -4391,6 +4445,7 @@ async function streamModel(
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
     projectProfileSummary: [
+      formatPersonalizationForPrompt(),
       formatGoalForPrompt(session.goal),
       projectProfile ? formatProjectProfileForPrompt(projectProfile) : undefined,
       session.workingDir ? projectMemory.formatMemoryForPrompt(session.workingDir) : undefined,

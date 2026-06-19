@@ -166,7 +166,7 @@ const DEFAULT_CONFIG: StoredConfig = {
   mcpServers: [],
   personality: '',
   activeModel: 'Auto',
-  activeTheme: 'midnight',
+  activeTheme: 'system',
   installedThemePluginManifests: [],
   favoriteModels: [],
   trustMode: 'workspace-write',

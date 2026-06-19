@@ -390,7 +390,7 @@
         },
         "textureRecipe": {
           "type": "string",
-          "enum": ["none", "paper-grain", "fine-grid", "blueprint-grid", "low-noise-matte", "soft-glass", "terminal-scanline"]
+          "enum": ["none", "paper-grain", "fine-grid", "blueprint-grid", "low-noise-matte", "soft-glass", "terminal-scanline", "soft-marble", "brushed-plaster", "paper-fiber", "frosted-noise"]
         },
         "textureOpacity": { "type": "number", "minimum": 0, "maximum": 0.18 },
         "backdropBlur": { "type": "number", "minimum": 0, "maximum": 60 },

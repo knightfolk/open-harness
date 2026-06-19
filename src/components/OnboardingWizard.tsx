@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import * as api from '../utils/api';
 import { defaultProviderPlan } from '../data/providerPlans';
-import { applyTheme, getThemeById, getThemesByMode, resolveThemeId } from '../theme/builtins';
+import { applyTheme, getThemeById, getThemesByMode, isSystemThemePreference, SYSTEM_THEME_ID } from '../theme/builtins';
 
 // ── Provider catalog (shared with onboarding) ──────────
 interface OnboardingProvider {
@@ -114,7 +114,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dockerReadiness, setDockerReadiness] = useState<api.DockerReadiness | null>(null);
-  const [activeTheme, setActiveTheme] = useState('midnight');
+  const [activeTheme, setActiveTheme] = useState(SYSTEM_THEME_ID);
 
   // Load saved onboarding step on mount
   useEffect(() => {
@@ -127,12 +127,13 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
         }
         if (typeof (cfg as any).activeTheme === 'string' && (cfg as any).activeTheme) {
           const rawThemeId = (cfg as any).activeTheme as string;
-          const themeId = resolveThemeId(rawThemeId);
-          setActiveTheme(themeId);
-          applyTheme(themeId);
-          if (rawThemeId !== themeId) {
+          const themeId = applyTheme(rawThemeId);
+          setActiveTheme(isSystemThemePreference(rawThemeId) ? SYSTEM_THEME_ID : themeId);
+          if (!isSystemThemePreference(rawThemeId) && rawThemeId !== themeId) {
             try { await api.updateConfig({ activeTheme: themeId } as any); } catch {}
           }
+        } else {
+          applyTheme(SYSTEM_THEME_ID);
         }
       } catch {}
 
@@ -343,7 +344,32 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
           <h2 className="onboarding-step-title">
             <Sun size={20} aria-hidden="true" /> Pick a theme
           </h2>
-          <p className="onboarding-step-subtitle">Choose a UI theme first, then continue through setup.</p>
+          <p className="onboarding-step-subtitle">OpenHarness follows your system appearance by default. Pick a dark or light theme if you want to override it.</p>
+
+          <div role="group" aria-labelledby="onboarding-theme-group-system" style={{ marginBottom: 16 }}>
+            <div id="onboarding-theme-group-system" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-tertiary)', marginBottom: 8 }}>
+              Default
+            </div>
+            <div className="onboarding-theme-grid">
+              <button
+                className={`onboarding-theme-card ${activeTheme === SYSTEM_THEME_ID ? 'selected' : ''}`}
+                aria-label={`Choose system appearance${activeTheme === SYSTEM_THEME_ID ? '. Active theme' : ''}`}
+                onClick={async () => {
+                  applyTheme(SYSTEM_THEME_ID);
+                  setActiveTheme(SYSTEM_THEME_ID);
+                  try { await api.updateConfig({ activeTheme: SYSTEM_THEME_ID } as any); } catch {}
+                }}
+              >
+                <div className="onboarding-theme-swatch" style={{ background: 'linear-gradient(135deg, #111827 0 48%, #f8fafc 52% 100%)' }} />
+                <div className="onboarding-theme-info">
+                  <div className="onboarding-theme-label">System</div>
+                  <div className="onboarding-theme-texture">Uses macOS appearance</div>
+                  {activeTheme === SYSTEM_THEME_ID && <div className="onboarding-theme-active">Active</div>}
+                </div>
+                <Moon size={14} aria-hidden="true" style={{ color: activeTheme === SYSTEM_THEME_ID ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
+              </button>
+            </div>
+          </div>
 
           {themeGroups.map((group) => (
             <div key={group.mode} role="group" aria-labelledby={`onboarding-theme-group-${group.mode}`} style={{ marginBottom: 16 }}>
@@ -801,7 +827,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
             <div className="onboarding-review-section">
               <div className="onboarding-review-label">Theme</div>
               <div className="onboarding-review-value">
-                {getThemeById(activeTheme)?.label || activeTheme}
+                {activeTheme === SYSTEM_THEME_ID ? 'System appearance' : getThemeById(activeTheme)?.label || activeTheme}
               </div>
             </div>
 

@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, Flag, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
+import { AlertTriangle, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, Flag, FileText, Gauge, Map as MapIcon, Package, Route, Terminal, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HarnessRun, HarnessRunStep, RunSteeringAction, SubAgent } from '../types';
 import { getActiveWorkState, type ActiveWorkState } from '../utils/agentWorkState';
@@ -536,12 +536,13 @@ export function SubAgentTracker({ agents, focusedAgentId, onRunSteer, onFocusAge
                   type="button"
                   className="sub-agent-focus-button"
                   aria-label={`Focus ${trace ? `${trace.role} run` : agent.name} in Agent detail`}
+                  title={`Focus ${trace ? `${trace.role} run` : agent.name} in Agent detail`}
                   onClick={(event) => {
                     event.stopPropagation();
                     onFocusAgent(agent.id);
                   }}
                 >
-                  Focus
+                  <Eye size={12} aria-hidden="true" />
                 </button>
               )}
             </div>

@@ -18,6 +18,10 @@ for (const expected of [
   "'low-noise-matte'",
   "'soft-glass'",
   "'terminal-scanline'",
+  "'soft-marble'",
+  "'brushed-plaster'",
+  "'paper-fiber'",
+  "'frosted-noise'",
   'textureOpacity?: number',
   'reducedTransparencyFallback?:',
 ]) {
@@ -44,7 +48,7 @@ for (const expected of [
 }
 
 for (const expected of [
-  "const TEXTURE_RECIPE_VALUES = ['none', 'paper-grain', 'fine-grid', 'blueprint-grid', 'low-noise-matte', 'soft-glass', 'terminal-scanline'] as const",
+  "const TEXTURE_RECIPE_VALUES = ['none', 'paper-grain', 'fine-grid', 'blueprint-grid', 'low-noise-matte', 'soft-glass', 'terminal-scanline', 'soft-marble', 'brushed-plaster', 'paper-fiber', 'frosted-noise'] as const",
   'if (key === \'textureRecipe\')',
   'if (!isTextureRecipe(value))',
   'ensureNonNegativeNumber(value, `${path}.effects.textureOpacity`, 0, 0.18, result)',
@@ -57,7 +61,7 @@ for (const expected of [
 
 for (const expected of [
   '"textureRecipe"',
-  '"enum": ["none", "paper-grain", "fine-grid", "blueprint-grid", "low-noise-matte", "soft-glass", "terminal-scanline"]',
+  '"enum": ["none", "paper-grain", "fine-grid", "blueprint-grid", "low-noise-matte", "soft-glass", "terminal-scanline", "soft-marble", "brushed-plaster", "paper-fiber", "frosted-noise"]',
   '"textureOpacity": { "type": "number", "minimum": 0, "maximum": 0.18 }',
   '"reducedTransparencyFallback"',
   '"kind": { "type": "string", "enum": ["preview", "background", "texture"] }',
@@ -89,6 +93,10 @@ for (const expected of [
   ':root[data-theme-texture-recipe="low-noise-matte"] .app-layout::before',
   ':root[data-theme-texture-recipe="soft-glass"] .app-layout::before',
   ':root[data-theme-texture-recipe="terminal-scanline"] .app-layout::before',
+  ':root[data-theme-texture-recipe="soft-marble"] .app-layout::before',
+  ':root[data-theme-texture-recipe="brushed-plaster"] .app-layout::before',
+  ':root[data-theme-texture-recipe="paper-fiber"] .app-layout::before',
+  ':root[data-theme-texture-recipe="frosted-noise"] .app-layout::before',
   '@media (prefers-reduced-transparency: reduce)',
   '--theme-texture-opacity: 0',
   '--theme-backdrop-blur: 0px',
@@ -104,6 +112,9 @@ for (const expected of [
   'function textureLabel(recipe?: string, opacity?: number): string',
   'Texture: none',
   'Texture opacity',
+  'Texture style',
+  'const TEXTURE_OPTIONS:',
+  'data-texture-preview',
   'const effectiveTextureOpacity = textureOpacityOverride ?? baseTextureOpacity',
   'const effectiveTexturePercent = Math.round(effectiveTextureOpacity * 100)',
   'min={0}',

@@ -476,6 +476,74 @@ export interface AppConfig {
   providerRateLimits?: ProviderRateLimit[];
 }
 
+export interface PersonalizationProfile {
+  enabled: boolean;
+  updatedAt: string | null;
+  responseStyle: string;
+  likes: string[];
+  dislikes: string[];
+  workflowStyle: string;
+  promptingStyle: string;
+  modelPreferences: string;
+  toolPreferences: string;
+  projectPreferences: string;
+  neverDo: string[];
+  compactSummary: string;
+}
+
+export interface PersonalizationResponse {
+  profile: PersonalizationProfile;
+  path: string;
+}
+
+export interface ReleaseNoteEntry {
+  version: string;
+  title: string;
+  date?: string;
+  current: boolean;
+  notes: string[];
+}
+
+export interface ReleaseNotesPayload {
+  currentVersion: string;
+  generatedAt: string;
+  releases: ReleaseNoteEntry[];
+}
+
+export interface CrashReportSource {
+  id: string;
+  label: string;
+  path: string;
+  exists: boolean;
+  fileCount: number;
+}
+
+export interface CrashReportFileSummary {
+  sourceId: string;
+  sourceLabel: string;
+  name: string;
+  path: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  kind: 'text' | 'binary' | 'metadata';
+  preview?: string;
+}
+
+export interface CrashReportSummary {
+  generatedAt: string;
+  privacyBoundary: string[];
+  sources: CrashReportSource[];
+  recentFiles: CrashReportFileSummary[];
+}
+
+export interface CrashReportBundle extends CrashReportSummary {
+  schemaVersion: 1;
+  files: Array<CrashReportFileSummary & {
+    excerpt?: string;
+    note?: string;
+  }>;
+}
+
 export async function getConfig(): Promise<AppConfig | null> {
   try {
     const res = await fetch(`${API_BASE}/api/config`);
@@ -484,12 +552,62 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests' | 'modelBudgets' | 'providerRateLimits'>>): Promise<void> {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests' | 'modelBudgets' | 'providerRateLimits'>> & { onboardingStep?: number }): Promise<void> {
   await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   });
+}
+
+export async function getPersonalization(): Promise<PersonalizationResponse> {
+  const res = await fetch(`${API_BASE}/api/personalization`);
+  if (!res.ok) throw new Error(`Failed to load personalization: ${res.status}`);
+  return res.json();
+}
+
+export async function updatePersonalization(profile: Partial<PersonalizationProfile>): Promise<PersonalizationResponse> {
+  const res = await fetch(`${API_BASE}/api/personalization`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+  if (!res.ok) throw new Error(`Failed to save personalization: ${res.status}`);
+  return res.json();
+}
+
+export async function deletePersonalization(): Promise<PersonalizationResponse> {
+  const res = await fetch(`${API_BASE}/api/personalization`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Failed to delete personalization: ${res.status}`);
+  return res.json();
+}
+
+export async function getReleaseNotes(): Promise<ReleaseNotesPayload> {
+  const res = await fetch(`${API_BASE}/api/release-notes`);
+  if (!res.ok) throw new Error(`Failed to load release notes: ${res.status}`);
+  return res.json();
+}
+
+export async function getCrashReports(): Promise<CrashReportSummary> {
+  const res = await fetch(`${API_BASE}/api/crash-reports`);
+  if (!res.ok) throw new Error(`Failed to load crash reports: ${res.status}`);
+  return res.json();
+}
+
+export async function downloadCrashReportBundle(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/crash-reports/export`);
+  if (!res.ok) throw new Error(`Failed to export crash report: ${res.status}`);
+  const blob = await res.blob();
+  const disposition = res.headers.get('content-disposition') || '';
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] || 'openharness-crash-report.json';
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function getProviderRateLimitStatus(): Promise<ProviderRateLimitStatus> {
@@ -2644,6 +2762,41 @@ export interface ToolErrorLedgerSummary {
   liveEvidenceStatus: ToolErrorLiveEvidenceStatus;
 }
 
+export interface ToolFailureTrainingExportRecord {
+  timestamp: string;
+  evidenceSource: ToolReliabilityEvidenceSource;
+  failed: {
+    model: string;
+    providerId: string;
+    tool: string;
+    round?: number;
+    message?: string;
+  };
+  workaround: {
+    completed: boolean;
+    type: 'recovered_tool_path' | 'final_answer_only' | 'unrecovered_or_unknown';
+    model?: string;
+    providerId?: string;
+    tool?: string;
+    round?: number;
+    retryDistance?: number;
+    finalStatus: string;
+    finalAnswerCaptured: boolean;
+    summary: string;
+  };
+}
+
+export interface ToolFailureTrainingExport {
+  schemaVersion: 1;
+  generatedAt: string;
+  privacyBoundary: {
+    includes: string[];
+    excludes: string[];
+  };
+  recordCount: number;
+  records: ToolFailureTrainingExportRecord[];
+}
+
 export interface ToolReliabilityBucket {
   total: number;
   complete: number;
@@ -2985,6 +3138,13 @@ export async function getRouterLearningEvents(sessionId?: string, limit = 50): P
 export async function getRouterLearningExport(): Promise<RouterLearningExport> {
   const res = await fetch(`${API_BASE}/api/router/learning/export`);
   if (!res.ok) throw new Error(`Failed to export router learning: ${res.status}`);
+  return res.json();
+}
+
+export async function getToolFailureTrainingExport(limit = 300): Promise<ToolFailureTrainingExport> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(`${API_BASE}/api/router/learning/tool-error-training-export?${params}`);
+  if (!res.ok) throw new Error(`Failed to export tool failure training data: ${res.status}`);
   return res.json();
 }
 

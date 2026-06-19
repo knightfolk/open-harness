@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Message, SubAgent, ProviderConfig, CodingRoleAssignment, HarnessRun, HarnessRunStep, ProjectProfile, SidebarTab, ThinkingEffort, RunSteeringAction, SessionGoal } from './types';
 import type { PanelId } from './types/layout';
+import type { ThemeTextureRecipe } from './theme/themeTokens';
 import { ALL_PANELS } from './types/layout';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -18,8 +19,9 @@ import {
   applyTheme,
   getInstalledThemePluginManifests,
   hydrateInstalledThemePluginManifests,
+  isSystemThemePreference,
   removeImportedTheme,
-  resolveThemeId,
+  SYSTEM_THEME_ID,
 } from './theme/builtins';
 import { describeAutoRouterRunStep, latestAutoRouterStep } from './utils/autoRouterTrace';
 import './styles/global.css';
@@ -45,6 +47,9 @@ const STATUS_BAR_HEIGHT_RANGE = { min: 40, max: 92 };
 const ENVIRONMENT_HIDDEN_KEY = 'openharness.chat-super.hidden.v2';
 const CLICKY_ENABLED_KEY = 'openharness.clicky.enabled.v1';
 const THEME_TEXTURE_OPACITY_OVERRIDE_KEY = 'openharness.theme.texture-opacity-override.v1';
+const THEME_TEXTURE_RECIPE_OVERRIDE_KEY = 'openharness.theme.texture-recipe-override.v1';
+const RELEASE_NOTES_LAST_SEEN_KEY = 'openharness.release-notes.last-seen-version.v1';
+const RELEASE_NOTES_OPT_OUT_KEY = 'openharness.release-notes.opt-out.v1';
 const NARROW_SIDEBAR_AUTO_CLOSE_WIDTH = 640;
 const POPOUT_PANEL_PARAM = 'popoutPanel';
 
@@ -116,6 +121,63 @@ function loadThemeTextureOpacityOverride(): number | null {
 
 function applyThemeTextureOpacityOverride(value: number) {
   document.documentElement.style.setProperty('--theme-texture-opacity', String(clampThemeTextureOpacity(value)));
+}
+
+const TEXTURE_RECIPE_VALUES: ThemeTextureRecipe[] = [
+  'none',
+  'paper-grain',
+  'fine-grid',
+  'blueprint-grid',
+  'low-noise-matte',
+  'soft-glass',
+  'terminal-scanline',
+  'soft-marble',
+  'brushed-plaster',
+  'paper-fiber',
+  'frosted-noise',
+];
+
+function isTextureRecipe(value: string): value is ThemeTextureRecipe {
+  return TEXTURE_RECIPE_VALUES.includes(value as ThemeTextureRecipe);
+}
+
+function loadThemeTextureRecipeOverride(): ThemeTextureRecipe | null {
+  try {
+    const raw = localStorage.getItem(THEME_TEXTURE_RECIPE_OVERRIDE_KEY);
+    return raw && isTextureRecipe(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyThemeTextureRecipeOverride(value: ThemeTextureRecipe) {
+  document.documentElement.setAttribute('data-theme-texture-recipe', value);
+  document.documentElement.style.setProperty('--theme-texture-recipe', value);
+}
+
+function releaseNotesOptedOut(): boolean {
+  try {
+    return localStorage.getItem(RELEASE_NOTES_OPT_OUT_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function releaseNotesLastSeenVersion(): string {
+  try {
+    return localStorage.getItem(RELEASE_NOTES_LAST_SEEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberReleaseNotesSeen(version: string, optOut: boolean): void {
+  try {
+    localStorage.setItem(RELEASE_NOTES_LAST_SEEN_KEY, version);
+    localStorage.setItem(RELEASE_NOTES_OPT_OUT_KEY, optOut ? 'true' : 'false');
+  } catch {
+    // Non-critical launch preference.
+  }
 }
 
 function describeRunStep(step: HarnessRunStep): string {
@@ -369,8 +431,9 @@ function App() {
   const [roleThinking, setRoleThinking] = useState<Record<string, ThinkingEffort>>(defaultRoleThinking);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [roleAssignments, setRoleAssignments] = useState<CodingRoleAssignment[]>(DEFAULT_ROLE_ASSIGNMENTS);
-  const [activeTheme, setActiveTheme] = useState('midnight');
+  const [activeTheme, setActiveTheme] = useState(SYSTEM_THEME_ID);
   const [textureOpacityOverride, setTextureOpacityOverride] = useState<number | null>(loadThemeTextureOpacityOverride);
+  const [textureRecipeOverride, setTextureRecipeOverride] = useState<ThemeTextureRecipe | null>(loadThemeTextureRecipeOverride);
   const [, setInstalledThemeManifests] = useState<string[]>([]);
   const [personalityText, setPersonalityText] = useState('');
   const [mcpServers, setMcpServers] = useState<import('./types').MCPServerItem[]>([]);
@@ -451,6 +514,9 @@ function App() {
   const [configPath, setConfigPath] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialCategory, setSettingsInitialCategory] = useState<string | undefined>(undefined);
+  const [releaseNotes, setReleaseNotes] = useState<api.ReleaseNotesPayload | null>(null);
+  const [patchNotesOpen, setPatchNotesOpen] = useState(false);
+  const [patchNotesOptOut, setPatchNotesOptOut] = useState(false);
   const [pendingPatchProposalId, setPendingPatchProposalId] = useState<string | null>(null);
   const [snapOverlayVisible, setSnapOverlayVisible] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -585,7 +651,7 @@ function App() {
 
   // Load config from server on mount
   useEffect(() => {
-    applyTheme('midnight');
+    applyTheme(SYSTEM_THEME_ID);
     (async () => {
       try {
         const config = await api.getConfig();
@@ -607,10 +673,10 @@ function App() {
           } else if ((config.installedThemePluginManifests || []).length > 0) {
             api.updateConfig({ installedThemePluginManifests: [] }).catch(() => {});
           }
-          const resolvedTheme = resolveThemeId(config.activeTheme);
-          setActiveTheme(resolvedTheme);
-          applyTheme(resolvedTheme);
-          if (config.activeTheme && config.activeTheme !== resolvedTheme) {
+          const configuredTheme = config.activeTheme || SYSTEM_THEME_ID;
+          const resolvedTheme = applyTheme(configuredTheme);
+          setActiveTheme(isSystemThemePreference(configuredTheme) ? SYSTEM_THEME_ID : resolvedTheme);
+          if (config.activeTheme && !isSystemThemePreference(config.activeTheme) && config.activeTheme !== resolvedTheme) {
             api.updateConfig({ activeTheme: resolvedTheme }).catch(() => {});
           }
           setPersonalityText(config.personality || '');
@@ -675,10 +741,26 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (textureRecipeOverride !== null) {
+      applyThemeTextureRecipeOverride(textureRecipeOverride);
+    }
     if (textureOpacityOverride !== null) {
       applyThemeTextureOpacityOverride(textureOpacityOverride);
     }
-  }, [activeTheme, textureOpacityOverride]);
+  }, [activeTheme, textureOpacityOverride, textureRecipeOverride]);
+
+  useEffect(() => {
+    if (!isSystemThemePreference(activeTheme) || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const syncSystemTheme = () => {
+      applyTheme(SYSTEM_THEME_ID);
+      if (textureRecipeOverride !== null) applyThemeTextureRecipeOverride(textureRecipeOverride);
+      if (textureOpacityOverride !== null) applyThemeTextureOpacityOverride(textureOpacityOverride);
+    };
+    syncSystemTheme();
+    media.addEventListener?.('change', syncSystemTheme);
+    return () => media.removeEventListener?.('change', syncSystemTheme);
+  }, [activeTheme, textureOpacityOverride, textureRecipeOverride]);
 
   // ── Provider / model handlers ──────────────────────
   const handleSelectModel = useCallback((modelId: string) => {
@@ -757,12 +839,16 @@ function App() {
 
   const handleSelectTheme = useCallback((themeId: string) => {
     const resolvedThemeId = applyTheme(themeId);
+    if (textureRecipeOverride !== null) {
+      applyThemeTextureRecipeOverride(textureRecipeOverride);
+    }
     if (textureOpacityOverride !== null) {
       applyThemeTextureOpacityOverride(textureOpacityOverride);
     }
-    setActiveTheme(resolvedThemeId);
-    api.updateConfig({ activeTheme: resolvedThemeId }).catch(() => {});
-  }, [textureOpacityOverride]);
+    const nextTheme = isSystemThemePreference(themeId) ? SYSTEM_THEME_ID : resolvedThemeId;
+    setActiveTheme(nextTheme);
+    api.updateConfig({ activeTheme: nextTheme }).catch(() => {});
+  }, [textureOpacityOverride, textureRecipeOverride]);
 
   const handleTextureOpacityOverrideChange = useCallback((value: number | null) => {
     if (value === null) {
@@ -776,6 +862,19 @@ function App() {
     setTextureOpacityOverride(next);
     applyThemeTextureOpacityOverride(next);
   }, [activeTheme]);
+
+  const handleTextureRecipeOverrideChange = useCallback((value: ThemeTextureRecipe | null) => {
+    if (value === null) {
+      try { localStorage.removeItem(THEME_TEXTURE_RECIPE_OVERRIDE_KEY); } catch { /* ignore */ }
+      setTextureRecipeOverride(null);
+      applyTheme(activeTheme);
+      if (textureOpacityOverride !== null) applyThemeTextureOpacityOverride(textureOpacityOverride);
+      return;
+    }
+    setTextureRecipeOverride(value);
+    applyThemeTextureRecipeOverride(value);
+    try { localStorage.setItem(THEME_TEXTURE_RECIPE_OVERRIDE_KEY, value); } catch { /* ignore */ }
+  }, [activeTheme, textureOpacityOverride]);
 
   const handleThemePluginManifestsChange = useCallback((themeManifests: string[]) => {
     const normalized = [...new Set(themeManifests
@@ -791,9 +890,9 @@ function App() {
     if (!removed) return;
     handleThemePluginManifestsChange(getInstalledThemePluginManifests());
     if (activeTheme === themeId) {
-      const resolvedFallback = applyTheme(resolveThemeId('midnight'));
-      setActiveTheme(resolvedFallback);
-      api.updateConfig({ activeTheme: resolvedFallback }).catch(() => {});
+      applyTheme(SYSTEM_THEME_ID);
+      setActiveTheme(SYSTEM_THEME_ID);
+      api.updateConfig({ activeTheme: SYSTEM_THEME_ID }).catch(() => {});
     }
   }, [activeTheme, handleThemePluginManifestsChange]);
 
@@ -1671,6 +1770,37 @@ function App() {
     setSettingsOpen(true);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    api.getReleaseNotes()
+      .then((payload) => {
+        if (cancelled) return;
+        setReleaseNotes(payload);
+        const optedOut = releaseNotesOptedOut();
+        setPatchNotesOptOut(optedOut);
+        if (!optedOut && payload.currentVersion && releaseNotesLastSeenVersion() !== payload.currentVersion) {
+          setPatchNotesOpen(true);
+        }
+      })
+      .catch(() => {
+        // Release notes should never interrupt the app shell.
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const closePatchNotes = useCallback((optOut = patchNotesOptOut) => {
+    if (releaseNotes?.currentVersion) {
+      rememberReleaseNotesSeen(releaseNotes.currentVersion, optOut);
+    }
+    setPatchNotesOptOut(optOut);
+    setPatchNotesOpen(false);
+  }, [patchNotesOptOut, releaseNotes]);
+
+  const openReleaseNotesSettings = useCallback(() => {
+    closePatchNotes(patchNotesOptOut);
+    openSettings('release-notes');
+  }, [closePatchNotes, openSettings, patchNotesOptOut]);
+
   const panelContext = {
     subAgents,
     plan: null,
@@ -1938,7 +2068,7 @@ function App() {
               if (result?.roleAssignments) setRoleAssignments(roleMapToAssignments(result.roleAssignments));
               if (result?.activeTheme) {
                 const resolvedTheme = applyTheme(result.activeTheme);
-                setActiveTheme(resolvedTheme);
+                setActiveTheme(isSystemThemePreference(result.activeTheme) ? SYSTEM_THEME_ID : resolvedTheme);
               }
               // If the user picked a folder, open it as a session.
               if (result?.folderPath) {
@@ -1968,6 +2098,16 @@ function App() {
         </Suspense>
       )}
 
+      {patchNotesOpen && releaseNotes && (
+        <PatchNotesModal
+          releaseNotes={releaseNotes}
+          optOut={patchNotesOptOut}
+          onOptOutChange={setPatchNotesOptOut}
+          onClose={() => closePatchNotes(patchNotesOptOut)}
+          onViewAll={openReleaseNotesSettings}
+        />
+      )}
+
       <Suspense fallback={null}>
       <SettingsModal
         isOpen={settingsOpen}
@@ -1981,6 +2121,7 @@ function App() {
         roleThinking={roleThinking}
         activeTheme={activeTheme}
         textureOpacityOverride={textureOpacityOverride}
+        textureRecipeOverride={textureRecipeOverride}
         personalityText={personalityText}
         mcpServers={mcpServers}
         mcpStatus={mcpStatus}
@@ -1998,15 +2139,72 @@ function App() {
         onAssignRoleThinking={handleAssignRoleThinking}
         onSelectTheme={handleSelectTheme}
         onTextureOpacityOverrideChange={handleTextureOpacityOverrideChange}
+        onTextureRecipeOverrideChange={handleTextureRecipeOverrideChange}
         onThemePluginManifestsChange={handleThemePluginManifestsChange}
         onRemoveTheme={handleRemoveTheme}
         onPersonalityChange={handlePersonalityChange}
-        onRestartOnboarding={() => { setSettingsOpen(false); setShowOnboarding(true); }}
+        onRestartOnboarding={async () => {
+          try { await api.updateConfig({ onboardingStep: 0 }); } catch { /* ignore */ }
+          setSettingsOpen(false);
+          setShowOnboarding(true);
+        }}
         onMcpStatusRefresh={refreshMcpStatus}
         clickyEnabled={clickyEnabled}
         onClickyEnabledChange={handleClickyEnabledChange}
       />
       </Suspense>
+    </div>
+  );
+}
+
+function PatchNotesModal({
+  releaseNotes,
+  optOut,
+  onOptOutChange,
+  onClose,
+  onViewAll,
+}: {
+  releaseNotes: api.ReleaseNotesPayload;
+  optOut: boolean;
+  onOptOutChange: (value: boolean) => void;
+  onClose: () => void;
+  onViewAll: () => void;
+}) {
+  const release = releaseNotes.releases.find((entry) => entry.current) || releaseNotes.releases[0];
+  return (
+    <div className="patch-notes-overlay" role="dialog" aria-modal="true" aria-labelledby="patch-notes-title">
+      <div className="patch-notes-modal">
+        <div className="patch-notes-header">
+          <div>
+            <div className="patch-notes-kicker">Updated</div>
+            <h2 id="patch-notes-title">What's new in OpenHarness</h2>
+            <div className="patch-notes-version">Version {releaseNotes.currentVersion}</div>
+          </div>
+          <button className="settings-modal-close" onClick={onClose} aria-label="Close patch notes">X</button>
+        </div>
+        <div className="patch-notes-body">
+          <div className="patch-notes-release-title">{release?.title || `Version ${releaseNotes.currentVersion}`}</div>
+          <ul className="patch-notes-items">
+            {(release?.notes || ['No patch notes recorded for this release.']).map((note, index) => (
+              <li key={`${release?.version || releaseNotes.currentVersion}-${index}`}>{note}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="patch-notes-footer">
+          <label className="settings-toggle-row patch-notes-opt-out">
+            <input
+              type="checkbox"
+              checked={optOut}
+              onChange={(event) => onOptOutChange(event.target.checked)}
+            />
+            <span>Do not show patch notes automatically</span>
+          </label>
+          <div className="patch-notes-actions">
+            <button className="settings-mini-button" onClick={onViewAll}>View all</button>
+            <button className="settings-mini-button patch-notes-primary" onClick={onClose}>Done</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

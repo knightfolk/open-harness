@@ -9,7 +9,7 @@ const MODE_VALUES: ThemeMode[] = ['dark', 'light', 'high-contrast-dark', 'high-c
 const PROVENANCE_SOURCES = ['builtin', 'local', 'generated', 'community', 'imported-vscode', 'imported-other'] as const;
 const TRUST_VALUES = ['trusted', 'review-required', 'blocked'] as const;
 const TARGET_VALUES = ['app', 'chat', 'sidebar', 'settings', 'right-panel'] as const;
-const TEXTURE_RECIPE_VALUES = ['none', 'paper-grain', 'fine-grid', 'blueprint-grid', 'low-noise-matte', 'soft-glass', 'terminal-scanline'] as const;
+const TEXTURE_RECIPE_VALUES = ['none', 'paper-grain', 'fine-grid', 'blueprint-grid', 'low-noise-matte', 'soft-glass', 'terminal-scanline', 'soft-marble', 'brushed-plaster', 'paper-fiber', 'frosted-noise'] as const;
 const COLOR_TOKEN_PATTERN = /^(?:#[0-9a-fA-F]{3,4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\([^)\n;]+\)|hsla?\([^)\n;]+\)|var\(--[a-zA-Z0-9_-]+\))$/;
 
 interface ValidationResult {

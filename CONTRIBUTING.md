@@ -10,6 +10,8 @@ project's source-available preview terms.
   product edges.
 - Start discussions for product direction, model-routing ideas, and workflow
   feedback.
+- Submit training data for review with the training data submission issue form
+  and [training data submission guide](docs/TRAINING_DATA_SUBMISSIONS.md).
 - Submit focused pull requests for fixes or small improvements after opening an
   issue or discussion.
 
@@ -27,6 +29,11 @@ other contribution to this repository, you agree that:
 - Submitting a contribution does not grant you ownership of OpenHarness or any
   right to redistribute, commercialize, or host the project beyond the
   permissions in LICENSE.
+
+Training data submissions, including datasets, prompt examples, eval examples,
+model-behavior examples, routing examples, and tool-use traces, must also
+include the permission statement in
+[docs/TRAINING_DATA_SUBMISSIONS.md](docs/TRAINING_DATA_SUBMISSIONS.md).
 
 ## Pull Request Guidelines
 

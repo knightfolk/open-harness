@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Eye,
   FolderOpen,
   Loader,
   MessageSquare,
@@ -626,23 +627,26 @@ function SubAgentRow({
             {(agent.task ? ` · ${agent.task.slice(0, 24)}${agent.task.length > 24 ? '…' : ''}` : '')}
           </span>
         )}
-        <StatusIcon
-          size={12}
-          aria-hidden="true"
-          style={{
-            color: statusColor,
-            flexShrink: 0,
-            ...(agent.status === 'running' ? { animation: 'spin 1s linear infinite' } : {}),
-          }}
-        />
+        {agent.status !== 'complete' && (
+          <StatusIcon
+            size={12}
+            aria-hidden="true"
+            style={{
+              color: statusColor,
+              flexShrink: 0,
+              ...(agent.status === 'running' ? { animation: 'spin 1s linear infinite' } : {}),
+            }}
+          />
+        )}
         {onFocus && (
           <button
             type="button"
             className="sub-agent-row-focus-button"
             onClick={onFocus}
             aria-label={`Focus ${label || agent.name} in Agent detail`}
+            title={`Focus ${label || agent.name} in Agent detail`}
           >
-            Focus
+            <Eye size={12} aria-hidden="true" />
           </button>
         )}
       </div>

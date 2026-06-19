@@ -1,0 +1,124 @@
+name: Training data submission
+description: Send datasets, prompt examples, eval examples, or tool traces for OpenHarness review.
+title: "[Training Data]: "
+labels:
+  - training-data
+  - needs-review
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sending training data for review. Submission does not guarantee inclusion. Please only submit data you own or are authorized to license to OpenHarness.
+  - type: input
+    id: dataset_name
+    attributes:
+      label: Dataset or example-set name
+      description: The public name OpenHarness should use when reviewing this submission.
+      placeholder: Router failure recovery examples
+    validations:
+      required: true
+  - type: input
+    id: submitter
+    attributes:
+      label: Submitter name and contact
+      description: Name, role, and a reliable contact method for follow-up.
+      placeholder: Jane Doe, Eval Maintainer, jane@example.com
+    validations:
+      required: true
+  - type: textarea
+    id: intended_use
+    attributes:
+      label: Intended OpenHarness use
+      description: Where should this data be used if accepted?
+      placeholder: Eval suite, prompt strategy example, routing fixture, model comparison, tool-use regression, documentation sample, or synthetic training corpus.
+    validations:
+      required: true
+  - type: textarea
+    id: data_context
+    attributes:
+      label: Data context
+      description: Briefly describe the data and why it is relevant to OpenHarness users.
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Source and provenance
+      description: Explain where the data came from, how it was collected, and whether it is human-authored, model-generated, synthetic, public, private, or mixed.
+      placeholder: |
+        Source:
+        Collection method:
+        Human-authored/model-generated/synthetic:
+        Public/private/mixed:
+    validations:
+      required: true
+  - type: textarea
+    id: format
+    attributes:
+      label: Size, format, and schema
+      description: Include approximate record count, file type, language, schema, and sample fields.
+      placeholder: |
+        Records:
+        Format:
+        Language:
+        Schema:
+        Example fields:
+    validations:
+      required: true
+  - type: textarea
+    id: data_links
+    attributes:
+      label: Data links or samples
+      description: Link a stable download, release artifact, read-only folder, pull request, or paste a small redacted sample.
+      placeholder: |
+        - Data link:
+        - Sample record:
+        - Schema link:
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and redaction notes
+      description: State whether the data contains personal data, private conversations, customer data, secrets, credentials, or sensitive material. Explain redaction already performed.
+      placeholder: |
+        No personal data, secrets, credentials, or private customer data.
+        Redaction steps:
+    validations:
+      required: true
+  - type: textarea
+    id: limitations
+    attributes:
+      label: Known limitations
+      description: List known bias, safety, quality, duplication, coverage, or evaluation limitations.
+      placeholder: |
+        Bias or coverage limitations:
+        Safety concerns:
+        Quality issues:
+        Duplicate risk:
+  - type: textarea
+    id: restrictions
+    attributes:
+      label: Usage restrictions or review timing
+      description: List license constraints, embargoes, approval steps, expiration dates, or other constraints.
+      placeholder: No embargo. No usage restrictions beyond the license statement below.
+  - type: textarea
+    id: permission
+    attributes:
+      label: Permission statement
+      description: Paste the statement below and replace the owner name if needed.
+      value: |
+        I confirm that I own or am authorized to submit this data and grant the OpenHarness project owner a perpetual, worldwide, royalty-free, irrevocable license to use, copy, modify, distribute, sublicense, and relicense the submitted data as part of OpenHarness, including in future proprietary, source-available, or open-source releases.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I have the right to submit this data for OpenHarness review.
+          required: true
+        - label: This submission does not include secrets, credentials, private customer data, or unapproved personal data.
+          required: true
+        - label: I understand maintainers may decline, edit, transform, or defer this training data submission.
+          required: true

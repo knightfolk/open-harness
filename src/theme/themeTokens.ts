@@ -84,7 +84,11 @@ export type ThemeTextureRecipe =
   | 'blueprint-grid'
   | 'low-noise-matte'
   | 'soft-glass'
-  | 'terminal-scanline';
+  | 'terminal-scanline'
+  | 'soft-marble'
+  | 'brushed-plaster'
+  | 'paper-fiber'
+  | 'frosted-noise';
 
 export interface ThemeEffectTokens {
   material?: 'solid' | 'frosted-glass' | 'classic-bevel' | 'paper-grain' | 'crt' | 'blueprint-grid' | 'photo-lab' | 'custom';

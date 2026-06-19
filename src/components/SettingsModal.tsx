@@ -1,5 +1,4 @@
 import { Component, useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent, type ReactNode } from 'react';
-import { ContextBudgetControls } from './ContextBudgetControls';
 import { RoutingLearningPane } from './RoutingLearningPane';
 import {
   X, KeyRound, Brain, FileCode,
@@ -7,10 +6,11 @@ import {
   Settings, SlidersHorizontal, Plus, Trash2, RefreshCw, Loader, Wifi,
   Check, ChevronDown, ChevronRight, CheckCircle2, Bot, Container,
   ArrowRight, BookOpen, Search, Sparkles, Zap, FileText, Globe, Layout, Command,
-  Grid, Layers, Eye, Wrench, DollarSign,
+  Grid, Layers, Eye, Wrench, DollarSign, AlertCircle, Download, Moon,
 } from 'lucide-react';
 import type { ProviderConfig, CodingRoleAssignment, MCPServerItem, Skill, Plugin, MemoryEntry } from '../types';
 import type { ThinkingEffort } from '../types';
+import type { ThemeTextureRecipe } from '../theme/themeTokens';
 import * as api from '../utils/api';
 import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
 import { mockSkills, mockPlugins, mockMemoryEntries } from '../utils/mockData';
@@ -37,8 +37,10 @@ import {
   getThemeById,
   getThemesByMode,
   importThemePluginFromJson,
+  isSystemThemePreference,
   getInstalledThemePluginManifests,
   resolveThemeId,
+  SYSTEM_THEME_ID,
 } from '../theme/builtins';
 
 // ── Category definition ────────────────────────────────
@@ -84,6 +86,7 @@ const CATEGORIES: SettingsCategory[] = [
   ]},
   { id: 'roles', label: 'Agent Roles', icon: SlidersHorizontal },
   { id: 'assistant', label: 'Assistant', icon: Sparkles, subcategories: [
+    { id: 'personalization', label: 'Personalization' },
     { id: 'clicky', label: 'Clicky' },
     { id: 'skills', label: 'Skills' },
     { id: 'memory', label: 'Memory' },
@@ -95,10 +98,12 @@ const CATEGORIES: SettingsCategory[] = [
     { id: 'add-mcp', label: 'Add Server' },
   ]},
   { id: 'personality', label: 'Personality', icon: MessageCircle },
-  { id: 'onboarding', label: 'Onboarding', icon: ArrowRight },
+  { id: 'onboarding', label: 'Setup Wizard', icon: ArrowRight },
   { id: 'theme', label: 'Theme', icon: ThemeIcon },
   { id: 'routing', label: 'Routing Learning', icon: Brain },
   { id: 'auto-router', label: 'Auto-Router', icon: SlidersHorizontal },
+  { id: 'release-notes', label: 'Release Notes', icon: FileText },
+  { id: 'crash-reports', label: 'Crash Reports', icon: AlertCircle },
   { id: 'chat', label: 'Chat Settings', icon: Settings },
   { id: 'about', label: 'About', icon: CheckCircle2 },
 ];
@@ -147,6 +152,7 @@ interface Props {
   roleThinking: Record<string, ThinkingEffort>;
   activeTheme: string;
   textureOpacityOverride: number | null;
+  textureRecipeOverride: ThemeTextureRecipe | null;
   personalityText: string;
   mcpServers: MCPServerItem[];
   mcpStatus: any[];
@@ -164,6 +170,7 @@ interface Props {
   onAssignRoleThinking: (roleId: string, effort: ThinkingEffort) => void;
   onSelectTheme: (themeId: string) => void;
   onTextureOpacityOverrideChange: (value: number | null) => void;
+  onTextureRecipeOverrideChange: (value: ThemeTextureRecipe | null) => void;
   onThemePluginManifestsChange: (themeManifests: string[]) => void;
   onRemoveTheme: (themeId: string) => void;
   onPersonalityChange: (text: string) => void;
@@ -217,11 +224,13 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
 export function SettingsModal({
   isOpen, onClose, activeModel, thinkingEffort, providers, roleAssignments, roleThinking, activeTheme,
   textureOpacityOverride,
+  textureRecipeOverride,
   configPath, personalityText, mcpServers, mcpStatus, onAddProvider, onTestProvider,
   onUpdateProvider,
   onFetchModels, onRemoveProvider, onAddMCPServer, onRemoveMCPServer,
   onSelectModel, onThinkingEffortChange, onToggleProviderModel, onAssignRoleModel, onAssignRoleThinking, onSelectTheme,
   onTextureOpacityOverrideChange,
+  onTextureRecipeOverrideChange,
   onThemePluginManifestsChange, onRemoveTheme,
   onPersonalityChange,
   onRestartOnboarding,
@@ -316,6 +325,7 @@ export function SettingsModal({
                   onDone={() => { setSelectedCat('providers'); setSelectedSub('manage'); }} />
               )}
               {contentKey === 'roles' && <AgentRolesPane roleAssignments={roleAssignments} roleThinking={roleThinking} enabledModels={enabledModels} onAssignRoleModel={onAssignRoleModel} onAssignRoleThinking={onAssignRoleThinking} />}
+              {contentKey === 'assistant/personalization' && <PersonalizationPane />}
               {contentKey === 'assistant/clicky' && <ClickySettingsPane enabled={clickyEnabled} onChange={onClickyEnabledChange} />}
               {contentKey === 'assistant/skills' && <AssistantSkillsPane skills={mockSkills} plugins={mockPlugins} />}
               {contentKey === 'assistant/memory' && <AssistantMemoryPane entries={mockMemoryEntries} />}
@@ -329,14 +339,18 @@ export function SettingsModal({
                 <ThemePane
                   activeTheme={activeTheme}
                   textureOpacityOverride={textureOpacityOverride}
+                  textureRecipeOverride={textureRecipeOverride}
                   onSelectTheme={onSelectTheme}
                   onTextureOpacityOverrideChange={onTextureOpacityOverrideChange}
+                  onTextureRecipeOverrideChange={onTextureRecipeOverrideChange}
                   onThemePluginManifestsChange={onThemePluginManifestsChange}
                   onRemoveTheme={onRemoveTheme}
                 />
               )}
               {contentKey === 'routing' && <RoutingLearningPane enabledModels={enabledModels} onApplyRoleRecommendation={onAssignRoleModel} />}
               {contentKey === 'auto-router' && <AutoRouterPane />}
+              {contentKey === 'release-notes' && <ReleaseNotesPane />}
+              {contentKey === 'crash-reports' && <CrashReportsPane />}
               {contentKey === 'chat' && <ChatSettingsPane />}
               {contentKey === 'about' && <AboutPane configPath={configPath} />}
             </SettingsPaneErrorBoundary>
@@ -2586,14 +2600,14 @@ function OnboardingPane({ onRestartOnboarding }: { onRestartOnboarding: () => vo
   return (
     <>
       <PaneTitle>Onboarding</PaneTitle>
-      <PaneDesc>Re-run the guided setup at any time. Your existing providers, keys, and settings will be preserved.</PaneDesc>
+      <PaneDesc>Re-run the guided setup wizard at any time. Your existing providers, keys, and settings will be preserved.</PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Restart guided setup</div>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Rerun setup wizard</div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, marginBottom: 12 }}>
-          The wizard will close any open chat and walk you through provider, personality, trust mode, and project setup again.
+          The wizard starts at the beginning and walks through theme, provider, personality, trust mode, and project setup again.
         </div>
         <button className="onboarding-btn-primary" onClick={onRestartOnboarding}>
-          <ArrowRight size={14} /> Restart onboarding
+          <ArrowRight size={14} /> Rerun wizard
         </button>
       </div>
     </>
@@ -2718,6 +2732,175 @@ function PersonalityPane({ personalityText, onChange }: any) {
 }
 
 /* ================================================================== */
+/*  PERSONALIZATION                                                    */
+/* ================================================================== */
+
+const emptyPersonalizationProfile: api.PersonalizationProfile = {
+  enabled: false,
+  updatedAt: null,
+  responseStyle: '',
+  likes: [],
+  dislikes: [],
+  workflowStyle: '',
+  promptingStyle: '',
+  modelPreferences: '',
+  toolPreferences: '',
+  projectPreferences: '',
+  neverDo: [],
+  compactSummary: '',
+};
+
+function listToText(items: string[]): string {
+  return items.join('\n');
+}
+
+function textToList(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim().replace(/^[-*]\s*/, ''))
+    .filter(Boolean);
+}
+
+function PersonalizationPane() {
+  const [profile, setProfile] = useState<api.PersonalizationProfile>(emptyPersonalizationProfile);
+  const [profilePath, setProfilePath] = useState('');
+  const [likesText, setLikesText] = useState('');
+  const [dislikesText, setDislikesText] = useState('');
+  const [neverDoText, setNeverDoText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const hydrate = useCallback((nextProfile: api.PersonalizationProfile, path: string) => {
+    setProfile(nextProfile);
+    setProfilePath(path);
+    setLikesText(listToText(nextProfile.likes));
+    setDislikesText(listToText(nextProfile.dislikes));
+    setNeverDoText(listToText(nextProfile.neverDo));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getPersonalization()
+      .then((result) => {
+        if (cancelled) return;
+        hydrate(result.profile, result.path);
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('Could not load personalization profile');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [hydrate]);
+
+  const updateField = (field: keyof api.PersonalizationProfile, value: string | boolean) => {
+    setProfile((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setStatus(null);
+    try {
+      const result = await api.updatePersonalization({
+        ...profile,
+        likes: textToList(likesText),
+        dislikes: textToList(dislikesText),
+        neverDo: textToList(neverDoText),
+      });
+      hydrate(result.profile, result.path);
+      setStatus('Saved encrypted profile');
+    } catch {
+      setStatus('Could not save profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    const approved = window.confirm('Delete the encrypted personalization profile from this machine?');
+    if (!approved) return;
+    setSaving(true);
+    setStatus(null);
+    try {
+      const result = await api.deletePersonalization();
+      hydrate(result.profile, result.path);
+      setStatus('Deleted profile');
+    } catch {
+      setStatus('Could not delete profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <PaneTitle>Personalization</PaneTitle>
+      <PaneDesc>Encrypted local preferences for response style, workflow fit, and model/tool defaults.</PaneDesc>
+      <div className="settings-card" style={{ marginTop: 16 }}>
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={profile.enabled}
+            onChange={(event) => updateField('enabled', event.target.checked)}
+            disabled={loading || saving}
+          />
+          <span>Use personalization in model prompts</span>
+        </label>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, marginTop: 8 }}>
+          Stored at {profilePath || '~/.openharness/personalization.enc.json'}
+        </div>
+      </div>
+      <div className="add-provider-card" style={{ marginTop: 16 }}>
+        <div className="add-provider-grid">
+          <label>Compact summary
+            <textarea className="personality-textarea" rows={4} value={profile.compactSummary} onChange={(event) => updateField('compactSummary', event.target.value)} placeholder="Concise style, validation proof, preferred workflow..." />
+          </label>
+          <label>Response style
+            <textarea className="personality-textarea" rows={3} value={profile.responseStyle} onChange={(event) => updateField('responseStyle', event.target.value)} />
+          </label>
+          <label>Likes
+            <textarea className="personality-textarea" rows={4} value={likesText} onChange={(event) => setLikesText(event.target.value)} placeholder="One preference per line" />
+          </label>
+          <label>Dislikes
+            <textarea className="personality-textarea" rows={4} value={dislikesText} onChange={(event) => setDislikesText(event.target.value)} placeholder="One preference per line" />
+          </label>
+          <label>Workflow style
+            <textarea className="personality-textarea" rows={3} value={profile.workflowStyle} onChange={(event) => updateField('workflowStyle', event.target.value)} />
+          </label>
+          <label>Prompting style
+            <textarea className="personality-textarea" rows={3} value={profile.promptingStyle} onChange={(event) => updateField('promptingStyle', event.target.value)} />
+          </label>
+          <label>Model preferences
+            <textarea className="personality-textarea" rows={3} value={profile.modelPreferences} onChange={(event) => updateField('modelPreferences', event.target.value)} />
+          </label>
+          <label>Tool preferences
+            <textarea className="personality-textarea" rows={3} value={profile.toolPreferences} onChange={(event) => updateField('toolPreferences', event.target.value)} />
+          </label>
+          <label>Project preferences
+            <textarea className="personality-textarea" rows={3} value={profile.projectPreferences} onChange={(event) => updateField('projectPreferences', event.target.value)} />
+          </label>
+          <label>Never do
+            <textarea className="personality-textarea" rows={4} value={neverDoText} onChange={(event) => setNeverDoText(event.target.value)} placeholder="One rule per line" />
+          </label>
+        </div>
+        {status && <div className={`test-result ${/could not/i.test(status) ? 'error' : 'success'}`}>{status}</div>}
+        <div className="add-provider-actions">
+          <button className="settings-mini-button" onClick={handleDelete} disabled={saving || loading}>
+            <Trash2 size={11} /> Delete
+          </button>
+          <button className="settings-mini-button" style={{ background: 'var(--accent-primary)', color: 'white' }} onClick={handleSave} disabled={saving || loading}>
+            {saving ? <Loader size={11} className="spin" /> : <Check size={11} />}
+            {saving ? 'Saving...' : 'Save encrypted profile'}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ================================================================== */
 /*  THEME                                                              */
 /* ================================================================== */
 
@@ -2730,11 +2913,28 @@ function textureLabel(recipe?: string, opacity?: number): string {
   return `Texture: ${label} · ${Math.round(opacity * 100)}%`;
 }
 
-function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextureOpacityOverrideChange, onThemePluginManifestsChange, onRemoveTheme }: any) {
+const TEXTURE_OPTIONS: Array<{ id: ThemeTextureRecipe; label: string; desc: string }> = [
+  { id: 'none', label: 'None', desc: 'Clean flat shell' },
+  { id: 'soft-marble', label: 'Soft marble', desc: 'Subtle cloudy paper' },
+  { id: 'brushed-plaster', label: 'Brushed plaster', desc: 'Fine directional sweep' },
+  { id: 'paper-fiber', label: 'Paper fiber', desc: 'Soft woven flecks' },
+  { id: 'frosted-noise', label: 'Frosted noise', desc: 'Light diffuse grain' },
+  { id: 'paper-grain', label: 'Paper grain', desc: 'Classic speckle' },
+  { id: 'low-noise-matte', label: 'Low-noise matte', desc: 'Quiet matte surface' },
+  { id: 'fine-grid', label: 'Fine grid', desc: 'Technical linework' },
+  { id: 'blueprint-grid', label: 'Blueprint grid', desc: 'Structured drafting grid' },
+  { id: 'terminal-scanline', label: 'Scanline', desc: 'CRT-style bands' },
+  { id: 'soft-glass', label: 'Soft glass', desc: 'Gentle diagonal sheen' },
+];
+
+function ThemePane({ activeTheme, textureOpacityOverride, textureRecipeOverride, onSelectTheme, onTextureOpacityOverrideChange, onTextureRecipeOverrideChange, onThemePluginManifestsChange, onRemoveTheme }: any) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const resolvedActiveTheme = resolveThemeId(activeTheme);
-  const hasRepair = activeTheme !== resolvedActiveTheme;
+  const usingSystemTheme = isSystemThemePreference(activeTheme);
+  const hasRepair = !isSystemThemePreference(activeTheme) && activeTheme !== resolvedActiveTheme;
   const activeThemeDetails = getThemeById(resolvedActiveTheme);
+  const baseTextureRecipe = activeThemeDetails?.tokens.effects?.textureRecipe || 'none';
+  const effectiveTextureRecipe = textureRecipeOverride || baseTextureRecipe;
   const baseTextureOpacity = activeThemeDetails?.tokens.effects?.textureOpacity ?? 0;
   const effectiveTextureOpacity = textureOpacityOverride ?? baseTextureOpacity;
   const effectiveTexturePercent = Math.round(effectiveTextureOpacity * 100);
@@ -2789,6 +2989,23 @@ function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextu
       <PaneTitle>Theme</PaneTitle>
       <PaneDesc>Choose a colorway. Changes apply instantly.</PaneDesc>
       <div style={{ marginTop: 16 }}>
+        <div className="settings-card" style={{ marginBottom: 14, padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>System appearance</div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>
+                Follow macOS by default, or pick a specific theme below.
+              </div>
+            </div>
+            <button
+              className={`settings-mini-button ${usingSystemTheme ? 'active' : ''}`}
+              onClick={() => onSelectTheme(SYSTEM_THEME_ID)}
+            >
+              {usingSystemTheme ? <Check size={11} /> : <Moon size={11} />}
+              System
+            </button>
+          </div>
+        </div>
         {hasRepair && (
           <div style={{ color: 'var(--accent-warning)', fontSize: 12, marginBottom: 12 }}>
             Saved theme "{activeTheme}" is unavailable. Reverted to "{resolvedActiveTheme}".
@@ -2809,6 +3026,38 @@ function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextu
           onChange={handleImportThemes}
           style={{ display: 'none' }}
         />
+        <div className="settings-card" style={{ marginBottom: 14, padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Texture style</div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>
+                Pick a generated texture, then tune its strength with the slider.
+              </div>
+            </div>
+            <button
+              className="settings-mini-button"
+              disabled={textureRecipeOverride === null}
+              onClick={() => onTextureRecipeOverrideChange(null)}
+            >
+              Reset
+            </button>
+          </div>
+          <div className="theme-texture-grid">
+            {TEXTURE_OPTIONS.map((texture) => (
+              <button
+                key={texture.id}
+                className={`theme-texture-option ${effectiveTextureRecipe === texture.id ? 'active' : ''}`}
+                onClick={() => onTextureRecipeOverrideChange(texture.id)}
+              >
+                <span className="theme-texture-preview" data-texture-preview={texture.id} />
+                <span className="theme-texture-copy">
+                  <span className="theme-texture-label">{texture.label}</span>
+                  <span className="theme-texture-desc">{texture.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="settings-card" style={{ marginBottom: 14, padding: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 10 }}>
             <div>
@@ -2868,14 +3117,14 @@ function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextu
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
               {group.themes.map((t) => (
-                <button key={t.id} className={`settings-card ${resolvedActiveTheme === t.id ? 'active' : ''}`}
+                <button key={t.id} className={`settings-card ${!usingSystemTheme && resolvedActiveTheme === t.id ? 'active' : ''}`}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
                     cursor: 'pointer',
                     padding: '10px 12px',
-                    border: resolvedActiveTheme === t.id ? '2px solid var(--accent-primary)' : undefined,
+                    border: !usingSystemTheme && resolvedActiveTheme === t.id ? '2px solid var(--accent-primary)' : undefined,
                     position: 'relative',
                   }}
                   onClick={() => onSelectTheme(t.id)}>
@@ -2885,7 +3134,7 @@ function ThemePane({ activeTheme, textureOpacityOverride, onSelectTheme, onTextu
                     <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
                       {textureLabel(t.tokens.effects?.textureRecipe, t.tokens.effects?.textureOpacity)}
                     </div>
-                    {resolvedActiveTheme === t.id && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Active</div>}
+                    {!usingSystemTheme && resolvedActiveTheme === t.id && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Active</div>}
                   </div>
                   {!t.tags?.includes('builtin') && (
                     <button
@@ -3939,9 +4188,143 @@ function ChatSettingsPane() {
 }
 
 /* ================================================================== */
+/*  RELEASE NOTES + CRASH REPORTS                                      */
+/* ================================================================== */
+
+function ReleaseNotesPane() {
+  const [notes, setNotes] = useState<api.ReleaseNotesPayload | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getReleaseNotes()
+      .then((result) => {
+        if (!cancelled) setNotes(result);
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('Could not load release notes');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <>
+      <PaneTitle>Release Notes</PaneTitle>
+      <PaneDesc>Patch notes by release, including the update shown after first launch.</PaneDesc>
+      {status && <div className="test-result error">{status}</div>}
+      <div className="release-notes-list">
+        {(notes?.releases || []).map((release) => (
+          <section className="settings-card release-note-card" key={`${release.version}-${release.title}`}>
+            <div className="release-note-header">
+              <div>
+                <div className="release-note-title">{release.title}</div>
+                <div className="release-note-meta">
+                  {release.date || `Version ${release.version}`}{release.current ? ' · Current' : ''}
+                </div>
+              </div>
+            </div>
+            <ul className="release-note-items">
+              {release.notes.map((note, index) => <li key={`${release.version}-${index}`}>{note}</li>)}
+            </ul>
+          </section>
+        ))}
+        {!notes && !status && <div className="settings-card">Loading release notes...</div>}
+      </div>
+    </>
+  );
+}
+
+function CrashReportsPane() {
+  const [summary, setSummary] = useState<api.CrashReportSummary | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const refresh = useCallback(() => {
+    setStatus(null);
+    api.getCrashReports()
+      .then(setSummary)
+      .catch(() => setStatus('Could not load crash report sources'));
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const exportReport = async () => {
+    setExporting(true);
+    setStatus(null);
+    try {
+      await api.downloadCrashReportBundle();
+      setStatus('Crash report exported');
+    } catch {
+      setStatus('Could not export crash report');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <>
+      <PaneTitle>Crash Reports</PaneTitle>
+      <PaneDesc>Review local crash artifacts and export a redacted report when you choose to send one.</PaneDesc>
+      <div className="settings-card crash-report-boundary">
+        {(summary?.privacyBoundary || [
+          'Reports are generated locally and are not uploaded automatically.',
+          'Text snippets are redacted before export.',
+        ]).map((item) => <div key={item}>{item}</div>)}
+      </div>
+      <div className="add-provider-actions" style={{ marginTop: 12 }}>
+        <button className="settings-mini-button" onClick={refresh}>
+          <RefreshCw size={11} /> Refresh
+        </button>
+        <button className="settings-mini-button" onClick={exportReport} disabled={exporting}>
+          {exporting ? <Loader size={11} className="spin" /> : <Download size={11} />}
+          {exporting ? 'Exporting...' : 'Export report'}
+        </button>
+      </div>
+      {status && <div className={`test-result ${/could not/i.test(status) ? 'error' : 'success'}`}>{status}</div>}
+      <div className="crash-report-grid">
+        {(summary?.sources || []).map((source) => (
+          <div className="settings-card crash-source-card" key={source.id}>
+            <div className="crash-source-title">{source.label}</div>
+            <div className="crash-source-meta">{source.exists ? `${source.fileCount} file${source.fileCount === 1 ? '' : 's'}` : 'Not found'}</div>
+            <div className="crash-source-path">{source.path}</div>
+          </div>
+        ))}
+      </div>
+      <div className="settings-section-header" style={{ marginTop: 16 }}>
+        <div className="settings-section-title">Recent crash/log files</div>
+      </div>
+      <div className="release-notes-list">
+        {(summary?.recentFiles || []).map((file) => (
+          <section className="settings-card crash-file-card" key={`${file.path}-${file.modifiedAt}`}>
+            <div className="release-note-header">
+              <div>
+                <div className="release-note-title">{file.name}</div>
+                <div className="release-note-meta">{file.sourceLabel} · {formatFileSize(file.sizeBytes)} · {new Date(file.modifiedAt).toLocaleString()}</div>
+              </div>
+              <span className="crash-kind-pill">{file.kind}</span>
+            </div>
+            <div className="crash-source-path">{file.path}</div>
+            {file.preview && <pre className="crash-preview">{file.preview}</pre>}
+          </section>
+        ))}
+        {summary && summary.recentFiles.length === 0 && <div className="settings-card">No crash or error log files found yet.</div>}
+        {!summary && !status && <div className="settings-card">Loading crash report sources...</div>}
+      </div>
+    </>
+  );
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/* ================================================================== */
 /*  ABOUT                                                              */
 /* ================================================================== */
-        <ContextBudgetControls />
 
 function AboutPane({ configPath }: { configPath?: string }) {
   const displayConfigPath = configPath || '(not reported by server)';

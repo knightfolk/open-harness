@@ -7,6 +7,8 @@ import {
 import { parseThemePluginManifest, type ThemePluginManifest } from './themePluginManifest';
 
 export const FALLBACK_THEME_ID = 'midnight';
+export const SYSTEM_THEME_ID = 'system';
+export const SYSTEM_LIGHT_THEME_ID = 'daylight';
 const DEFAULT_EFFECTS = {
   material: 'solid' as const,
   textureRecipe: 'none' as const,
@@ -1035,9 +1037,21 @@ export function removeImportedTheme(themeId: string): boolean {
   return true;
 }
 
+export function isSystemThemePreference(themeId: string | undefined | null): boolean {
+  return typeof themeId === 'string' && themeId.trim().toLowerCase() === SYSTEM_THEME_ID;
+}
+
+export function resolveSystemThemeId(): string {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? SYSTEM_LIGHT_THEME_ID : FALLBACK_THEME_ID;
+  }
+  return FALLBACK_THEME_ID;
+}
+
 export function resolveThemeId(themeId: string | undefined | null): string {
   if (!themeId) return FALLBACK_THEME_ID;
   const normalized = themeId.trim();
+  if (normalized.toLowerCase() === SYSTEM_THEME_ID) return resolveSystemThemeId();
   return THEME_BY_ID.has(normalized) ? normalized : FALLBACK_THEME_ID;
 }
 
@@ -1111,6 +1125,7 @@ function themeTokensToCssVars(theme: BuiltinTheme): Record<string, string> {
 }
 
 export function applyTheme(themeId: string, _resolvedInputs?: Record<string, ThemeInputValue>): string {
+  const preference = isSystemThemePreference(themeId) ? SYSTEM_THEME_ID : themeId;
   const resolvedThemeId = resolveThemeId(themeId);
   const theme = THEME_BY_ID.get(resolvedThemeId);
   if (!theme) return FALLBACK_THEME_ID;
@@ -1124,6 +1139,7 @@ export function applyTheme(themeId: string, _resolvedInputs?: Record<string, The
     style.setProperty(name, value);
   }
   document.documentElement.setAttribute('data-theme', resolvedThemeId);
+  document.documentElement.setAttribute('data-theme-preference', preference);
   document.documentElement.setAttribute('data-theme-texture-recipe', theme.tokens.effects?.textureRecipe || DEFAULT_EFFECTS.textureRecipe);
   return resolvedThemeId;
 }

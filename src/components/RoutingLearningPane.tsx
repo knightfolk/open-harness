@@ -615,6 +615,26 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     setTimeout(() => setSaving(null), 1200);
   };
 
+  const handleExportToolFailureTrainingData = async () => {
+    try {
+      const payload = await api.getToolFailureTrainingExport(500);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `openharness-tool-failure-training-${payload.generatedAt.replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setSaving(`Downloaded safe failure export (${payload.recordCount} rows, no prompts)`);
+      setTimeout(() => setSaving(null), 1600);
+    } catch {
+      setSaving('Could not download safe failure export');
+      setTimeout(() => setSaving(null), 1600);
+    }
+  };
+
   const handleImportEvidenceFile = async (file: File | null) => {
     if (!file) return;
     try {
@@ -724,6 +744,15 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             title="Export a human-readable Routing Learning evidence brief"
           >
             <Download size={12} aria-hidden="true" /> Export brief
+          </button>
+          <button
+            type="button"
+            className="settings-mini-button"
+            onClick={handleExportToolFailureTrainingData}
+            aria-label="Export safe tool failure training data without prompts"
+            title="Export only failure messages, failed model/tool, and captured workaround. No prompts, responses, artifacts, file contents, or raw tool output."
+          >
+            <Download size={12} aria-hidden="true" /> Export failures
           </button>
           <button
             type="button"

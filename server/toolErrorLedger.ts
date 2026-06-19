@@ -58,6 +58,41 @@ export interface ToolErrorLedgerSummary {
   recentEvents: ToolErrorLedgerEvent[];
 }
 
+export interface ToolFailureTrainingExportRecord {
+  timestamp: string;
+  evidenceSource: ToolErrorEvidenceSource;
+  failed: {
+    model: string;
+    providerId: string;
+    tool: string;
+    round?: number;
+    message?: string;
+  };
+  workaround: {
+    completed: boolean;
+    type: 'recovered_tool_path' | 'final_answer_only' | 'unrecovered_or_unknown';
+    model?: string;
+    providerId?: string;
+    tool?: string;
+    round?: number;
+    retryDistance?: number;
+    finalStatus: HarnessRun['status'];
+    finalAnswerCaptured: boolean;
+    summary: string;
+  };
+}
+
+export interface ToolFailureTrainingExportPayload {
+  schemaVersion: 1;
+  generatedAt: string;
+  privacyBoundary: {
+    includes: string[];
+    excludes: string[];
+  };
+  recordCount: number;
+  records: ToolFailureTrainingExportRecord[];
+}
+
 interface ToolErrorLedgerOptions {
   model?: string;
   providerId?: string;
@@ -293,6 +328,46 @@ function providerFromStep(step: Extract<HarnessRunStep, { type: 'tool_call' }>, 
   return step.providerId || fallbackProvider || 'unknown';
 }
 
+function cleanFailureMessage(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (!compact) return undefined;
+  return compact.slice(0, 500);
+}
+
+function workaroundForEvent(event: ToolErrorLedgerEvent): ToolFailureTrainingExportRecord['workaround'] {
+  if (event.recoveryTool) {
+    return {
+      completed: event.runRecovered,
+      type: 'recovered_tool_path',
+      model: event.recoveryModel,
+      providerId: event.recoveryProviderId,
+      tool: event.recoveryTool,
+      round: event.recoveryRound,
+      retryDistance: event.retryDistance,
+      finalStatus: event.finalStatus,
+      finalAnswerCaptured: event.finalAnswerCaptured,
+      summary: `Recovered by ${event.recoveryModel || 'unknown'} using ${event.recoveryTool}.`,
+    };
+  }
+  if (event.finalStatus === 'complete' && event.finalAnswerCaptured) {
+    return {
+      completed: true,
+      type: 'final_answer_only',
+      finalStatus: event.finalStatus,
+      finalAnswerCaptured: event.finalAnswerCaptured,
+      summary: 'Task completed without a later successful tool call captured after this failure.',
+    };
+  }
+  return {
+    completed: false,
+    type: 'unrecovered_or_unknown',
+    finalStatus: event.finalStatus,
+    finalAnswerCaptured: event.finalAnswerCaptured,
+    summary: 'No completed workaround captured for this failure.',
+  };
+}
+
 function getRecoveryAfterError(
   toolSteps: Extract<HarnessRunStep, { type: 'tool_call' }>[],
   errorIndex: number,
@@ -338,6 +413,59 @@ export function getToolErrorLedgerSummary(options: ToolErrorLedgerOptions = {}):
     persistedEventCount: persistedEvents.filter((event) => matchEvent(event, query)).length,
     logTraceEventCount: logEvents.filter((event) => matchEvent(event, query)).length,
   });
+}
+
+export function buildToolFailureTrainingExportPayload({
+  events,
+  generatedAt = new Date().toISOString(),
+}: {
+  events: ToolErrorLedgerEvent[];
+  generatedAt?: string;
+}): ToolFailureTrainingExportPayload {
+  const records = events.map((event) => ({
+    timestamp: event.timestamp,
+    evidenceSource: event.evidenceSource,
+    failed: {
+      model: event.failedModel || 'unknown',
+      providerId: event.failedProviderId || 'unknown',
+      tool: event.failedTool || 'unknown',
+      round: event.round,
+      message: cleanFailureMessage(event.error),
+    },
+    workaround: workaroundForEvent(event),
+  }));
+
+  return {
+    schemaVersion: 1,
+    generatedAt,
+    privacyBoundary: {
+      includes: [
+        'failure timestamp',
+        'evidence source',
+        'failed model',
+        'failed provider',
+        'failed tool',
+        'failure message',
+        'completion status',
+        'recovery model/provider/tool when captured',
+        'retry distance when captured',
+      ],
+      excludes: [
+        'user prompts',
+        'assistant responses',
+        'session titles',
+        'artifacts',
+        'file contents',
+        'raw tool input',
+        'raw tool output',
+        'full run traces',
+        'session ids',
+        'run ids',
+      ],
+    },
+    recordCount: records.length,
+    records,
+  };
 }
 
 export function recordToolErrorRunEvents(run: HarnessRun): void {

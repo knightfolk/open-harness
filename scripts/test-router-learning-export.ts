@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { buildRouterLearningExportPayload } from '../server/routerLearningExport';
 import type { LearningSummary, RoutingEvent } from '../server/routerLearning';
 import type { ToolReliabilitySummary } from '../server/toolReliability';
+import { buildToolFailureTrainingExportPayload, type ToolErrorLedgerEvent } from '../server/toolErrorLedger';
 
 const event = {
   id: 'event-1',
@@ -316,5 +317,74 @@ assert.deepEqual(payload.routerEvidenceFreshness, {
   configuredCandidateCount: 4,
   activeCandidateCount: 2,
 }, 'export should preserve router candidate evidence freshness');
+
+const toolFailureEvents: ToolErrorLedgerEvent[] = [
+  {
+    id: 'run-1-tool-1',
+    timestamp: '2026-06-17T00:30:00.000Z',
+    evidenceSource: 'saved_session_trace',
+    sessionId: 'secret-session-id',
+    runId: 'secret-run-id',
+    failedModel: 'provider:model',
+    failedProviderId: 'provider',
+    failedTool: 'read_file',
+    round: 0,
+    error: 'ENOENT: missing file',
+    runRecovered: true,
+    finalStatus: 'complete',
+    finalAnswerCaptured: true,
+    recoveryModel: 'provider:model',
+    recoveryProviderId: 'provider',
+    recoveryTool: 'list_directory',
+    recoveryRound: 1,
+    retryDistance: 1,
+  },
+  {
+    id: 'run-2-tool-1',
+    timestamp: '2026-06-17T00:45:00.000Z',
+    evidenceSource: 'saved_session_trace',
+    sessionId: 'secret-session-id-2',
+    runId: 'secret-run-id-2',
+    failedModel: 'provider:model',
+    failedProviderId: 'provider',
+    failedTool: 'shell',
+    error: 'Command timed out after 1000ms',
+    runRecovered: false,
+    finalStatus: 'complete',
+    finalAnswerCaptured: true,
+  },
+];
+
+const toolFailureTrainingExport = buildToolFailureTrainingExportPayload({
+  events: toolFailureEvents,
+  generatedAt: '2026-06-17T02:00:00.000Z',
+});
+
+assert.equal(toolFailureTrainingExport.schemaVersion, 1, 'tool failure training export schema should be stable');
+assert.equal(toolFailureTrainingExport.recordCount, 2, 'tool failure training export should include one row per tool failure');
+assert.equal(toolFailureTrainingExport.records[0].failed.model, 'provider:model', 'tool failure training export should include failed model');
+assert.equal(toolFailureTrainingExport.records[0].failed.tool, 'read_file', 'tool failure training export should include failed tool');
+assert.equal(toolFailureTrainingExport.records[0].failed.message, 'ENOENT: missing file', 'tool failure training export should include failure message');
+assert.equal(toolFailureTrainingExport.records[0].workaround.type, 'recovered_tool_path', 'tool failure training export should identify recovered tool paths');
+assert.equal(toolFailureTrainingExport.records[0].workaround.tool, 'list_directory', 'tool failure training export should include the workaround tool');
+assert.equal(toolFailureTrainingExport.records[1].workaround.type, 'final_answer_only', 'tool failure training export should identify completed runs without a later successful tool');
+assert.ok(toolFailureTrainingExport.privacyBoundary.excludes.includes('user prompts'), 'tool failure training export should document prompt exclusion');
+
+const serializedToolFailureRecords = JSON.stringify(toolFailureTrainingExport.records);
+for (const forbidden of [
+  'secret-session-id',
+  'secret-run-id',
+  'sessionId',
+  'runId',
+  'prompt',
+  'artifact',
+  'file content',
+]) {
+  assert.equal(
+    serializedToolFailureRecords.includes(forbidden),
+    false,
+    `tool failure training export should not leak forbidden runtime field ${forbidden}`,
+  );
+}
 
 console.log('Router learning export tests passed.');

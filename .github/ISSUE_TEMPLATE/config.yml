@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Training data submission guide
+    url: https://github.com/knightfolk/open-harness/blob/main/docs/TRAINING_DATA_SUBMISSIONS.md
+    about: Read the required training data, format, provenance, and permission guidance before submitting.

@@ -207,6 +207,28 @@ curl http://127.0.0.1:3001/api/router/state
 
 If server/runtime code changes, restart the running OpenHarness server before validating. For README, asset, client-only, and documentation changes, a browser refresh is enough.
 
+## 1. Privacy-Safe Training Data Review
+
+OpenHarness includes a review path for training-data contributions without asking maintainers to ingest private prompts by default. The repository includes a GitHub issue template for proposed datasets, eval examples, routing examples, model-behavior notes, and tool-use traces, plus a required provenance and permission statement.
+
+The in-app Routing Learning export for tool failures is intentionally narrow: it captures failure messages, model identifiers, called tools, recovery outcomes, and the workaround that completed the task. It does not export raw prompts, assistant replies, session titles, artifacts, file contents, raw tool I/O, full traces, session IDs, or run IDs.
+
+See [docs/TRAINING_DATA_SUBMISSIONS.md](docs/TRAINING_DATA_SUBMISSIONS.md) for the submission template and review expectations.
+
+## 2. Local Personalization And Privacy Controls
+
+OpenHarness can store response preferences locally in an encrypted personalization profile under `~/.openharness`. The profile is meant for user-controlled details such as response style, likes, dislikes, workflow preferences, prompting habits, model preferences, tool preferences, project preferences, and "never do" rules.
+
+Personalization is opt-in from **Settings -> Assistant -> Personalization**. When enabled, the profile is summarized into model prompts so responses can better match the user's workflow. The profile stays local unless the user chooses to share or export it outside OpenHarness.
+
+## 3. Release Notes, Crash Reports, And Setup
+
+After an update, OpenHarness can show patch notes once on first launch. Users can opt out of automatic patch-note popups, and all release notes remain available later in **Settings -> Release Notes**.
+
+Crash reporting is local and user-driven. **Settings -> Crash Reports** shows local crash/log sources, recent crash-related files, and an export button for a redacted JSON report. Reports are not uploaded automatically; Crashpad/minidump content is listed as metadata only, and text excerpts are limited to redacted error/crash lines.
+
+The setup wizard defaults to system appearance, with dark mode as the safe fallback if the OS preference cannot be read. Users can rerun the wizard from **Settings -> Setup Wizard**, switch to light mode if they want, and choose generated shell textures such as soft marble, brushed plaster, paper fiber, and frosted noise from **Settings -> Theme**. The existing texture slider adjusts the selected texture intensity.
+
 ## Packaging
 
 Current prerelease: `1.0.0-alpha.update.1`.
@@ -252,6 +274,12 @@ build directly. Setup notes and Apple credential links are in
 OpenHarness is public so people can follow the work, try it locally, open issues, and discuss direction. The repo is source-available rather than open-source licensed while the product is still taking shape.
 
 Feedback is welcome through GitHub Issues and Discussions. Contributions are governed by [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Training data, including datasets, prompt examples, eval examples, routing
+examples, model-behavior examples, and tool-use traces, can be submitted for
+review through the training data submission issue form. See
+[docs/TRAINING_DATA_SUBMISSIONS.md](docs/TRAINING_DATA_SUBMISSIONS.md) for the
+required template, provenance notes, and permission statement.
 
 ## License
 
