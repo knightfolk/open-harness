@@ -131,9 +131,30 @@
 }
 
 /* ========== Sidebar ========== */
+/* ── Sidebar overlay backdrop (drawer mode on narrow viewports) ──── */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--sidebar-drawer-z) - 1);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity var(--transition-base);
+  pointer-events: none;
+}
+
+.sidebar-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .sidebar {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
+  padding-top: calc(36px + var(--safe-area-top, 0px));
+  padding-left: var(--safe-area-left, 0px);
   /* Chrome plane: lifted off the canvas with a whisper-soft edge instead of a
      hard 1px rule, so the chat stage reads as the primary surface. */
   background:
@@ -148,6 +169,42 @@
   z-index: 20;
   padding-top: 36px;  /* clear macOS traffic lights */
   -webkit-app-region: drag;  /* top area is draggable */
+}
+
+/* On narrow viewports, the sidebar becomes an overlay drawer instead of
+   a fixed side panel. It floats above the content with a backdrop blur. */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: var(--sidebar-drawer-z);
+    box-shadow: var(--shadow-lg);
+    border-right: none;
+    -webkit-app-region: no-drag;
+    padding-top: 36px;
+    transform: translateX(0);
+    opacity: 1;
+  }
+
+  .sidebar.collapsed {
+    transform: translateX(calc(-1 * var(--sidebar-width)));
+    opacity: 0;
+    min-width: var(--sidebar-width);
+    width: var(--sidebar-width);
+    overflow: visible;
+    border: none;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+  }
+
+  .sidebar-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .sidebar-resize-handle {
@@ -196,6 +253,12 @@
   width: 0;
   overflow: hidden;
   border: none;
+}
+
+@media (min-width: 769px) {
+  .sidebar-backdrop {
+    display: none !important;
+  }
 }
 
 .sidebar-header {
@@ -921,6 +984,7 @@
   display: flex;
   align-items: center;
   padding: 0 16px 0 78px;  /* left inset clears macOS traffic lights */
+  padding-right: calc(16px + var(--safe-area-right, 0px));
   gap: 12px;
   z-index: 10;
   -webkit-app-region: drag;  /* entire top bar is a window drag handle */
@@ -1024,6 +1088,59 @@
 .top-bar-action.active {
   color: var(--accent-primary);
   background: var(--accent-primary-muted);
+}
+
+/* ── Top bar responsive ─────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .top-bar {
+    padding: 0 12px 0 78px;
+    gap: 8px;
+  }
+
+  .top-bar-title {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .top-bar {
+    padding: 0 8px 0 78px;
+    gap: 4px;
+  }
+
+  .top-bar-model {
+    padding: 2px 6px;
+    font-size: 11px;
+    gap: 4px;
+  }
+
+  .top-bar-model-dot {
+    display: none;
+  }
+
+  .top-bar-action {
+    padding: 4px;
+  }
+
+  .top-bar-title {
+    font-size: 11px;
+    max-width: 30vw;
+  }
+}
+
+@media (max-width: 480px) {
+  .top-bar {
+    padding: 0 4px 0 68px;
+    gap: 2px;
+  }
+
+  .top-bar-actions {
+    gap: 0;
+  }
+
+  .top-bar-action:not(:first-child):not([data-priority="high"]) {
+    display: none;
+  }
 }
 
 /* ========== Content Area ========== */
@@ -1133,6 +1250,25 @@
   .floating-super-panel {
     right: 12px;
     width: min(var(--floating-super-width, 330px), calc(100% - 24px)) !important;
+    max-height: calc(100% - var(--chat-input-height, 112px) - 48px);
+  }
+}
+
+@media (max-width: 480px) {
+  .floating-super-panel {
+    right: 8px;
+    left: 8px;
+    width: auto !important;
+    min-width: 0;
+    max-height: 50vh;
+    top: auto;
+    bottom: calc(var(--chat-input-height, 112px) + 8px);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .floating-super-resize-handle {
+    display: none;  /* too fiddly on a phone screen */
   }
 }
 
@@ -1732,6 +1868,51 @@
   color: var(--text-primary);
 }
 
+/* ── Input error state ───────────────────────────────────────────── */
+.input-textarea[aria-invalid="true"],
+.input-textarea.input-error {
+  border-color: var(--accent-error) !important;
+  box-shadow: 0 0 0 3px var(--accent-error-muted) !important;
+}
+
+.input-error-message {
+  font-size: 11px;
+  color: var(--accent-error);
+  margin-top: 4px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Disabled control non-color differentiation ──────────────────── */
+button:disabled,
+button[disabled],
+input:disabled,
+select:disabled,
+textarea:disabled {
+  filter: grayscale(40%);
+  cursor: not-allowed !important;
+}
+
+button:disabled:hover,
+button[disabled]:hover {
+  filter: grayscale(50%);
+  background: inherit !important;
+  color: inherit !important;
+  border-color: inherit !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Respect reduced motion: no transform or filter animations on disabled controls */
+@media (prefers-reduced-motion: reduce) {
+  button:disabled,
+  button[disabled] {
+    filter: grayscale(50%) opacity(0.6);
+  }
+}
+
 @media (max-width: 640px) {
   .input-area,
   .chat-panel-root .input-area {
@@ -1755,6 +1936,38 @@
   }
 }
 
+@media (max-width: 480px) {
+  .input-area,
+  .chat-panel-root .input-area {
+    width: calc(100% - 12px);
+    margin-left: 6px;
+    margin-right: 6px;
+    padding: 4px 0 8px;
+  }
+
+  .input-container {
+    border-radius: var(--radius-md);
+    padding: 2px;
+  }
+
+  .input-textarea {
+    font-size: 13px;
+    padding: 8px 10px;
+    max-height: 140px;
+  }
+
+  .input-send {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    margin: 3px;
+  }
+
+  .input-hint {
+    display: none;
+  }
+}
+
 /* ========== Right Panel ========== */
 .right-panel {
   width: var(--panel-width);
@@ -1766,6 +1979,29 @@
   height: 100%;
   transition: transform var(--transition-base), opacity var(--transition-base);
   overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  .right-panel {
+    --panel-width: clamp(220px, 30vw, 360px);
+  }
+}
+
+@media (max-width: 640px) {
+  .right-panel {
+    --panel-width: min(85vw, 360px);
+    position: fixed;
+    right: 0;
+    top: var(--topbar-height, 44px);
+    bottom: var(--status-bar-height, 48px);
+    z-index: 40;
+    box-shadow: var(--shadow-lg);
+    border-left: none;
+  }
+
+  .right-panel.hidden {
+    transform: translateX(100%);
+  }
 }
 
 .right-panel.hidden {
@@ -2635,6 +2871,41 @@
   line-height: 1.4;
 }
 
+@media (max-width: 640px) {
+  .welcome-screen {
+    padding: 24px 16px;
+  }
+
+  .welcome-logo {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 16px;
+  }
+
+  .welcome-title {
+    font-size: 20px;
+  }
+
+  .welcome-subtitle {
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+
+  .welcome-suggestions {
+    grid-template-columns: 1fr;
+    max-width: 100%;
+  }
+
+  .welcome-suggestion {
+    padding: 12px;
+  }
+
+  /* Hide the feature badges row on narrow screens */
+  .welcome-screen > div:last-child {
+    display: none;
+  }
+}
+
 /* ========== Inline Comments ========== */
 .inline-comment {
   margin: 8px 0;
@@ -3342,6 +3613,14 @@ button:focus-visible {
   padding: 0;
 }
 
+.panel-body > * {
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .panel-popout-app {
   width: 100vw;
   height: 100vh;
@@ -3408,6 +3687,44 @@ button:focus-visible {
   opacity: 1;
   background: color-mix(in srgb, var(--accent-primary) 62%, transparent);
   box-shadow: 0 0 0 1px var(--accent-primary-muted);
+}
+
+/* ── Responsive layout split adaption ─────────────────────────── */
+@media (max-width: 1024px) {
+  .layout-split--horizontal .layout-split-child {
+    min-width: 160px;
+  }
+}
+
+@media (max-width: 640px) {
+  .layout-split--horizontal {
+    flex-direction: column !important;
+  }
+
+  .layout-split--horizontal .layout-split-resizer--horizontal {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: 8px;
+    cursor: row-resize;
+    transform: none;
+    top: auto;
+  }
+}
+
+/* ── Agent focus panel responsive ──────────────────────────────── */
+@media (max-width: 768px) {
+  div[style*="--agent-focus-width"] {
+    position: fixed !important;
+    right: 0;
+    top: var(--topbar-height, 44px);
+    bottom: var(--status-bar-height, 48px);
+    z-index: 40;
+    box-shadow: var(--shadow-lg);
+    width: min(90vw, 460px) !important;
+    max-width: 100vw !important;
+  }
 }
 
 /* ========== Panels Dropdown ========== */
@@ -5496,6 +5813,33 @@ button:focus-visible {
   }
 }
 
+@media (max-width: 480px) {
+  .settings-modal {
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    border: none;
+  }
+
+  .settings-modal-header {
+    padding: 12px 14px;
+  }
+
+  .settings-modal-title {
+    font-size: 14px;
+  }
+
+  .settings-nav {
+    max-height: 120px;
+  }
+
+  .settings-content {
+    padding: 12px;
+  }
+}
+
 /* ========== Model Library ========== */
 .model-library-toolbar {
   display: grid;
@@ -7007,6 +7351,7 @@ button:focus-visible {
   height: var(--status-bar-height, 48px);
   min-height: 40px;
   padding: 0 12px;
+  padding-bottom: var(--safe-area-bottom, 0px);
   background: color-mix(in srgb, var(--bg-secondary) 55%, var(--bg-primary));
   border-top: 1px solid var(--border-secondary);
   font-size: 11px;
@@ -7228,14 +7573,64 @@ button:focus-visible {
   box-shadow: var(--shadow-lg);
 }
 
+/* ── Status bar responsive ──────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .status-bar {
+    padding: 0 8px;
+    gap: 2px;
+  }
+
+  .status-bar-path {
+    max-width: 120px;
+  }
+
+  .status-bar-model-name {
+    max-width: 140px;
+  }
+}
+
+@media (max-width: 768px) {
+  .status-bar {
+    font-size: 10px;
+    padding: 0 6px;
+    gap: 2px;
+    min-height: 36px;
+  }
+
+  .status-bar-shell {
+    min-height: 36px;
+  }
+
+  /* Hide secondary items on narrow viewports */
+  .status-bar-item:has(.status-bar-path),
+  .status-bar-item:has(.status-model-ability),
+  .status-bar-item:has(svg[data-icon="dollar-sign"]) {
+    display: none;
+  }
+
+  .status-bar-separator:not(:first-of-type):not(:last-of-type) {
+    display: none;
+  }
+
+  .status-bar-model-name {
+    max-width: 80px;
+  }
+
+  .status-bar-model-btn {
+    height: 26px;
+    padding: 0 6px;
+    gap: 4px;
+  }
+}
+
 /* Model Picker Dropdown */
 
 .model-picker {
   position: absolute;
   bottom: 32px;
   left: 0;
-  width: 380px;
-  max-height: 360px;
+  width: clamp(260px, 80vw, 380px);
+  max-height: min(360px, 60vh);
   background: var(--bg-elevated);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-md);
@@ -7245,6 +7640,18 @@ button:focus-visible {
   flex-direction: column;
   overflow: hidden;
   animation: slideUp 0.15s ease;
+}
+
+@media (max-width: 480px) {
+  .model-picker {
+    position: fixed;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: 8px;
+    width: auto !important;
+    max-height: 55vh;
+    border-radius: var(--radius-lg);
+  }
 }
 
 .model-picker-search {
@@ -7371,6 +7778,23 @@ button:focus-visible {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes pressIn {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes glowPulse {
+  0% { box-shadow: 0 0 0 0 var(--accent-primary-muted); }
+  70% { box-shadow: 0 0 0 6px rgba(99, 102, 241, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -7378,6 +7802,98 @@ button:focus-visible {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* ── Motion utility classes ────────────────────────────────────────── */
+.motion-fade-in {
+  animation: fadeIn var(--transition-base) ease-out both;
+}
+
+.motion-slide-up {
+  animation: slideUp var(--transition-base) ease-out both;
+}
+
+.motion-slide-in-right {
+  animation: slideInRight var(--transition-base) ease-out both;
+}
+
+/* Staggered entrance — apply to lists of items */
+.motion-stagger > * {
+  animation: slideUp 300ms ease-out both;
+  animation-delay: calc(var(--stagger-index, 0) * 60ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-fade-in,
+  .motion-slide-up,
+  .motion-slide-in-right,
+  .motion-stagger > * {
+    animation: fadeIn 100ms ease-out both;
+  }
+
+  .motion-stagger > * {
+    animation-delay: 0ms;
+  }
+}
+
+/* ── Button press feedback ─────────────────────────────────────────── */
+button:active:not(:disabled),
+.button:active {
+  transform: scale(0.97);
+  transition: transform 100ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Focus ring smooth transition ──────────────────────────────────── */
+*:focus-visible {
+  transition: outline-color var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+/* ── Sidebar backdrop fade ─────────────────────────────────────────── */
+.sidebar-backdrop {
+  transition: opacity var(--transition-base),
+              visibility var(--transition-base);
+}
+
+/* ── Right panel and agent focus slide-in ──────────────────────────── */
+.right-panel,
+div[style*="--agent-focus-width"] {
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 200ms ease;
+}
+
+/* ── Send button press ─────────────────────────────────────────────── */
+.input-send:active:not(:disabled) {
+  transform: scale(0.93);
+  transition: transform 80ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Tool call status dot transitions ──────────────────────────────── */
+.tool-call-status {
+  transition: background var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+.tool-call-status.running {
+  animation: glowPulse 1.5s ease-in-out infinite;
+}
+
+/* ── Session run dot transition ────────────────────────────────────── */
+.session-run-dot {
+  transition: background var(--transition-fast);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-fade-in,
+  .motion-slide-up,
+  .motion-slide-in-right,
+  .motion-stagger > * {
+    animation: fadeIn 100ms ease-out both;
+  }
+
+  .motion-stagger > * {
+    animation-delay: 0ms;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════

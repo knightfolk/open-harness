@@ -13,18 +13,21 @@ export function PanelWrapper({ panelId, onClose, onPopOut, children }: Props) {
   const config = getPanelConfig(panelId);
   const Icon = getPanelIcon(panelId);
   const canPopOut = panelId !== 'chat' && Boolean(onPopOut);
+  const titleId = `panel-title-${panelId}`;
 
   return (
     <div
       className={`panel-frame panel-frame--${panelId}`}
       data-panel-id={panelId}
+      role="region"
+      aria-labelledby={titleId}
     >
       <div
         className="panel-header"
       >
         <div className="panel-header-title">
           <Icon size={14} />
-          <span>{config.label}</span>
+          <span id={titleId}>{config.label}</span>
         </div>
         <div className="panel-header-actions">
           {canPopOut && (

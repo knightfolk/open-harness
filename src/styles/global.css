@@ -9,8 +9,10 @@
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
-  --sidebar-width: 280px;
-  --panel-width: 360px;
+  --sidebar-width: clamp(220px, 22vw, 360px);
+  --sidebar-width-collapsed: 0px;
+  --sidebar-drawer-z: 50;
+  --panel-width: clamp(260px, 28vw, 440px);
   --topbar-height: 44px;
   --surface-flat: transparent;
   --surface-subtle: var(--bg-tertiary);
@@ -151,4 +153,102 @@ body {
 @keyframes fadeSlideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ── Safe area handling ─────────────────────────────────────────── */
+@supports (padding: env(safe-area-inset-top)) {
+  :root {
+    --safe-area-top: env(safe-area-inset-top);
+    --safe-area-bottom: env(safe-area-inset-bottom);
+    --safe-area-left: env(safe-area-inset-left);
+    --safe-area-right: env(safe-area-inset-right);
+  }
+}
+
+@supports not (padding: env(safe-area-inset-top)) {
+  :root {
+    --safe-area-top: 0px;
+    --safe-area-bottom: 0px;
+    --safe-area-left: 0px;
+    --safe-area-right: 0px;
+  }
+}
+
+/* ── Touch device: larger minimum touch targets ─────────────────── */
+@media (pointer: coarse) {
+  :root {
+    --touch-target-min: 44px;
+  }
+}
+
+@media (pointer: fine) {
+  :root {
+    --touch-target-min: 32px;
+  }
+}
+
+/* ── No hover: remove hover-only effects, add tap feedback ──────── */
+@media (hover: none) and (pointer: coarse) {
+  .sidebar-resize-handle,
+  .floating-super-resize-handle,
+  .agent-focus-resize-handle,
+  .status-bar-resize-handle {
+    display: none;  /* resize handles are unusable on touch */
+  }
+
+  *:active {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Expand hit areas for buttons on touch */
+  button, a, select, input[type="checkbox"], input[type="radio"] {
+    min-height: var(--touch-target-min, 44px);
+    min-width: var(--touch-target-min, 44px);
+  }
+
+  /* Expand small buttons with ::before touch hit areas */
+  .panel-close, .panel-popout,
+  .top-bar-toggle, .top-bar-action,
+  .settings-modal-close,
+  .sidebar-icon-button,
+  .input-send {
+    position: relative;
+  }
+
+  .panel-close::before, .panel-popout::before,
+  .top-bar-toggle::before, .top-bar-action::before,
+  .settings-modal-close::before,
+  .sidebar-icon-button::before,
+  .input-send::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: inherit;
+  }
+}
+
+/* ── Ultrawide: cap content width so line-length stays readable ─── */
+@media (min-width: 1800px) {
+  .message-content {
+    max-width: min(820px, 60ch) !important;
+  }
+
+  .chat-panel-root {
+    --chat-content-max: 1200px;
+  }
+}
+
+@media (min-width: 2560px) {
+  .chat-panel-root {
+    --chat-content-max: 1400px;
+  }
+}
+
+/* ── Reduced motion: suppress parallax, sticky hover ────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

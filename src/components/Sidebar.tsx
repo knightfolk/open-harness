@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   Bot,
@@ -59,6 +60,7 @@ interface Props {
   onDeleteSession?: (id: string) => void;
   onDeleteProject?: (workingDir: string | null) => void;
   clickyEnabled: boolean;
+  onClose?: () => void;
 }
 
 function normalizeRunLabel(run: SubAgent): string {
@@ -151,6 +153,7 @@ export function Sidebar({
   activeModel,
   providers,
   clickyEnabled,
+  onClose,
 }: Props) {
   const [clickyOpen, setClickyOpen] = useState(false);
   const [visiblePanels, setVisiblePanels] = useState({ chat: false, projects: true });
@@ -171,15 +174,22 @@ export function Sidebar({
     onActiveTabChange(nextVisible ? panel : panel === 'chat' ? 'projects' : 'chat');
   };
 
+  const backdrop = isOpen && onClose
+    ? createPortal(
+        <div className={`sidebar-backdrop visible`} onClick={onClose} aria-hidden="true" />,
+        document.body
+      )
+    : null;
+
   if (!isOpen) return null;
 
   return (
     <aside
       className="sidebar"
-      aria-label="Project and chat navigation"
-      style={width ? ({ width, minWidth: width, ['--sidebar-width']: `${width}px` } as CSSProperties & { '--sidebar-width'?: string }) : undefined}
-    >
-      {onResizeStart && (
+        aria-label="Project and chat navigation"
+        style={width ? ({ width, minWidth: width, ['--sidebar-width']: `${width}px` } as CSSProperties & { '--sidebar-width'?: string }) : undefined}
+      >
+        {onResizeStart && (
         <button
           type="button"
           className="sidebar-resize-handle"
@@ -263,6 +273,7 @@ export function Sidebar({
           </button>
         </div>
       )}
+      {backdrop}
     </aside>
   );
 }

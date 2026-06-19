@@ -107,7 +107,7 @@ export function FilesPanel({ workingDir, projectProfile }: Props) {
 
   if (!workingDir) {
     return (
-      <div className="empty-state">
+      <div className="empty-state" role="status">
         <div className="empty-state-icon">📁</div>
         <div className="empty-state-text">Open a folder to browse files</div>
       </div>
@@ -269,7 +269,16 @@ export function FilesPanel({ workingDir, projectProfile }: Props) {
           {workingDir}
         </div>
         {loading ? (
-          <div style={{ padding: 12, color: 'var(--text-tertiary)', fontSize: 12 }}>Loading...</div>
+          <div className="empty-state" role="status" aria-live="polite" aria-label="Loading files">
+            <div className="empty-state-icon">
+              <div className="typing-indicator">
+                <div className="typing-dot" />
+                <div className="typing-dot" />
+                <div className="typing-dot" />
+              </div>
+            </div>
+            <div className="empty-state-text">Loading files from workspace</div>
+          </div>
         ) : (
           <DirectoryEntries
             entries={entries}

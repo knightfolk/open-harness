@@ -117,7 +117,7 @@ export function StatusBar({
 
   useEffect(() => {
     if (!modelPickerOpen && !trustPickerOpen && !terminalOpen) return;
-    const handler = (e: MouseEvent) => {
+    const handleMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
       const clickedModelButton = modelBtnRef.current?.contains(target);
       const clickedModelPicker = pickerPanelRef.current?.contains(target);
@@ -136,8 +136,26 @@ export function StatusBar({
         setTerminalOpen(false);
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (modelPickerOpen) {
+        setModelPickerOpen(false);
+        setSearchQuery('');
+        e.preventDefault();
+      } else if (trustPickerOpen) {
+        setTrustPickerOpen(false);
+        e.preventDefault();
+      } else if (terminalOpen) {
+        setTerminalOpen(false);
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [modelPickerOpen, trustPickerOpen, terminalOpen]);
 
   const filtered = models.filter(m =>

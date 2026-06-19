@@ -249,6 +249,38 @@ export function SettingsModal({
     return () => window.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
 
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.activeElement as HTMLElement | null;
+    const el = modalRef.current;
+    if (el) {
+      const first = el.querySelector<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      first?.focus();
+    }
+    return () => {
+      if (prev && document.contains(prev)) prev.focus();
+    };
+  }, [isOpen]);
+
+  const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab' || !modalRef.current) return;
+    const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])'
+    );
+    if (focusable.length < 2) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
   useEffect(() => {
     if (!isOpen || !initialCategory) return;
     const category = CATEGORIES.find((item) => item.id === initialCategory);
@@ -270,9 +302,16 @@ export function SettingsModal({
 
   return (
     <div className="settings-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="settings-modal">
+      <div
+        className="settings-modal"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+        onKeyDown={handleModalKeyDown}
+      >
         <div className="settings-modal-header">
-          <h2 className="settings-modal-title">Settings</h2>
+          <h2 className="settings-modal-title" id="settings-dialog-title">Settings</h2>
           <button className="settings-modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="settings-modal-body">

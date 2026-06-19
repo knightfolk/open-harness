@@ -10,11 +10,11 @@ const icons = [Search, Code, Bug, FileText];
 export function WelcomeScreen({ onSuggestionClick }: Props) {
   return (
     <div className="welcome-screen">
-      <div className="welcome-logo">
+      <div className="welcome-logo" style={{ animation: 'slideUp 300ms ease-out both' }}>
         <Cpu size={28} color="white" />
       </div>
-      <h1 className="welcome-title">OpenHarness</h1>
-      <p className="welcome-subtitle">
+      <h1 className="welcome-title" style={{ animation: 'slideUp 300ms ease-out 80ms both' }}>OpenHarness</h1>
+      <p className="welcome-subtitle" style={{ animation: 'slideUp 300ms ease-out 160ms both' }}>
         An open-source, agent-first harness for coding, routing, and evaluation.
         Ask anything — write code, debug issues, inspect repos, and coordinate agents.
       </p>
@@ -26,6 +26,7 @@ export function WelcomeScreen({ onSuggestionClick }: Props) {
               key={i}
               className="welcome-suggestion"
               onClick={() => onSuggestionClick(s.desc)}
+              style={{ animation: `slideUp 300ms ease-out ${320 + i * 80}ms both` } as React.CSSProperties}
             >
               <div className="welcome-suggestion-title">
                 <Icon size={14} style={{ color: 'var(--accent-primary)' }} />
@@ -37,7 +38,7 @@ export function WelcomeScreen({ onSuggestionClick }: Props) {
         })}
       </div>
 
-      <div style={{ marginTop: 40, display: 'flex', gap: 20, fontSize: 11, color: 'var(--text-tertiary)' }}>
+      <div style={{ marginTop: 40, display: 'flex', gap: 20, fontSize: 11, color: 'var(--text-tertiary)', animation: 'fadeIn 400ms ease-out 600ms both' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <Layers size={12} /> Multi-agent support
         </span>

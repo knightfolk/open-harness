@@ -53,6 +53,33 @@ const RELEASE_NOTES_OPT_OUT_KEY = 'openharness.release-notes.opt-out.v1';
 const NARROW_SIDEBAR_AUTO_CLOSE_WIDTH = 640;
 const POPOUT_PANEL_PARAM = 'popoutPanel';
 
+/** Skip-to-content link — first tabbable element for keyboard users. */
+function SkipLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      style={{
+        position: 'fixed',
+        top: -100,
+        left: 8,
+        zIndex: 10000,
+        padding: '8px 16px',
+        background: 'var(--accent-primary)',
+        color: '#fff',
+        fontSize: 13,
+        fontWeight: 600,
+        borderRadius: '0 0 6px 6px',
+        textDecoration: 'none',
+        transition: 'top 0.15s ease',
+      }}
+      onFocus={(e) => { e.currentTarget.style.top = '0'; }}
+      onBlur={(e) => { e.currentTarget.style.top = '-100px'; }}
+    >
+      Skip to content
+    </a>
+  );
+}
+
 function getRequestedPopoutPanel(): PanelId | null {
   try {
     const requested = new URLSearchParams(window.location.search).get(POPOUT_PANEL_PARAM);
@@ -423,6 +450,7 @@ function App() {
   const [projectProfile, setProjectProfile] = useState<ProjectProfile | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('projects');
+  const [sidebarAutoCollapsed, setSidebarAutoCollapsed] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -498,15 +526,20 @@ function App() {
   }, [statusBarHeight]);
 
   useEffect(() => {
-    const closeSidebarForNarrowScreens = () => {
-      if (window.innerWidth <= NARROW_SIDEBAR_AUTO_CLOSE_WIDTH) {
+    const handleResizeForSidebar = () => {
+      const isNarrow = window.innerWidth <= NARROW_SIDEBAR_AUTO_CLOSE_WIDTH;
+      if (isNarrow && sidebarOpen && !sidebarAutoCollapsed) {
         setSidebarOpen(false);
+        setSidebarAutoCollapsed(true);
+      } else if (!isNarrow && sidebarAutoCollapsed) {
+        setSidebarOpen(true);
+        setSidebarAutoCollapsed(false);
       }
     };
-    closeSidebarForNarrowScreens();
-    window.addEventListener('resize', closeSidebarForNarrowScreens);
-    return () => window.removeEventListener('resize', closeSidebarForNarrowScreens);
-  }, []);
+    handleResizeForSidebar();
+    window.addEventListener('resize', handleResizeForSidebar);
+    return () => window.removeEventListener('resize', handleResizeForSidebar);
+  }, [sidebarOpen, sidebarAutoCollapsed]);
   const [providerRateLimitStatus, setProviderRateLimitStatus] = useState<api.ProviderRateLimitStatus | null>(null);
   const [modelContextWindows, setModelContextWindows] = useState<Map<string, number>>(new Map());
   const [contextWarning, setContextWarning] = useState<string | null>(null);
@@ -1862,6 +1895,7 @@ function App() {
 
   return (
     <div className="app-layout">
+      <SkipLink href="#main-content" />
       <Sidebar
         isOpen={sidebarOpen}
         sessions={sessions}
@@ -1899,9 +1933,10 @@ function App() {
         onDeleteSession={handleDeleteSession}
         onDeleteProject={handleDeleteProject}
         clickyEnabled={clickyEnabled}
+        onClose={() => setSidebarOpen(false)}
       />
 
-      <main className="main-area">
+      <main className="main-area" id="main-content">
         <TopBar
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
@@ -1927,7 +1962,7 @@ function App() {
             </div>
           ) : (
             <>
-            <div className="workspace-shell">
+            <div className="workspace-shell" role="region" aria-label="Workspace panels">
                 <LayoutEngine
                   layout={layout}
                   onRemovePanel={removePanel}
@@ -1969,6 +2004,7 @@ function App() {
         {shouldShowStatusBar && (
           <div
             className="status-bar-shell"
+          role="region" aria-label="Status bar"
             style={{ ['--status-bar-height']: `${statusBarHeight}px` } as CSSProperties & { '--status-bar-height'?: string }}
           >
             <button
