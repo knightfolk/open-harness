@@ -707,6 +707,15 @@ export interface ProviderModelInfo {
   id: string;
   name: string;
   enabled: boolean;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  inputCostPerMTok?: number;
+  outputCostPerMTok?: number;
+  supportsImages?: boolean;
+  supportsTools?: boolean;
+  metadataSource?: string;
+  metadataUpdatedAt?: string;
+  metadataNotes?: string[];
 }
 
 export interface LocalProviderDiscovery {
@@ -727,6 +736,14 @@ export interface ModelInfo {
   type: string;
   family: string;
   contextWindowTokens: number;
+  maxOutputTokens?: number;
+  inputCostPerMTok?: number;
+  outputCostPerMTok?: number;
+  supportsImages?: boolean;
+  supportsTools?: boolean;
+  metadataSource?: string;
+  metadataUpdatedAt?: string;
+  metadataNotes?: string[];
 }
 
 export async function getProviders(): Promise<ProviderInfo[]> {
@@ -807,6 +824,15 @@ export async function testProviderConnection(providerId: string, tempKey?: strin
 export interface FetchedModel {
   id: string;
   name: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  inputCostPerMTok?: number;
+  outputCostPerMTok?: number;
+  supportsImages?: boolean;
+  supportsTools?: boolean;
+  metadataSource?: string;
+  metadataUpdatedAt?: string;
+  metadataNotes?: string[];
 }
 
 export async function fetchProviderModels(providerId: string, tempKey?: string, tempURL?: string): Promise<FetchedModel[]> {
@@ -828,6 +854,68 @@ export async function getModels(): Promise<ModelInfo[]> {
     if (res.ok) return res.json();
   } catch { /* not available yet */ }
   return [];
+}
+
+export async function refreshModelMetadata(): Promise<{ ok: boolean; refreshedAt: string; providers: Array<{ providerId: string; models: number }>; modelCount: number }> {
+  const res = await fetch(`${API_BASE}/api/models/metadata/refresh`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to refresh model metadata: ${res.status}`);
+  return res.json();
+}
+
+export interface ModelCatalogAuditReport {
+  generatedAt: string;
+  catalogCardCount: number;
+  topCatalogCardCount: number;
+  configuredModelCount: number;
+  enabledConfiguredModelCount: number;
+  missingCatalogCards: Array<{
+    providerId: string;
+    providerName: string;
+    modelId: string;
+    modelName: string;
+    enabled: boolean;
+    metadataSource?: string;
+    contextWindowTokens?: number;
+  }>;
+  metadataDisagreements: Array<{
+    providerId: string;
+    providerName: string;
+    modelId: string;
+    catalogId: string;
+    displayName: string;
+    field: 'contextWindowTokens' | 'maxOutputTokens' | 'inputCostPerMTok' | 'outputCostPerMTok';
+    catalogValue?: number;
+    liveValue?: number;
+    liveSource?: string;
+  }>;
+  topCatalogMetadataGaps: Array<{
+    catalogId: string;
+    displayName: string;
+    provider: string;
+    reason: string;
+  }>;
+  suggestedCatalogCards: Array<{
+    id: string;
+    displayName: string;
+    provider: string;
+    aliases: string[];
+    contextWindowTokens: number;
+    maxOutputTokens?: number;
+    inputCostPerMTok?: number;
+    outputCostPerMTok?: number;
+    supportsImages: boolean;
+    supportsTools: boolean;
+    metadataSource?: string;
+    compactDescription: string;
+  }>;
+  sourcePrecedence: string[];
+}
+
+export async function getModelCatalogAudit(options: { openRouter?: boolean } = {}): Promise<ModelCatalogAuditReport> {
+  const query = options.openRouter === false ? '?openRouter=false' : '';
+  const res = await fetch(`${API_BASE}/api/models/catalog/audit${query}`);
+  if (!res.ok) throw new Error(`Failed to audit model catalog: ${res.status}`);
+  return res.json();
 }
 
 export async function setModel(modelID: string): Promise<void> {

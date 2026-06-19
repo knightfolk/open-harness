@@ -5529,7 +5529,7 @@ button:focus-visible {
 
 .model-library-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 6px;
   margin-top: 10px;
   font-size: 11px;
@@ -7077,6 +7077,20 @@ button:focus-visible {
 
 .status-bar-connection {
   gap: 6px;
+}
+
+.status-bar-connection-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.status-bar-connection-btn:hover,
+.status-bar-connection-btn:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 /* Model/router control: reads as a quiet capsule, not a bordered toolbar button. */

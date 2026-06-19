@@ -9,6 +9,7 @@ interface Props {
 
 const HISTORY_VISIBLE_LIMIT = 20;
 type ModelSourceCategory = 'all' | 'frontier' | 'open-source';
+type ModelLabTab = 'recommendations' | 'benchmark' | 'configure' | 'results' | 'history' | 'tasks' | 'bench' | 'packs';
 interface ModelLabSelectableModel {
   id: string;
   name: string;
@@ -78,7 +79,7 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
   const [running, setRunning] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeBenchId, setActiveBenchId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'configure' | 'results' | 'history' | 'tasks' | 'bench' | 'packs'>('configure');
+  const [tab, setTab] = useState<ModelLabTab>('recommendations');
   const [loading, setLoading] = useState(true);
   const [diagnostic, setDiagnostic] = useState<{ tone: 'error' | 'warning' | 'info'; title: string; detail: string } | null>(null);
   const [providerHealthSignal, setProviderHealthSignal] = useState<ProviderHealthSignal | null>(null);
@@ -105,6 +106,14 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
         setBenchRuns(b);
         setPromptPlugins(plugins);
         setProviderHealthSignal(summarizeProviderHealth(health));
+        const latestReport = [...r].sort((a, b) => new Date(b.completedAt || b.createdAt).getTime() - new Date(a.completedAt || a.createdAt).getTime())[0];
+        if (latestReport) {
+          api.getEvalReport(latestReport.id).then(setSelectedReport).catch(() => {});
+        }
+        const latestBenchRun = [...b].sort((a, b) => new Date(b.completedAt || b.createdAt).getTime() - new Date(a.completedAt || a.createdAt).getTime())[0];
+        if (latestBenchRun) {
+          api.getBenchRun(latestBenchRun.id).then(setSelectedBenchRun).catch(() => {});
+        }
       } catch (err) {
         console.error('Failed to load Model Lab data:', err);
         setDiagnostic({
@@ -439,21 +448,20 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
   }, [selectedBenchRun]);
 
   const categories = [...new Set(prompts.map(p => p.category))];
-  const modelLabTabs: Array<{ id: typeof tab; label: string; ariaLabel: string }> = [
-    { id: 'configure', label: 'Eval', ariaLabel: 'Show Model Lab eval setup and provider-call proof preparation' },
-    { id: 'tasks', label: 'Tasks', ariaLabel: 'Show Model Lab bench task selection and proof-run preparation' },
-    { id: 'bench', label: 'Bench', ariaLabel: 'Show Model Lab bench rankings, proof review, and exports' },
-    { id: 'packs', label: 'Packs', ariaLabel: 'Show Model Lab prompt packs and pack evidence exports' },
+  const modelLabTabs: Array<{ id: ModelLabTab; label: string; ariaLabel: string }> = [
+    { id: 'recommendations', label: 'Recommendations', ariaLabel: 'Show Model Lab recommended models and next action' },
     { id: 'results', label: 'Results', ariaLabel: 'Show Model Lab eval recommendations, proof review, and exports' },
     { id: 'history', label: 'History', ariaLabel: 'Show Model Lab saved eval and bench proof history' },
   ];
-  const tabPanelProps = (id: typeof tab) => ({
+  const benchmarkTabs: ModelLabTab[] = ['benchmark', 'configure', 'tasks', 'bench', 'packs'];
+  const benchmarkActive = benchmarkTabs.includes(tab);
+  const tabPanelProps = (id: ModelLabTab) => ({
     id: `model-lab-panel-${id}`,
     role: 'tabpanel' as const,
     'aria-labelledby': `model-lab-tab-${id}`,
     tabIndex: 0,
   });
-  const handleModelLabTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, currentTab: typeof tab) => {
+  const handleModelLabTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, currentTab: ModelLabTab) => {
     const currentIndex = modelLabTabs.findIndex((item) => item.id === currentTab);
     if (currentIndex < 0) return;
     const lastIndex = modelLabTabs.length - 1;
@@ -515,11 +523,51 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
             {item.label}
           </button>
         ))}
+        <button
+          type="button"
+          aria-pressed={benchmarkActive}
+          onClick={() => setTab('benchmark')}
+          style={tabBtnStyle(benchmarkActive)}
+          title="Open benchmarking tools"
+        >
+          Benchmark
+        </button>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
         {diagnostic && (
           <ModelLabDiagnostic diagnostic={diagnostic} onDismiss={() => setDiagnostic(null)} />
+        )}
+
+        {tab === 'recommendations' && (
+          <RecommendationsDashboard
+            report={selectedReport}
+            benchRun={selectedBenchRun}
+            reports={reports}
+            benchRuns={benchRuns}
+            models={selectableModels}
+            providerHealthSignal={providerHealthSignal}
+            onBenchmark={() => setTab('benchmark')}
+            onReviewResults={() => setTab(selectedReport ? 'results' : selectedBenchRun ? 'bench' : 'history')}
+          />
+        )}
+
+        {tab === 'benchmark' && (
+          <BenchmarkLanding
+            prompts={prompts}
+            tasks={tasks}
+            models={selectableModels}
+            report={selectedReport}
+            benchRun={selectedBenchRun}
+            providerHealthSignal={providerHealthSignal}
+            onPrepareEval={prepareSmallEvalProofRun}
+            onPrepareBench={prepareSmallBenchProofRun}
+            onOpenEval={() => setTab('configure')}
+            onOpenTasks={() => setTab('tasks')}
+            onOpenPacks={() => setTab('packs')}
+            onOpenBenchResults={() => setTab('bench')}
+            onOpenEvalResults={() => setTab('results')}
+          />
         )}
 
         {/* ── Eval Configure Tab ── */}
@@ -1217,6 +1265,280 @@ function ModelLabDiagnostic({ diagnostic, onDismiss }: {
           Dismiss
         </button>
       </div>
+    </div>
+  );
+}
+
+function RecommendationsDashboard({
+  report,
+  benchRun,
+  reports,
+  benchRuns,
+  models,
+  providerHealthSignal,
+  onBenchmark,
+  onReviewResults,
+}: {
+  report: api.EvalReport | null;
+  benchRun: api.BenchRun | null;
+  reports: api.EvalReportSummary[];
+  benchRuns: api.BenchRunSummary[];
+  models: ModelLabSelectableModel[];
+  providerHealthSignal: ProviderHealthSignal | null;
+  onBenchmark: () => void;
+  onReviewResults: () => void;
+}) {
+  const recommendations = report?.summary?.recommendations || [];
+  const trusted = report?.proofReview?.status === 'approved' || benchRun?.proofReview?.status === 'approved';
+  const needsAttention = report?.proofReview?.status === 'needs-attention' || benchRun?.proofReview?.status === 'needs-attention';
+  const noEvidence = !report?.summary && !benchRun?.summary;
+  const latestDate = [report?.completedAt || report?.createdAt, benchRun?.completedAt || benchRun?.createdAt]
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const status = trusted
+    ? { label: 'Trusted', color: 'var(--accent-success)', detail: 'Approved evidence is available for model decisions.' }
+    : needsAttention
+      ? { label: 'Needs review', color: 'var(--accent-warning)', detail: 'The latest evidence has open review notes.' }
+      : noEvidence
+        ? { label: 'No benchmark yet', color: 'var(--text-tertiary)', detail: 'Run a small benchmark to get model recommendations.' }
+        : { label: 'Review pending', color: 'var(--accent-warning)', detail: 'Evidence exists, but it has not been approved yet.' };
+  const bestBench = benchRun?.summary?.bestModel;
+  const modelName = (id?: string) => {
+    if (!id) return 'Not available';
+    return models.find((model) => model.id === id)?.name || id;
+  };
+  const defaultRecommendations = [
+    { role: 'coder', modelId: report?.summary?.bestModel || bestBench || '', reason: 'Best current evidence' },
+    { role: 'planner', modelId: bestBench || report?.summary?.bestModel || '', reason: 'Best task benchmark signal' },
+    { role: 'summarizer', modelId: report?.summary?.bestModel || '', reason: 'Best eval signal' },
+  ].filter((item) => item.modelId);
+  const visibleRecommendations = recommendations.length > 0 ? recommendations : defaultRecommendations;
+  return (
+    <div {...{ id: 'model-lab-panel-recommendations', role: 'tabpanel' as const, tabIndex: 0 }} aria-labelledby="model-lab-tab-recommendations" style={{ padding: 12 }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) auto',
+        gap: 12,
+        alignItems: 'start',
+        padding: 12,
+        borderRadius: 8,
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border-primary)',
+        marginBottom: 12,
+      }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>
+            Model recommendations
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45, marginTop: 4 }}>
+            {status.detail}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            <span style={{ ...pillStyle, color: status.color, background: 'var(--bg-tertiary)' }}>{status.label}</span>
+            <span style={{ ...pillStyle, color: 'var(--text-tertiary)', background: 'var(--bg-tertiary)' }}>
+              {reports.length} eval run{reports.length === 1 ? '' : 's'}
+            </span>
+            <span style={{ ...pillStyle, color: 'var(--text-tertiary)', background: 'var(--bg-tertiary)' }}>
+              {benchRuns.length} benchmark{benchRuns.length === 1 ? '' : 's'}
+            </span>
+            {latestDate && (
+              <span style={{ ...pillStyle, color: 'var(--text-tertiary)', background: 'var(--bg-tertiary)' }}>
+                Updated {new Date(latestDate).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: 6, minWidth: 142 }}>
+          <button type="button" onClick={onBenchmark} style={primaryActionStyle}>
+            Benchmark
+          </button>
+          <button type="button" onClick={onReviewResults} style={smallBtnStyle}>
+            Review evidence
+          </button>
+        </div>
+      </div>
+
+      {providerHealthSignal && (
+        <div style={{
+          marginBottom: 12,
+          padding: 8,
+          borderRadius: 6,
+          border: '1px solid var(--border-primary)',
+          background: 'var(--bg-secondary)',
+          fontSize: 10,
+          color: providerHealthSignal.failing > 0 || providerHealthSignal.stale > 0 ? 'var(--accent-warning)' : 'var(--accent-success)',
+        }}>
+          Provider health: {providerHealthSignal.tracked} tracked, {providerHealthSignal.failing} failing, {providerHealthSignal.stale} stale
+          {providerHealthSignal.maxLatencyMs ? `, slowest ${Math.round(providerHealthSignal.maxLatencyMs)}ms` : ''}
+        </div>
+      )}
+
+      {visibleRecommendations.length === 0 ? (
+        <div style={{ padding: 18, borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)', color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center' }}>
+          No recommendations yet. Start with a small benchmark.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, marginBottom: 12 }}>
+          {visibleRecommendations.slice(0, 6).map((rec) => (
+            <div key={`${rec.role}:${rec.modelId}`} style={{ padding: 10, borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+              <div style={{ fontSize: 10, textTransform: 'uppercase', color: 'var(--text-tertiary)', fontWeight: 800, letterSpacing: 0.4 }}>
+                {rec.role}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 750, marginTop: 4, overflowWrap: 'anywhere' }}>
+                {modelName(rec.modelId)}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 5, lineHeight: 1.4 }}>
+                {rec.reason}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+        <EvidenceSummaryCard
+          title="Eval signal"
+          value={report?.summary?.bestModel ? modelName(report.summary.bestModel) : 'No eval result'}
+          detail={report?.summary ? `${report.completed}/${report.total} prompt runs complete` : 'Use Benchmark for a quick prompt check'}
+          status={report?.proofReview?.status}
+        />
+        <EvidenceSummaryCard
+          title="Task signal"
+          value={bestBench ? modelName(bestBench) : 'No task benchmark'}
+          detail={benchRun?.summary ? benchRun.summary.bestModelReason || `${benchRun.completed}/${benchRun.total} task runs complete` : 'Use Benchmark for task-level proof'}
+          status={benchRun?.proofReview?.status}
+        />
+      </div>
+    </div>
+  );
+}
+
+function EvidenceSummaryCard({ title, value, detail, status }: {
+  title: string;
+  value: string;
+  detail: string;
+  status?: api.ProofReviewState['status'];
+}) {
+  const color = status === 'approved'
+    ? 'var(--accent-success)'
+    : status === 'needs-attention'
+      ? 'var(--accent-warning)'
+      : 'var(--text-tertiary)';
+  return (
+    <div style={{ padding: 10, borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', color: 'var(--text-tertiary)', fontWeight: 800, letterSpacing: 0.4 }}>{title}</div>
+        <span style={{ ...pillStyle, color, background: 'var(--bg-tertiary)' }}>{status || 'unreviewed'}</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 750, marginTop: 5, overflowWrap: 'anywhere' }}>{value}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.4, marginTop: 5 }}>{detail}</div>
+    </div>
+  );
+}
+
+function BenchmarkLanding({
+  prompts,
+  tasks,
+  models,
+  report,
+  benchRun,
+  providerHealthSignal,
+  onPrepareEval,
+  onPrepareBench,
+  onOpenEval,
+  onOpenTasks,
+  onOpenPacks,
+  onOpenBenchResults,
+  onOpenEvalResults,
+}: {
+  prompts: api.PromptCase[];
+  tasks: api.HarnessTask[];
+  models: ModelLabSelectableModel[];
+  report: api.EvalReport | null;
+  benchRun: api.BenchRun | null;
+  providerHealthSignal: ProviderHealthSignal | null;
+  onPrepareEval: () => void;
+  onPrepareBench: () => void;
+  onOpenEval: () => void;
+  onOpenTasks: () => void;
+  onOpenPacks: () => void;
+  onOpenBenchResults: () => void;
+  onOpenEvalResults: () => void;
+}) {
+  return (
+    <div {...{ id: 'model-lab-panel-benchmark', role: 'tabpanel' as const, tabIndex: 0 }} style={{ padding: 12 }}>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>Benchmark</div>
+        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+          Start small, compare only what matters, then review the evidence before changing model defaults.
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8, marginBottom: 12 }}>
+        <BenchmarkActionCard
+          title="Quick recommendation"
+          detail={`${prompts.length} prompt checks available across ${models.length} model${models.length === 1 ? '' : 's'}.`}
+          action="Prepare quick check"
+          onAction={onPrepareEval}
+          disabled={prompts.length === 0 || models.length === 0}
+        />
+        <BenchmarkActionCard
+          title="Task benchmark"
+          detail={`${tasks.length} task fixture${tasks.length === 1 ? '' : 's'} available for validation-backed scoring.`}
+          action="Prepare task benchmark"
+          onAction={onPrepareBench}
+          disabled={tasks.length === 0 || models.length === 0}
+        />
+      </div>
+
+      <MatrixRunCaution
+        kind="bench"
+        selectedItems={1}
+        selectedModels={models.length > 0 ? 1 : 0}
+        providerHealthSignal={providerHealthSignal}
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6, marginTop: 12 }}>
+        <button type="button" onClick={onOpenEvalResults} disabled={!report} style={smallBtnStyle}>
+          Eval evidence
+        </button>
+        <button type="button" onClick={onOpenBenchResults} disabled={!benchRun} style={smallBtnStyle}>
+          Benchmark evidence
+        </button>
+        <button type="button" onClick={onOpenPacks} style={smallBtnStyle}>
+          Prompt packs
+        </button>
+      </div>
+
+      <details style={{ marginTop: 12, padding: 10, borderRadius: 8, border: '1px solid var(--border-primary)', background: 'var(--bg-secondary)' }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--text-primary)', fontSize: 12, fontWeight: 700 }}>
+          Advanced benchmark setup
+        </summary>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 6, marginTop: 10 }}>
+          <button type="button" onClick={onOpenEval} style={smallBtnStyle}>Prompt matrix</button>
+          <button type="button" onClick={onOpenTasks} style={smallBtnStyle}>Task matrix</button>
+          <button type="button" onClick={onOpenPacks} style={smallBtnStyle}>Pack matrix</button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function BenchmarkActionCard({ title, detail, action, onAction, disabled }: {
+  title: string;
+  detail: string;
+  action: string;
+  onAction: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div style={{ padding: 10, borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <div style={{ fontSize: 13, fontWeight: 750, color: 'var(--text-primary)' }}>{title}</div>
+      <div style={{ marginTop: 5, minHeight: 34, fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{detail}</div>
+      <button type="button" onClick={onAction} disabled={disabled} style={{ ...primaryActionStyle, width: '100%', marginTop: 8 }}>
+        {action}
+      </button>
     </div>
   );
 }
@@ -2609,6 +2931,17 @@ const filterBtnStyleInactive: React.CSSProperties = {
 const smallBtnStyle: React.CSSProperties = {
   background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
   borderRadius: 4, padding: '4px 10px', fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer',
+};
+
+const primaryActionStyle: React.CSSProperties = {
+  background: 'var(--accent-primary)',
+  border: '1px solid var(--accent-primary)',
+  borderRadius: 6,
+  padding: '6px 10px',
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--accent-on-primary, white)',
+  cursor: 'pointer',
 };
 
 const pillStyle: React.CSSProperties = {

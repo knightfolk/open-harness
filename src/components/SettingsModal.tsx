@@ -1152,6 +1152,32 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | keyof typeof MODEL_CATEGORY_META>('all');
   const [accessOnly, setAccessOnly] = useState(false);
+  const [audit, setAudit] = useState<api.ModelCatalogAuditReport | null>(null);
+  const [auditStatus, setAuditStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+
+  const refreshAudit = useCallback(async () => {
+    setAuditStatus('loading');
+    try {
+      await api.refreshModelMetadata();
+      const report = await api.getModelCatalogAudit();
+      setAudit(report);
+      setAuditStatus('idle');
+    } catch {
+      setAuditStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getModelCatalogAudit({ openRouter: false })
+      .then((report) => {
+        if (!cancelled) setAudit(report);
+      })
+      .catch(() => {
+        if (!cancelled) setAuditStatus('error');
+      });
+    return () => { cancelled = true; };
+  }, [providers]);
 
   const categoryCounts = TOP_MODEL_CATALOG.reduce<Record<string, number>>((acc, card) => {
     const category = modelBestCategory(card);
@@ -1219,13 +1245,32 @@ function ModelLibraryPane({ providers }: { providers: ProviderConfig[] }) {
           {accessOnly ? <Check size={11} aria-hidden="true" /> : <Bot size={11} aria-hidden="true" />}
           My Models
         </button>
+        <button
+          className="settings-mini-button"
+          type="button"
+          onClick={() => { void refreshAudit(); }}
+          disabled={auditStatus === 'loading'}
+          title="Refresh model metadata and audit catalog coverage"
+          aria-label="Refresh model metadata and audit catalog coverage"
+        >
+          {auditStatus === 'loading' ? <Loader size={11} aria-hidden="true" className="spin" /> : <RefreshCw size={11} aria-hidden="true" />}
+          Refresh
+        </button>
       </div>
 
-      <div className="model-library-summary" role="status" aria-label={`Model library summary: ${TOP_MODEL_CATALOG.length} catalog cards, ${providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length} enabled provider models, updated ${MODEL_CATALOG_UPDATED_AT}`}>
+      <div className="model-library-summary" role="status" aria-label={`Model library summary: ${TOP_MODEL_CATALOG.length} catalog cards, ${providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length} enabled provider models, ${audit?.missingCatalogCards.length || 0} missing catalog cards, ${audit?.metadataDisagreements.length || 0} metadata differences, ${audit?.suggestedCatalogCards.length || 0} draft cards, updated ${MODEL_CATALOG_UPDATED_AT}`}>
         <div><strong>{TOP_MODEL_CATALOG.length}</strong> catalog cards</div>
         <div><strong>{providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length}</strong> enabled provider models</div>
+        <div><strong>{audit?.missingCatalogCards.length ?? '...'}</strong> missing cards</div>
+        <div><strong>{audit?.metadataDisagreements.length ?? '...'}</strong> metadata diffs</div>
+        <div><strong>{audit?.suggestedCatalogCards.length ?? '...'}</strong> draft cards</div>
         <div>Updated {MODEL_CATALOG_UPDATED_AT}</div>
       </div>
+      {auditStatus === 'error' && (
+        <div className="settings-inline-error" role="status">
+          Model metadata audit is unavailable.
+        </div>
+      )}
 
       <div className="model-category-legend" role="group" aria-label="Model library category filters">
         {Object.entries(MODEL_CATEGORY_META).map(([id, meta]) => (
@@ -1787,8 +1832,8 @@ function ModelList({ models, providerId, activeModel, onToggle }: any) {
         Models ({models.length})
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {models.map((model: any) => (
-          <div key={model.id} className="prov-model-row" title={modelCatalogTooltip(model.id, providerId)}>
+        {models.map((model: any, index: number) => (
+          <div key={`${providerId}:${model.id}:${index}`} className="prov-model-row" title={modelCatalogTooltip(model.id, providerId)}>
             <div className="prov-model-info">
               <span className="prov-model-name">{model.name}</span>
               <span className="prov-model-id">{model.id}</span>

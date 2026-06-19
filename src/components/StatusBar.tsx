@@ -192,14 +192,37 @@ export function StatusBar({
   return (
     <div className="status-bar">
       {/* Connection status */}
-      <div className="status-bar-item status-bar-connection" title={connectionTitle}>
-        {connected ? (
-          <Wifi size={12} style={{ color: 'var(--accent-success)' }} />
-        ) : (
-          <WifiOff size={12} style={{ color: 'var(--accent-error)' }} />
-        )}
-        {connectionLabel}
-      </div>
+      {isAuto && onOpenSettings ? (
+        <button
+          type="button"
+          className="status-bar-item status-bar-connection status-bar-connection-btn"
+          title="Open Auto-Router settings"
+          aria-label={`${connectionLabel}. Open Auto-Router settings`}
+          onClick={() => {
+            setModelPickerOpen(false);
+            setTrustPickerOpen(false);
+            setTerminalOpen(false);
+            setSearchQuery('');
+            onOpenSettings('auto-router');
+          }}
+        >
+          {connected ? (
+            <Wifi size={12} style={{ color: 'var(--accent-success)' }} />
+          ) : (
+            <WifiOff size={12} style={{ color: 'var(--accent-error)' }} />
+          )}
+          {connectionLabel}
+        </button>
+      ) : (
+        <div className="status-bar-item status-bar-connection" title={connectionTitle}>
+          {connected ? (
+            <Wifi size={12} style={{ color: 'var(--accent-success)' }} />
+          ) : (
+            <WifiOff size={12} style={{ color: 'var(--accent-error)' }} />
+          )}
+          {connectionLabel}
+        </div>
+      )}
 
       <div className="status-bar-separator" />
 
@@ -300,17 +323,9 @@ export function StatusBar({
         <button
           ref={modelBtnRef}
           className={`status-bar-item status-bar-model-btn ${isAuto ? 'status-bar-model-btn-auto' : ''}`}
-          title={isAuto ? 'Open Auto-Router settings' : modelCatalogTooltip(activeModel, providerName)}
-          aria-label={isAuto ? 'Open Auto-Router settings' : `Choose model, currently ${activeModel}`}
+          title={isAuto ? 'Choose model, currently Auto' : modelCatalogTooltip(activeModel, providerName)}
+          aria-label={isAuto ? 'Choose model, currently Auto' : `Choose model, currently ${activeModel}`}
           onClick={() => {
-            if (isAuto && onOpenSettings) {
-              setModelPickerOpen(false);
-              setTrustPickerOpen(false);
-              setTerminalOpen(false);
-              setSearchQuery('');
-              onOpenSettings('auto-router');
-              return;
-            }
             const nextOpen = !modelPickerOpen;
             setModelPickerOpen(nextOpen);
             setTrustPickerOpen(false);

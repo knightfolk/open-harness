@@ -68,6 +68,7 @@ import { deletePersonalizationProfile, formatPersonalizationForPrompt, getPerson
 import { getReleaseNotes } from './releaseNotes';
 import { buildCrashReportBundle, getCrashReportSummary } from './crashReports';
 import { appendVisualContextToContent, normalizeVisualContext, type VisualContext } from './visionFallback';
+import { applyOfficialMetadata, buildModelCatalogAuditReport, enrichModelsFromSecondarySources, fetchOpenRouterModelMetadata } from './modelMetadata';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -1931,7 +1932,7 @@ app.post('/api/providers/:id/models', async (req, res) => {
     const existingMap = new Map(provider.models.map((m) => [m.id, m]));
     const merged = fetchedModels.map((fm) => {
       const existing = existingMap.get(fm.id);
-      return { id: fm.id, name: fm.name, enabled: existing ? existing.enabled : true };
+      return { ...fm, enabled: existing ? existing.enabled : true };
     });
 
     // Persist to config
@@ -2192,6 +2193,7 @@ app.get('/api/models', (_req, res) => {
         .map((m) => {
           const family = detectModelFamily(m.id);
           const profile = getModelConfig(m.id);
+          const hydrated = applyOfficialMetadata(m, p);
           return {
             id: m.id,
             name: m.name,
@@ -2199,11 +2201,72 @@ app.get('/api/models', (_req, res) => {
             providerName: p.name,
             type: p.type,
             family,
-            contextWindowTokens: profile.contextWindowTokens,
+            contextWindowTokens: hydrated.contextWindowTokens || profile.contextWindowTokens,
+            maxOutputTokens: hydrated.maxOutputTokens || profile.recommendedMaxTokens,
+            inputCostPerMTok: hydrated.inputCostPerMTok,
+            outputCostPerMTok: hydrated.outputCostPerMTok,
+            supportsImages: hydrated.supportsImages,
+            supportsTools: hydrated.supportsTools,
+            metadataSource: hydrated.metadataSource || 'static-profile',
+            metadataUpdatedAt: hydrated.metadataUpdatedAt,
+            metadataNotes: hydrated.metadataNotes || [],
           };
         })
     );
   res.json(models);
+});
+
+app.post('/api/models/metadata/refresh', async (_req, res) => {
+  const result = await refreshConfiguredModelMetadata();
+  res.json({
+    ok: true,
+    ...result,
+  });
+});
+
+async function refreshConfiguredModelMetadata(): Promise<{ refreshedAt: string; providers: Array<{ providerId: string; models: number }>; modelCount: number }> {
+  let modelCount = 0;
+  const refreshedProviders: Array<{ providerId: string; models: number }> = [];
+
+  for (const provider of appConfig.providers) {
+    if (!Array.isArray(provider.models) || provider.models.length === 0) continue;
+    const enriched = await enrichModelsFromSecondarySources(provider.models, provider);
+    provider.models = enriched.map((model) => ({ ...model, enabled: model.enabled !== false }));
+    modelCount += provider.models.length;
+    refreshedProviders.push({ providerId: provider.id, models: provider.models.length });
+  }
+
+  saveConfig(appConfig);
+  return {
+    refreshedAt: new Date().toISOString(),
+    providers: refreshedProviders,
+    modelCount,
+  };
+}
+
+function scheduleStartupModelMetadataRefresh(delayMs = 2500): void {
+  setTimeout(() => {
+    void refreshConfiguredModelMetadata()
+      .then((result) => {
+        console.log(`[models] Background metadata refresh complete: ${result.modelCount} model(s), ${result.providers.length} provider(s)`);
+      })
+      .catch((err: any) => {
+        console.log(`[models] Background metadata refresh skipped: ${err?.message || err}`);
+      });
+  }, delayMs);
+}
+
+app.get('/api/models/catalog/audit', async (req, res) => {
+  const includeOpenRouter = req.query.openRouter !== 'false';
+  let openRouterMetadata = null;
+  if (includeOpenRouter) {
+    try {
+      openRouterMetadata = await fetchOpenRouterModelMetadata(AbortSignal.timeout(5000));
+    } catch {
+      openRouterMetadata = null;
+    }
+  }
+  res.json(buildModelCatalogAuditReport(appConfig, openRouterMetadata));
 });
 
 // ── Filesystem Routes ──────────────────────────────────
@@ -6961,6 +7024,7 @@ app.listen(PORT, SERVER_LISTEN_HOST, () => {
     console.log(`⚠  No provider found for model ${_activeModel} — using local fallback`);
   }
   console.log(`✓ Config loaded from ${getConfigPath()}`);
+  scheduleStartupModelMetadataRefresh();
 
   // Auto-start Docker MCP gateway via stdio (keeps process alive as child)
   try {

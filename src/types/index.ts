@@ -335,6 +335,15 @@ export interface ProviderModel {
   id: string;
   name: string;
   enabled: boolean;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  inputCostPerMTok?: number;
+  outputCostPerMTok?: number;
+  supportsImages?: boolean;
+  supportsTools?: boolean;
+  metadataSource?: string;
+  metadataUpdatedAt?: string;
+  metadataNotes?: string[];
 }
 
 export interface ProviderConfig {

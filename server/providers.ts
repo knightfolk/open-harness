@@ -2,6 +2,7 @@
  * Provider connection testing and model fetching
  */
 import { providerAuthToken, type StoredProvider } from './config';
+import { enrichModelsFromSecondarySources, normalizeModelMetadata, type RawFetchedModel } from './modelMetadata';
 
 // ── Test provider connection ───────────────────────────
 
@@ -73,6 +74,15 @@ export async function testProviderConnection(provider: StoredProvider): Promise<
 export interface FetchedModel {
   id: string;
   name: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  inputCostPerMTok?: number;
+  outputCostPerMTok?: number;
+  supportsImages?: boolean;
+  supportsTools?: boolean;
+  metadataSource?: string;
+  metadataUpdatedAt?: string;
+  metadataNotes?: string[];
 }
 
 export async function fetchProviderModels(provider: StoredProvider): Promise<FetchedModel[]> {
@@ -102,7 +112,8 @@ export async function fetchProviderModels(provider: StoredProvider): Promise<Fet
     }
 
     const data = await response.json() as any;
-    return parseModelsResponse(data, provider);
+    const models = parseModelsResponse(data, provider);
+    return enrichModelsFromSecondarySources(models, provider);
   } catch (err: any) {
     throw new Error(`Failed to fetch models: ${err.message}`);
   }
@@ -146,14 +157,15 @@ function buildModelsURL(provider: StoredProvider): string {
   return `${base}/models`;
 }
 
-function parseModelsResponse(data: any, _provider: StoredProvider): FetchedModel[] {
+function parseModelsResponse(data: any, _provider: StoredProvider): RawFetchedModel[] {
   // OpenAI-compatible format: { data: [{ id, object, ... }] }
   if (Array.isArray(data?.data)) {
     return data.data
       .filter((m: any) => m.id)
       .map((m: any) => ({
         id: m.id,
-        name: m.id, // Use ID as name; can be refined later
+        name: m.name || m.id,
+        ...normalizeModelMetadata(m, 'provider-models-api'),
       }))
       .sort((a: FetchedModel, b: FetchedModel) => b.id.localeCompare(a.id));
   }
@@ -165,6 +177,7 @@ function parseModelsResponse(data: any, _provider: StoredProvider): FetchedModel
       .map((m: any) => ({
         id: m.name.split('/').pop() || m.name,
         name: m.displayName || m.name.split('/').pop() || m.name,
+        ...normalizeModelMetadata(m, 'provider-models-api'),
       }))
       .sort((a: FetchedModel, b: FetchedModel) => b.id.localeCompare(a.id));
   }
@@ -176,6 +189,7 @@ function parseModelsResponse(data: any, _provider: StoredProvider): FetchedModel
       .map((m: any) => ({
         id: m.id || m.name,
         name: m.id || m.name,
+        ...normalizeModelMetadata(m, 'provider-models-api'),
       }))
       .sort((a: FetchedModel, b: FetchedModel) => b.id.localeCompare(a.id));
   }

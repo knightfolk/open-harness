@@ -35,6 +35,7 @@
     "test:premier-layout-shell": "tsx scripts/test-premier-layout-shell.ts",
     "test:premier-agent-detail": "tsx scripts/test-premier-agent-detail.ts",
     "test:premier-model-harness": "tsx scripts/test-premier-model-harness.ts",
+    "test:model-metadata-refresh": "tsx scripts/test-model-metadata-refresh.ts",
     "test:premier-theme-textures": "tsx scripts/test-premier-theme-textures.ts",
     "test:premier-review-changes": "tsx scripts/test-premier-review-changes.ts",
     "test:premier-baseline-manifest": "tsx scripts/test-premier-baseline-manifest.ts",
