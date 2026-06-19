@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, renameSync } from 'fs';
-import { join } from 'path';
+import { basename, join, relative, resolve } from 'path';
 import { homedir } from 'os';
 import { redactSecrets } from './sectionRedaction';
 import type { SessionKind } from './sessionKinds';
@@ -62,13 +62,25 @@ function redactPersistedValue<T>(value: T): T {
 // ── Storage paths ──────────────────────────────────────
 
 const SESSIONS_DIR = join(homedir(), '.openharness', 'sessions');
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function ensureDir() {
   if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
 }
 
+export function isValidSessionId(id: string): boolean {
+  return typeof id === 'string' && SESSION_ID_RE.test(id);
+}
+
 function sessionPath(id: string): string {
-  return join(SESSIONS_DIR, `${id}.json`);
+  if (!isValidSessionId(id)) throw new Error('Invalid session id');
+  const base = resolve(SESSIONS_DIR);
+  const target = resolve(base, `${id}.json`);
+  const rel = relative(base, target);
+  if (rel === '..' || rel.startsWith('..') || rel === '' || basename(target) !== `${id}.json`) {
+    throw new Error('Invalid session path');
+  }
+  return target;
 }
 
 // ── Save ───────────────────────────────────────────────
@@ -84,6 +96,7 @@ export function saveSession(session: PersistedSession): void {
 // ── Load ───────────────────────────────────────────────
 
 export function loadSession(id: string): PersistedSession | null {
+  if (!isValidSessionId(id)) return null;
   const path = sessionPath(id);
   if (!existsSync(path)) return null;
   try {
@@ -97,7 +110,7 @@ export function loadSession(id: string): PersistedSession | null {
 
 export function loadAllSessions(): PersistedSession[] {
   ensureDir();
-  const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+  const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json') && isValidSessionId(f.slice(0, -5)));
   const sessions: PersistedSession[] = [];
   for (const file of files) {
     try {
@@ -111,6 +124,7 @@ export function loadAllSessions(): PersistedSession[] {
 // ── Delete ─────────────────────────────────────────────
 
 export function deleteSession(id: string): boolean {
+  if (!isValidSessionId(id)) return false;
   const path = sessionPath(id);
   if (!existsSync(path)) return false;
   try {

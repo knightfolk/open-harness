@@ -99,6 +99,8 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   const asksProductQa = /\b(?:product owner|game state|playtest|readiness verdict|qa pass|prototype milestone|implemented feature map|human playtest|next-iteration|next iteration)\b/.test(intentLower);
   const asksInformationalRunQuestion = /^\s*(?:how|what|where|which)\b[\s\S]{0,120}\brun\b/.test(intentLower);
   const asksInformationalCreationQuestion = /\b(?:how|what|where|which|explain|describe)\b[\s\S]{0,120}\b(?:build|make|create|scaffold|prototype|generate)\b/.test(intentLower);
+  const asksAdvisoryChange = /\b(?:suggest|recommend|advise|what should|how should|how would|what would)\b[\s\S]{0,120}\b(?:update|change|modify|refactor|fix|improve|add|remove)\b/.test(intentLower)
+    && !/\b(?:apply|implement|make the change|change it|update it|modify it|patch it|edit it|do it)\b/.test(intentLower);
   const asksExplicitExecution = !asksInformationalRunQuestion && (
     /\bexecute[-\s]?mode\b/.test(intentLower)
     || /\borchestration mode:\s*execute\b/.test(intentLower)
@@ -115,7 +117,7 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   );
   const asksExecute = asksExplicitExecution
     || asksCreateArtifact
-    || /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower);
+    || (!asksAdvisoryChange && /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower));
   const asksPlan = /\b(plan|planning mode|roadmap|design|architect|architecture|strategy|proposal|approach)\b/.test(intentLower);
   const asksTeamPlan = asksPlan
     && /\b(spawn|team|agents?|participants?|planning room|compare notes?|consensus|single plan|guiding document)\b/.test(intentLower);
@@ -141,8 +143,8 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   else if (asksTeamPlan) mode = 'plan';
   else if (asksCompare) mode = 'compare';
   else if (asksProjectOverview) mode = 'investigate';
-  else if (asksPlan) mode = 'plan';
   else if (asksReview && !simpleQuestion) mode = 'investigate';
+  else if (asksPlan) mode = 'plan';
 
   let role: HarnessRole = 'coder';
   if (mode === 'compare') role = 'reviewer';

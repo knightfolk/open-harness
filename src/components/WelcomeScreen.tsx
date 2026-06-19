@@ -15,7 +15,7 @@ export function WelcomeScreen({ onSuggestionClick }: Props) {
       </div>
       <h1 className="welcome-title" style={{ animation: 'slideUp 300ms ease-out 80ms both' }}>OpenHarness</h1>
       <p className="welcome-subtitle" style={{ animation: 'slideUp 300ms ease-out 160ms both' }}>
-        An open-source, agent-first harness for coding, routing, and evaluation.
+        A source-available, agent-first harness for coding, routing, and evaluation.
         Ask anything — write code, debug issues, inspect repos, and coordinate agents.
       </p>
       <div className="welcome-suggestions">

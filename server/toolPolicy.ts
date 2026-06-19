@@ -1,5 +1,5 @@
 // ── Types ──────────────────────────────────────────────
-import { isAbsolute, relative, resolve } from 'path';
+import path, { isAbsolute, resolve } from 'path';
 import { existsSync, realpathSync } from 'fs';
 
 
@@ -19,6 +19,18 @@ export interface ToolPolicyResult {
 export interface CommandRisk {
   level: 'safe' | 'caution' | 'dangerous';
   reason?: string;
+}
+
+export const ALL_TRUST_MODES: TrustMode[] = [
+  'chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local',
+];
+
+export function isTrustMode(value: unknown): value is TrustMode {
+  return typeof value === 'string' && (ALL_TRUST_MODES as string[]).includes(value);
+}
+
+export function normalizeTrustMode(value: unknown, fallback: TrustMode = 'workspace-write'): TrustMode {
+  return isTrustMode(value) ? value : fallback;
 }
 
 // ── Tool categories ────────────────────────────────────
@@ -134,15 +146,28 @@ export function isPathWithin(candidate: string, workspace: string): boolean {
     ? resolve(candidate)
     : resolve(resolvedWorkspace, candidate);
   const resolvedCandidate = realpathExistingAncestor(rawCandidate);
-  if (resolvedCandidate === resolvedWorkspace) return true;
-  const rel = relative(resolvedWorkspace, resolvedCandidate);
-  // `relative` returns a path that begins with `..` for any candidate
-  // that escapes the workspace, or an absolute path if the two arguments
-  // landed on different drives. Either case is outside.
-  if (rel === '' || rel.startsWith('..' + '/') || rel === '..' || isAbsolute(rel)) {
-    return false;
-  }
-  return true;
+  return isResolvedPathWithin(resolvedCandidate, resolvedWorkspace);
+}
+
+type PathLike = Pick<typeof path, 'isAbsolute' | 'relative' | 'resolve' | 'sep'>;
+
+export function isPathWithinForPlatform(candidate: string, workspace: string, pathApi: PathLike): boolean {
+  if (typeof candidate !== 'string' || typeof workspace !== 'string') return false;
+  if (candidate.length === 0 || workspace.length === 0) return false;
+  const resolvedWorkspace = pathApi.resolve(workspace);
+  const resolvedCandidate = pathApi.isAbsolute(candidate)
+    ? pathApi.resolve(candidate)
+    : pathApi.resolve(resolvedWorkspace, candidate);
+  return isResolvedPathWithin(resolvedCandidate, resolvedWorkspace, pathApi);
+}
+
+function isResolvedPathWithin(candidate: string, workspace: string, pathApi: PathLike = path): boolean {
+  if (candidate === workspace) return true;
+  const rel = pathApi.relative(workspace, candidate);
+  return rel !== ''
+    && rel !== '..'
+    && !rel.startsWith('..' + pathApi.sep)
+    && !pathApi.isAbsolute(rel);
 }
 
 function realpathExistingAncestor(path: string): string {
@@ -165,6 +190,7 @@ function realpathExistingAncestor(path: string): string {
 }
 
 export function isPathAllowed(filePath: string, trustMode: TrustMode, workingDir?: string): ToolPolicyResult {
+  if (!isTrustMode(trustMode)) return { allowed: false, reason: 'Invalid trust mode' };
   if (trustMode === 'full-local') return { allowed: true };
   if (trustMode === 'workspace-write' || trustMode === 'ask-before-write') {
     if (!workingDir) return { allowed: false, reason: 'No working directory set' };
@@ -179,10 +205,11 @@ export function isPathAllowed(filePath: string, trustMode: TrustMode, workingDir
   if (trustMode === 'read-only' || trustMode === 'chat-only') {
     return { allowed: false, reason: `Write operations not allowed in ${trustMode} mode` };
   }
-  return { allowed: true };
+  return { allowed: false, reason: 'Invalid trust mode' };
 }
 
 export function isReadPathAllowed(filePath: string, trustMode: TrustMode, workingDir?: string): ToolPolicyResult {
+  if (!isTrustMode(trustMode)) return { allowed: false, reason: 'Invalid trust mode' };
   if (trustMode === 'chat-only') {
     return { allowed: false, reason: 'Read operations not allowed in chat-only mode' };
   }
@@ -250,6 +277,9 @@ export function checkCommandPolicy(
   command: string,
   trustMode: TrustMode,
 ): ToolPolicyResult {
+  if (!isTrustMode(trustMode)) {
+    return { allowed: false, reason: 'Invalid trust mode' };
+  }
   if (trustMode === 'chat-only') {
     return { allowed: false, reason: 'Terminal commands not allowed in chat-only mode' };
   }
@@ -281,6 +311,9 @@ export function checkToolActionPolicy(
   trustMode: TrustMode,
   workingDir?: string,
 ): ToolPolicyResult {
+  if (!isTrustMode(trustMode)) {
+    return { allowed: false, reason: 'Invalid trust mode' };
+  }
   if (trustMode === 'chat-only') {
     return { allowed: false, reason: 'Tools not allowed in chat-only mode' };
   }
@@ -354,7 +387,3 @@ export function getTrustModeColor(mode: TrustMode): string {
   };
   return colors[mode] || '#6b7280';
 }
-
-export const ALL_TRUST_MODES: TrustMode[] = [
-  'chat-only', 'read-only', 'ask-before-write', 'workspace-write', 'full-local',
-];

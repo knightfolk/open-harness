@@ -1,11 +1,11 @@
 # OpenHarness
 
 <p align="center">
-  <img src="public/openharness-readme-banner.svg" alt="OpenHarness banner: open-source, agent-first, optimized harness" width="100%">
+  <img src="public/openharness-readme-banner.svg" alt="OpenHarness banner: source-available, agent-first, optimized harness" width="100%">
 </p>
 
 <p align="center">
-  <strong>An open-source, agent-first, optimized harness for routing models, running agents, inspecting proof, and learning which providers perform best.</strong>
+  <strong>A source-available, agent-first, optimized harness for routing models, running agents, inspecting proof, and learning which providers perform best.</strong>
 </p>
 
 OpenHarness is an agent-first desktop harness for people who work across multiple AI models, providers, tools, and coding agents. It keeps the chat surface, model routing, provider health, MCP tools, agent traces, eval feedback, and review evidence in one dense workspace so the harness is visible while it works.
@@ -75,7 +75,7 @@ Auto-Router uses a classifier model to choose from active candidates, then layer
 | **Model Lab** | Runs prompt suites across model sets and produces recommendations that can inform role defaults and router candidates. |
 | **Routing Learning** | Tracks prompt strategy evidence, tool reliability, recovery paths, eval proof status, and source-tagged routing recommendations. |
 | **Review Surfaces** | Keeps artifacts, patch review, validation evidence, confidence signals, and next actions inspectable without crowding the main answer. |
-| **Desktop Shell** | Runs as a Vite web app or an Electron desktop app for local workflows. |
+| **Desktop Shell** | Runs as a Vite web app or the canonical Electron desktop app for local workflows. |
 
 ## Typical Workflow
 
@@ -109,6 +109,8 @@ For the Electron shell:
 ```bash
 npm run electron
 ```
+
+Electron is the V1 desktop release surface. The Swift/WKWebView prototype under `OpenHarnessApp/` is retained only as a native-shell experiment and regression fixture unless a future plan explicitly reactivates it; see [Desktop Surface Decision](docs/DESKTOP_SURFACE_DECISION.md).
 
 ## Configuration
 
@@ -231,7 +233,7 @@ The setup wizard defaults to system appearance, with dark mode as the safe fallb
 
 ## Packaging
 
-Current prerelease: `1.0.0-alpha.update.2`.
+Current prerelease: `1.0.0-alpha.update.3`.
 
 ```bash
 npm run pack

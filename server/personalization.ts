@@ -36,6 +36,7 @@ const FALLBACK_KEY_PATH = join(BASE_DIR, 'personalization.key');
 const KEYCHAIN_SERVICE = 'OpenHarness Personalization';
 const KEYCHAIN_ACCOUNT = 'local-profile';
 const MAX_SUMMARY_CHARS = 1200;
+let lastLoadError: string | null = null;
 
 export function emptyPersonalizationProfile(): PersonalizationProfile {
   return {
@@ -58,22 +59,31 @@ export function getPersonalizationProfilePath(): string {
   return PROFILE_PATH;
 }
 
+export function getPersonalizationLoadError(): string | null {
+  return lastLoadError;
+}
+
 export function loadPersonalizationProfile(): PersonalizationProfile {
+  lastLoadError = null;
   if (!existsSync(PROFILE_PATH)) return emptyPersonalizationProfile();
   try {
     const envelope = JSON.parse(readFileSync(PROFILE_PATH, 'utf-8')) as EncryptedProfileEnvelope;
     if (envelope.schemaVersion !== 1 || envelope.algorithm !== 'aes-256-gcm') {
+      lastLoadError = 'Unsupported personalization profile format.';
       return emptyPersonalizationProfile();
     }
-    const key = getEncryptionKey();
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64'));
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
-      decipher.final(),
-    ]).toString('utf-8');
-    return normalizePersonalizationProfile(JSON.parse(plaintext));
-  } catch {
+    for (const key of getEncryptionKeyCandidates()) {
+      try {
+        return normalizePersonalizationProfile(JSON.parse(decryptEnvelope(envelope, key)));
+      } catch {
+        // Try the next key candidate so profiles saved with the legacy fallback
+        // derivation can still be recovered after the fixed derivation lands.
+      }
+    }
+    lastLoadError = 'Could not decrypt personalization profile.';
+    return emptyPersonalizationProfile();
+  } catch (err: any) {
+    lastLoadError = err?.message || 'Could not load personalization profile.';
     return emptyPersonalizationProfile();
   }
 }
@@ -173,19 +183,33 @@ function cleanList(value: unknown): string[] {
 }
 
 function getEncryptionKey(): Buffer {
+  return getEncryptionKeyCandidates()[0];
+}
+
+function getEncryptionKeyCandidates(): Buffer[] {
   const testKey = process.env.OPENHARNESS_PERSONALIZATION_TEST_KEY;
-  if (testKey) return createHash('sha256').update(testKey).digest();
+  if (testKey) return [createHash('sha256').update(testKey).digest()];
 
   const envKey = process.env.OPENHARNESS_PERSONALIZATION_KEY;
-  if (envKey) return createHash('sha256').update(envKey).digest();
+  if (envKey) return [createHash('sha256').update(envKey).digest()];
 
   const keychainKey = getOrCreateMacKeychainSecret();
-  if (keychainKey) return createHash('sha256').update(keychainKey).digest();
+  if (keychainKey) return [createHash('sha256').update(keychainKey).digest()];
 
-  return getOrCreateFallbackKey();
+  return getOrCreateFallbackKeys();
+}
+
+function decryptEnvelope(envelope: EncryptedProfileEnvelope, key: Buffer): string {
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
+    decipher.final(),
+  ]).toString('utf-8');
 }
 
 function getOrCreateMacKeychainSecret(): string | null {
+  if (process.env.OPENHARNESS_PERSONALIZATION_DISABLE_KEYCHAIN === '1') return null;
   if (platform() !== 'darwin') return null;
   try {
     return execFileSync('security', ['find-generic-password', '-w', '-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT], {
@@ -205,12 +229,19 @@ function getOrCreateMacKeychainSecret(): string | null {
   }
 }
 
-function getOrCreateFallbackKey(): Buffer {
+function getOrCreateFallbackKeys(): Buffer[] {
   if (!existsSync(BASE_DIR)) mkdirSync(BASE_DIR, { recursive: true });
   if (existsSync(FALLBACK_KEY_PATH)) {
-    return createHash('sha256').update(readFileSync(FALLBACK_KEY_PATH)).digest();
+    const stored = readFileSync(FALLBACK_KEY_PATH);
+    const raw = Buffer.from(stored.toString('utf-8').trim(), 'base64');
+    if (raw.length === 32) {
+      const primary = createHash('sha256').update(raw).digest();
+      const legacy = createHash('sha256').update(stored).digest();
+      return primary.equals(legacy) ? [primary] : [primary, legacy];
+    }
+    return [createHash('sha256').update(stored).digest()];
   }
   const key = randomBytes(32);
   writeFileSync(FALLBACK_KEY_PATH, key.toString('base64'), { encoding: 'utf-8', mode: 0o600 });
-  return createHash('sha256').update(key).digest();
+  return [createHash('sha256').update(key).digest()];
 }

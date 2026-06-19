@@ -1,10 +1,12 @@
 import type express from 'express';
 import type { StoredConfig, StoredMCPServer } from '../config';
+import type { ApprovalAction } from '../actionApprovals';
 import { removeMCPServer, upsertMCPServer } from '../config';
 import { CURATED_MCP_SERVERS, describePermissions, findCuratedServer, validateAllCuratedServers } from '../curatedMcp';
 import { checkDockerReadiness } from '../dockerReadiness';
 import { dockerDesktopEnv } from '../dockerDesktopEnv';
 import { mcpManager, parseStdioEndpoint } from '../mcp';
+import { sendRouteError } from '../routeSupport';
 import { checkToolActionPolicy, filterToolsForTrustMode, type TrustMode } from '../toolPolicy';
 import { spawn } from 'child_process';
 
@@ -15,11 +17,14 @@ interface McpRouteDeps {
   setConfig: (config: StoredConfig) => void;
   saveConfig: (config: StoredConfig) => void;
   ensureLocalMutationWithControl: (req: express.Request) => ControlResult;
+  ensureAskBeforeWriteApproval: (req: express.Request, action: ApprovalAction) => ControlResult & { approval?: unknown };
   trustedWorkspaceFromRequest: (req: express.Request) => string;
   redactToolResult: (value: any) => any;
 }
 
 const DOCKER_MCP_ARGS = ['mcp', 'gateway', 'run', '--transport', 'stdio', '--profile', 'ai_coding'];
+const MCP_WRITE_TOOLS = new Set(['write-file', 'create-file', 'delete-file', 'move-file', 'edit-file', 'apply-patch']);
+const MCP_COMMAND_TOOLS = new Set(['exec-command', 'run-command', 'shell-exec']);
 
 async function startDockerMcpGateway() {
   const child = spawn('docker', DOCKER_MCP_ARGS, {
@@ -65,6 +70,40 @@ export function validateMcpEndpoint(endpoint: unknown): { ok: true } | { ok: fal
   return { ok: true };
 }
 
+export function validateCustomStdioTrust(endpoint: unknown, trustMode: TrustMode): { ok: true } | { ok: false; status: number; error: string } {
+  if (typeof endpoint !== 'string' || !endpoint.trim().toLowerCase().startsWith('stdio://')) {
+    return { ok: true };
+  }
+  if (trustMode !== 'full-local') {
+    return { ok: false, status: 403, error: 'Custom stdio MCP servers require full-local trust mode' };
+  }
+  return { ok: true };
+}
+
+function approvalActionForMcpTool(serverId: string, toolName: string, args: Record<string, any>, workingDir: string): ApprovalAction | null {
+  const normalized = toolName.replace(/_/g, '-');
+  if (MCP_COMMAND_TOOLS.has(normalized)) {
+    return {
+      kind: 'command',
+      route: `/api/mcp/${serverId}/tools/${toolName}`,
+      description: `Run MCP command tool ${toolName}`,
+      cwd: String(args.cwd || args.workingDir || args.working_directory || workingDir),
+      command: String(args.command || args.cmd || ''),
+    };
+  }
+  if (MCP_WRITE_TOOLS.has(normalized)) {
+    const targetPath = args.path || args.file_path || args.filePath || args.dir || args.root;
+    return {
+      kind: 'write',
+      route: `/api/mcp/${serverId}/tools/${toolName}`,
+      description: `Run MCP write tool ${toolName}`,
+      cwd: workingDir,
+      paths: targetPath ? [String(targetPath)] : [],
+    };
+  }
+  return null;
+}
+
 function maskedMcpServer(server: StoredMCPServer) {
   return {
     ...server,
@@ -79,7 +118,7 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
       const results = await validateAllCuratedServers();
       res.json({ results, ok: results.every((r) => r.ok) });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Validation failed' });
+      sendRouteError(res, { route: 'GET /api/mcp/curated/validate', status: 500, fallback: 'Validation failed', err });
     }
   });
 
@@ -96,7 +135,7 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
       mcpManager.startWatchdog(30_000);
       res.json({ ok: true, message: 'Watchdog restarted' });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to restart watchdog' });
+      sendRouteError(res, { route: 'POST /api/mcp/watchdog/restart', status: 500, fallback: 'Failed to restart watchdog', err });
     }
   });
 
@@ -127,6 +166,10 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
     const endpointValidation = validateMcpEndpoint(endpoint);
     if (!endpointValidation.ok) {
       return res.status(endpointValidation.status).json({ error: endpointValidation.error });
+    }
+    const trustValidation = validateCustomStdioTrust(endpoint, deps.getConfig().trustMode as TrustMode);
+    if (!trustValidation.ok) {
+      return res.status(trustValidation.status).json({ error: trustValidation.error });
     }
     const server: StoredMCPServer = {
       id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -184,11 +227,16 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
     if (!toolPolicy.allowed) {
       return res.status(403).json({ error: toolPolicy.reason || 'Tool call not allowed' });
     }
+    const approvalAction = approvalActionForMcpTool(serverId, toolName, args, workingDir);
+    if (approvalAction) {
+      const approval = deps.ensureAskBeforeWriteApproval(req, approvalAction);
+      if (!approval.ok) return res.status(approval.status).json({ error: approval.error, approval: approval.approval });
+    }
     try {
       const result = await mcpManager.callTool(serverId, toolName, args);
       res.json({ result: deps.redactToolResult(result) });
     } catch (err: any) {
-      res.status(502).json({ error: err.message });
+      sendRouteError(res, { route: 'POST /api/mcp/:serverId/tools/:toolName', status: 502, fallback: 'MCP tool call failed', err });
     }
   });
 
@@ -204,6 +252,10 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
       if (!endpointValidation.ok) {
         return res.status(endpointValidation.status).json({ error: endpointValidation.error });
       }
+      const trustValidation = validateCustomStdioTrust(server!.endpoint, appConfig.trustMode as TrustMode);
+      if (!trustValidation.ok) {
+        return res.status(trustValidation.status).json({ error: trustValidation.error });
+      }
     }
     try {
       const client = serverId === 'docker-mcp'
@@ -216,7 +268,7 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
         toolCount: client.getTools().length,
       });
     } catch (err: any) {
-      res.status(502).json({ error: err.message });
+      sendRouteError(res, { route: 'POST /api/mcp/:serverId/start', status: 502, fallback: 'Failed to start MCP server', err });
     }
   });
 
@@ -241,6 +293,10 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
         if (!endpointValidation.ok) {
           return res.status(endpointValidation.status).json({ error: endpointValidation.error });
         }
+        const trustValidation = validateCustomStdioTrust(server!.endpoint, appConfig.trustMode as TrustMode);
+        if (!trustValidation.ok) {
+          return res.status(trustValidation.status).json({ error: trustValidation.error });
+        }
       }
       const client = serverId === 'docker-mcp'
         ? await startDockerMcpGateway()
@@ -253,7 +309,7 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
         restarted: true,
       });
     } catch (err: any) {
-      res.status(502).json({ error: err.message });
+      sendRouteError(res, { route: 'POST /api/mcp/:serverId/restart', status: 502, fallback: 'Failed to restart MCP server', err });
     }
   });
 
@@ -262,7 +318,7 @@ export function registerMcpRoutes(app: express.Express, deps: McpRouteDeps) {
       const readiness = await checkDockerReadiness();
       res.json(readiness);
     } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Failed to check Docker readiness' });
+      sendRouteError(res, { route: 'GET /api/mcp/docker/readiness', status: 500, fallback: 'Failed to check Docker readiness', err });
     }
   });
 

@@ -2,12 +2,13 @@ import { strict as assert } from 'node:assert';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
+import { v4 as uuid } from 'uuid';
 import { saveSession, type PersistedSession } from '../server/sessionStore';
 import { repairLatestUserOnlySessions, scanForLatestUserOnlySessions } from '../server/sessionHealth';
 
 const SESSIONS_DIR = join(homedir(), '.openharness', 'sessions');
 
-const testSessionId = `persistence-regression-test-${Date.now()}`;
+const testSessionId = uuid();
 const testSession: PersistedSession = {
   id: testSessionId,
   title: 'Regression test - should be cleaned up',
@@ -24,7 +25,7 @@ const testSession: PersistedSession = {
   ],
 };
 
-const canceledSessionId = `persistence-regression-canceled-${Date.now()}`;
+const canceledSessionId = uuid();
 const canceledSession: PersistedSession = {
   id: canceledSessionId,
   title: 'Regression test - canceled session',
@@ -47,7 +48,7 @@ const canceledSession: PersistedSession = {
   ],
 };
 
-const retryAfterInterruptedId = `persistence-regression-retry-after-interrupted-${Date.now()}`;
+const retryAfterInterruptedId = uuid();
 const retryAfterInterruptedSession: PersistedSession = {
   id: retryAfterInterruptedId,
   title: 'Regression test - retry after old interrupted marker',
@@ -130,9 +131,9 @@ try {
   console.log('  Canceled session correctly exempted');
 
   const realFlagged = flagged.filter(
-    f => !f.id.startsWith('persistence-regression-test-')
-      && !f.id.startsWith('persistence-regression-canceled-')
-      && !f.id.startsWith('persistence-regression-retry-after-interrupted-'),
+    f => f.id !== testSessionId
+      && f.id !== canceledSessionId
+      && f.id !== retryAfterInterruptedId,
   );
   if (realFlagged.length > 0) {
     console.log(`\n  WARNING: ${realFlagged.length} real session(s) flagged as latest-user-only:`);
@@ -151,7 +152,7 @@ try {
 const startupRepairDir = mkdtempSync(join(tmpdir(), 'openharness-session-startup-repair-'));
 try {
   mkdirSync(startupRepairDir, { recursive: true });
-  const staleSessionId = 'startup-repair-session';
+  const staleSessionId = uuid();
   const staleTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const startupRepairFile = join(startupRepairDir, `${staleSessionId}.json`);
   writeFileSync(startupRepairFile, JSON.stringify({

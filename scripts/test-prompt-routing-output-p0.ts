@@ -170,6 +170,20 @@ function testBoundedReviewRouting() {
   assert.equal(readOnlyQa.mode, 'investigate', 'read-only QA reports should not route to execute just because they mention validation checks');
   assert.equal(readOnlyQa.role, 'summarizer', 'read-only product QA should produce a synthesized report');
   assert.equal(readOnlyQa.needsValidation, true, 'mentioning validation checks should still mark validation relevance');
+
+  const securityArchitecture = routeRequest(
+    'Review this architecture for security risks before implementation.',
+    'local-model',
+  );
+  assert.equal(securityArchitecture.mode, 'investigate', 'review/security wording should beat architecture planning nouns');
+  assert.equal(securityArchitecture.role, 'reviewer', 'security architecture review should use reviewer role');
+
+  const advisoryUpdate = routeRequest(
+    'Suggest how to update this component without editing files.',
+    'local-model',
+  );
+  assert.equal(advisoryUpdate.mode, 'direct', 'advisory update suggestions should not execute edits');
+  assert.equal(advisoryUpdate.needsValidation, false, 'advisory update suggestions should not require validation');
 }
 
 function testDirectAnswerNoRegression() {

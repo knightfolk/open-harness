@@ -137,10 +137,24 @@ function normalizeRecommendationModelKey(modelId: string): string {
   return modelId.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+function recommendationModelKeyVariants(modelId: string): string[] {
+  const variants = new Set<string>();
+  const trimmed = modelId.trim();
+  if (!trimmed) return [];
+  variants.add(normalizeRecommendationModelKey(trimmed));
+  const parts = trimmed.split(':').map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1) variants.add(normalizeRecommendationModelKey(parts[parts.length - 1]));
+  return [...variants].filter(Boolean);
+}
+
 function recommendationMatchesCandidate(recModelId: string, candidateModelId: string): boolean {
-  const recKey = normalizeRecommendationModelKey(recModelId);
-  const candidateKey = normalizeRecommendationModelKey(candidateModelId);
-  return recKey === candidateKey || candidateKey.endsWith(recKey) || recKey.endsWith(candidateKey);
+  const recKeys = recommendationModelKeyVariants(recModelId);
+  const candidateKeys = recommendationModelKeyVariants(candidateModelId);
+  return recKeys.some((recKey) =>
+    candidateKeys.some((candidateKey) =>
+      recKey === candidateKey || candidateKey.endsWith(recKey) || recKey.endsWith(candidateKey),
+    ),
+  );
 }
 
 function annotateCandidatesWithEvalRecommendations(

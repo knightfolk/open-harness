@@ -1,14 +1,17 @@
-const { app, BrowserWindow, dialog, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, Menu, ipcMain, shell, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
 const { randomBytes } = require('crypto');
+const { getRuntimeConfig } = require('../shared/runtimeConfig.cjs');
 
 // ── Config ─────────────────────────────────────────────
-const SERVER_PORT = process.env.OPENHARNESS_SERVER_PORT || 3001;
-const VITE_PORT = process.env.OPENHARNESS_VITE_PORT || 5173;
+const runtimeConfig = getRuntimeConfig(process.env);
+const SERVER_PORT = runtimeConfig.serverPort;
+const VITE_PORT = runtimeConfig.vitePort;
 const isDev = !app.isPackaged;
+const ALLOWED_APP_ORIGINS = new Set(runtimeConfig.allowedAppOrigins);
 
 let mainWindow = null;
 let packagedServer = null;
@@ -231,8 +234,19 @@ function createWindow() {
   });
 
   const url = isDev
-    ? `http://localhost:${VITE_PORT}`
-    : `http://localhost:${SERVER_PORT}`;
+    ? `http://127.0.0.1:${VITE_PORT}`
+    : `http://127.0.0.1:${SERVER_PORT}`;
+
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    if (isAllowedAppUrl(targetUrl)) return { action: 'deny' };
+    shell.openExternal(targetUrl).catch(() => {});
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    if (isAllowedAppUrl(targetUrl)) return;
+    event.preventDefault();
+    shell.openExternal(targetUrl).catch(() => {});
+  });
 
   console.log(`[main] Loading ${url}`);
   mainWindow.loadURL(url);
@@ -244,12 +258,40 @@ function createWindow() {
   }
 }
 
+function isAllowedAppUrl(targetUrl) {
+  try {
+    const parsed = new URL(targetUrl);
+    return ALLOWED_APP_ORIGINS.has(parsed.origin);
+  } catch {
+    return false;
+  }
+}
+
+function installResponseHardening() {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (!isAllowedAppUrl(details.url)) return callback({ responseHeaders: details.responseHeaders });
+    const responseHeaders = details.responseHeaders || {};
+    responseHeaders['Content-Security-Policy'] = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+    ].join('; ');
+    callback({ responseHeaders });
+  });
+}
+
 function checkServer() {
   return new Promise((resolve) => {
     const req = http.get({
       hostname: '127.0.0.1',
       port: SERVER_PORT,
-      path: '/api/config',
+      path: '/api/ready',
       headers: isDev ? {} : { 'x-openharness-electron-handshake': packagedServerHandshake },
     }, (res) => {
       res.resume();
@@ -292,9 +334,11 @@ async function startPackagedServer() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       PORT: String(SERVER_PORT),
+      OPENHARNESS_SERVER_PORT: String(SERVER_PORT),
+      OPENHARNESS_VITE_PORT: String(VITE_PORT),
       OPENHARNESS_STATIC_DIR: staticDir,
       OPENHARNESS_APP_ROOT: appPath,
-      OPENHARNESS_UI_URL: `http://localhost:${SERVER_PORT}`,
+      OPENHARNESS_UI_URL: runtimeConfig.serverOrigin,
       OPENHARNESS_LISTEN_HOST: '127.0.0.1',
       OPENHARNESS_ELECTRON_HANDSHAKE: packagedServerHandshake,
     },
@@ -316,7 +360,9 @@ async function startPackagedServer() {
 const { globalShortcut, screen } = require('electron');
 
 function getSnapZones() {
-  const display = screen.getPrimaryDisplay();
+  const display = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
   const { width, height } = display.workArea;
   const { x: wx, y: wy } = display.workArea;
   const halfW = Math.floor(width / 2);
@@ -398,6 +444,7 @@ ipcMain.handle('install-update', () => {
 
 // ── App Lifecycle ──────────────────────────────────────
 app.whenReady().then(async () => {
+  installResponseHardening();
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   await startPackagedServer();
   registerSnapShortcuts();

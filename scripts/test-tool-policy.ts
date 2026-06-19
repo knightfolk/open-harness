@@ -1,10 +1,14 @@
 import { strict as assert } from 'node:assert';
+import path from 'node:path';
 import {
   checkCommandPolicy,
   checkToolActionPolicy,
   filterToolsForTrustMode,
   isPathWithin,
+  isPathWithinForPlatform,
   isReadPathAllowed,
+  isTrustMode,
+  normalizeTrustMode,
 } from '../server/toolPolicy';
 
 const tools = [
@@ -31,6 +35,10 @@ assert.deepEqual(
 
 assert.equal(checkCommandPolicy('pwd', 'read-only').allowed, false, 'read-only must block even safe terminal commands');
 assert.equal(checkCommandPolicy('pwd', 'chat-only').allowed, false, 'chat-only must block terminal commands');
+assert.equal(isTrustMode('workspace-write'), true, 'known trust modes should validate');
+assert.equal(isTrustMode('workspace-write-plus'), false, 'unknown trust modes should not validate');
+assert.equal(normalizeTrustMode('workspace-write-plus'), 'workspace-write', 'unknown trust modes should normalize to safe default');
+assert.equal(checkCommandPolicy('pwd', 'workspace-write-plus' as any).allowed, false, 'unknown trust mode must deny commands');
 assert.equal(checkCommandPolicy('rm -rf dist', 'workspace-write').allowed, false, 'workspace-write must block dangerous deletes');
 assert.equal(checkCommandPolicy('rm -r dist', 'workspace-write').allowed, false, 'workspace-write must block recursive deletes');
 assert.equal(checkCommandPolicy('git reset --hard HEAD', 'workspace-write').allowed, false, 'workspace-write must block destructive git reset');
@@ -78,11 +86,22 @@ assert.equal(isPathWithin('/tmp/project/src/App.tsx', '/tmp/project'), true, 'no
 assert.equal(isPathWithin('/tmp/project/../secret.txt', '/tmp/project'), false, 'traversal path should escape workspace');
 assert.equal(isPathWithin('/tmp/project-other/file.txt', '/tmp/project'), false, 'sibling-prefix path should not count as inside workspace');
 assert.equal(isPathWithin('src/App.tsx', '/tmp/project'), true, 'relative path should resolve inside workspace');
+assert.equal(isPathWithinForPlatform('C:\\repo\\project\\src\\App.tsx', 'C:\\repo\\project', path.win32), true, 'Windows child path should be inside workspace');
+assert.equal(isPathWithinForPlatform('C:\\repo\\project-other\\secret.txt', 'C:\\repo\\project', path.win32), false, 'Windows sibling-prefix path should not count as inside workspace');
+assert.equal(isPathWithinForPlatform('C:\\repo\\project\\..\\secret.txt', 'C:\\repo\\project', path.win32), false, 'Windows traversal path should escape workspace');
+assert.equal(isPathWithinForPlatform('D:\\repo\\project\\src\\App.tsx', 'C:\\repo\\project', path.win32), false, 'Windows paths on different drives should not count as inside workspace');
+assert.equal(isPathWithinForPlatform('\\\\server\\share\\project\\src\\App.tsx', '\\\\server\\share\\project', path.win32), true, 'Windows UNC child path should be inside workspace');
+assert.equal(isPathWithinForPlatform('\\\\server\\share\\project-other\\secret.txt', '\\\\server\\share\\project', path.win32), false, 'Windows UNC sibling path should not count as inside workspace');
 
 assert.equal(
   checkToolActionPolicy('write_file', { path: '/tmp/project/src/App.tsx' }, 'workspace-write', '/tmp/project').allowed,
   true,
   'workspace-write should allow writes inside workspace',
+);
+assert.equal(
+  checkToolActionPolicy('write_file', { path: '/tmp/project/src/App.tsx' }, 'workspace-write-plus' as any, '/tmp/project').allowed,
+  false,
+  'unknown trust mode must deny writes',
 );
 assert.equal(
   checkToolActionPolicy('write_file', { path: '/tmp/project-other/secret.txt' }, 'workspace-write', '/tmp/project').allowed,

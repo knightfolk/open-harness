@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 
 import { execFile, spawn } from 'child_process';
+import { createRequire } from 'module';
 import http from 'http';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
+const require = createRequire(import.meta.url);
+const { getRuntimeConfig } = require('../shared/runtimeConfig.cjs');
 
-const SERVER_PORT = 3001;
-const VITE_PORT = 5173;
+const runtimeConfig = getRuntimeConfig(process.env);
+const SERVER_PORT = runtimeConfig.serverPort;
+const VITE_PORT = runtimeConfig.vitePort;
 
 function checkPort(port) {
   return new Promise(resolve => {
@@ -66,7 +70,12 @@ if (serverAlreadyRunning || viteAlreadyRunning) {
 const server = spawn('npx', ['tsx', 'server/index.ts'], {
   cwd: root,
   stdio: 'pipe',
-  env: { ...process.env, PORT: String(SERVER_PORT) },
+  env: {
+    ...process.env,
+    PORT: String(SERVER_PORT),
+    OPENHARNESS_SERVER_PORT: String(SERVER_PORT),
+    OPENHARNESS_VITE_PORT: String(VITE_PORT),
+  },
 });
 server.stdout.on('data', d => process.stdout.write('[server] ' + d));
 server.stderr.on('data', d => process.stderr.write('[server:err] ' + d));
@@ -75,7 +84,13 @@ server.stderr.on('data', d => process.stderr.write('[server:err] ' + d));
 const vite = spawn('npx', ['vite', '--port', String(VITE_PORT), '--host', '127.0.0.1', '--strictPort'], {
   cwd: root,
   stdio: 'pipe',
-  env: { ...process.env },
+  env: {
+    ...process.env,
+    OPENHARNESS_SERVER_PORT: String(SERVER_PORT),
+    OPENHARNESS_VITE_PORT: String(VITE_PORT),
+    VITE_OPENHARNESS_SERVER_PORT: String(SERVER_PORT),
+    VITE_OPENHARNESS_VITE_PORT: String(VITE_PORT),
+  },
 });
 vite.stdout.on('data', d => process.stdout.write('[vite] ' + d));
 vite.stderr.on('data', d => process.stderr.write('[vite] ' + d));

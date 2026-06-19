@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -48,6 +49,37 @@ assert.equal(personalization.formatPersonalizationForPrompt(), '', 'disabled pro
 personalization.deletePersonalizationProfile();
 assert.equal(personalization.loadPersonalizationProfile().enabled, false, 'deleted profile should return empty disabled profile');
 
+const fallbackDir = mkdtempSync(join(tmpdir(), 'openharness-personalization-fallback-'));
+const fallbackEnv = {
+  ...process.env,
+  OPENHARNESS_PERSONALIZATION_DIR: fallbackDir,
+  OPENHARNESS_PERSONALIZATION_DISABLE_KEYCHAIN: '1',
+  OPENHARNESS_PERSONALIZATION_TEST_KEY: '',
+  OPENHARNESS_PERSONALIZATION_KEY: '',
+};
+execFileSync('npx', ['tsx', '-e', `
+  (async () => {
+    const personalization = await import('./server/personalization.ts');
+    personalization.savePersonalizationProfile({
+      enabled: true,
+      compactSummary: 'Fallback profile survives restart',
+      likes: ['fallback encryption']
+    });
+  })();
+`], { cwd: process.cwd(), env: fallbackEnv, stdio: 'pipe' });
+const fallbackOutput = execFileSync('npx', ['tsx', '-e', `
+  (async () => {
+    const personalization = await import('./server/personalization.ts');
+    const profile = personalization.loadPersonalizationProfile();
+    console.log(JSON.stringify({ profile, error: personalization.getPersonalizationLoadError() }));
+  })();
+`], { cwd: process.cwd(), env: fallbackEnv, encoding: 'utf-8' });
+const fallbackLoaded = JSON.parse(fallbackOutput);
+assert.equal(fallbackLoaded.error, null, 'fallback profile should decrypt without a load error in a later process');
+assert.equal(fallbackLoaded.profile.compactSummary, 'Fallback profile survives restart', 'fallback key should be stable across processes');
+assert.deepEqual(fallbackLoaded.profile.likes, ['fallback encryption'], 'fallback process should decrypt list fields');
+
 rmSync(tempDir, { recursive: true, force: true });
+rmSync(fallbackDir, { recursive: true, force: true });
 
 console.log('Personalization store tests passed.');

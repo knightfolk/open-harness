@@ -5,6 +5,8 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { normalizeTrustMode, type TrustMode } from './toolPolicy';
+import { hydrateStoredConfigCredentials, persistStoredConfigCredentials, scrubStoredConfigCredentials } from './credentialVault';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -162,7 +164,7 @@ export interface StoredConfig {
   modelBudgets?: ModelBudget[];
   providerRateLimits?: ProviderRateLimit[];
   capabilitySettings?: CapabilitySettings;
-  trustMode: string; // TrustMode
+  trustMode: TrustMode;
 }
 
 // ── Config path ────────────────────────────────────────
@@ -243,13 +245,13 @@ export function loadConfig(): StoredConfig {
     const raw = readFileSync(CONFIG_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as StoredConfig;
     // Merge with defaults for forward-compat
-    const normalizedProviders = hydrateProviderEnvCredentials(repairProviderAliasCredentials((parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
+    const normalizedProviders = repairProviderAliasCredentials((parsed.providers || cloneDefaultConfig().providers).map((provider) => ({
       ...provider,
       apiKey: typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '',
       accessMode: (provider.accessMode === 'subscription' ? 'subscription' : 'api-key') as StoredProvider['accessMode'],
       planId: typeof provider.planId === 'string' && provider.planId ? provider.planId : undefined,
       oauth: normalizeProviderOAuth((provider as any).oauth),
-    }))));
+    })));
     const normalizedFavoriteModels = Array.isArray(parsed.favoriteModels)
       ? [...new Set(parsed.favoriteModels.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
       : [];
@@ -259,14 +261,14 @@ export function loadConfig(): StoredConfig {
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0))]
       : [];
-    return {
+    const config = {
       ...cloneDefaultConfig(),
       ...parsed,
       providers: normalizedProviders,
       mcpServers: parsed.mcpServers || [],
       favoriteModels: normalizedFavoriteModels,
       installedThemePluginManifests: normalizedThemeManifests,
-      trustMode: parsed.trustMode || DEFAULT_CONFIG.trustMode,
+      trustMode: normalizeTrustMode((parsed as any).trustMode, DEFAULT_CONFIG.trustMode),
       thinkingEffort: normalizeThinkingEffort((parsed as any).thinkingEffort),
       roleThinking: normalizeRoleThinking((parsed as any).roleThinking || {}),
       roleAssignments: {
@@ -277,9 +279,24 @@ export function loadConfig(): StoredConfig {
       providerRateLimits: normalizeProviderRateLimits((parsed as any).providerRateLimits),
       capabilitySettings: normalizeCapabilitySettings((parsed as any).capabilitySettings),
     };
+    const hadInlineCredentials = hasInlineConfigCredentials(config);
+    const hydratedConfig = hydrateStoredConfigCredentials(config);
+    const finalConfig = {
+      ...hydratedConfig,
+      providers: hydrateProviderEnvCredentials(hydratedConfig.providers),
+    };
+    if (hadInlineCredentials) {
+      saveConfig(finalConfig);
+    }
+    return finalConfig;
   } catch {
     return cloneDefaultConfig();
   }
+}
+
+function hasInlineConfigCredentials(config: StoredConfig): boolean {
+  return config.providers.some((provider) => Boolean(provider.apiKey || provider.oauth?.accessToken || provider.oauth?.refreshToken))
+    || config.mcpServers.some((server) => Boolean(server.authToken));
 }
 
 function normalizeCapabilitySettings(value: unknown): CapabilitySettings {
@@ -343,7 +360,12 @@ export function saveConfig(config: StoredConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  persistStoredConfigCredentials(config);
+  const normalizedConfig = {
+    ...scrubStoredConfigCredentials(config),
+    trustMode: normalizeTrustMode((config as any).trustMode, DEFAULT_CONFIG.trustMode),
+  };
+  writeFileSync(CONFIG_PATH, JSON.stringify(normalizedConfig, null, 2), { encoding: 'utf-8', mode: 0o600 });
 }
 
 // ── Provider helpers ───────────────────────────────────

@@ -19,6 +19,19 @@ function normalizeModelId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+function modelIdVariants(model: EnabledModelRef): string[] {
+  return [
+    model.id,
+    `${model.providerId}:${model.id}`,
+    model.name,
+    `${model.providerName}:${model.name}`,
+  ].map(normalizeModelId).filter(Boolean);
+}
+
+function modelKeyMatches(a: string, b: string): boolean {
+  return a === b || a.endsWith(b) || b.endsWith(a);
+}
+
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
@@ -170,12 +183,18 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   const enabledModelKeys = useMemo(() => {
     const keys = new Set<string>();
     for (const model of enabledModels) {
-      keys.add(normalizeModelId(model.id));
-      keys.add(normalizeModelId(`${model.providerId}:${model.id}`));
-      keys.add(normalizeModelId(model.name));
+      for (const key of modelIdVariants(model)) keys.add(key);
     }
     return keys;
   }, [enabledModels]);
+
+  const isRecommendationEnabled = useCallback((rec: api.EvalRecommendation) => {
+    const recKey = normalizeModelId(rec.modelId);
+    for (const key of enabledModelKeys) {
+      if (modelKeyMatches(recKey, key)) return true;
+    }
+    return false;
+  }, [enabledModelKeys]);
 
   const loadData = useCallback(async () => {
     const [s, e, r, routerState, strategies] = await Promise.all([
@@ -213,13 +232,13 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   }, [loadData]);
 
   const accessibleRecommendations = useMemo(
-    () => recommendations.filter((rec) => enabledModelKeys.has(normalizeModelId(rec.modelId))),
-    [enabledModelKeys, recommendations],
+    () => recommendations.filter(isRecommendationEnabled),
+    [isRecommendationEnabled, recommendations],
   );
 
   const unavailableRecommendations = useMemo(
-    () => recommendations.filter((rec) => !enabledModelKeys.has(normalizeModelId(rec.modelId))),
-    [enabledModelKeys, recommendations],
+    () => recommendations.filter((rec) => !isRecommendationEnabled(rec)),
+    [isRecommendationEnabled, recommendations],
   );
 
   const trustedAccessibleRecommendations = useMemo(

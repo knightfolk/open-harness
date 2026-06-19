@@ -2,12 +2,16 @@ import type { BrowserPreviewResult, PatchValidationResult } from '../types';
 import { TOP_MODEL_CATALOG } from '../data/modelCatalog';
 
 function defaultApiBase(): string {
-  if (typeof window === 'undefined' || !window.location.hostname) return 'http://localhost:3001';
+  const serverPort = import.meta.env.VITE_OPENHARNESS_SERVER_PORT || '3001';
+  const vitePort = import.meta.env.VITE_OPENHARNESS_VITE_PORT || '5173';
+  if (typeof window === 'undefined' || !window.location.hostname) return `http://localhost:${serverPort}`;
   const { protocol, hostname } = window.location;
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    return 'http://localhost:3001';
+    const pagePort = window.location.port;
+    const apiPort = pagePort && pagePort !== vitePort ? pagePort : serverPort;
+    return `http://localhost:${apiPort}`;
   }
-  return `${protocol}//${hostname}:3001`;
+  return `${protocol}//${hostname}:${serverPort}`;
 }
 
 function resolveApiBase(): string {

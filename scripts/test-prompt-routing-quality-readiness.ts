@@ -69,6 +69,18 @@ const ROUTE_CASES: RouteReadinessCase[] = [
     qualityContract: ROUTE_CONTRACTS.plan,
   },
   {
+    id: 'security-architecture-review',
+    prompt: 'Review this architecture for security risks before implementation.',
+    expected: { mode: 'investigate', role: 'reviewer', needsTools: true, needsValidation: false },
+    qualityContract: ROUTE_CONTRACTS.investigate,
+  },
+  {
+    id: 'advisory-update-suggestion',
+    prompt: 'Suggest how to update this component without editing files.',
+    expected: { mode: 'direct', role: 'worker', needsTools: false, needsValidation: false },
+    qualityContract: ROUTE_CONTRACTS.direct,
+  },
+  {
     id: 'planning-room-1980s-roguelike',
     prompt: 'Spawn a Planning Room team of sub agents and produce a full-scale plan for a new roguelike game based on 1980s icons, events, and era-specific items.',
     expected: { mode: 'plan', role: 'planner', needsTools: true, needsValidation: false },

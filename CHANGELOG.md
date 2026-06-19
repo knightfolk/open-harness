@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0-alpha.update.3] - 2026-06-19
+
+- Remediated the repository review findings across trust-mode approvals, credential storage, remote API access, Electron hardening, routing quality, and release gates.
+- Split the server control plane into focused route/support modules, including the main chat streaming route and SSE helpers, with static guards against inline API route regressions.
+- Added and expanded hardening coverage for action approvals, MCP route policy, runtime config, credential vault migration, remote API access, terminal execution, and session-store boundaries.
+- Refreshed the all-platform release package set for macOS, Windows, and Linux.
+
 ## [1.0.0-alpha.update.2] - 2026-06-19
 
 - Flattened the default workspace shell by quieting global shadows, lowering passive elevation, and keeping the Environment panel in the workspace plane.

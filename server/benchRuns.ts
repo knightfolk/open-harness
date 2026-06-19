@@ -1,13 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { spawn } from 'child_process';
 import { v4 as uuid } from 'uuid';
 
 import { buildScoreBreakdown, type EvalScores, type EvalScoreBreakdown } from './evals';
 import type { PromptStrategyTrace } from './promptStrategies';
 import { redactSecrets } from './sectionRedaction';
-import { resolveShell } from './shell';
+import { spawnShellCommand, terminateProcessTree } from './shell';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -205,20 +204,20 @@ export function runValidation(
 
   return Promise.all(commands.map(cmd => new Promise<ValidationCommandResult>((resolve) => {
     const start = Date.now();
-    const child = spawn(resolveShell(), ['-lc', cmd], { cwd: workingDir, env: { ...process.env, ...env } });
+    const child = spawnShellCommand(cmd, workingDir, { env });
     let stdout = '';
     let stderr = '';
     const limit = 512 * 1024;
 
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       if (stdout.length < limit) stdout += chunk.toString().slice(0, limit - stdout.length);
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       if (stderr.length < limit) stderr += chunk.toString().slice(0, limit - stderr.length);
     });
 
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
+      terminateProcessTree(child, 'SIGTERM');
       resolve({
         command: redactSecrets(cmd).redacted,
         exitCode: 124,

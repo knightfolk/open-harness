@@ -243,7 +243,7 @@ try {
     recommendations: [
       {
         role: 'reasoner',
-        modelId: 'phi-4',
+        modelId: 'Local Test Provider:Phi 4',
         reason: 'Directly comparable prompt-strategy test on same-model artifacts produced mixed signal.',
         reportId: `${evalReportId}-fuzzy`,
         reportName: 'Needs-attention strategy-comparison review',

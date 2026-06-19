@@ -1,7 +1,7 @@
-import { spawn, ChildProcess } from 'child_process';
+import { ChildProcess } from 'child_process';
 import { v4 as uuid } from 'uuid';
 import { redactSecrets } from './sectionRedaction';
-import { resolveShell } from './shell';
+import { spawnShellCommand, terminateProcessTree } from './shell';
 
 export interface TerminalSession {
   id: string;
@@ -34,6 +34,20 @@ const history = new Map<string, TerminalCommandEntry[]>();
 const activeProcesses = new Map<string, ActiveProcess>();
 
 const OUTPUT_LIMIT = 512 * 1024;
+const BACKSPACE = String.fromCharCode(8);
+
+export function cleanTerminalOutput(text: string, opts?: { final?: boolean }): string {
+  let cleaned = text;
+  const artifacts = [`^D${BACKSPACE}${BACKSPACE}`, `^D${BACKSPACE}`, '^D'];
+  if (opts?.final === false && artifacts.some((artifact) => artifact.startsWith(cleaned))) {
+    return '';
+  }
+  for (const artifact of artifacts) {
+    while (cleaned.startsWith(artifact)) cleaned = cleaned.slice(artifact.length);
+  }
+  while (cleaned.startsWith(BACKSPACE)) cleaned = cleaned.slice(1);
+  return cleaned;
+}
 
 export function createSession(cwd: string): TerminalSession {
   const session: TerminalSession = {
@@ -91,27 +105,30 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
   const entries = history.get(opts.sessionId);
   if (entries) entries.push(entry);
 
-  const child = spawn(resolveShell(), ['-lc', opts.command], { cwd });
+  const child = spawnShellCommand(opts.command, cwd, { interactive: true });
   let output = '';
+  let streamedLength = 0;
   const startTime = Date.now();
 
   const append = (chunk: Buffer) => {
     if (output.length < OUTPUT_LIMIT) {
-      const text = chunk.toString();
-      output += text;
-      const redacted = redactSecrets(output).redacted;
+      output += chunk.toString().slice(0, OUTPUT_LIMIT - output.length);
+      const cleanedOutput = cleanTerminalOutput(output, { final: false });
+      const redacted = redactSecrets(cleanedOutput).redacted;
       entry.output = redacted;
-      opts.onChunk?.(redactSecrets(text).redacted);
+      const delta = cleanedOutput.slice(streamedLength);
+      streamedLength = cleanedOutput.length;
+      if (delta) opts.onChunk?.(redactSecrets(delta).redacted);
     }
   };
 
-  child.stdout.on('data', append);
-  child.stderr.on('data', append);
+  child.stdout?.on('data', append);
+  child.stderr?.on('data', append);
 
   activeProcesses.set(entry.id, { child, entry, output, startTime });
 
   const timer = setTimeout(() => {
-    child.kill('SIGTERM');
+    terminateProcessTree(child, 'SIGTERM');
     entry.status = 'cancelled';
     entry.exitCode = 124;
     entry.completedAt = new Date().toISOString();
@@ -133,9 +150,9 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
     clearTimeout(timer);
     if (entry.status === 'running') {
       entry.status = code === 0 ? 'complete' : 'error';
+      entry.exitCode = code ?? 0;
     }
-    entry.exitCode = code ?? 0;
-    entry.output = redactSecrets(output).redacted;
+    entry.output = redactSecrets(cleanTerminalOutput(output)).redacted;
     entry.completedAt = new Date().toISOString();
     entry.durationMs = Date.now() - startTime;
     activeProcesses.delete(entry.id);
@@ -147,7 +164,7 @@ export function runCommand(opts: RunOptions): TerminalCommandEntry {
 export function cancelCommand(commandId: string): boolean {
   const active = activeProcesses.get(commandId);
   if (!active) return false;
-  active.child.kill('SIGTERM');
+  terminateProcessTree(active.child, 'SIGTERM');
   active.entry.status = 'cancelled';
   active.entry.exitCode = 130;
   active.entry.completedAt = new Date().toISOString();

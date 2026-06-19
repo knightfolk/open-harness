@@ -1,12 +1,16 @@
 {
   "name": "openharness",
   "private": true,
-  "license": "UNLICENSED",
-  "version": "1.0.0-alpha.update.2",
+  "license": "SEE LICENSE IN LICENSE",
+  "version": "1.0.0-alpha.update.3",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "test": "npm run test:hardening && npm run test:personalization-store && npm run test:review-remediation-static",
     "build": "tsc -b && vite build && npm run build:server",
     "build:server": "node scripts/build-server.mjs",
     "lint": "eslint .",
@@ -15,6 +19,7 @@
     "test:router-learning-debug-loop": "tsx scripts/test-router-learning-debug-loop.ts",
     "test:router-learning-export": "tsx scripts/test-router-learning-export.ts",
     "test:personalization-store": "tsx scripts/test-personalization-store.ts",
+    "test:review-remediation-static": "tsx scripts/test-review-remediation-static.ts",
     "test:release-notes": "tsx scripts/test-release-notes.ts",
     "test:crash-reports": "tsx scripts/test-crash-reports.ts",
     "test:capability-settings": "tsx scripts/test-capability-settings.ts",
@@ -68,7 +73,7 @@
     "test:planning-room-failure-hygiene": "tsx scripts/test-planning-room-failure-hygiene.ts",
     "test:session-persistence": "tsx scripts/test-session-persistence-regression.ts",
     "test:sse-progress": "tsx scripts/test-sse-progress-regression.ts",
-    "test:hardening": "tsx scripts/test-tool-policy.ts && tsx scripts/test-security-remediations.ts && tsx scripts/test-auto-router-context.ts && tsx scripts/test-router-learning-export.ts && tsx scripts/test-router-learning-import.ts && npm run test:theme-accessibility && tsx scripts/test-redaction.ts && tsx scripts/test-session-redaction.ts && tsx scripts/test-artifact-redaction.ts && tsx scripts/test-process-ledger-redaction.ts && tsx scripts/test-mcp-redaction.ts && tsx scripts/test-prompt-injection-boundaries.ts && tsx scripts/test-command-safety.ts",
+    "test:hardening": "tsx scripts/test-tool-policy.ts && tsx scripts/test-security-remediations.ts && tsx scripts/test-runtime-config.ts && tsx scripts/test-credential-vault.ts && tsx scripts/test-remote-api-access.ts && tsx scripts/test-action-approvals.ts && tsx scripts/test-auto-router-context.ts && tsx scripts/test-router-learning-export.ts && tsx scripts/test-router-learning-import.ts && npm run test:theme-accessibility && tsx scripts/test-redaction.ts && tsx scripts/test-session-redaction.ts && tsx scripts/test-artifact-redaction.ts && tsx scripts/test-process-ledger-redaction.ts && tsx scripts/test-mcp-redaction.ts && tsx scripts/test-mcp-route-policy.ts && tsx scripts/test-prompt-injection-boundaries.ts && tsx scripts/test-command-safety.ts && tsx scripts/test-terminal-sessions.ts && tsx scripts/test-session-store-boundaries.ts",
     "test:auto-update-packaging": "tsx scripts/test-auto-update-packaging.ts",
     "smoke:tool-boundaries": "node scripts/smoke-tool-boundaries.mjs",
     "smoke:browser-deep": "node scripts/smoke-browser-deep.mjs",
@@ -123,6 +128,7 @@
     "dotenv-cli": "^11.0.0",
     "electron": "^42.3.0",
     "electron-builder": "^26.8.1",
+    "esbuild": "~0.28.0",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

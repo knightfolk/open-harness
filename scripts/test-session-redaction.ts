@@ -2,10 +2,11 @@ import { strict as assert } from 'node:assert';
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { v4 as uuid } from 'uuid';
 import { saveSession, type PersistedSession } from '../server/sessionStore';
 
 const fakeKey = 'sk-123456789012345678901234';
-const sessionId = `redaction-test-${Date.now()}`;
+const sessionId = uuid();
 const path = join(homedir(), '.openharness', 'sessions', `${sessionId}.json`);
 
 const session: PersistedSession = {

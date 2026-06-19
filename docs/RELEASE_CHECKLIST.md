@@ -9,7 +9,8 @@ Use this checklist before every release, patch release, or milestone handoff tha
 - [ ] Confirm runtime impact:
   - [ ] Client/UI-only changes
   - [ ] Server/runtime changes
-  - [ ] OpenHarness desktop (`OpenHarnessApp`) changes
+  - [ ] Electron desktop shell / packaging changes
+  - [ ] Swift prototype (`OpenHarnessApp`) changes
   - [ ] Data migration/storage/config schema changes
 - [ ] Confirm rollout owner and target version.
 
@@ -39,7 +40,7 @@ Use this checklist before every release, patch release, or milestone handoff tha
     - App/web UI is reachable (as configured, typically `http://localhost:5173`)
 - If `OpenHarnessApp` / native bridge files changed:
   - [ ] `npm run test:webbridge-runtime-regression`
-  - [ ] One manual runtime pass using stable installed app artifact (no temporary regenerated `/tmp/*.app` bundles)
+  - [ ] Confirm the Swift prototype is still non-shipping, or link the plan that explicitly reactivates it.
 - If `electron/`, packaging, or release scripts changed:
   - [ ] `npm run test:auto-update-packaging`
   - [ ] `npm run notarize:check`
