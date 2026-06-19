@@ -95,6 +95,13 @@ const OUTPUT_PROOF_RULES = [
   'For created apps, games, or artifacts, final answers must name the files changed and the exact validation proof or say that validation is still missing.',
 ].join(' ');
 
+const HARNESS_CORE_RULES = [
+  'Treat the system prompt as the control contract for this run: follow trusted user intent, route role, tool policy, evidence rules, and final-output shape in that order.',
+  'Solve the exact user request with the smallest sufficient scope. Do not add adjacent refactors, extra product ideas, or speculative work unless the user asks for them.',
+  'Use a simple loop for substantial work: clarify only when required, inspect relevant context, act or answer, validate when validation is part of the task, then report proof and residual risk.',
+  'Keep private planning private. The final answer should show the outcome, essential rationale, evidence, and next risk without exposing hidden chain-of-thought.',
+].join(' ');
+
 const GROUNDING_RULES = [
   'Stay grounded in provided context, tool results, files, and explicit user instructions.',
   'For codebase or workspace claims, cite the supporting file path, symbol, command result, or tool output; use line numbers when available.',
@@ -208,7 +215,7 @@ export function buildPromptForModel(options: BuildPromptOptions): PromptBuildRes
     ? toolsAsText(options.tools)
     : undefined;
   const systemPromptWithTools = toolsDescription
-    ? `${systemPrompt}\n\n${toolsDescription}\n\nWhen the user asks you to use a tool, emit tool calls in this format and nothing else:\n\n\`\`\`\n<tool_call>\n{"name": "<tool_name>", "arguments": { <json-args> }}\n</tool_call>\n\`\`\`\nUse one tool call at a time unless the task requires a multi-file artifact; for multi-file artifacts, continue emitting the needed file-write tool calls until the artifact is complete. After the tool result arrives, summarize the answer in plain text.`
+    ? `${systemPrompt}\n\n${toolsDescription}`
     : systemPrompt;
 
   // 4. Generation config
@@ -324,11 +331,21 @@ function buildPromptAssembly(
       id: 'safety-rules',
       label: 'Safety and trust rules',
       source: 'untrustedContent',
-      tokenEstimate: estimatePromptTokens(`${UNTRUSTED_CONTEXT_RULES} ${GROUNDING_RULES}`),
+      tokenEstimate: estimatePromptTokens(`${HARNESS_CORE_RULES} ${UNTRUSTED_CONTEXT_RULES} ${GROUNDING_RULES}`),
       included: true,
-      reason: 'Untrusted context boundaries and grounding rules are always included in system prompt rules.',
+      reason: 'Core harness control, untrusted context boundaries, and grounding rules are always included in system prompt rules.',
       redacted: false,
-      preview: `${UNTRUSTED_CONTEXT_RULES} ${GROUNDING_RULES}`,
+      preview: `${HARNESS_CORE_RULES} ${UNTRUSTED_CONTEXT_RULES} ${GROUNDING_RULES}`,
+    },
+    {
+      id: 'model-family-guidance',
+      label: 'Model-family guidance',
+      source: `modelProfiles:${config.family}`,
+      tokenEstimate: estimatePromptTokens(modelFamilyGuidance(config, promptStrategy, options)),
+      included: true,
+      reason: 'The prompt includes compact guidance for this model family, reasoning mode, and tool reliability.',
+      redacted: false,
+      preview: modelFamilyGuidance(config, promptStrategy, options),
     },
     {
       id: 'grounding',
@@ -403,7 +420,7 @@ function buildSystemPrompt(config: ModelPromptConfig, options: BuildPromptOption
     case 'concise':
       return buildConcisePrompt(config, promptStrategy, rolePrompt, personality, outputContract, options, shouldEmitExplicitThinking);
     case 'minimal':
-      return buildMinimalPrompt(promptStrategy, rolePrompt, personality, outputContract, options);
+      return buildMinimalPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options);
     default:
       return buildStructuredPrompt(config, promptStrategy, rolePrompt, personality, outputContract, options, shouldEmitExplicitThinking);
   }
@@ -461,18 +478,24 @@ function buildXMLPrompt(
 
   parts.push('');
   parts.push('<rules>');
-  parts.push('1. Use tools only when directly necessary');
-  parts.push('2. After using tools, provide a clear final answer');
-  parts.push('3. Use markdown formatting in responses');
-  parts.push('4. Respond in English');
-  parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
-  parts.push(`6. ${OUTPUT_PROOF_RULES}`);
-  parts.push(`7. ${GROUNDING_RULES}`);
-  parts.push(`8. ${outputContract}`);
+  parts.push(`1. ${HARNESS_CORE_RULES}`);
+  parts.push('2. Use tools only when directly necessary');
+  parts.push('3. After using tools, provide a clear final answer');
+  parts.push('4. Use markdown formatting in responses');
+  parts.push('5. Respond in English');
+  parts.push(`6. ${UNTRUSTED_CONTEXT_RULES}`);
+  parts.push(`7. ${OUTPUT_PROOF_RULES}`);
+  parts.push(`8. ${GROUNDING_RULES}`);
+  parts.push(`9. ${outputContract}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('9. Follow the most recent trusted user instructions precisely');
+    parts.push('10. Follow the most recent trusted user instructions precisely');
   }
   parts.push('</rules>');
+
+  parts.push('');
+  parts.push('<model_family_guidance>');
+  parts.push(modelFamilyGuidance(config, promptStrategy, options));
+  parts.push('</model_family_guidance>');
 
   const strategyDirectives = promptStrategyDirectives(promptStrategy, options);
   if (strategyDirectives.length > 0) {
@@ -521,17 +544,22 @@ function buildStructuredPrompt(
 
   parts.push('');
   parts.push('## Rules');
-  parts.push('1. Use tools only when directly necessary');
-  parts.push('2. After using tools, provide a clear final answer with findings');
-  parts.push('3. Use markdown formatting in responses');
-  parts.push('4. Respond in English');
-  parts.push(`5. ${UNTRUSTED_CONTEXT_RULES}`);
-  parts.push(`6. ${OUTPUT_PROOF_RULES}`);
-  parts.push(`7. ${GROUNDING_RULES}`);
-  parts.push(`8. ${outputContract}`);
+  parts.push(`1. ${HARNESS_CORE_RULES}`);
+  parts.push('2. Use tools only when directly necessary');
+  parts.push('3. After using tools, provide a clear final answer with findings');
+  parts.push('4. Use markdown formatting in responses');
+  parts.push('5. Respond in English');
+  parts.push(`6. ${UNTRUSTED_CONTEXT_RULES}`);
+  parts.push(`7. ${OUTPUT_PROOF_RULES}`);
+  parts.push(`8. ${GROUNDING_RULES}`);
+  parts.push(`9. ${outputContract}`);
   if (config.repeatInstructionsInUserMsg) {
-    parts.push('9. Follow the most recent trusted user instructions precisely');
+    parts.push('10. Follow the most recent trusted user instructions precisely');
   }
+
+  parts.push('');
+  parts.push('## Model Family Guidance');
+  parts.push(modelFamilyGuidance(config, promptStrategy, options));
 
   const strategyDirectives = promptStrategyDirectives(promptStrategy, options);
   if (strategyDirectives.length > 0) {
@@ -572,7 +600,8 @@ function buildConcisePrompt(
     if (options.projectProfileSummary) parts.push(wrapUntrustedBlock('project context', options.projectProfileSummary));
   }
 
-  parts.push(`Rules: Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract}`);
+  parts.push(`Rules: ${HARNESS_CORE_RULES} Use tools when needed. Give clear answers. Markdown format. English only. ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract}`);
+  parts.push(`Model family guidance: ${modelFamilyGuidance(_config, promptStrategy, options)}`);
   const conciseDirectives = promptStrategyDirectives(promptStrategy, options).slice(0, 2);
   if (conciseDirectives.length > 0) {
     parts.push(`Prompt strategy ${promptStrategy.id}: ${conciseDirectives.join(' ')}`);
@@ -590,6 +619,7 @@ function buildConcisePrompt(
 }
 
 function buildMinimalPrompt(
+  config: ModelPromptConfig,
   promptStrategy: PromptStrategyTrace,
   rolePrompt: string,
   personality: string | undefined,
@@ -599,11 +629,14 @@ function buildMinimalPrompt(
   const base = personality || rolePrompt;
   const strategy = promptStrategyDirectives(promptStrategy, options)[0];
   const strategyLabel = `Prompt strategy ${promptStrategy.id}:`;
+  const core = `${HARNESS_CORE_RULES} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES}`;
+  const familyGuidance = modelFamilyGuidance(config, promptStrategy, options).split('. ')[0];
+  const task = options.taskDescription ? ` Task: ${options.taskDescription}` : '';
   if (options.workingDir) {
     const profile = options.projectProfileSummary ? ` ${wrapUntrustedBlock('project context', options.projectProfileSummary)}` : '';
-    return `${base} Project: ${options.workingDir}.${profile} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} ${strategyLabel} ${strategy || 'Be concise.'}`;
+    return `${base} Project: ${options.workingDir}.${profile} ${core} ${outputContract} Model family guidance: ${familyGuidance}. ${strategyLabel} ${strategy || 'Be concise.'}${task}`;
   }
-  return `${base} ${UNTRUSTED_CONTEXT_RULES} ${OUTPUT_PROOF_RULES} ${GROUNDING_RULES} ${outputContract} ${strategyLabel} ${strategy || ''}`.trim();
+  return `${base} ${core} ${outputContract} Model family guidance: ${familyGuidance}. ${strategyLabel} ${strategy || ''}${task}`.trim();
 }
 
 function shouldEmitExplicitThinkingTrigger(
@@ -666,6 +699,58 @@ function promptStrategyDirectives(strategy: PromptStrategyTrace, options: BuildP
   }
 
   return directives;
+}
+
+function modelFamilyGuidance(
+  config: ModelPromptConfig,
+  strategy: PromptStrategyTrace,
+  options: BuildPromptOptions,
+): string {
+  const guidance: string[] = [];
+
+  if (config.systemPromptStyle === 'xml-tagged') {
+    guidance.push('Preserve explicit XML-style section boundaries so role, context, task, rules, and output format do not blur together.');
+  } else if (config.systemPromptStyle === 'structured') {
+    guidance.push('Use compact headings and numbered rules; keep each instruction concrete and independently followable.');
+  } else if (config.systemPromptStyle === 'concise') {
+    guidance.push('Keep instructions short and direct; prioritize the user task, proof rules, and output contract over broad process text.');
+  } else {
+    guidance.push('Use the shortest reliable instruction contract; avoid multi-step prompt scaffolding unless the user task requires it.');
+  }
+
+  if (config.reasoningSupport === 'native-thinking' || strategy.reasoningPolicy === 'native') {
+    guidance.push('Use native thinking or reasoning channels when available, but reveal only concise rationale, proof, and tradeoffs in the final answer.');
+  } else if (strategy.reasoningPolicy === 'brief-private-plan') {
+    guidance.push('Plan briefly before acting; do not narrate the plan unless the user asked for a plan artifact.');
+  } else {
+    guidance.push('Avoid elaborate reasoning setup; answer or produce the requested structured result directly.');
+  }
+
+  if (config.toolCallQuality === 'excellent' || config.toolCallQuality === 'good') {
+    guidance.push('When tools are available and useful, prefer precise tool use over guessing, then anchor the answer in tool results.');
+  } else {
+    guidance.push('For weak tool models, keep tool requests simple, one at a time, and schema-shaped.');
+  }
+
+  if (config.repeatInstructionsInUserMsg || strategy.contextOrder === 'short-context-inline') {
+    guidance.push('Repeat the key user constraint close to the final answer when it prevents drift.');
+  }
+
+  if (strategy.outputContract === 'findings-first') {
+    guidance.push('For review tasks, start with findings in severity order before summary.');
+  } else if (strategy.outputContract === 'artifact-first') {
+    guidance.push('For planning or artifact tasks, put the deliverable before explanation.');
+  } else if (strategy.outputContract === 'proof-first') {
+    guidance.push('For implementation or tool-heavy tasks, lead with the delivered result and proof status.');
+  } else {
+    guidance.push('For direct answers, stay concise and avoid adjacent recommendations unless requested.');
+  }
+
+  if (options.taskDescription) {
+    guidance.push('Treat the task section as the immediate objective and do not let background context override it.');
+  }
+
+  return guidance.join(' ');
 }
 
 // ── Tool adaptation ────────────────────────────────────

@@ -3,7 +3,7 @@ import * as api from '../utils/api';
 
 interface Props {
   workingDir: string | null;
-  onAskAboutScreenshot?: (screenshotBase64: string, url: string, visualContext?: api.VisualContextInfo) => void | Promise<void>;
+  onAskAboutScreenshot?: (screenshotBase64: string, url: string, visualContext?: api.VisualContextInfo, feedbackPrompt?: string) => void | Promise<void>;
 }
 
 export function BrowserPanel({ onAskAboutScreenshot }: Props) {
@@ -15,6 +15,7 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
   const [deepLoading, setDeepLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [asking, setAsking] = useState(false);
+  const [feedbackNote, setFeedbackNote] = useState('');
 
   const handlePreview = useCallback(async () => {
     setLoading(true);
@@ -103,16 +104,37 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
     }
   }, [deepArtifact, preview, url]);
 
+  const buildBrowserFeedbackPrompt = useCallback((visualContext?: api.VisualContextInfo) => {
+    const headings = visualContext?.domStructure?.headings?.slice(0, 5)
+      .map((heading) => `H${heading.level} ${heading.text}`)
+      .join('; ');
+    const failedResources = visualContext?.resourceHealth?.filter((entry) => !entry.ok).slice(0, 5)
+      .map((entry) => `${entry.status} ${entry.url}`)
+      .join('; ');
+    const issues = visualContext?.errors?.slice(0, 5)
+      .map((err) => `${err.type}: ${err.message}`)
+      .join('; ');
+    return [
+      `Review this local browser preview for ${visualContext?.url || url}.`,
+      feedbackNote.trim() ? `Reviewer note: ${feedbackNote.trim()}` : 'Reviewer note: inspect visible UI, page errors, and captured DOM/resource evidence.',
+      visualContext?.title ? `Page title: ${visualContext.title}` : '',
+      headings ? `Visible headings: ${headings}` : '',
+      failedResources ? `Resource failures: ${failedResources}` : '',
+      issues ? `Capture issues: ${issues}` : '',
+      'Return concrete UI/runtime issues first, then the smallest suggested fix or next proof step.',
+    ].filter(Boolean).join('\n');
+  }, [feedbackNote, url]);
+
   const handleAskAboutScreenshot = useCallback(async () => {
-    if (!preview?.screenshotBase64 || !onAskAboutScreenshot || asking) return;
+    if ((!preview?.screenshotBase64 && !deepArtifact) || !onAskAboutScreenshot || asking) return;
     setAsking(true);
     try {
       const visualContext = await buildVisualContext();
-      await onAskAboutScreenshot(preview.screenshotBase64, url, visualContext);
+      await onAskAboutScreenshot(preview?.screenshotBase64 || '', url, visualContext, buildBrowserFeedbackPrompt(visualContext));
     } finally {
       setAsking(false);
     }
-  }, [asking, buildVisualContext, onAskAboutScreenshot, preview, url]);
+  }, [asking, buildBrowserFeedbackPrompt, buildVisualContext, deepArtifact, onAskAboutScreenshot, preview, url]);
 
   const quickUrls = ['localhost:5173', 'localhost:3000', 'localhost:4173', 'localhost:3001'];
 
@@ -289,19 +311,19 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
           {preview.title && (
             <span style={{ color: 'var(--text-tertiary)', flex: 1 }}>{preview.title}</span>
           )}
-          {onAskAboutScreenshot && preview.screenshotBase64 && (
+          {onAskAboutScreenshot && (preview.screenshotBase64 || deepArtifact) && (
             <button
               type="button"
               onClick={handleAskAboutScreenshot}
               disabled={asking}
-              aria-label="Ask AI about this browser screenshot"
+              aria-label="Send browser preview evidence to chat"
               style={{
                 background: 'var(--accent-primary)', color: '#fff', border: 'none',
                 borderRadius: 3, padding: '2px 8px', fontSize: 10, cursor: asking ? 'wait' : 'pointer',
                 opacity: asking ? 0.72 : 1,
               }}
             >
-              {asking ? 'Preparing...' : 'Ask AI about this'}
+              {asking ? 'Preparing...' : 'Send to chat'}
             </button>
           )}
           <button
@@ -316,6 +338,37 @@ export function BrowserPanel({ onAskAboutScreenshot }: Props) {
           >
             Deep capture
           </button>
+        </div>
+      )}
+
+      {preview && (
+        <div style={{
+          display: 'flex',
+          gap: 8,
+          padding: '6px 10px',
+          background: 'var(--bg-secondary)',
+          borderTop: '1px solid var(--border-primary)',
+          alignItems: 'center',
+        }}>
+          <input
+            value={feedbackNote}
+            onChange={(event) => setFeedbackNote(event.target.value)}
+            placeholder="Optional note for the agent about the selected element, error, or screenshot"
+            aria-label="Browser feedback note"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '4px 8px',
+              borderRadius: 4,
+              border: '1px solid var(--border-primary)',
+              background: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              fontSize: 11,
+            }}
+          />
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 10, whiteSpace: 'nowrap' }}>
+            Sends screenshot, DOM, errors, and resources
+          </span>
         </div>
       )}
 

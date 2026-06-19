@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react';
 import type { HarnessRun, RunSteeringAction, SessionGoal } from '../../types';
 import type { PanelId } from '../../types/layout';
+import type { VisualContextInfo } from '../../utils/api';
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((m) => ({ default: m.ChatPanel })));
 const BrowserPanel = lazy(() => import('../BrowserPanel').then((m) => ({ default: m.BrowserPanel })));
@@ -34,7 +35,7 @@ interface Props {
     onReviewDiff?: (diffText: string) => void;
     onProposePatch?: (diffText: string, explanation?: string) => void;
     onExplainChange?: (filePath: string) => void;
-    onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
+    onAskAboutScreenshot?: (screenshotBase64: string, url: string, visualContext?: VisualContextInfo, feedbackPrompt?: string) => void;
     onCompareModel?: () => void;
     onFocusAgents?: () => void;
     trustMode?: string;

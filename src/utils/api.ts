@@ -930,6 +930,7 @@ export interface MCPServerInfo {
   endpoint: string;
   authType: 'none' | 'bearer';
   authToken: string;
+  authConfigured?: boolean;
   enabled: boolean;
   builtIn?: boolean;
   description?: string;

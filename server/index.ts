@@ -7,14 +7,12 @@ import { execFileSync, spawn } from 'child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
 import { homedir } from 'os';
-import { loadConfig, saveConfig, upsertProvider, removeProvider, upsertMCPServer, removeMCPServer, getProviderForModel, splitModelRef, getConfigPath } from './config';
-import type { StoredMCPServer, StoredProvider } from './config';
+import { loadConfig, saveConfig, upsertProvider, removeProvider, getProviderForModel, splitModelRef, getConfigPath } from './config';
+import type { StoredProvider } from './config';
 import { assertProviderBaseURLAllowed, testProviderConnection, fetchProviderModels } from './providers';
-import { mcpManager, parseStdioEndpoint } from './mcp';
-import { checkDockerReadiness } from './dockerReadiness';
+import { mcpManager } from './mcp';
 import { dockerDesktopEnv } from './dockerDesktopEnv';
 import { resolveShell } from './shell';
-import { CURATED_MCP_SERVERS, findCuratedServer, describePermissions, validateAllCuratedServers } from './curatedMcp';
 import { getModelConfig, isReasoningModel, detectModelFamily, estimateCost, estimateCostForRanking } from './modelProfiles';
 import { buildContextWindow, estimateTokens } from './contextManager';
 import { buildPromptForModel } from './promptBuilder';
@@ -69,6 +67,7 @@ import { getReleaseNotes } from './releaseNotes';
 import { buildCrashReportBundle, getCrashReportSummary } from './crashReports';
 import { appendVisualContextToContent, normalizeVisualContext, type VisualContext } from './visionFallback';
 import { applyOfficialMetadata, buildModelCatalogAuditReport, enrichModelsFromSecondarySources, fetchOpenRouterModelMetadata } from './modelMetadata';
+import { registerMcpRoutes } from './routes/mcpRoutes';
 
 function stripToolCallMarkup(text: string, knownToolNames: string[]): string {
   if (!text) return text;
@@ -370,15 +369,6 @@ function wrapToolResultForModel(toolName: string, content: string): string {
 
 const DOCKER_MCP_ARGS = ['mcp', 'gateway', 'run', '--transport', 'stdio', '--profile', 'ai_coding'];
 
-async function startDockerMcpGateway() {
-  const child = spawn('docker', DOCKER_MCP_ARGS, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: dockerDesktopEnv(),
-  });
-  child.on('error', (err: Error) => console.log('[mcp-gw] Failed:', err.message));
-  child.on('exit', (code: number | null) => console.log('[mcp-gw] exited with code', code));
-  return mcpManager.startStdioClient('docker-mcp', 'Docker MCP', child, 'docker', DOCKER_MCP_ARGS);
-}
 import { applyPatch as nodeApplyPatch } from './patchApply';
 import {
   createProposal,
@@ -1016,40 +1006,6 @@ function normalizePersistedWorkingDir(raw: string | null): string | null {
   return validation.ok ? validation.dir : null;
 }
 
-function validateMcpEndpoint(endpoint: unknown): { ok: true } | { ok: false; status: number; error: string } {
-  if (typeof endpoint !== 'string') return { ok: false, status: 400, error: 'endpoint must be a string' };
-  const trimmed = endpoint.trim();
-  const lower = trimmed.toLowerCase();
-
-  if (!trimmed) {
-    return { ok: false, status: 400, error: 'endpoint is required' };
-  }
-
-  if (lower.startsWith('stdio://')) {
-    if (!parseStdioEndpoint(trimmed)) {
-      return { ok: false, status: 400, error: 'Invalid stdio endpoint format. Expected stdio://command arg1 arg2' };
-    }
-    return { ok: true };
-  }
-
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
-    return { ok: false, status: 400, error: 'Unsupported endpoint scheme. Use http(s) URL or stdio:// command' };
-  }
-
-  const lowerTrimmed = trimmed.toLowerCase();
-  if (!lowerTrimmed.startsWith('http://') && !lowerTrimmed.startsWith('https://')) {
-    return { ok: false, status: 400, error: 'Unsupported endpoint scheme. Use http(s) URL or stdio:// command' };
-  }
-
-  try {
-    new URL(trimmed);
-  } catch {
-    return { ok: false, status: 400, error: 'Invalid MCP endpoint URL' };
-  }
-
-  return { ok: true };
-}
-
 function isKnownWorkspacePath(candidate: string | undefined): boolean {
   if (!candidate) return false;
   const normalized = resolveWorkspaceCandidate(candidate);
@@ -1104,32 +1060,15 @@ function disposeEphemeralSession(sessionId: string) {
 }
 // ── Session Routes ─────────────────────────────────────
 
-// Validate all curated MCP server prerequisites (binary availability, endpoint reachability)
-app.get('/api/mcp/curated/validate', async (_req, res) => {
-  try {
-    const results = await validateAllCuratedServers();
-    res.json({ results, ok: results.every((r) => r.ok) });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message || 'Validation failed' });
-  }
-});
-// MCP watchdog status and control
-app.get('/api/mcp/watchdog', (_req, res) => {
-  const status = mcpManager.getVerboseStatus();
-  res.json({ status, connected: status.filter((s) => s.running).length, total: status.length });
+registerMcpRoutes(app, {
+  getConfig: () => appConfig,
+  setConfig: (config) => { appConfig = config; },
+  saveConfig,
+  ensureLocalMutationWithControl,
+  trustedWorkspaceFromRequest,
+  redactToolResult,
 });
 
-app.post('/api/mcp/watchdog/restart', async (_req, res) => {
-  const mutation = ensureLocalMutationWithControl(_req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  try {
-    mcpManager.stopWatchdog();
-    mcpManager.startWatchdog(30_000);
-    res.json({ ok: true, message: 'Watchdog restarted' });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message || 'Failed to restart watchdog' });
-  }
-});
 app.get('/api/sessions', (_req, res) => {
   const list = Array.from(sessions.values())
     .filter((session) => isMainSessionKind(session.kind))
@@ -1998,237 +1937,6 @@ app.post('/api/providers/:id/models', async (req, res) => {
   } catch (err: any) {
     res.status(502).json({ error: err.message });
   }
-});
-
-// ── MCP Server endpoints ───────────────────────────────
-
-app.get('/api/mcp-servers', (_req, res) => {
-  const servers = appConfig.mcpServers.map((s) => ({
-    ...s,
-    authToken: s.authToken ? '••••' + s.authToken.slice(-4) : '',
-  }));
-  // Include Docker MCP as a built-in
-  const builtIn = {
-    id: 'docker-mcp',
-    name: 'Docker MCP',
-    endpoint: 'stdio://mcp-docker',
-    authType: 'none',
-    authToken: '',
-    enabled: true,
-    builtIn: true,
-    description: 'Containerized tool execution via Docker MCP server',
-  };
-  res.json([builtIn, ...servers]);
-});
-
-app.post('/api/mcp-servers', (req, res) => {
-  const mutation = ensureLocalMutationWithControl(req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  const { name, endpoint, authType, authToken, enabled } = req.body as any;
-  if (!name || !endpoint) {
-    return res.status(400).json({ error: 'name and endpoint are required' });
-  }
-  const endpointValidation = validateMcpEndpoint(endpoint);
-  if (!endpointValidation.ok) {
-    return res.status(endpointValidation.status).json({ error: endpointValidation.error });
-  }
-  const server: StoredMCPServer = {
-    id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    name,
-    endpoint,
-    authType: authType || 'none',
-    authToken: authToken || '',
-    enabled: enabled !== false,
-  };
-  appConfig = upsertMCPServer(appConfig, server);
-  saveConfig(appConfig);
-  res.status(201).json({ ...server, authToken: '••••' });
-});
-
-app.delete('/api/mcp-servers/:id', (req, res) => {
-  const mutation = ensureLocalMutationWithControl(req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  appConfig = removeMCPServer(appConfig, req.params.id);
-  saveConfig(appConfig);
-  // Also stop the process if running
-  mcpManager.stopServer(req.params.id).catch(() => {});
-  res.status(204).end();
-});
-
-// ── MCP runtime endpoints ─────────────────────────────
-
-app.get('/api/mcp/status', (_req, res) => {
-  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
-  const status = mcpManager.getStatus().map((server: any) => {
-    const tools = Array.isArray(server.tools) ? server.tools : [];
-    const policy = filterToolsForTrustMode(tools, trustMode);
-    const allowed = new Set(policy.filteredTools || []);
-    return {
-      ...server,
-      usableToolCount: allowed.size,
-      blockedToolCount: Math.max(0, tools.length - allowed.size),
-      tools: tools.map((tool: any) => ({
-        ...tool,
-        allowed: allowed.has(tool.name),
-      })),
-    };
-  });
-  res.json(status);
-});
-
-app.post('/api/mcp/:serverId/tools/:toolName', async (req, res) => {
-  const mutation = ensureLocalMutationWithControl(req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  const { serverId, toolName } = req.params;
-  const args = req.body || {};
-  const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
-  const workingDir = trustedWorkspaceFromRequest(req);
-  const toolPolicy = checkToolActionPolicy(toolName, args, trustMode, workingDir);
-  if (!toolPolicy.allowed) {
-    return res.status(403).json({ error: toolPolicy.reason || 'Tool call not allowed' });
-  }
-  try {
-    const result = await mcpManager.callTool(serverId, toolName, args);
-    res.json({ result: redactToolResult(result) });
-  } catch (err: any) {
-    res.status(502).json({ error: err.message });
-  }
-});
-
-app.post('/api/mcp/:serverId/start', async (req, res) => {
-  const mutation = ensureLocalMutationWithControl(req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  const { serverId } = req.params;
-  const server = appConfig.mcpServers.find((s) => s.id === serverId);
-  if (serverId !== 'docker-mcp' && !server) return res.status(404).json({ error: 'Server not found' });
-  if (serverId !== 'docker-mcp') {
-    const endpointValidation = validateMcpEndpoint(server!.endpoint);
-    if (!endpointValidation.ok) {
-      return res.status(endpointValidation.status).json({ error: endpointValidation.error });
-    }
-  }
-  try {
-    const client = serverId === 'docker-mcp'
-      ? await startDockerMcpGateway()
-      : await mcpManager.startServer(server!.id, server!.name, server!.endpoint);
-    res.json({
-      id: client.id,
-      name: client.name,
-      running: client.isConnected(),
-      toolCount: client.getTools().length,
-    });
-  } catch (err: any) {
-    res.status(502).json({ error: err.message });
-  }
-});
-
-app.post('/api/mcp/:serverId/stop', async (req, res) => {
-  const mutation = ensureLocalMutationWithControl(req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  await mcpManager.stopServer(req.params.serverId);
-  res.json({ ok: true });
-});
-
-// Restart an MCP server (stop then start)
-app.post('/api/mcp/:serverId/restart', async (req, res) => {
-  const mutation = ensureLocalMutationWithControl(req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  const { serverId } = req.params;
-  try {
-    await mcpManager.stopServer(serverId).catch(() => {});
-    const server = appConfig.mcpServers.find((s) => s.id === serverId);
-    if (serverId !== 'docker-mcp' && !server) return res.status(404).json({ error: 'Server not found' });
-    if (serverId !== 'docker-mcp') {
-      const endpointValidation = validateMcpEndpoint(server!.endpoint);
-      if (!endpointValidation.ok) {
-        return res.status(endpointValidation.status).json({ error: endpointValidation.error });
-      }
-    }
-    const client = serverId === 'docker-mcp'
-      ? await startDockerMcpGateway()
-      : await mcpManager.startServer(server!.id, server!.name, server!.endpoint);
-    res.json({
-      id: client.id,
-      name: client.name,
-      running: client.isConnected(),
-      toolCount: client.getTools().length,
-      restarted: true,
-    });
-  } catch (err: any) {
-    res.status(502).json({ error: err.message });
-  }
-});
-
-// Docker + Docker MCP readiness (used by onboarding + settings)
-app.get('/api/mcp/docker/readiness', async (_req, res) => {
-  try {
-    const readiness = await checkDockerReadiness();
-    res.json(readiness);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to check Docker readiness' });
-  }
-});
-
-// Curated safe-by-default MCP server catalog
-app.get('/api/mcp/curated', (_req, res) => {
-  const installed = new Set(appConfig.mcpServers.map((s) => s.id));
-  installed.add('docker-mcp');
-  res.json(CURATED_MCP_SERVERS.map((s) => ({
-    ...s,
-    command: undefined,
-    args: undefined,
-    installed: installed.has(s.id),
-    permissionSummary: describePermissions(s.permissions),
-  })));
-});
-
-// Install a curated MCP server in one click
-app.post('/api/mcp/curated/install', async (req, res) => {
-  const mutation = ensureLocalMutationWithControl(req);
-  if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
-  const { id } = req.body || {};
-  if (!id) return res.status(400).json({ error: 'id is required' });
-  const entry = findCuratedServer(id);
-  if (!entry) return res.status(404).json({ error: 'Unknown curated server' });
-
-  if (id === 'docker-mcp') {
-    return res.status(400).json({ error: 'Docker MCP is the built-in gateway; use the lifecycle buttons to start/stop it.' });
-  }
-
-  if (entry.transport === 'stdio' && entry.command) {
-    const endpoint = `stdio://${[entry.command, ...(entry.args || [])].join(' ')}`;
-    const endpointValidation = validateMcpEndpoint(endpoint);
-    if (!endpointValidation.ok) {
-      return res.status(endpointValidation.status).json({ error: endpointValidation.error });
-    }
-    const server: StoredMCPServer = {
-      id: entry.id,
-      name: entry.name,
-      endpoint,
-      authType: 'none',
-      authToken: '',
-      enabled: true,
-    };
-    appConfig = upsertMCPServer(appConfig, server);
-    saveConfig(appConfig);
-    return res.status(201).json({ ...server, authToken: '' });
-  }
-
-  if (entry.transport === 'http' && entry.endpoint) {
-    const server: StoredMCPServer = {
-      id: entry.id,
-      name: entry.name,
-      endpoint: entry.endpoint,
-      authType: 'none',
-      authToken: '',
-      enabled: true,
-    };
-    appConfig = upsertMCPServer(appConfig, server);
-    saveConfig(appConfig);
-    return res.status(201).json({ ...server, authToken: '' });
-  }
-
-  res.status(400).json({ error: 'Curated server has no runnable configuration' });
 });
 
 // ── Models endpoint (all enabled models across providers) ──

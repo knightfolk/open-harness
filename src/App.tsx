@@ -1604,8 +1604,8 @@ function App() {
     await handleSendMessage(`Explain what changed in \`${filePath}\` and why.`);
   }, [handleSendMessage]);
 
-  const handleAskAboutScreenshot = useCallback(async (_screenshotBase64: string, url: string, visualContext?: api.VisualContextInfo) => {
-    await handleSendMessage(`Review the browser screenshot for ${url}. What issues or improvements do you see?`, { visualContext });
+  const handleAskAboutScreenshot = useCallback(async (_screenshotBase64: string, url: string, visualContext?: api.VisualContextInfo, feedbackPrompt?: string) => {
+    await handleSendMessage(feedbackPrompt || `Review the browser screenshot for ${url}. What issues or improvements do you see?`, { visualContext });
   }, [handleSendMessage]);
 
   const handleCompareModel = useCallback(async () => {

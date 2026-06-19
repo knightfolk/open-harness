@@ -99,6 +99,7 @@ const REQUIRED_ASSEMBLY_SECTIONS = [
   'model-family-renderer',
   'context-pack',
   'safety-rules',
+  'model-family-guidance',
   'task-contract',
   'output-style',
 ] as const;
@@ -159,6 +160,12 @@ function assertPromptAssemblyReadiness() {
     }
 
     assert.ok(prompt.assembly.sections.every((section) => section.reason.trim().length > 0), `${modelCase.modelId}: every section should explain inclusion`);
+    assert.match(prompt.systemPrompt, /Treat the system prompt as the control contract for this run/i, `${modelCase.modelId}: system prompt should include the core harness contract`);
+    assert.match(prompt.systemPrompt, /Model Family Guidance|model_family_guidance|Model family guidance/i, `${modelCase.modelId}: system prompt should include model-family guidance`);
+    assert.ok(
+      /final answer|review tasks|deliverable|direct answers|delivered result|proof status/i.test(prompt.assembly.sections.find((section) => section.id === 'model-family-guidance')?.preview || ''),
+      `${modelCase.modelId}: model-family guidance should steer final answer shape`,
+    );
   }
 }
 

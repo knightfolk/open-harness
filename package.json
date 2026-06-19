@@ -46,6 +46,7 @@
     "test:premier-closeout-matrix": "tsx scripts/test-premier-closeout-matrix.ts",
     "test:premier-restart-scope": "tsx scripts/test-premier-restart-scope.ts",
     "test:premier-worktree-isolation": "tsx scripts/test-premier-worktree-isolation.ts",
+    "test:post-alpha-followups": "tsx scripts/test-post-alpha-followups.ts",
     "test:premier-no-spend": "npm run test:theme-accessibility && npm run test:prompt-routing-memory && npm run test:execute-proof-hygiene && npm run test:premier-narrow-layout && npm run test:premier-proof-trust && npm run test:premier-steering-contract && npm run test:premier-artifact-review && npm run test:premier-calm-chat && npm run test:premier-active-work && npm run test:premier-layout-shell && npm run test:premier-agent-detail && npm run test:premier-model-harness && npm run test:premier-theme-textures && npm run test:premier-review-changes && npm run test:premier-baseline-manifest && npm run test:premier-stop-condition-audit && npm run test:premier-prompt-source-provenance && npm run test:premier-live-evidence-guard && npm run test:premier-approval-boundaries && npm run test:premier-closeout-matrix && npm run test:premier-restart-scope && npm run test:premier-worktree-isolation && npm run check:premier-closeout-readiness",
     "check:premier-no-spend": "npm run test:premier-no-spend && npm run lint && npm run build",
     "test:side-chat-main-session-isolation": "tsx scripts/test-side-chat-main-session-isolation.ts",

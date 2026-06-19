@@ -122,7 +122,10 @@ function assertPromptBuilderIntegration() {
     assert.equal(strategy.family, testCase.family, `${testCase.modelId}: assembly should record family`);
     assert.equal(strategy.systemStyle, testCase.style, `${testCase.modelId}: assembly should record style`);
     assert.ok(prompt.assembly.sections.some((section) => section.id === 'prompt-strategy'), `${testCase.modelId}: assembly should include prompt-strategy section`);
+    assert.ok(prompt.assembly.sections.some((section) => section.id === 'model-family-guidance'), `${testCase.modelId}: assembly should include model-family guidance section`);
     assert.match(prompt.systemPrompt, new RegExp(strategy.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${testCase.modelId}: system prompt should include strategy id`);
+    assert.match(prompt.systemPrompt, /Treat the system prompt as the control contract for this run/i, `${testCase.modelId}: system prompt should include shared core harness contract`);
+    assert.match(prompt.systemPrompt, /final answer/i, `${testCase.modelId}: system prompt should steer final answer shape`);
     assert.match(prompt.systemPrompt, testCase.phrase, `${testCase.modelId}: system prompt should include family-specific strategy directive`);
   }
 }
@@ -172,6 +175,32 @@ function assertSameModelStrategyOverrides() {
   assert.notEqual(defaultPrompt.systemPrompt, overriddenPrompt.systemPrompt, 'same-model strategy comparison should produce distinct prompt contracts');
   assert.match(defaultPrompt.systemPrompt, /Role\/task variant qwen-coder-tool-proof/i, 'prompt should emit the selected role/task variant directive');
   assert.ok(getPromptStrategyById('mistral-structured-purpose-v1'), 'strategy ids should resolve for Model Lab override selection');
+}
+
+function assertMinimalPromptPreservesTaskAndToolContract() {
+  const prompt = buildPromptForModel({
+    modelId: 'phi-4-mini',
+    role: 'coder',
+    workingDir: '/Users/kevink/Projects/OpenHarness',
+    projectProfileSummary: 'OpenHarness routes tasks, builds model-aware prompts, and records run traces.',
+    taskDescription: 'Implement a small prompt-heart change and report validation proof.',
+    tools: [{
+      type: 'function',
+      function: {
+        name: 'read_file',
+        description: 'Read a file',
+        parameters: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+          required: ['path'],
+        },
+      },
+    }],
+  });
+
+  assert.match(prompt.systemPrompt, /Task: Implement a small prompt-heart change and report validation proof\./, 'minimal prompts should preserve the immediate task when workspace context is present');
+  assert.equal((prompt.systemPrompt.match(/<tool_call>/g) || []).length, 1, 'text-rendered tool prompts should include one tool-call format block');
+  assert.equal((prompt.systemPrompt.match(/When you need to use a tool/g) || []).length, 1, 'text-rendered tool prompts should not duplicate tool-call instructions');
 }
 
 function assertModelIdOverridePaths() {
@@ -329,6 +358,7 @@ assertRepresentativeModelMapping();
 assertPromptBuilderIntegration();
 assertModelLabResultStrategyMetadata();
 assertSameModelStrategyOverrides();
+assertMinimalPromptPreservesTaskAndToolContract();
 assertModelIdOverridePaths();
 assertRoleTaskVariants();
 assertPromptStrategyEvalSummary();

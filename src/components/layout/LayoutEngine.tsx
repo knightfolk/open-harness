@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
 import type { HarnessRun, RunSteeringAction, SessionGoal } from '../../types';
+import type { VisualContextInfo } from '../../utils/api';
 import { PanelWrapper } from './PanelWrapper';
 import { PanelContent } from './PanelContent';
 import { getPanelConfig } from './panelRegistry';
@@ -28,7 +29,7 @@ interface Props {
   onReviewDiff?: (diffText: string) => void;
   onProposePatch?: (diffText: string, explanation?: string) => void;
   onExplainChange?: (filePath: string) => void;
-  onAskAboutScreenshot?: (screenshotBase64: string, url: string) => void;
+  onAskAboutScreenshot?: (screenshotBase64: string, url: string, visualContext?: VisualContextInfo, feedbackPrompt?: string) => void;
   onCompareModel?: () => void;
   onReviewChanges?: () => void;
   onFocusAgents?: () => void;

@@ -2717,7 +2717,7 @@ function CustomMCPServersPane({ mcpServers, onRemove }: any) {
   return (
     <>
       <PaneTitle>Custom MCP Servers</PaneTitle>
-      <PaneDesc>Additional Model Context Protocol servers for tools, resources, and prompts.</PaneDesc>
+      <PaneDesc>Additional Model Context Protocol servers for tools, resources, and prompts. Bearer tokens are stored locally and masked in Settings.</PaneDesc>
       <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {custom.map((server: any) => (
           <div key={server.id} className="provider-card">
@@ -2728,11 +2728,25 @@ function CustomMCPServersPane({ mcpServers, onRemove }: any) {
                   <span className="provider-name">{server.name}</span>
                   <span className={`provider-status ${server.enabled ? 'ready' : 'missing'}`}>{server.enabled ? 'Enabled' : 'Disabled'}</span>
                 </div>
-                <div className="provider-meta">{server.authType} • {server.endpoint}</div>
+                <div className="provider-meta">
+                  {server.authType === 'bearer'
+                    ? server.authConfigured ? 'Bearer token stored locally' : 'Bearer token missing'
+                    : 'No auth token'} • {server.endpoint}
+                </div>
               </div>
             </div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.45, padding: '6px 0', borderTop: '1px solid var(--border-primary)' }}>
+              {server.endpoint?.startsWith('stdio://')
+                ? 'stdio transport runs a local command when started; keep it scoped to tools you trust.'
+                : 'HTTP transport sends tool calls to the configured endpoint; use bearer auth for private gateways.'}
+            </div>
             <div className="provider-actions-row">
-              <button className="settings-mini-button" style={{ marginLeft: 'auto', color: 'var(--accent-error)', background: 'var(--accent-error-muted)' }} onClick={() => onRemove(server.id)}>
+              <button
+                className="settings-mini-button"
+                style={{ marginLeft: 'auto', color: 'var(--accent-error)', background: 'var(--accent-error-muted)' }}
+                onClick={() => onRemove(server.id)}
+                aria-label={`Remove MCP server ${server.name}`}
+              >
                 <Trash2 size={11} /> Remove
               </button>
             </div>
@@ -2771,8 +2785,14 @@ function AddMCPServerPane({ onAdd, onDone }: any) {
   return (
     <>
       <PaneTitle>Add MCP Server</PaneTitle>
-      <PaneDesc>Connect a Model Context Protocol server via stdio or HTTP transport.</PaneDesc>
+      <PaneDesc>Connect a Model Context Protocol server via stdio or HTTP transport. Use bearer auth only for private HTTP gateways; local stdio commands run on this machine.</PaneDesc>
       <div className="add-provider-card" style={{ marginTop: 16, maxWidth: 440 }}>
+        <div className="settings-card" style={{ marginBottom: 12, padding: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>Connection checklist</div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+            Prefer curated servers when possible. For custom servers, confirm the endpoint scheme, the trust mode needed for its tools, and whether a bearer token is required before starting it.
+          </div>
+        </div>
         <div className="add-provider-grid">
           <label>Server name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-tools-server" /></label>
           <label>Endpoint<input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="stdio://./my-server or http://..." /></label>
