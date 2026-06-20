@@ -1,0 +1,285 @@
+{
+  "createdAt": "2026-06-19T22:42:49.739Z",
+  "route": "/api/test/run",
+  "timeoutMs": 65000,
+  "prompt": "Direct answer only. Void Lanes is a Vite/canvas browser game with flight, docking, trading, contracts, jump buoys, raider combat, upgrades, npm test, and npm run build. In 80 words max: score shipping readiness 1-10, name the top risk, and name the best next improvement.",
+  "total": 19,
+  "ok": 19,
+  "error": 0,
+  "results": [
+    {
+      "model": "minimax:MiniMax-M3",
+      "status": "ok",
+      "error": "",
+      "responseLength": 595,
+      "response": "**Shipping readiness: 7/10.** `npm run build` clean (9 kB JS / 2.4 kB CSS, vite 6.4.3, 43ms) and `npm test` passes — but it's a substring-presence check, not real coverage.\n\n**Top risk:** `scripts/check.js` greps for tokens like `function update`; regressions ship silently under green tests.\n\n**Best next improvement:** Replace it with Vitest unit tests on trading math, jump-buoy cooldown, and combat damage — same Vite toolchain, real regression net.\n\n*Evidence:* `/Users/kevink/Projects/void-lanes/scripts/check.js:11-19`, `npm run build` output above, `src/game.js` (359 lines, monolithic).",
+      "wallMs": 33332,
+      "duration": 33310,
+      "toolCallCount": 6,
+      "messageCount": 2
+    },
+    {
+      "model": "minimax:MiniMax-M2.7-highspeed",
+      "status": "ok",
+      "error": "",
+      "responseLength": 717,
+      "response": "## Assessment\n\n**Shipping Readiness: 7/10**\n\nBuild and `npm test` pass cleanly. Dist output is lean (9KB JS, 2.4KB CSS gzip-ready). All listed features appear implemented in `src/game.js` (trading, contracts, docking, raiders, jump buoys, upgrades, flight). No known crashes in the static checks.\n\n**Top Risk:** The `npm test` suite is purely static—file existence and string matching. No runtime game logic validation exists. A regression in docking, trading prices, raider AI, or buoy jump math would ship undetected.\n\n**Best Next Improvement:** Add headless/runtime tests for core mechanics (e.g., trade profit validation, docking state transitions, raider spawn/collision) to catch logic regressions before build.",
+      "wallMs": 19711,
+      "duration": 19705,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "minimax:MiniMax-M2.7",
+      "status": "ok",
+      "error": "",
+      "responseLength": 750,
+      "response": "## Void Lanes Shipping Readiness\n\n**Score: 6/10**\n\n### Top Risk\n**Code architecture** — a single 359-line `game.js` monolithic file. All game logic (flight physics, docking, trading, contracts, raider AI, upgrades, buoys) lives in one flat module. This makes the game brittle to extension, difficult to debug, and blocks multiplayer or save/load without a significant refactor.\n\n### Best Next Improvement\nExtract core systems (entity state, economy, combat, input) into separate ES modules with a simple game loop orchestrator. This unlocks testable units, incremental features, and a sane foundation for ship upgrades or multiplayer.\n\n### Validation\n- `npm run build` ✅ — 9KB JS / 2.4KB CSS, builds in 44ms\n- `npm test` ✅ — passes `scripts/check.js`",
+      "wallMs": 40607,
+      "duration": 40602,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "minimax:MiniMax-M2.5-highspeed",
+      "status": "ok",
+      "error": "",
+      "responseLength": 552,
+      "response": "**Score: 5/10** — Build and lint pass cleanly, but the project lacks tests, TypeScript, and documentation.\n\n**Top risk:** A single monolithic `game.js` with zero test coverage. The entire game (physics, combat, economy, docking, buoys) lives in ~12KB of plain JS, making any new feature or refactor a high-regression hazard.\n\n**Best next improvement:** Extract the core game logic (trade math, damage rolls, docking validation, buoy routing) into testable modules and add unit tests. This would directly reduce the raider-combat/upgrade expansion risk.",
+      "wallMs": 14633,
+      "duration": 14628,
+      "toolCallCount": 10,
+      "messageCount": 2
+    },
+    {
+      "model": "minimax:MiniMax-M2.5",
+      "status": "ok",
+      "error": "",
+      "responseLength": 210,
+      "response": "**Score**: 7/10\n\n**Top risk**: No real test coverage—only a lint check script, no unit or e2e tests.\n\n**Best next improvement**: Add Vitest or Playwright tests for core game mechanics (flight, combat, trading).",
+      "wallMs": 7157,
+      "duration": 7153,
+      "toolCallCount": 8,
+      "messageCount": 2
+    },
+    {
+      "model": "minimax:MiniMax-M2.1-highspeed",
+      "status": "ok",
+      "error": "",
+      "responseLength": 354,
+      "response": "**Score: 6/10** — fully playable loop but no persistence, audio, or proper tests.\n\n**Top risk:** No save/load — the entire game state lives in memory; refreshing wipes progress, which breaks the core trading loop.\n\n**Best next improvement:** Add `localStorage` serialization on dock and periodically, so players can resume sessions after closing the tab.",
+      "wallMs": 13265,
+      "duration": 13261,
+      "toolCallCount": 10,
+      "messageCount": 2
+    },
+    {
+      "model": "minimax:MiniMax-M2.1",
+      "status": "ok",
+      "error": "",
+      "responseLength": 416,
+      "response": "Void Lanes Shipping Readiness\n\n**Score: 7/10**\n\nThe game is functional with all core features implemented and builds successfully via Vite. However, it lacks persistence and automated tests.\n\n**Top Risk:**\nNo save system — all progress (credits, cargo, ship upgrades, contracts) is lost on page refresh.\n\n**Best Next Improvement:**\nAdd `localStorage` persistence to save/restore game state, then add automated tests.",
+      "wallMs": 14933,
+      "duration": 14930,
+      "toolCallCount": 10,
+      "messageCount": 2
+    },
+    {
+      "model": "minimax:MiniMax-M2",
+      "status": "ok",
+      "error": "",
+      "responseLength": 332,
+      "response": "## Void Lanes Shipping Readiness\n\n**Score: 7/10**\n\n**Top Risk:** No persistence—players lose all progress on page refresh. The game state lives only in memory.\n\n**Best Next Improvement:** Add localStorage save/load to persist credits, cargo, ship upgrades, and contract progress. This transforms it from a demo into a playable game.",
+      "wallMs": 12568,
+      "duration": 12564,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "opencode-go:qwen3.7-plus",
+      "status": "ok",
+      "error": "",
+      "responseLength": 572,
+      "response": "**Score: 7/10**\n\nBuild and test both pass. Core loop is complete — flight, docking, 4-commodity trading, contracts, jump gates, raider AI, 4 upgrades, keyboard shortcuts, and a 9 KB production bundle.\n\n**Top risk:** `scripts/check.js` only verifies file existence and string needles — zero behavioral tests. A refactor could silently break trading, combat, or contract delivery with no guardrail.\n\n**Best next improvement:** Add real unit tests for pure logic (`buy`, `sell`, `jump`, `checkContract`, `updateBullets`) by extracting state mutations into testable functions.",
+      "wallMs": 31726,
+      "duration": 31721,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "opencode-go:qwen3.6-plus",
+      "status": "ok",
+      "error": "",
+      "responseLength": 635,
+      "response": "**Shipping readiness: 7/10**\n\n`npm test` and `npm run build` both pass cleanly. The build is tiny (9 KB JS gzipped). All named features—flight, docking, trading, contracts, jump buoys, raider combat, upgrades—are present and wired in `src/game.js`.\n\n**Top risk:** Zero behavioral test coverage. `npm test` only checks that files exist and contain certain strings. Any logic regression (broken contract payout, hull overflow, jump gate mismatch) ships undetected.\n\n**Best next improvement:** Add a proper win state. Reaching 2,000 credits only logs a message—there's no end screen, score summary, or replay loop to give players closure.",
+      "wallMs": 24409,
+      "duration": 24405,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "opencode-go:mimo-v2.5-pro",
+      "status": "ok",
+      "error": "",
+      "responseLength": 687,
+      "response": "**Score: 6/10**\n\nBuild and tests pass cleanly (43ms, 9KB JS). Core loop works: flight, docking, trading, contracts, jump buoys, raider combat, and upgrades are all present and functional. However, the entire game is a single 350-line JS file with no save system, no audio, fixed 1280×720 canvas, and a \"test\" that's just a string-existence linter rather than behavioral assertions.\n\n**Top risk:** No game state persistence — a page refresh loses all progress, which will frustrate players immediately.\n\n**Best next improvement:** Add `localStorage` save/load for game state (credits, cargo, system, upgrades, kills). Small effort, huge UX win — players can actually resume play sessions.",
+      "wallMs": 14111,
+      "duration": 14109,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "opencode-go:kimi-k2.6",
+      "status": "ok",
+      "error": "",
+      "responseLength": 627,
+      "response": "**Shipping readiness: 6/10**\n\n**Top risk:** The entire game logic, state, and persistence live in a single 359-line `src/game.js` file with no module boundaries, no save/load system, and only a string-inclusion smoke test (`scripts/check.js`) for \"test\" and \"lint\" — any bug or state corruption crashes the whole session irreversibly.\n\n**Best next improvement:** Add a `localStorage` save/load checkpoint and split game.js into modules (state, physics, UI, trade/combat) so features can be tested independently and players don't lose progress on refresh. This also enables writing real unit tests instead of string-grep checks.",
+      "wallMs": 14957,
+      "duration": 14953,
+      "toolCallCount": 10,
+      "messageCount": 2
+    },
+    {
+      "model": "opencode-go:deepseek-v4-pro",
+      "status": "ok",
+      "error": "",
+      "responseLength": 462,
+      "response": "**Shipping readiness: 6/10.** Build (Vite, 9KB gzipped) and checks pass. The core loop — fly, dock, trade, contract, jump, fight, upgrade, win — is complete and functional.\n\n**Top risk: No persistence.** Refreshing the page resets all progress; there is no save/load or localStorage.\n\n**Best next improvement: Add `localStorage` save/load** on dock, jump, or interval, restoring `state` on load so players keep credits, cargo, hull, and upgrades across sessions.",
+      "wallMs": 16015,
+      "duration": 16010,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "opencode-go:deepseek-v4-flash",
+      "status": "ok",
+      "error": "",
+      "responseLength": 483,
+      "response": "**Score: 6/10.** Core flight, dock, trade, combat, and upgrade loop works; `npm test` and `npm run build` pass clean. Missing save/load, audio, mobile support, and proper end-game state.\n\n**Top risk:** `update()` calls `log()` every frame once `credits >= 2000` — no guard flag, so it floods the log array and UI infinitely, masking real messages.\n\n**Best improvement:** Add a `won` flag to fire the win message once, then add `localStorage` save/load so players can resume progress.",
+      "wallMs": 21598,
+      "duration": 21592,
+      "toolCallCount": 20,
+      "messageCount": 2
+    },
+    {
+      "model": "z-ai-zhipu:glm-5.2",
+      "status": "ok",
+      "error": "",
+      "responseLength": 553,
+      "response": "**Shipping readiness: 7/10.** Build is clean (9 KB JS, gzip 3.65 KB) and `npm test`/`npm run build` both pass; all claimed features exist and wire to real logic in `src/game.js`.\n\n**Top risk:** No state machine. The win branch (`update()`, `if (state.credits >= 2000) log(...)`) fires *every frame* once crossed, spamming the log and never reaching a terminal \"won\" state. Death likewise silently resets hull instead of ending.\n\n**Best next improvement:** Add explicit `start → playing → won/lost` states so victory triggers once and a restart is clean.",
+      "wallMs": 30289,
+      "duration": 30285,
+      "toolCallCount": 16,
+      "messageCount": 2
+    },
+    {
+      "model": "z-ai-zhipu:glm-5.1",
+      "status": "ok",
+      "error": "",
+      "responseLength": 662,
+      "response": "**Shipping readiness: 6/10.** It's a complete, single-file playable game (~12 KB JS) covering flight, docking, trading, contracts, jump buoys, raiders, and upgrades; `npm test` and `npm run build` both pass cleanly (verified, exit 0).\n\n**Top risk:** `scripts/check.js` only greps for required strings/file existence—it's a structural smoke test, not behavioral coverage, so logic regressions (e.g., contract completion, docking thresholds, combat death/respawn) ship undetected.\n\n**Best next improvement:** Add real unit tests around the pure logic functions (`buy`/`sell`, `checkContract`, `upgrade`, `distance`) to catch edge cases before they reach the build.",
+      "wallMs": 26711,
+      "duration": 26707,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "z-ai-zhipu:glm-4.7",
+      "status": "ok",
+      "error": "",
+      "responseLength": 161,
+      "response": "Score: 8/10.\nRisk: No touch controls; unplayable on mobile devices despite viewport settings.\nImprovement: Implement on-screen controls for mobile accessibility.",
+      "wallMs": 43522,
+      "duration": 43517,
+      "toolCallCount": 16,
+      "messageCount": 2
+    },
+    {
+      "model": "zhipu:glm-5.1",
+      "status": "ok",
+      "error": "",
+      "responseLength": 576,
+      "response": "**Score: 6/10** — Builds clean (9KB gzipped JS), core loop works (flight, dock, trade, contracts, jump, combat, upgrades), and `npm test`/`npm run build` both pass.\n\n**Top risk:** Endgame breaks. In `update()`, `if (state.credits >= 2000) log(...)` fires every frame (~60fps) once you cross 2,000 credits, spamming the log with the win message and capping the 8-entry feed. There's no proper win/lose/restart state.\n\n**Best next improvement:** Add a one-shot win trigger plus a real win/lose state machine with restart, so the endgame plays cleanly instead of flooding the UI.",
+      "wallMs": 35737,
+      "duration": 35734,
+      "toolCallCount": 14,
+      "messageCount": 2
+    },
+    {
+      "model": "zhipu:glm-4.7",
+      "status": "ok",
+      "error": "",
+      "responseLength": 356,
+      "response": "Score: 7/10. Build and smoke checks pass.\n\nTop Risk: The \"test\" script only checks for keyword presence, not logic correctness, leaving regressions undetected in the monolithic code.\n\nBest Improvement: Add functional unit tests for core mechanics (trading math, collision, docking) to validate gameplay rules, ensuring stability during future code changes.",
+      "wallMs": 43471,
+      "duration": 43468,
+      "toolCallCount": 14,
+      "messageCount": 2
+    }
+  ],
+  "fastest": [
+    {
+      "model": "minimax:MiniMax-M2.5",
+      "wallMs": 7157,
+      "responseLength": 210,
+      "toolCallCount": 8
+    },
+    {
+      "model": "minimax:MiniMax-M2",
+      "wallMs": 12568,
+      "responseLength": 332,
+      "toolCallCount": 14
+    },
+    {
+      "model": "minimax:MiniMax-M2.1-highspeed",
+      "wallMs": 13265,
+      "responseLength": 354,
+      "toolCallCount": 10
+    },
+    {
+      "model": "opencode-go:mimo-v2.5-pro",
+      "wallMs": 14111,
+      "responseLength": 687,
+      "toolCallCount": 14
+    },
+    {
+      "model": "minimax:MiniMax-M2.5-highspeed",
+      "wallMs": 14633,
+      "responseLength": 552,
+      "toolCallCount": 10
+    }
+  ],
+  "slowest": [
+    {
+      "model": "z-ai-zhipu:glm-4.7",
+      "wallMs": 43522,
+      "responseLength": 161,
+      "toolCallCount": 16
+    },
+    {
+      "model": "zhipu:glm-4.7",
+      "wallMs": 43471,
+      "responseLength": 356,
+      "toolCallCount": 14
+    },
+    {
+      "model": "minimax:MiniMax-M2.7",
+      "wallMs": 40607,
+      "responseLength": 750,
+      "toolCallCount": 14
+    },
+    {
+      "model": "zhipu:glm-5.1",
+      "wallMs": 35737,
+      "responseLength": 576,
+      "toolCallCount": 14
+    },
+    {
+      "model": "minimax:MiniMax-M3",
+      "wallMs": 33332,
+      "responseLength": 595,
+      "toolCallCount": 6
+    }
+  ],
+  "averageWallMs": 24145
+}

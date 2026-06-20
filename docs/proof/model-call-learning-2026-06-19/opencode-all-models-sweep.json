@@ -1,0 +1,1198 @@
+{
+  "createdAt": "2026-06-19T23:28:25.997Z",
+  "providerId": "opencode-go",
+  "route": "direct-openai-compatible-chat-completions",
+  "chatURL": "https://<provider>/zen/go/v1/chat/completions",
+  "modelCount": 18,
+  "promptCount": 2,
+  "total": 36,
+  "ok": 14,
+  "error": 22,
+  "prompts": [
+    {
+      "id": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "content": "Project: Void Lanes. Original Vite/canvas browser game in /Users/kevink/Projects/void-lanes. Verified npm test and npm run build pass. Features: top-down ship flight, station docking, commodity trading, delivery contracts, jump buoys, raider combat, upgrades, 2,000-credit win condition. Key files: index.html, src/game.js, src/styles.css, scripts/check.js, README.md.\n\nDirect answer only. In 90 words max, score first-playtest readiness 1-10, name the strongest evidence, name the top risk, and name the best next improvement."
+    },
+    {
+      "id": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "content": "Project: Void Lanes. Original Vite/canvas browser game in /Users/kevink/Projects/void-lanes. Verified npm test and npm run build pass. Features: top-down ship flight, station docking, commodity trading, delivery contracts, jump buoys, raider combat, upgrades, 2,000-credit win condition. Key files: index.html, src/game.js, src/styles.css, scripts/check.js, README.md.\n\nDirect answer only. In 110 words max, identify one likely gameplay or code risk from this design and propose the smallest patch plan plus one validation command."
+    }
+  ],
+  "results": [
+    {
+      "model": "opencode-go:qwen3.7-plus",
+      "bareModel": "qwen3.7-plus",
+      "configuredEnabled": true,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 463,
+      "response": "Score: 8/10\n\nStrongest evidence: Passing build/tests and a complete core loop featuring flight, trading, combat, and a clear 2,000-credit win condition.\n\nTop risk: Unverified game balance. Without playtesting, the 2,000-credit goal might be trivially easy or frustratingly hard, and combat tuning is unknown.\n\nBest next improvement: Implement a brief onboarding prompt explaining basic controls, station docking, and the win condition to guide first-time players.",
+      "usage": {
+        "total_tokens": 1481,
+        "completion_tokens": 1310,
+        "prompt_tokens": 171,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1197,
+          "text_tokens": 1310
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "text_tokens": 171
+        }
+      },
+      "startedAt": "2026-06-19T23:28:25.998Z",
+      "completedAt": "2026-06-19T23:28:50.670Z",
+      "wallMs": 24672
+    },
+    {
+      "model": "opencode-go:qwen3.7-plus",
+      "bareModel": "qwen3.7-plus",
+      "configuredEnabled": true,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 391,
+      "response": "Risk: Entity array bloat and `requestAnimationFrame` leaks during raider combat and jump transitions in `src/game.js`, causing severe frame drops.\n\nPatch: Filter dead entities (raiders/projectiles) in the main update loop via `array.filter()`. Wrap scene transitions (docking/jumping) with `cancelAnimationFrame()` before re-initializing the render loop.\n\nValidation: `node scripts/check.js`",
+      "usage": {
+        "total_tokens": 1868,
+        "completion_tokens": 1703,
+        "prompt_tokens": 165,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1614,
+          "text_tokens": 1703
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "text_tokens": 165
+        }
+      },
+      "startedAt": "2026-06-19T23:28:50.671Z",
+      "completedAt": "2026-06-19T23:29:22.390Z",
+      "wallMs": 31719
+    },
+    {
+      "model": "opencode-go:qwen3.7-max",
+      "bareModel": "qwen3.7-max",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 401,
+      "error": "Model qwen3.7-max is not supported for format oa-compat",
+      "responseLength": 0,
+      "response": "",
+      "usage": null,
+      "startedAt": "2026-06-19T23:29:22.390Z",
+      "completedAt": "2026-06-19T23:29:22.501Z",
+      "wallMs": 111
+    },
+    {
+      "model": "opencode-go:qwen3.7-max",
+      "bareModel": "qwen3.7-max",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 401,
+      "error": "Model qwen3.7-max is not supported for format oa-compat",
+      "responseLength": 0,
+      "response": "",
+      "usage": null,
+      "startedAt": "2026-06-19T23:29:22.502Z",
+      "completedAt": "2026-06-19T23:29:22.616Z",
+      "wallMs": 114
+    },
+    {
+      "model": "opencode-go:qwen3.6-plus",
+      "bareModel": "qwen3.6-plus",
+      "configuredEnabled": true,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 452,
+      "response": "Score: 7/10. Strongest evidence: Passing npm test and npm run build with a complete, integrated feature set proves a stable, executable build. Top risk: Unbalanced economy and combat pacing, which frequently break progression or trivialize the 2,000-credit target during unguided sessions. Best next improvement: Add lightweight session telemetry to log credit flow, combat deaths, and time-to-win, enabling rapid balance tuning before broader testing.",
+      "usage": {
+        "prompt_tokens": 171,
+        "completion_tokens": 1615,
+        "total_tokens": 1786,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1516,
+          "text_tokens": 1615
+        },
+        "prompt_tokens_details": {
+          "text_tokens": 171
+        }
+      },
+      "startedAt": "2026-06-19T23:29:22.616Z",
+      "completedAt": "2026-06-19T23:29:52.724Z",
+      "wallMs": 30108
+    },
+    {
+      "model": "opencode-go:qwen3.6-plus",
+      "bareModel": "qwen3.6-plus",
+      "configuredEnabled": true,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 449,
+      "response": "Risk: Unbounded credit mutations in src/game.js enable exploit loops that bypass contract requirements and prematurely trigger the 2,000-credit win state.\n\nPatch: Implement a single validateCreditDelta(amount, source) function that verifies rewards against active contracts and combat logs before applying state changes. Gate the win condition behind this validator. Touch only src/game.js (~15 lines).\n\nValidation: node scripts/check.js && npm test",
+      "usage": {
+        "prompt_tokens": 165,
+        "completion_tokens": 1592,
+        "total_tokens": 1757,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1499,
+          "text_tokens": 1592
+        },
+        "prompt_tokens_details": {
+          "text_tokens": 165
+        }
+      },
+      "startedAt": "2026-06-19T23:29:52.724Z",
+      "completedAt": "2026-06-19T23:30:22.728Z",
+      "wallMs": 30004
+    },
+    {
+      "model": "opencode-go:qwen3.5-plus",
+      "bareModel": "qwen3.5-plus",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 507,
+      "response": "Score: 8/10. Strongest evidence: Passing build/test pipeline and implemented win condition confirming a complete core loop. Top risk: Economy and combat balance disrupting progression pacing or making the 2,000-credit goal trivial. Best next improvement: Implement screen shake and particle effects for combat impacts and trade confirmations. Visual juice clarifies game state better than UI text during high-intensity moments, ensuring playtesters understand cause-and-effect immediately without confusion.",
+      "usage": {
+        "prompt_tokens": 171,
+        "completion_tokens": 1902,
+        "total_tokens": 2073,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1801,
+          "text_tokens": 1902
+        },
+        "prompt_tokens_details": {
+          "text_tokens": 171
+        }
+      },
+      "startedAt": "2026-06-19T23:30:22.729Z",
+      "completedAt": "2026-06-19T23:30:58.260Z",
+      "wallMs": 35531
+    },
+    {
+      "model": "opencode-go:qwen3.5-plus",
+      "bareModel": "qwen3.5-plus",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 459,
+      "response": "Risk: Unvalidated client-side state allows players to edit LocalStorage and instantly trigger the 2,000-credit win condition, breaking progression.\n\nPatch Plan:\n1. Modify src/game.js to generate a hash of save data on every credit transaction.\n2. Verify this hash integrity immediately before rendering the victory screen.\n3. Update scripts/check.js to include a unit test asserting that tampered credit values reject validation.\n\nValidation Command:\nnpm test",
+      "usage": {
+        "prompt_tokens": 165,
+        "completion_tokens": 3129,
+        "total_tokens": 3294,
+        "completion_tokens_details": {
+          "reasoning_tokens": 3028,
+          "text_tokens": 3129
+        },
+        "prompt_tokens_details": {
+          "text_tokens": 165
+        }
+      },
+      "startedAt": "2026-06-19T23:30:58.261Z",
+      "completedAt": "2026-06-19T23:31:55.812Z",
+      "wallMs": 57551
+    },
+    {
+      "model": "opencode-go:minimax-m3",
+      "bareModel": "minimax-m3",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 985,
+      "response": "<think>\nThe user wants a concise first-playtest readiness assessment of the Void Lanes game. Let me analyze what I know:\n\n- Vite/canvas browser game\n- Verified npm test and npm run build pass (strong signal)\n- Has core loop features: flight, docking, trading, contracts, jump buoys, combat, upgrades, win condition\n- Key files exist and are organized\n\nStrengths:\n- Build and tests pass - this is concrete verified evidence\n- Core feature set is complete (trading + combat + progression + win condition = full loop)\n\nRisks:\n- Without actually running it, I can't verify gameplay feel, balance, or UX\n- Combat/raider systems often need tuning; first-playtest typically surfaces balance issues\n- No mention of save/load, tutorial, or onboarding\n\nBest next improvement:\n- An onboarding/tutorial flow or first-time player experience\n- Or a \"smoke test\" play script that exercises the full loop automatically\n\nLet me keep this under 90 words, direct, no markdown.\n</think>\nReadiness: 7/10.\n\n",
+      "usage": {
+        "total_tokens": 539,
+        "total_characters": 0,
+        "prompt_tokens": 319,
+        "completion_tokens": 220,
+        "prompt_tokens_details": {
+          "cached_tokens": 114
+        }
+      },
+      "startedAt": "2026-06-19T23:31:55.813Z",
+      "completedAt": "2026-06-19T23:32:02.264Z",
+      "wallMs": 6451
+    },
+    {
+      "model": "opencode-go:minimax-m3",
+      "bareModel": "minimax-m3",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 1029,
+      "response": "<think>\nThe user wants me to identify a likely gameplay or code risk from the Void Lanes design, propose the smallest patch plan, and provide one validation command. They want a direct answer in 110 words max, no markdown tables, no mention of hidden chain of thought.\n\nLet me think about what could be a risk in this design. The game has:\n- Top-down ship flight\n- Station docking\n- Commodity trading\n- Delivery contracts\n- Jump buoys\n- Raider combat\n- Upgrades\n- Win condition at 2,000 credits\n\nA likely risk: Save/migration issues, or performance with many entities, or the economy breaking (infinite money exploit), or the combat/win balance, or jump buoy teleporting into collision.\n\nActually, a common risk in this kind of game is the commodity trading economy being exploitable - e.g., buy low sell high loops that trivialize the win condition. Or save game compatibility when upgrades are added.\n\nAnother common risk: jump buoy traversal causing the ship to spawn inside a station/raider/asteroid. Or the docking\n</think>\n",
+      "usage": {
+        "total_tokens": 533,
+        "total_characters": 0,
+        "prompt_tokens": 313,
+        "completion_tokens": 220,
+        "prompt_tokens_details": {
+          "cached_tokens": 242
+        }
+      },
+      "startedAt": "2026-06-19T23:32:02.265Z",
+      "completedAt": "2026-06-19T23:32:08.283Z",
+      "wallMs": 6018
+    },
+    {
+      "model": "opencode-go:minimax-m2.7",
+      "bareModel": "minimax-m2.7",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 352,
+      "response": "Score: 6/10\n\n**Strongest evidence:** Verified build/test passes confirms codebase stability and reproducible builds.\n\n**Top risk:** Untested core loops — no confirmation the trading contracts, combat, or docking feel satisfying or balanced.\n\n**Best next improvement:** Conduct a focused playtest session to validate the trading-delivery loop and combat",
+      "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 220,
+        "total_tokens": 220,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:08.283Z",
+      "completedAt": "2026-06-19T23:32:14.645Z",
+      "wallMs": 6362
+    },
+    {
+      "model": "opencode-go:minimax-m2.7",
+      "bareModel": "minimax-m2.7",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 220,
+        "total_tokens": 220,
+        "prompt_tokens_details": {
+          "cached_tokens": 31
+        }
+      },
+      "startedAt": "2026-06-19T23:32:14.646Z",
+      "completedAt": "2026-06-19T23:32:19.774Z",
+      "wallMs": 5128
+    },
+    {
+      "model": "opencode-go:minimax-m2.5",
+      "bareModel": "minimax-m2.5",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 163,
+        "completion_tokens": 220,
+        "total_tokens": 383,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0003129,
+          "upstream_inference_prompt_cost": 0.0000489,
+          "upstream_inference_completions_cost": 0.000264
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 220,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:19.774Z",
+      "completedAt": "2026-06-19T23:32:25.711Z",
+      "wallMs": 5937
+    },
+    {
+      "model": "opencode-go:minimax-m2.5",
+      "bareModel": "minimax-m2.5",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 226,
+      "response": "**Risk:** Docking relies on a single proximity check, so players can accidentally dock or clip through stations when velocity is high, breaking trade loops and contracts.\n\n**Patch (src/game.js):** 1) Add a `isDocking` flag and",
+      "usage": {
+        "prompt_tokens": 157,
+        "completion_tokens": 220,
+        "total_tokens": 377,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0003111,
+          "upstream_inference_prompt_cost": 0.0000471,
+          "upstream_inference_completions_cost": 0.000264
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 167,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:25.712Z",
+      "completedAt": "2026-06-19T23:32:33.085Z",
+      "wallMs": 7373
+    },
+    {
+      "model": "opencode-go:mimo-v2.5-pro",
+      "bareModel": "mimo-v2.5-pro",
+      "configuredEnabled": true,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 563,
+      "response": "Score: 7/10. Strongest evidence: build and tests pass, core loop is complete (trade, dock, combat, win condition), and all essential systems ship in a single coherent package. Top risk: untested balance—credit economy, contract payouts, raider difficulty, and upgrade costs have no playtest data, so progression likely feels too fast, too slow, or unfair. Best next improvement: add lightweight telemetry or a manual playthrough log tracking time-to-2000-credits, death count, and contract completion rate, then iterate one tuning pass before broader playtesting.",
+      "usage": {
+        "prompt_tokens": 167,
+        "completion_tokens": 145,
+        "total_tokens": 312,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000198795,
+          "upstream_inference_prompt_cost": 0.000072645,
+          "upstream_inference_completions_cost": 0.00012615
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 19,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:33.086Z",
+      "completedAt": "2026-06-19T23:32:37.098Z",
+      "wallMs": 4012
+    },
+    {
+      "model": "opencode-go:mimo-v2.5-pro",
+      "bareModel": "mimo-v2.5-pro",
+      "configuredEnabled": true,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 161,
+        "completion_tokens": 220,
+        "total_tokens": 381,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 64,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0002338254,
+          "upstream_inference_prompt_cost": 0.0000424254,
+          "upstream_inference_completions_cost": 0.0001914
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 219,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:37.099Z",
+      "completedAt": "2026-06-19T23:32:43.231Z",
+      "wallMs": 6132
+    },
+    {
+      "model": "opencode-go:mimo-v2.5",
+      "bareModel": "mimo-v2.5",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 167,
+        "completion_tokens": 220,
+        "total_tokens": 387,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00008498,
+          "upstream_inference_prompt_cost": 0.00002338,
+          "upstream_inference_completions_cost": 0.0000616
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 219,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:43.232Z",
+      "completedAt": "2026-06-19T23:32:47.010Z",
+      "wallMs": 3778
+    },
+    {
+      "model": "opencode-go:mimo-v2.5",
+      "bareModel": "mimo-v2.5",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 161,
+        "completion_tokens": 220,
+        "total_tokens": 381,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 64,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0000753592,
+          "upstream_inference_prompt_cost": 0.0000137592,
+          "upstream_inference_completions_cost": 0.0000616
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 219,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:47.011Z",
+      "completedAt": "2026-06-19T23:32:50.904Z",
+      "wallMs": 3893
+    },
+    {
+      "model": "opencode-go:mimo-v2-pro",
+      "bareModel": "mimo-v2-pro",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 400,
+      "error": "Error from provider: This model has been deprecated. It is recommended to migrate to xiaomi/mimo-v2.5-pro",
+      "responseLength": 0,
+      "response": "",
+      "usage": null,
+      "startedAt": "2026-06-19T23:32:50.906Z",
+      "completedAt": "2026-06-19T23:32:51.108Z",
+      "wallMs": 202
+    },
+    {
+      "model": "opencode-go:mimo-v2-pro",
+      "bareModel": "mimo-v2-pro",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 400,
+      "error": "Error from provider: This model has been deprecated. It is recommended to migrate to xiaomi/mimo-v2.5-pro",
+      "responseLength": 0,
+      "response": "",
+      "usage": null,
+      "startedAt": "2026-06-19T23:32:51.109Z",
+      "completedAt": "2026-06-19T23:32:51.308Z",
+      "wallMs": 199
+    },
+    {
+      "model": "opencode-go:mimo-v2-omni",
+      "bareModel": "mimo-v2-omni",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 400,
+      "error": "Error from provider: This model has been deprecated. It is recommended to migrate to xiaomi/mimo-v2.5",
+      "responseLength": 0,
+      "response": "",
+      "usage": null,
+      "startedAt": "2026-06-19T23:32:51.309Z",
+      "completedAt": "2026-06-19T23:32:51.517Z",
+      "wallMs": 208
+    },
+    {
+      "model": "opencode-go:mimo-v2-omni",
+      "bareModel": "mimo-v2-omni",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 400,
+      "error": "Error from provider: This model has been deprecated. It is recommended to migrate to xiaomi/mimo-v2.5",
+      "responseLength": 0,
+      "response": "",
+      "usage": null,
+      "startedAt": "2026-06-19T23:32:51.517Z",
+      "completedAt": "2026-06-19T23:32:51.723Z",
+      "wallMs": 206
+    },
+    {
+      "model": "opencode-go:kimi-k2.6",
+      "bareModel": "kimi-k2.6",
+      "configuredEnabled": true,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 162,
+        "completion_tokens": 220,
+        "total_tokens": 382,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0010339,
+          "upstream_inference_prompt_cost": 0.0001539,
+          "upstream_inference_completions_cost": 0.00088
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 231,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:51.724Z",
+      "completedAt": "2026-06-19T23:32:55.308Z",
+      "wallMs": 3584
+    },
+    {
+      "model": "opencode-go:kimi-k2.6",
+      "bareModel": "kimi-k2.6",
+      "configuredEnabled": true,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 156,
+        "completion_tokens": 220,
+        "total_tokens": 376,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0010282,
+          "upstream_inference_prompt_cost": 0.0001482,
+          "upstream_inference_completions_cost": 0.00088
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 266,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:32:55.309Z",
+      "completedAt": "2026-06-19T23:33:00.314Z",
+      "wallMs": 5005
+    },
+    {
+      "model": "opencode-go:kimi-k2.5",
+      "bareModel": "kimi-k2.5",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 162,
+        "completion_tokens": 220,
+        "total_tokens": 382,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0007572,
+          "upstream_inference_prompt_cost": 0.0000972,
+          "upstream_inference_completions_cost": 0.00066
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 236,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:33:00.315Z",
+      "completedAt": "2026-06-19T23:33:05.343Z",
+      "wallMs": 5028
+    },
+    {
+      "model": "opencode-go:kimi-k2.5",
+      "bareModel": "kimi-k2.5",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 156,
+        "completion_tokens": 220,
+        "total_tokens": 376,
+        "cost": 0,
+        "is_byok": true,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0007536,
+          "upstream_inference_prompt_cost": 0.0000936,
+          "upstream_inference_completions_cost": 0.00066
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 254,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:33:05.344Z",
+      "completedAt": "2026-06-19T23:33:10.022Z",
+      "wallMs": 4678
+    },
+    {
+      "model": "opencode-go:hy3-preview",
+      "bareModel": "hy3-preview",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 224,
+      "response": "Playtest readiness: 8/10.\n\nStrongest evidence: Verified npm test and build pipelines ensure a stable, deployable codebase.\n\nTop risk: Incomplete or unoptimized game loop performance in the Vite/canvas environment may lead to",
+      "usage": {
+        "prompt_tokens": 166,
+        "completion_tokens": 220,
+        "total_tokens": 386,
+        "cost": 0.000068156,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000068156,
+          "upstream_inference_prompt_cost": 0.000010956,
+          "upstream_inference_completions_cost": 0.0000572
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 167,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:33:10.023Z",
+      "completedAt": "2026-06-19T23:33:13.535Z",
+      "wallMs": 3512
+    },
+    {
+      "model": "opencode-go:hy3-preview",
+      "bareModel": "hy3-preview",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 53,
+      "response": "The risk is economic imbalance; players may reach the",
+      "usage": {
+        "prompt_tokens": 160,
+        "completion_tokens": 220,
+        "total_tokens": 380,
+        "cost": 0.00006776,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00006776,
+          "upstream_inference_prompt_cost": 0.00001056,
+          "upstream_inference_completions_cost": 0.0000572
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 209,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "startedAt": "2026-06-19T23:33:13.536Z",
+      "completedAt": "2026-06-19T23:33:17.426Z",
+      "wallMs": 3890
+    },
+    {
+      "model": "opencode-go:glm-5.1",
+      "bareModel": "glm-5.1",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 158,
+        "total_tokens": 378,
+        "completion_tokens": 220,
+        "estimated_cost": 0,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": null
+        }
+      },
+      "startedAt": "2026-06-19T23:33:17.427Z",
+      "completedAt": "2026-06-19T23:33:19.452Z",
+      "wallMs": 2025
+    },
+    {
+      "model": "opencode-go:glm-5.1",
+      "bareModel": "glm-5.1",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "ok",
+      "httpStatus": 200,
+      "error": "",
+      "responseLength": 46,
+      "response": "Risk: Static commodity prices enable arbitrage",
+      "usage": {
+        "prompt_tokens": 152,
+        "total_tokens": 372,
+        "completion_tokens": 220,
+        "estimated_cost": 0,
+        "prompt_tokens_details": {
+          "cached_tokens": 96,
+          "cache_write_tokens": null
+        }
+      },
+      "startedAt": "2026-06-19T23:33:19.453Z",
+      "completedAt": "2026-06-19T23:33:21.570Z",
+      "wallMs": 2117
+    },
+    {
+      "model": "opencode-go:glm-5",
+      "bareModel": "glm-5",
+      "configuredEnabled": false,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 158,
+        "total_tokens": 378,
+        "completion_tokens": 220,
+        "estimated_cost": 0,
+        "prompt_tokens_details": {
+          "cached_tokens": 128,
+          "cache_write_tokens": null
+        }
+      },
+      "startedAt": "2026-06-19T23:33:21.571Z",
+      "completedAt": "2026-06-19T23:33:23.469Z",
+      "wallMs": 1898
+    },
+    {
+      "model": "opencode-go:glm-5",
+      "bareModel": "glm-5",
+      "configuredEnabled": false,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 152,
+        "total_tokens": 372,
+        "completion_tokens": 220,
+        "estimated_cost": 0,
+        "prompt_tokens_details": {
+          "cached_tokens": 128,
+          "cache_write_tokens": null
+        }
+      },
+      "startedAt": "2026-06-19T23:33:23.470Z",
+      "completedAt": "2026-06-19T23:33:25.516Z",
+      "wallMs": 2046
+    },
+    {
+      "model": "opencode-go:deepseek-v4-pro",
+      "bareModel": "deepseek-v4-pro",
+      "configuredEnabled": true,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 239,
+        "completion_tokens": 220,
+        "total_tokens": 459,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 220
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 239
+      },
+      "startedAt": "2026-06-19T23:33:25.517Z",
+      "completedAt": "2026-06-19T23:33:28.691Z",
+      "wallMs": 3174
+    },
+    {
+      "model": "opencode-go:deepseek-v4-pro",
+      "bareModel": "deepseek-v4-pro",
+      "configuredEnabled": true,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 233,
+        "completion_tokens": 220,
+        "total_tokens": 453,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 220
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 105
+      },
+      "startedAt": "2026-06-19T23:33:28.692Z",
+      "completedAt": "2026-06-19T23:33:31.557Z",
+      "wallMs": 2865
+    },
+    {
+      "model": "opencode-go:deepseek-v4-flash",
+      "bareModel": "deepseek-v4-flash",
+      "configuredEnabled": true,
+      "promptId": "shipping-readiness",
+      "taskType": "direct",
+      "role": "reviewer",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 239,
+        "completion_tokens": 220,
+        "total_tokens": 459,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 220
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 239
+      },
+      "startedAt": "2026-06-19T23:33:31.558Z",
+      "completedAt": "2026-06-19T23:33:35.141Z",
+      "wallMs": 3583
+    },
+    {
+      "model": "opencode-go:deepseek-v4-flash",
+      "bareModel": "deepseek-v4-flash",
+      "configuredEnabled": true,
+      "promptId": "bug-patch-plan",
+      "taskType": "investigate",
+      "role": "coder",
+      "status": "error",
+      "httpStatus": 200,
+      "error": "empty response",
+      "responseLength": 0,
+      "response": "",
+      "usage": {
+        "prompt_tokens": 233,
+        "completion_tokens": 220,
+        "total_tokens": 453,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 220
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 105
+      },
+      "startedAt": "2026-06-19T23:33:35.142Z",
+      "completedAt": "2026-06-19T23:33:38.419Z",
+      "wallMs": 3277
+    }
+  ],
+  "completed": 36,
+  "completedAt": "2026-06-19T23:33:38.420Z",
+  "averageWallMs": 8678,
+  "byModel": {
+    "opencode-go:qwen3.7-plus": {
+      "ok": 2,
+      "error": 0,
+      "averageWallMs": 28196,
+      "configuredEnabled": true
+    },
+    "opencode-go:qwen3.7-max": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 113,
+      "configuredEnabled": false
+    },
+    "opencode-go:qwen3.6-plus": {
+      "ok": 2,
+      "error": 0,
+      "averageWallMs": 30056,
+      "configuredEnabled": true
+    },
+    "opencode-go:qwen3.5-plus": {
+      "ok": 2,
+      "error": 0,
+      "averageWallMs": 46541,
+      "configuredEnabled": false
+    },
+    "opencode-go:minimax-m3": {
+      "ok": 2,
+      "error": 0,
+      "averageWallMs": 6235,
+      "configuredEnabled": false
+    },
+    "opencode-go:minimax-m2.7": {
+      "ok": 1,
+      "error": 1,
+      "averageWallMs": 5745,
+      "configuredEnabled": false
+    },
+    "opencode-go:minimax-m2.5": {
+      "ok": 1,
+      "error": 1,
+      "averageWallMs": 6655,
+      "configuredEnabled": false
+    },
+    "opencode-go:mimo-v2.5-pro": {
+      "ok": 1,
+      "error": 1,
+      "averageWallMs": 5072,
+      "configuredEnabled": true
+    },
+    "opencode-go:mimo-v2.5": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 3836,
+      "configuredEnabled": false
+    },
+    "opencode-go:mimo-v2-pro": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 201,
+      "configuredEnabled": false
+    },
+    "opencode-go:mimo-v2-omni": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 207,
+      "configuredEnabled": false
+    },
+    "opencode-go:kimi-k2.6": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 4295,
+      "configuredEnabled": true
+    },
+    "opencode-go:kimi-k2.5": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 4853,
+      "configuredEnabled": false
+    },
+    "opencode-go:hy3-preview": {
+      "ok": 2,
+      "error": 0,
+      "averageWallMs": 3701,
+      "configuredEnabled": false
+    },
+    "opencode-go:glm-5.1": {
+      "ok": 1,
+      "error": 1,
+      "averageWallMs": 2071,
+      "configuredEnabled": false
+    },
+    "opencode-go:glm-5": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 1972,
+      "configuredEnabled": false
+    },
+    "opencode-go:deepseek-v4-pro": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 3020,
+      "configuredEnabled": true
+    },
+    "opencode-go:deepseek-v4-flash": {
+      "ok": 0,
+      "error": 2,
+      "averageWallMs": 3430,
+      "configuredEnabled": true
+    }
+  }
+}
