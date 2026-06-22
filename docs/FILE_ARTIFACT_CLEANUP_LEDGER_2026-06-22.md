@@ -3,7 +3,7 @@
 Date: 2026-06-22
 Reviewer: Friday
 Baseline: `2782aedd` (`Harden day-one cleanup surfaces`)
-Status: safe cleanup slice completed
+Status: safe cleanup slice completed; release retention policy added
 
 This ledger turns the day-one File And Artifact Cleanup Queue into explicit
 dispositions. The rule for this pass is preservation first: generated folders
@@ -14,7 +14,7 @@ current proof record.
 
 | Path | Observed state | Disposition | Action |
 | --- | --- | --- | --- |
-| `release/` | Ignored generated Electron release output, about 7.0 GB. Contains alpha update 1, 2, and 3 packages plus unpacked app directories. Update 3 artifacts were generated on 2026-06-22. | Keep as current release output. Older update generations remain archive candidates, but need release-by-release evidence review before deletion. | No deletion in this pass. |
+| `release/` | Ignored generated Electron release output. It was about 7.0 GB before the release-retention pass and about 4.9 GB after removing unpacked Electron Builder folders. It still contains alpha update 1, 2, and 3 packages, updater metadata, checksums, and builder diagnostics. | Keep versioned packages, blockmaps, updater metadata, and checksum files. Older update generations remain archive candidates, but need release-by-release checksum evidence before deletion. | Initial cleanup pass made no `release/` deletion. Follow-up release-retention pass removed only unpacked generated folders; see `docs/RELEASE_ARTIFACT_RETENTION_LEDGER_2026-06-22.md`. |
 | `dist/` | Ignored Vite build output, about 3.3 MB, generated on 2026-06-22. | Remove only as part of a deliberate rebuild/reset. It is reproducible but useful for current validation. | Kept. |
 | `dist-server/` | Ignored server bundle output, about 2.2 MB, generated on 2026-06-22. | Remove only as part of a deliberate rebuild/reset. It is reproducible but useful for current validation. | Kept. |
 | `node_modules/` | Ignored install output, about 779 MB. | Remove only if dependency reinstall is desired. It is generated, but deleting it would slow validation and does not reduce repo confusion in git. | Kept. |
@@ -38,9 +38,14 @@ current proof record.
 No tracked proof artifact, release package, generated release output, README
 screenshot, source data file, or test fixture was deleted.
 
+Follow-up release cleanup is now tracked in
+`docs/RELEASE_ARTIFACT_RETENTION_LEDGER_2026-06-22.md`. That pass removed only
+ignored unpacked Electron Builder folders under `release/`; no release packages,
+blockmaps, updater metadata, or checksum files were deleted.
+
 ## Next Safe Cleanup Step
 
-The next cleanup pass should decide whether `release/` needs a local retention
-policy after confirming which alpha update packages are already published or
-otherwise preserved outside the working tree. Until then, `release/` remains
-large but intentionally preserved.
+The next cleanup pass should resolve the update 3 checksum mismatch documented
+in `docs/RELEASE_ARTIFACT_RETENTION_LEDGER_2026-06-22.md` before deleting any
+versioned release package. Until then, `release/` remains large but the package
+history is intentionally preserved.
