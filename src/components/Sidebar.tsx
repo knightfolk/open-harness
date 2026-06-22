@@ -621,8 +621,7 @@ function SubAgentRow({
         </span>
             {compact && (
               <span
-                className="sub-agent-name-text"
-                style={{ color: 'var(--text-tertiary)' }}
+                className="sub-agent-compact-meta"
                 role="group"
                 aria-label={[
                   agent.runTrace?.providerId ? `provider ${agent.runTrace.providerId}` : null,
@@ -634,8 +633,7 @@ function SubAgentRow({
                 ].filter(Boolean).join('. ')}
               >
             {(agent.status === 'error' || agent.status === 'blocked') && <span className="sub-agent-attention" title="Needs attention" aria-hidden="true">⚠ </span>}
-            · {agent.runTrace?.providerId ? `${agent.runTrace.providerId} · ` : ''}{agent.model ? `${agent.model} · ` : ''}{latestRunArtifactCue(agent) ? `${latestRunArtifactCue(agent)} · ` : ''}{formatRunStatus(agent.status)} · {formatAgentDuration(agent.startTime)}
-            {(agent.task ? ` · ${agent.task.slice(0, 24)}${agent.task.length > 24 ? '…' : ''}` : '')}
+            {formatRunStatus(agent.status)} · {formatAgentDuration(agent.startTime)}
           </span>
         )}
         {agent.status !== 'complete' && (

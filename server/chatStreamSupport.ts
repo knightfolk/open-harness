@@ -86,7 +86,7 @@ function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
     case 'model_request': return `Waiting for ${step.model}`;
     case 'tool_call': return step.durationMs == null ? `Using ${step.name}` : `Finished ${step.name}`;
     case 'model_text': return 'Receiving response text';
-    case 'model_thinking': return step.source === 'router' ? 'Router rationale received' : 'Model thinking live';
+    case 'model_thinking': return step.source === 'router' ? 'Routing details saved' : 'Model thinking live';
     case 'repo_map': return 'Mapping the repository';
     case 'context_pack': return 'Preparing project context';
     default: return null;
@@ -105,6 +105,6 @@ export function emitVisibleRunActivity(
   const now = Date.now();
   if (now - state.lastAt < 250 && step.type !== 'model_thinking') return;
   state.lastAt = now;
-  const preview = step.type === 'model_thinking' && step.preview ? compactTracePreview(step.preview, 220) : undefined;
+  const preview = step.type === 'model_thinking' && step.source !== 'router' && step.preview ? compactTracePreview(step.preview, 220) : undefined;
   writeSSE(res, 'thinking', { id: assistantId, chars: state.chars, message, preview });
 }

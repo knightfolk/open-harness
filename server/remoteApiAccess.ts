@@ -48,6 +48,18 @@ export function getBearerOrHeaderToken(req: express.Request, headerNames: string
   return '';
 }
 
+export function browserMutationOriginAllowed(req: express.Request, allowedOrigins: Set<string>): { ok: true } | { ok: false; error: string } {
+  const origin = req.get('origin');
+  if (origin && !allowedOrigins.has(origin)) {
+    return { ok: false, error: 'Mutation origin is not allowed' };
+  }
+  const fetchSite = (req.get('sec-fetch-site') || '').toLowerCase();
+  if (fetchSite === 'cross-site') {
+    return { ok: false, error: 'Cross-site browser mutation refused' };
+  }
+  return { ok: true };
+}
+
 export function createRemoteApiGuard(options: {
   enabled: boolean;
   token: string;

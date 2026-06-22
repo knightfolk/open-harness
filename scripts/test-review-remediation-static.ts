@@ -78,7 +78,7 @@ assert.match(serverIndex, /registerApprovalRoutes\(app/, 'Approval transaction r
 assert.match(serverIndex, /ensureAskBeforeWriteApproval/, 'Server should enforce ask-before-write approval transactions');
 assert.match(serverIndex, /requires an explicit approval transaction in ask-before-write mode/, 'Automatic model write/command tools should be blocked in ask-before-write mode');
 assert.match(serverIndex, /registerTerminalRoutes\(app/, 'Terminal route family should be registered from a route module');
-assert.match(serverIndex, /registerAppInfoRoutes\(app\)/, 'Personalization, release notes, and crash routes should be registered from a route module');
+assert.match(serverIndex, /registerAppInfoRoutes\(app, \{\s+ensureLocalMutationWithControl,\s+\}\)/, 'Personalization mutation routes should be registered with local mutation control');
 assert.match(serverIndex, /registerBenchExecutionRoutes\(app/, 'Bench execution route should be registered from a route module');
 assert.match(serverIndex, /registerBenchRoutes\(app/, 'Bench report routes should be registered from a route module');
 assert.match(serverIndex, /registerBrowserRoutes\(app\)/, 'Browser route family should be registered from a route module');
@@ -138,6 +138,8 @@ assert.match(serverIndex + readFileSync('server/config.ts', 'utf-8'), /hasInline
 assert.match(remoteApiAccess, /x-openharness-api-token/, 'Remote API token guard should remain present after extraction');
 assert.match(remoteApiAccess, /export function createRemoteApiGuard/, 'Remote API access guard should live outside the server entrypoint');
 assert.match(remoteApiAccess, /export function isLoopbackAddress/, 'Loopback address classification should live outside the server entrypoint');
+assert.match(remoteApiAccess, /export function browserMutationOriginAllowed/, 'Browser-origin mutation checks should live outside the server entrypoint');
+assert.match(serverIndex, /browserMutationOriginAllowed\(req, allowedOrigins\)/, 'Local mutation control should reject cross-site browser-origin requests before loopback shortcuts');
 assert.match(requestSchemas, /export function objectSchema/, 'Runtime request schema helper should be available for API payloads');
 assert.match(requestSchemas, /export function parseBody/, 'Runtime request schema helper should reject invalid request bodies');
 assert.match(requestSchemas, /export function requiredNonBlankString/, 'Runtime request schema helper should validate non-blank strings without trimming payloads');
@@ -165,6 +167,8 @@ assert.match(terminalRoutes, /export function registerTerminalRoutes/, 'Terminal
 assert.match(terminalRoutes, /ensureAskBeforeWriteApproval/, 'Extracted terminal routes should keep ask-before-write approval enforcement');
 assert.match(appInfoRoutes, /export function registerAppInfoRoutes/, 'App info routes should live outside the server entrypoint');
 assert.match(appInfoRoutes, /\/api\/personalization/, 'Personalization routes should live in the app info route module');
+assert.match(appInfoRoutes, /app\.put\('\/api\/personalization'[\s\S]*ensureLocalMutationWithControl/, 'Personalization PUT should require local mutation control');
+assert.match(appInfoRoutes, /app\.delete\('\/api\/personalization'[\s\S]*ensureLocalMutationWithControl/, 'Personalization DELETE should require local mutation control');
 assert.match(appInfoRoutes, /\/api\/release-notes/, 'Release notes route should live in the app info route module');
 assert.match(appInfoRoutes, /\/api\/crash-reports/, 'Crash report routes should live in the app info route module');
 assert.match(benchExecutionRoutes, /export function registerBenchExecutionRoutes/, 'Bench execution route should live outside the server entrypoint');
@@ -248,6 +252,8 @@ assert.match(labUtilityRoutes, /debug-bundle/, 'Debug bundle routes should live 
 assert.match(labUtilityRoutes, /\/api\/prompt\/redact/, 'Prompt redaction route should live in the lab utility route module');
 assert.match(labUtilityRoutes, /\/api\/prompt\/estimate/, 'Prompt estimation route should live in the lab utility route module');
 assert.match(labUtilityRoutes, /ensureLocalMutationWithControl/, 'Extracted lab utility mutations should preserve local mutation checks');
+assert.match(labUtilityRoutes, /ensureExplicitApproval/, 'Prompt skill import should require explicit source-read approval outside the active workspace');
+assert.match(labUtilityRoutes, /isPathWithin\(resolvedSource, targetWorkspace\.dir\)/, 'Prompt skill import should allow unapproved reads only inside the active workspace');
 assert.match(labUtilityRoutes, /ensureKnownWorkspace/, 'Extracted lab utility routes should preserve workspace checks');
 assert.doesNotMatch(serverIndex, /app\.(get|post|put)\('\/api\/(evals\/prompts|prompt-strategies|evals\/reports|evals\/recommendations|capabilities|prompt-plugins|prompt\/redact|prompt\/estimate)/, 'Lab utility routes should not remain inline in the server entrypoint');
 assert.doesNotMatch(serverIndex, /app\.get\('\/api\/(sessions\/:sessionId\/messages\/:messageId|runs\/:runId)\/debug-bundle/, 'Debug bundle routes should not remain inline in the server entrypoint');
@@ -266,6 +272,8 @@ assert.match(patchProposalRoutes, /\/api\/patch-proposals/, 'Patch proposal CRUD
 assert.match(patchProposalRoutes, /\/api\/patch-proposals\/:id\/isolate/, 'Patch proposal isolate route should live in the patch proposal route module');
 assert.match(patchProposalRoutes, /\/api\/patch-proposals\/:id\/apply/, 'Patch proposal apply route should live in the patch proposal route module');
 assert.match(patchProposalRoutes, /ensureAskBeforeWriteApproval/, 'Patch proposal write routes should preserve ask-before-write approval checks');
+assert.match(patchProposalRoutes, /app\.post\('\/api\/patch-proposals\/:id\/validate'[\s\S]*ensureWorkspaceMutationAllowed/, 'Patch proposal validate should require workspace mutation control before running stored commands');
+assert.match(patchProposalRoutes, /app\.post\('\/api\/patch-proposals\/:id\/commit'[\s\S]*ensureWorkspaceMutationAllowed/, 'Patch proposal commit should require workspace mutation control before running stored commands');
 assert.match(patchProposalRoutes, /isPathAllowed/, 'Patch proposal apply routes should preserve trust-mode path checks');
 assert.match(patchProposalRoutes, /runValidationGate/, 'Patch proposal validation and commit gates should remain in the extracted route');
 assert.match(patchProposalRoutes, /captureDetectedPreview/, 'Patch proposal preview capture should remain in the extracted route');

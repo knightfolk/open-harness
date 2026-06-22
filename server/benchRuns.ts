@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
 
 import { buildScoreBreakdown, type EvalScores, type EvalScoreBreakdown } from './evals';
+import { safeJsonStorePath } from './jsonStorePaths';
 import type { PromptStrategyTrace } from './promptStrategies';
 import { redactSecrets } from './sectionRedaction';
 import { spawnShellCommand, terminateProcessTree } from './shell';
@@ -616,17 +617,20 @@ export function createBenchRun(params: {
 }
 
 export function saveBenchRun(run: BenchRun): void {
-  const path = join(BENCH_DIR, `${run.id}.json`);
+  const path = safeJsonStorePath(BENCH_DIR, run.id);
+  if (!path) throw new Error('Invalid bench run id');
   writeFileSync(path, JSON.stringify(redactPersistedValue(run), null, 2), 'utf-8');
 }
 
 export function getBenchArtifactPath(id: string): string | undefined {
-  const path = join(BENCH_DIR, `${id}.json`);
+  const path = safeJsonStorePath(BENCH_DIR, id);
+  if (!path) return undefined;
   return existsSync(path) ? path : undefined;
 }
 
 export function getBenchRun(id: string): BenchRun | null {
-  const path = join(BENCH_DIR, `${id}.json`);
+  const path = safeJsonStorePath(BENCH_DIR, id);
+  if (!path) return null;
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf-8'));

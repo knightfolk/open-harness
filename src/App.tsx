@@ -2308,9 +2308,9 @@ function PatchNotesBanner({
       <div className="patch-notes-banner-copy">
         <div className="patch-notes-kicker">Updated</div>
         <div id="patch-notes-title" className="patch-notes-banner-title">
-          {release?.title || `Version ${releaseNotes.currentVersion}`}
+          Release notes updated
         </div>
-        <div className="patch-notes-version">Version {releaseNotes.currentVersion}</div>
+        <div className="patch-notes-version">{release?.title || `Version ${releaseNotes.currentVersion}`}</div>
       </div>
       <label className="patch-notes-opt-out">
         <input

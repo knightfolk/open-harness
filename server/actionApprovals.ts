@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { redactSecrets } from './sectionRedaction';
 
-export type ApprovalActionKind = 'command' | 'write';
+export type ApprovalActionKind = 'command' | 'write' | 'read';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'consumed' | 'expired';
 
 export interface ApprovalAction {

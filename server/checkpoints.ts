@@ -40,11 +40,13 @@ import {
   unlinkSync,
   statSync,
 } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { v4 as uuid } from 'uuid';
 import { getStatus, getFileDiff } from './git';
+import { safeJsonStorePath } from './jsonStorePaths';
+import { isPathWithin } from './toolPolicy';
 
 const ROOT = join(homedir(), '.openharness', 'checkpoints');
 
@@ -230,7 +232,8 @@ export function listCheckpoints(dir: string): Checkpoint[] {
 export function getCheckpoint(dir: string, id: string): Checkpoint | null {
   const root = getGitRoot(dir);
   if (!root) return null;
-  const path = join(projectDir(root), `${id}.json`);
+  const path = safeJsonStorePath(projectDir(root), id);
+  if (!path) return null;
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as Checkpoint;
@@ -242,7 +245,8 @@ export function getCheckpoint(dir: string, id: string): Checkpoint | null {
 export function deleteCheckpoint(dir: string, id: string): boolean {
   const root = getGitRoot(dir);
   if (!root) return false;
-  const path = join(projectDir(root), `${id}.json`);
+  const path = safeJsonStorePath(projectDir(root), id);
+  if (!path) return false;
   if (!existsSync(path)) return false;
   unlinkSync(path);
   return true;
@@ -281,7 +285,11 @@ export function restoreCheckpoint(dir: string, id: string): RestoreCheckpointRes
     try {
       if (file.status === 'added') {
         // File did not exist at HEAD — remove it
-        const full = join(root, file.path);
+        const full = resolve(root, file.path);
+        if (!isPathWithin(full, root)) {
+          failed.push(`${file.path}: path escapes checkpoint root`);
+          continue;
+        }
         if (existsSync(full)) unlinkSync(full);
         applied.push(file.path);
         continue;
@@ -296,7 +304,11 @@ export function restoreCheckpoint(dir: string, id: string): RestoreCheckpointRes
   // Recreate inline untracked files
   for (const file of checkpoint.files.filter(f => f.kind === 'untracked')) {
     try {
-      const full = join(root, file.path);
+      const full = resolve(root, file.path);
+      if (!isPathWithin(full, root)) {
+        failed.push(`${file.path}: path escapes checkpoint root`);
+        continue;
+      }
       ensureDir(dirname(full));
       writeFileSync(full, file.content, 'utf-8');
       applied.push(file.path);
@@ -309,7 +321,8 @@ export function restoreCheckpoint(dir: string, id: string): RestoreCheckpointRes
   checkpoint.restoredAt = new Date().toISOString();
   const meta = readProjectMeta(root);
   writeProjectMeta(root, meta);
-  writeFileSync(join(projectDir(root), `${checkpoint.id}.json`), JSON.stringify(checkpoint, null, 2), 'utf-8');
+  const checkpointPath = safeJsonStorePath(projectDir(root), checkpoint.id);
+  if (checkpointPath) writeFileSync(checkpointPath, JSON.stringify(checkpoint, null, 2), 'utf-8');
 
   return {
     ok: failed.length === 0,
@@ -336,7 +349,11 @@ export function applyCheckpointDiff(dir: string, id: string): RestoreCheckpointR
 
   for (const file of checkpoint.files.filter(f => f.kind === 'tracked' && f.content)) {
     try {
-      const full = join(root, file.path);
+      const full = resolve(root, file.path);
+      if (!isPathWithin(full, root)) {
+        failed.push(`${file.path}: path escapes checkpoint root`);
+        continue;
+      }
       ensureDir(dirname(full));
       execFileSync('git', ['apply', '--whitespace=nowarn', '-'], {
         cwd: root,

@@ -71,10 +71,9 @@ export function formatAutoRouterStepDetail(step: AutoRouterStep): string {
 }
 
 export function describeAutoRouterRunStep(step: AutoRouterStep): string {
-  const scoreCount = sortedCandidateScores(step.candidateScores).length;
-  const scoreText = scoreCount > 0 ? ` · ${scoreCount} candidate score${scoreCount === 1 ? '' : 's'}` : '';
   const verb = step.fallback ? 'used default fallback' : 'selected';
-  return `${AUTO_ROUTER_LABEL} ${verb} ${step.modelId} (${step.score.toFixed(2)})${step.cached ? ' from cache' : ''}${scoreText}`;
+  const cacheText = step.cached ? ' from cached routing evidence' : '';
+  return `${AUTO_ROUTER_LABEL} ${verb} ${step.modelId}${cacheText}. Details are in Routing Learning.`;
 }
 
 export function autoRouterStepTraceText(step: AutoRouterStep): string {

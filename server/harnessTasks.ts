@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
+import { safeJsonStorePath } from './jsonStorePaths';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -50,19 +51,6 @@ function ensureDirs() {
 
 ensureDirs();
 
-function safeStoreId(id: string): string | null {
-  if (typeof id !== 'string') return null;
-  const trimmed = id.trim();
-  return /^[a-zA-Z0-9._-]{1,120}$/.test(trimmed) && !trimmed.includes('..') ? trimmed : null;
-}
-
-function safeJsonPath(root: string, id: string): string | null {
-  const safeId = safeStoreId(id);
-  if (!safeId) return null;
-  const path = join(root, `${safeId}.json`);
-  return resolve(path).startsWith(resolve(root) + '/') ? path : null;
-}
-
 // ── Task CRUD ──────────────────────────────────────────
 
 export function createTask(task: Omit<HarnessTask, 'id' | 'createdAt' | 'updatedAt'>): HarnessTask {
@@ -79,7 +67,7 @@ export function createTask(task: Omit<HarnessTask, 'id' | 'createdAt' | 'updated
 }
 
 export function getTask(id: string): HarnessTask | null {
-  const path = safeJsonPath(TASKS_DIR, id);
+  const path = safeJsonStorePath(TASKS_DIR, id);
   if (!path) return null;
   if (!existsSync(path)) return null;
   try {
@@ -93,14 +81,14 @@ export function updateTask(id: string, updates: Partial<HarnessTask>): HarnessTa
   const existing = getTask(id);
   if (!existing) return null;
   const updated: HarnessTask = { ...existing, ...updates, id, updatedAt: new Date().toISOString() };
-  const path = safeJsonPath(TASKS_DIR, id);
+  const path = safeJsonStorePath(TASKS_DIR, id);
   if (!path) return null;
   writeFileSync(path, JSON.stringify(updated, null, 2), 'utf-8');
   return updated;
 }
 
 export function deleteTask(id: string): boolean {
-  const path = safeJsonPath(TASKS_DIR, id);
+  const path = safeJsonStorePath(TASKS_DIR, id);
   if (!path) return false;
   if (!existsSync(path)) return false;
   unlinkSync(path);
@@ -138,7 +126,8 @@ export function createSuite(suite: Omit<TaskSuite, 'id' | 'createdAt' | 'updated
 }
 
 export function getSuite(id: string): TaskSuite | null {
-  const path = join(SUITES_DIR, `${id}.json`);
+  const path = safeJsonStorePath(SUITES_DIR, id);
+  if (!path) return null;
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf-8'));
@@ -160,7 +149,8 @@ export function listSuites(): TaskSuite[] {
 }
 
 export function deleteSuite(id: string): boolean {
-  const path = join(SUITES_DIR, `${id}.json`);
+  const path = safeJsonStorePath(SUITES_DIR, id);
+  if (!path) return false;
   if (!existsSync(path)) return false;
   unlinkSync(path);
   return true;

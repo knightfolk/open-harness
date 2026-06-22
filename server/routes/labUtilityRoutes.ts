@@ -1,16 +1,20 @@
 import express from 'express';
+import { resolve } from 'path';
 
 import type { StoredConfig } from '../config';
+import type { ApprovalAction } from '../actionApprovals';
 import * as evals from '../evals';
 import { listCapabilities, setCapabilityEnabled, type CapabilityKind } from '../capabilities';
 import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins } from '../promptPlugins';
 import { PROMPT_STRATEGY_PROFILES } from '../promptStrategies';
 import { estimateSections, redactSecrets } from '../sectionRedaction';
+import { isPathWithin } from '../toolPolicy';
 
 interface LabUtilityRouteDeps {
   getConfig: () => StoredConfig;
   saveConfig: (config: StoredConfig) => void;
   ensureLocalMutationWithControl: (req: express.Request) => { ok: true } | { ok: false; status: number; error: string };
+  ensureExplicitApproval: (req: express.Request, action: ApprovalAction) => { ok: true } | { ok: false; status: number; error: string; approval?: unknown };
   ensureKnownWorkspace: (dir: string) => { ok: true; dir: string } | { ok: false; status: number; error: string };
   buildRunDebugBundle: (sessionId: string, messageId: string) => { run: { id: string } } | null;
   buildRunDebugBundleByRunId: (runId: string) => { run: { id: string } } | null;
@@ -104,6 +108,8 @@ export function registerLabUtilityRoutes(app: express.Express, deps: LabUtilityR
   });
 
   app.post('/api/prompt-plugins/ensure-roots', (req, res) => {
+    const mutation = deps.ensureLocalMutationWithControl(req);
+    if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
     const targetWorkspace = optionalWorkspace(req.body?.workingDir, deps);
     if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
     const appConfig = deps.getConfig();
@@ -112,12 +118,25 @@ export function registerLabUtilityRoutes(app: express.Express, deps: LabUtilityR
   });
 
   app.post('/api/prompt-plugins/import-skill', (req, res) => {
+    const mutation = deps.ensureLocalMutationWithControl(req);
+    if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
     const workingDir = typeof req.body?.workingDir === 'string' ? req.body.workingDir : undefined;
     const sourcePath = typeof req.body?.sourcePath === 'string' ? req.body.sourcePath : '';
     if (!workingDir) return res.status(400).json({ error: 'workingDir is required' });
     if (!sourcePath.trim()) return res.status(400).json({ error: 'sourcePath is required' });
     const targetWorkspace = deps.ensureKnownWorkspace(workingDir);
     if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+    const resolvedSource = resolve(sourcePath);
+    if (!isPathWithin(resolvedSource, targetWorkspace.dir)) {
+      const approval = deps.ensureExplicitApproval(req, {
+        kind: 'read',
+        route: '/api/prompt-plugins/import-skill',
+        description: 'Import prompt skill instructions from outside the active workspace',
+        cwd: targetWorkspace.dir,
+        paths: [resolvedSource],
+      });
+      if (!approval.ok) return res.status(approval.status).json({ error: approval.error, approval: approval.approval });
+    }
     const appConfig = deps.getConfig();
     const result = importSkillAsPromptPlugin(targetWorkspace.dir, sourcePath);
     if (!result.ok) return res.status(400).json(result);

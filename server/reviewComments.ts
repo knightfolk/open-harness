@@ -68,13 +68,16 @@ import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
+import { safeJsonStorePath } from './jsonStorePaths';
 
 const PROPOSALS_DIR = join(homedir(), '.openharness', 'patch-proposals');
 function ensureDir(): void {
   if (!existsSync(PROPOSALS_DIR)) mkdirSync(PROPOSALS_DIR, { recursive: true });
 }
 function proposalPath(id: string): string {
-  return join(PROPOSALS_DIR, `${id}.json`);
+  const path = safeJsonStorePath(PROPOSALS_DIR, id);
+  if (!path) throw new Error('Invalid patch proposal id');
+  return path;
 }
 function persistProposal(p: PatchProposal): void {
   ensureDir();

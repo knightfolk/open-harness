@@ -755,8 +755,9 @@
   margin-bottom: 4px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 8px 24px minmax(0, 1fr);
+  align-items: start;
   gap: 7px;
   font-family: inherit;
   font-size: 11px;
@@ -788,6 +789,7 @@
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--text-tertiary);
+  margin-top: 7px;
 }
 
 .session-run-dot-running {
@@ -823,14 +825,14 @@
 
 .session-run-copy {
   min-width: 0;
-  flex: 1;
   display: grid;
   gap: 3px;
 }
 
 .session-run-mainline {
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 6px;
 }
@@ -867,8 +869,7 @@
 }
 
 .session-run-meta {
-  margin-left: auto;
-  display: inline-flex;
+  display: none;
   align-items: center;
   gap: 6px;
   color: var(--text-tertiary);
@@ -882,6 +883,11 @@
 .session-run-status {
   font-weight: 600;
   text-transform: capitalize;
+  min-width: 0;
+  max-width: 58px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-run-status-running { color: var(--accent-primary); }
@@ -899,13 +905,13 @@
 
 .session-run-steerable {
   border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, transparent);
-  border-radius: 999px;
-  padding: 1px 5px;
-  color: var(--accent-primary);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  color: transparent;
+  background: var(--accent-primary);
+  overflow: hidden;
 }
 
 .session-run-children {
@@ -1419,16 +1425,16 @@
 }
 
 .message-content {
-  max-width: min(760px, 100%);
-  padding: 11px 14px;
+  max-width: min(820px, 100%);
+  padding: 10px 13px;
   border: 1px solid var(--border-secondary);
-  border-radius: 14px;
+  border-radius: 10px;
   /* Assistant cards read as a quiet elevated plane above the canvas — a hairline
      edge and a faint lift, no accent tint, so the work thread stays calm. */
   background: color-mix(in srgb, var(--bg-elevated) 62%, var(--bg-primary));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.55;
   color: var(--text-primary);
   word-wrap: break-word;
 }
@@ -1514,7 +1520,7 @@
 }
 
 .message-content p {
-  margin-bottom: 8px;
+  margin: 0 0 7px;
 }
 
 .message-content p:last-child {
@@ -1522,12 +1528,21 @@
 }
 
 .message-content ul, .message-content ol {
-  padding-left: 20px;
-  margin-bottom: 8px;
+  padding-left: 17px;
+  margin: 6px 0 8px;
 }
 
 .message-content li {
-  margin-bottom: 4px;
+  margin-bottom: 3px;
+  padding-left: 1px;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin: 9px 0 5px;
+  line-height: 1.3;
 }
 
 .message-content strong {
@@ -2126,18 +2141,23 @@ button[disabled]:hover {
 }
 
 .sub-agent-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 6px;
 }
 
 .sub-agent-name {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
   gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sub-agent-detail-toggle {
@@ -2155,7 +2175,6 @@ button[disabled]:hover {
 }
 
 .sub-agent-focus-button {
-  margin-left: auto;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -2177,6 +2196,10 @@ button[disabled]:hover {
 }
 
 .sub-agent-status-badge {
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 10px;
@@ -2231,15 +2254,21 @@ button[disabled]:hover {
 .sub-agent-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   font-size: 11px;
   color: var(--text-tertiary);
 }
 
 .sub-agent-meta-item {
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sub-agent-steps {
@@ -3422,7 +3451,7 @@ button:focus-visible {
 /* ========== Sub-agent tree lines ========== */
 .sub-agent-tree {
   padding-left: 10px;
-  padding-right: 4px;
+  padding-right: 2px;
   position: relative;
 }
 
@@ -3448,7 +3477,8 @@ button:focus-visible {
 
 /* Sub-agent row */
 .sub-agent-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 12px 24px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   padding: 5px 6px 5px 8px;
@@ -3480,11 +3510,22 @@ button:focus-visible {
 }
 
 .sub-agent-name-text {
-  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+}
+
+.sub-agent-compact-meta {
+  min-width: 0;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  justify-self: end;
 }
 
 .sub-agent-avatar {
@@ -3495,9 +3536,8 @@ button:focus-visible {
 }
 
 .sub-agent-row-focus-button {
-  margin-left: auto;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-sm);
@@ -5651,17 +5691,16 @@ button:focus-visible {
   background: color-mix(in srgb, var(--bg-secondary) 94%, var(--bg-primary));
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-md);
-  bottom: 16px;
   box-shadow: var(--shadow-md);
   color: var(--text-primary);
   display: flex;
-  gap: 12px;
-  left: 50%;
-  max-width: min(680px, calc(100vw - 32px));
-  padding: 10px 12px;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 9px 10px;
   position: fixed;
-  transform: translateX(-50%);
-  width: max-content;
+  right: 18px;
+  top: 74px;
+  width: min(420px, calc(100vw - 32px));
   z-index: 80;
 }
 
@@ -5673,7 +5712,8 @@ button:focus-visible {
 }
 
 .patch-notes-banner-copy {
-  min-width: min(260px, 42vw);
+  min-width: 0;
+  flex: 1;
 }
 
 .patch-notes-banner-title {
@@ -5681,12 +5721,19 @@ button:focus-visible {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .patch-notes-version,
 .patch-notes-release-title {
   color: var(--text-tertiary);
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .patch-notes-body {
@@ -5715,15 +5762,23 @@ button:focus-visible {
   align-items: center;
   color: var(--text-tertiary);
   display: inline-flex;
-  font-size: 11px;
-  gap: 6px;
+  font-size: 0;
+  gap: 0;
   margin: 0;
+  min-width: 0;
+  max-width: 18px;
+  overflow: hidden;
   white-space: nowrap;
+}
+
+.patch-notes-opt-out input {
+  flex: 0 0 auto;
 }
 
 .patch-notes-actions {
   display: flex;
-  gap: 8px;
+  flex: 0 0 auto;
+  gap: 6px;
 }
 
 .patch-notes-primary {
@@ -5734,8 +5789,10 @@ button:focus-visible {
 @media (max-width: 640px) {
   .patch-notes-banner {
     align-items: stretch;
-    bottom: 10px;
     flex-direction: column;
+    left: 10px;
+    right: 10px;
+    top: 68px;
     width: calc(100vw - 20px);
   }
 
@@ -11619,9 +11676,9 @@ div[style*="--agent-focus-width"] {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 12px;
-  max-width: 100%;
+  max-width: min(100%, 920px);
   border-radius: 999px;
   border: 1px solid var(--border-primary);
   background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
@@ -11638,6 +11695,7 @@ div[style*="--agent-focus-width"] {
 }
 
 .active-work-strip-title {
+  flex: 0 0 auto;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -11646,10 +11704,11 @@ div[style*="--agent-focus-width"] {
 .active-work-strip-body {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   overflow: hidden;
   white-space: nowrap;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .active-work-strip-meta {
@@ -11690,7 +11749,7 @@ div[style*="--agent-focus-width"] {
   color: var(--text-tertiary);
   text-overflow: ellipsis;
   overflow: hidden;
-  max-width: 130px;
+  max-width: clamp(44px, 8vw, 92px);
 }
 
 .active-work-strip-step.completed { color: var(--text-primary); }
@@ -11715,6 +11774,17 @@ div[style*="--agent-focus-width"] {
   margin-left: 2px;
   padding-left: 8px;
   white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .active-work-strip-meta,
+  .active-work-strip-separator {
+    display: none;
+  }
+
+  .active-work-strip-step {
+    max-width: 62px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -11852,6 +11922,7 @@ body.is-resizing-row * {
 .agent-focus-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-secondary);
@@ -11895,6 +11966,7 @@ body.is-resizing-row * {
 }
 
 .agent-focus-header-title {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -11908,7 +11980,10 @@ body.is-resizing-row * {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 5px;
+  min-width: 0;
 }
 
 /* Status pills stay, but demoted: only colored state pills carry intent;
@@ -11941,25 +12016,27 @@ body.is-resizing-row * {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border-secondary);
   background: var(--bg-primary);
-  overflow-x: auto;
-  overflow-y: hidden;
-  display: flex;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr;
+  max-height: min(32vh, 220px);
   padding: 8px 12px;
-  gap: 8px;
+  gap: 6px;
 }
 
 .agent-focus-list-cell {
-  flex: 0 0 min(280px, 74%);
+  min-width: 0;
 }
 
 .agent-focus-list-item {
   display: grid;
   grid-template-columns: 14px 22px minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto;
   gap: 2px 8px;
   align-items: center;
   width: 100%;
-  min-height: 76px;
+  min-height: 58px;
   padding: 9px 10px 8px;
   background: var(--bg-primary);
   border: 1px solid transparent;
@@ -11986,10 +12063,11 @@ body.is-resizing-row * {
 .agent-focus-list-item.active::before {
   content: '';
   position: absolute;
-  left: 9px;
-  right: 9px;
-  bottom: 0;
-  height: 2px;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  height: auto;
   border-radius: 2px;
   background: var(--accent-primary);
 }
@@ -12029,6 +12107,7 @@ body.is-resizing-row * {
 }
 
 .agent-focus-list-name {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
@@ -12036,6 +12115,9 @@ body.is-resizing-row * {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Quiet role tag after the agent callsign. */
@@ -12054,7 +12136,7 @@ body.is-resizing-row * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 200px;
+  max-width: 100%;
 }
 
 .agent-focus-list-model {
@@ -12068,7 +12150,7 @@ body.is-resizing-row * {
 
 .agent-focus-list-meta {
   grid-column: 3;
-  grid-row: 3;
+  grid-row: 2;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -12079,9 +12161,13 @@ body.is-resizing-row * {
 }
 
 .agent-focus-list-meta span {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-focus-detail {

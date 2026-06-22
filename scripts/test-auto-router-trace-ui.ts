@@ -68,7 +68,12 @@ assert.deepEqual(sortedCandidateScores(scoredStep.candidateScores, 2).map(([mode
 assert.match(formatAutoRouterScoreList(scoredStep.candidateScores), /provider:strong-model: 0\.91/);
 assert.match(formatAutoRouterStepTitle(scoredStep), /^Auto-Router · provider:strong-model \(0\.91\)$/);
 assert.match(formatAutoRouterStepDetail(fallbackStep), /^Default fallback · classifier: opencode-go:deepseek-v4-flash/);
-assert.match(describeAutoRouterRunStep(fallbackStep), /Auto-Router used default fallback minimax:MiniMax-M3/);
+assert.equal(
+  describeAutoRouterRunStep(scoredStep),
+  'Auto-Router selected provider:strong-model from cached routing evidence. Details are in Routing Learning.',
+  'default Auto-Router summary should avoid raw scores and candidate counts',
+);
+assert.doesNotMatch(describeAutoRouterRunStep(scoredStep), /0\.91|score|candidate/i, 'default Auto-Router summary should keep diagnostics out of main chat copy');
 assert.match(autoRouterStepTraceText(fallbackStep), /Candidate scores: No candidate scores for this fallback/);
 
 console.log('Auto-Router trace UI helper tests passed.');

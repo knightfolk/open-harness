@@ -75,7 +75,7 @@ import { registerTestRoutes } from './routes/testRoutes';
 import { registerUsageRoutes } from './routes/usageRoutes';
 import { registerConfigRoutes } from './routes/configRoutes';
 import { getRuntimeConfig } from '../shared/runtimeConfig.cjs';
-import { createRemoteApiGuard, getBearerOrHeaderToken, isLoopbackAddress, secureTokenEquals } from './remoteApiAccess';
+import { browserMutationOriginAllowed, createRemoteApiGuard, getBearerOrHeaderToken, isLoopbackAddress, secureTokenEquals } from './remoteApiAccess';
 import {
   consumeApprovedApprovalTransaction,
   createApprovalTransaction,
@@ -831,6 +831,8 @@ function getLocalControlToken(req: express.Request): string {
 }
 
 function ensureLocalControl(req: express.Request): { ok: true } | { ok: false; status: number; error: string } {
+  const browserOrigin = browserMutationOriginAllowed(req, allowedOrigins);
+  if (!browserOrigin.ok) return { ok: false, status: 403, error: browserOrigin.error };
   if (req.ip && isLoopbackAddress(req.ip)) return { ok: true };
   if (!LOCAL_CONTROL_TOKEN) return { ok: false, status: 403, error: 'Mutation/execution endpoints require loopback access or OPENHARNESS_LOCAL_TOKEN' };
   const providedToken = getLocalControlToken(req);
@@ -964,7 +966,9 @@ registerTerminalRoutes(app, {
   redactOutputText,
 });
 
-registerAppInfoRoutes(app);
+registerAppInfoRoutes(app, {
+  ensureLocalMutationWithControl,
+});
 registerBrowserRoutes(app);
 registerProviderRoutes(app, {
   getConfig: () => appConfig,
@@ -1074,6 +1078,7 @@ registerLabUtilityRoutes(app, {
   getConfig: () => appConfig,
   saveConfig,
   ensureLocalMutationWithControl,
+  ensureExplicitApproval,
   ensureKnownWorkspace,
   buildRunDebugBundle,
   buildRunDebugBundleByRunId,
@@ -1260,6 +1265,19 @@ function ensureAskBeforeWriteApproval(req: express.Request, action: ApprovalActi
   const trustMode = (appConfig.trustMode || 'workspace-write') as TrustMode;
   if (trustMode !== 'ask-before-write') return { ok: true };
 
+  const consumed = consumeApprovedApprovalTransaction(approvalIdFromRequest(req), action);
+  if (consumed.ok) return { ok: true };
+
+  const approval = createApprovalTransaction(action);
+  return {
+    ok: false,
+    status: 409,
+    error: `Approval required: ${consumed.reason}`,
+    approval,
+  };
+}
+
+function ensureExplicitApproval(req: express.Request, action: ApprovalAction): ApprovalCheckResult {
   const consumed = consumeApprovedApprovalTransaction(approvalIdFromRequest(req), action);
   if (consumed.ok) return { ok: true };
 

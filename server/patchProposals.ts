@@ -17,6 +17,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
 
+import { safeJsonStorePath } from './jsonStorePaths';
 import { parseUnifiedDiff, type ParsedFile, type ParsedHunk, type FileAction, serializeHunks } from './patchParse';
 
 const PROPOSALS_DIR = join(homedir(), '.openharness', 'patch-proposals');
@@ -26,7 +27,9 @@ function ensureDir(): void {
 }
 
 function proposalPath(id: string): string {
-  return join(PROPOSALS_DIR, `${id}.json`);
+  const path = safeJsonStorePath(PROPOSALS_DIR, id);
+  if (!path) throw new Error('Invalid patch proposal id');
+  return path;
 }
 
 export type HunkStatus = 'pending' | 'accepted' | 'rejected';
@@ -177,7 +180,12 @@ function persist(p: PatchProposal): void {
 export function getProposal(id: string): PatchProposal | null {
   // Memory cache is not used in v1 to keep the module stateless across
   // hot-reloads; the disk file is the source of truth.
-  const path = proposalPath(id);
+  let path: string;
+  try {
+    path = proposalPath(id);
+  } catch {
+    return null;
+  }
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as PatchProposal;
@@ -340,7 +348,12 @@ export function serializeAcceptedPatch(p: PatchProposal): string {
 }
 
 export function deleteProposal(id: string): boolean {
-  const path = proposalPath(id);
+  let path: string;
+  try {
+    path = proposalPath(id);
+  } catch {
+    return false;
+  }
   if (!existsSync(path)) return false;
   try {
     unlinkSync(path);

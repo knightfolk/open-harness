@@ -9,7 +9,13 @@ import {
 import { getReleaseNotes } from '../releaseNotes';
 import { buildCrashReportBundle, getCrashReportSummary } from '../crashReports';
 
-export function registerAppInfoRoutes(app: express.Express) {
+type ControlResult = { ok: true } | { ok: false; status: number; error: string };
+
+interface AppInfoRouteDeps {
+  ensureLocalMutationWithControl: (req: express.Request) => ControlResult;
+}
+
+export function registerAppInfoRoutes(app: express.Express, deps: AppInfoRouteDeps) {
   app.get('/api/personalization', (_req, res) => {
     const profile = loadPersonalizationProfile();
     res.json({
@@ -20,6 +26,8 @@ export function registerAppInfoRoutes(app: express.Express) {
   });
 
   app.put('/api/personalization', (req, res) => {
+    const mutation = deps.ensureLocalMutationWithControl(req);
+    if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
     const profile = savePersonalizationProfile(req.body || {});
     res.json({
       ok: true,
@@ -28,7 +36,9 @@ export function registerAppInfoRoutes(app: express.Express) {
     });
   });
 
-  app.delete('/api/personalization', (_req, res) => {
+  app.delete('/api/personalization', (req, res) => {
+    const mutation = deps.ensureLocalMutationWithControl(req);
+    if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
     deletePersonalizationProfile();
     res.json({
       ok: true,

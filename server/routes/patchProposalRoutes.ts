@@ -439,10 +439,12 @@ export function registerPatchProposalRoutes(app: express.Express, deps: PatchPro
   app.post('/api/patch-proposals/:id/validate', async (req, res) => {
     const proposal = getProposal(req.params.id);
     if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+    const workspace = deps.ensureWorkspaceMutationAllowed(req, proposal.workingDir);
+    if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
     const body = (req.body || {}) as { force?: boolean };
     try {
       const result = await commitMessage.runValidationGate({
-        workingDir: proposal.workingDir,
+        workingDir: workspace.dir,
         commands: proposal.verificationCommands ?? [],
         force: body.force,
       });
@@ -455,9 +457,11 @@ export function registerPatchProposalRoutes(app: express.Express, deps: PatchPro
   app.post('/api/patch-proposals/:id/commit', async (req, res) => {
     const proposal = getProposal(req.params.id);
     if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+    const workspace = deps.ensureWorkspaceMutationAllowed(req, proposal.workingDir);
+    if (!workspace.ok) return res.status(workspace.status).json({ error: workspace.error });
     const body = (req.body || {}) as { subjectOverride?: string; branchName?: string; force?: boolean };
     const gate = await commitMessage.runValidationGate({
-      workingDir: proposal.workingDir,
+      workingDir: workspace.dir,
       commands: proposal.verificationCommands ?? [],
       force: body.force,
     });
@@ -465,14 +469,14 @@ export function registerPatchProposalRoutes(app: express.Express, deps: PatchPro
       return res.status(409).json({ error: 'Validation gate failed', gate, blockedBy: gate.blockers });
     }
     if (body.branchName && body.branchName.trim()) {
-      const branch = commitMessage.createBranch(proposal.workingDir, body.branchName.trim());
+      const branch = commitMessage.createBranch(workspace.dir, body.branchName.trim());
       if (!branch.ok) {
         return res.status(400).json({ error: branch.error || 'Branch creation failed' });
       }
     }
     const filePaths = proposal.files.map((file) => file.filePath);
     const message = commitMessage.generateCommitMessage(proposal, { subjectOverride: body.subjectOverride });
-    const result = commitMessage.gitCommit(proposal.workingDir, message.fullText, filePaths);
+    const result = commitMessage.gitCommit(workspace.dir, message.fullText, filePaths);
     if (!result.ok) {
       return res.status(400).json({ error: result.error || 'Commit failed' });
     }
