@@ -118,6 +118,7 @@ Day-one cleanup disposition:
 
 - No historical proof, release output, generated artifacts, or `.commandcode/taste/` files were deleted during this repair pass.
 - Existing `release/`, `dist/`, `dist-server/`, `node_modules/`, Swift build output, and older proof files remain candidates for a separate cleanup pass only after explicit artifact-by-artifact disposition.
+- Follow-up cleanup ledger: `docs/FILE_ARTIFACT_CLEANUP_LEDGER_2026-06-22.md` records explicit keep/archive/remove dispositions for the File And Artifact Cleanup Queue. Only expired ignored `.openharness-*` scratch folders were removed in that pass.
 
 ## File And Artifact Cleanup Queue
 
