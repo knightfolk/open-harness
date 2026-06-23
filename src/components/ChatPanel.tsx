@@ -274,41 +274,52 @@ function GoalLoopStrip({ goal, activeWorkVisible, onStatus }: { goal: SessionGoa
 
 function ActiveWorkStrip({ state, onOpenDetails }: { state: ActiveWorkState; onOpenDetails: () => void }) {
   if (state.steps.length === 0) return null;
-  const metadata = [state.currentTask, state.modelProvider, state.latestArtifact].filter(Boolean).join(' · ');
-  const metadataLabel = [
-    state.currentTask ? `Current task: ${state.currentTask}` : null,
-    state.modelProvider ? `Model: ${state.modelProvider}` : null,
-    state.latestArtifact ? `Latest ${state.latestArtifact}` : null,
-  ].filter(Boolean).join('. ');
+  const tone = state.status === 'error'
+    ? 'error'
+    : state.status === 'blocked'
+      ? 'blocked'
+      : state.status === 'complete'
+        ? 'complete'
+        : state.status === 'idle'
+          ? 'idle'
+          : 'running';
+  const statusLabel = state.status === 'error'
+    ? 'failed'
+    : state.status === 'blocked'
+      ? 'blocked'
+      : state.status === 'complete'
+        ? 'complete'
+        : state.status === 'idle'
+          ? 'queued'
+          : 'running';
+  const headline = `${state.runLabel} ${statusLabel}`;
+  const usefulArtifact = state.latestArtifact && !/\bworktree\b/i.test(state.latestArtifact) ? state.latestArtifact : undefined;
+  const detail = usefulArtifact || state.currentTask || state.currentStepLabel || state.workflowLabel;
   const labelParts = [
-    state.workflowLabel,
+    headline,
+    detail,
+    state.progressLabel,
     state.currentTask ? `Current task: ${state.currentTask}` : null,
     state.modelProvider ? `Model: ${state.modelProvider}` : null,
-    state.latestArtifact ? `Latest ${state.latestArtifact}` : null,
     'Open Agent detail',
   ].filter(Boolean);
 
   return (
-    <div className="active-work-strip-host" role="status" aria-live="polite" aria-label={`${state.workflowLabel} active work progress`}>
+    <div className="active-work-strip-host" role="status" aria-live="polite" aria-label={`${state.workflowLabel} active work status`}>
       <button
-        className="active-work-strip"
+        className={`active-work-strip ${tone}`}
         type="button"
         onClick={onOpenDetails}
         title="Open Agent detail"
         aria-label={labelParts.join('. ')}
       >
-        <span className="active-work-strip-title">Execution flow</span>
-        <span className="active-work-strip-body" role="list" aria-label={`${state.workflowLabel} steps`}>
-          {state.steps.map((step, index) => (
-            <span key={step.id} className="active-work-strip-segment" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'in_progress' ? 'step' : undefined}>
-              <span className={`active-work-strip-dot ${step.status}`} aria-hidden="true" />
-              <span className={`active-work-strip-step ${step.status}`}>{step.label}</span>
-              {index < state.steps.length - 1 ? <span className="active-work-strip-separator" aria-hidden="true">›</span> : null}
-            </span>
-          ))}
+        <span className={`active-work-strip-dot ${tone}`} aria-hidden="true" />
+        <span className="active-work-strip-body">
+          <span className="active-work-strip-title">{headline}</span>
+          <span className="active-work-strip-meta">{detail}</span>
         </span>
-        {metadata && <span className="active-work-strip-meta" role="group" aria-label={metadataLabel}>{metadata}</span>}
-        <span className="active-work-strip-action">Agent detail</span>
+        {state.progressLabel && <span className="active-work-strip-progress">{state.progressLabel}</span>}
+        <span className="active-work-strip-action">View details</span>
       </button>
     </div>
   );

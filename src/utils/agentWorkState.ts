@@ -1,4 +1,5 @@
 import type { HarnessRunStep, SubAgent } from '../types';
+import { agentIdentityForRole } from './agentIdentity';
 
 export const PHASE_PREFIX = ':phase:';
 export const DEFAULT_WORKFLOW_STEPS = ['Plan', 'Implement', 'Verify', 'Review', 'Report'];
@@ -13,7 +14,11 @@ export type WorkStep = {
 
 export type ActiveWorkState = {
   workflowLabel: string;
+  runLabel: string;
+  status: SubAgent['status'];
   steps: WorkStep[];
+  currentStepLabel?: string;
+  progressLabel?: string;
   currentTask?: string;
   modelProvider?: string;
   latestArtifact?: string;
@@ -113,7 +118,9 @@ export function pickActiveRunAndPhases(agents: SubAgent[]): { run: SubAgent; pha
   if (runs.length === 0) return null;
 
   const sortedRuns = [...runs].sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
-  const activeRun = sortedRuns.find((agent) => agent.status === 'running' || agent.status === 'blocked' || agent.status === 'idle') ?? sortedRuns[0];
+  const activeRun = sortedRuns.find((agent) => agent.status === 'running' || agent.status === 'blocked' || agent.status === 'idle')
+    ?? sortedRuns.find((agent) => agent.status === 'error')
+    ?? sortedRuns[0];
   const runPhases = agents
     .filter((agent) => isPhaseAgent(agent) && agent.id.startsWith(`${activeRun.id}${PHASE_PREFIX}`))
     .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
@@ -212,9 +219,13 @@ export function buildActiveWorkState(agents: SubAgent[]): ActiveWorkState | null
           : orchestrationMode === 'investigate'
             ? 'Investigation flow'
             : orchestrationMode === 'compare'
-              ? 'Comparison flow'
-              : 'Active work',
+            ? 'Comparison flow'
+            : 'Active work',
+    runLabel: run.runTrace?.role ? agentIdentityForRole(run.runTrace.role).name : run.name || runLabel(run),
+    status: run.status,
     steps,
+    currentStepLabel: steps[activeIndex]?.label,
+    progressLabel: `${completedPhases}/${workflowSteps.length} steps`,
     currentTask: activeTaskForRun(run, phases),
     modelProvider: modelProviderForRun(run),
     latestArtifact: latestArtifactCue([...phases].reverse().find((phase) => latestArtifactCue(phase)) || run) || undefined,

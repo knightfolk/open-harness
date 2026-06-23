@@ -11613,7 +11613,7 @@ div[style*="--agent-focus-width"] {
   width: min(var(--chat-composer-max), calc(100% - var(--chat-content-left) - var(--chat-content-right)));
   margin-left: var(--chat-content-left);
   margin-right: auto;
-  padding: 4px 0 0;
+  padding: 4px 0 6px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -11699,15 +11699,16 @@ div[style*="--agent-focus-width"] {
 .active-work-strip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   width: 100%;
+  min-height: 34px;
   padding: 7px 10px;
   max-width: 100%;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-secondary);
-  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
+  background: color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary));
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
   box-shadow: none;
@@ -11718,76 +11719,61 @@ div[style*="--agent-focus-width"] {
   color: var(--text-primary);
 }
 
-.active-work-strip-title {
-  flex: 0 0 auto;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  padding-right: 2px;
+.active-work-strip.error,
+.active-work-strip.blocked {
+  border-color: color-mix(in srgb, var(--accent-error) 42%, var(--border-secondary));
+  background: color-mix(in srgb, var(--accent-error) 9%, var(--bg-secondary));
 }
 
 .active-work-strip-body {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   overflow: hidden;
   white-space: nowrap;
   min-width: 0;
   flex: 1 1 auto;
 }
 
+.active-work-strip-title {
+  flex: 0 0 auto;
+  font-weight: 650;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
 .active-work-strip-meta {
-  max-width: min(36vw, 360px);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-tertiary);
   border-left: 1px solid var(--border-primary);
-  margin-left: 2px;
   padding-left: 8px;
 }
 
-.active-work-strip-segment {
+.active-work-strip-progress {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-width: 0;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .active-work-strip-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--text-tertiary);
   flex-shrink: 0;
 }
 
-.active-work-strip-dot.in_progress { background: var(--accent-primary); }
-.active-work-strip-dot.completed { background: var(--accent-success); }
-.active-work-strip-dot.pending { background: var(--text-tertiary); }
+.active-work-strip-dot.running { background: var(--accent-success); }
+.active-work-strip-dot.idle { background: var(--text-tertiary); }
+.active-work-strip-dot.complete { background: var(--accent-success); }
 .active-work-strip-dot.error { background: var(--accent-error); }
 .active-work-strip-dot.blocked { background: var(--accent-error); }
-
-.active-work-strip-step {
-  white-space: nowrap;
-  color: var(--text-tertiary);
-  text-overflow: ellipsis;
-  overflow: hidden;
-  max-width: clamp(44px, 8vw, 92px);
-}
-
-.active-work-strip-step.completed { color: var(--text-primary); }
-.active-work-strip-step.in_progress { color: var(--accent-primary); font-weight: 600; }
-.active-work-strip-step.error { color: var(--accent-error); font-weight: 600; }
-.active-work-strip-step.blocked { color: var(--accent-error); font-weight: 600; }
-
-.active-work-strip-separator {
-  color: var(--text-tertiary);
-  font-size: 10px;
-  margin: 0 2px;
-  opacity: 0.8;
-}
 
 .active-work-strip-action {
   display: inline-flex;
@@ -11802,13 +11788,8 @@ div[style*="--agent-focus-width"] {
 }
 
 @media (max-width: 1180px) {
-  .active-work-strip-meta,
-  .active-work-strip-separator {
+  .active-work-strip-progress {
     display: none;
-  }
-
-  .active-work-strip-step {
-    max-width: 62px;
   }
 }
 
@@ -11836,10 +11817,6 @@ div[style*="--agent-focus-width"] {
 
   .active-work-strip-meta {
     display: none;
-  }
-
-  .active-work-strip-step {
-    max-width: 88px;
   }
 }
 
