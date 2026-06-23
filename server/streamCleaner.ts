@@ -13,6 +13,7 @@ const THINKING_TAG_PATTERNS: RegExp[] = [
 
 const MONOLOGUE_STARTERS = /^(?:The user (?:wants|asked|is asking)|Let me |I should |Now I (?:have|need|will)|First,? I|I'm going to|To (?:do|answer|complete) this)/i;
 const INTERNAL_ACTION_STARTERS = /^I (?:need to|will|should|am going to|have to)\s+(?:inspect|check|read|open|look|review|search|run|use|call|write|edit|modify|update|apply|test|validate|verify|analyze|figure out|determine|start by)\b/i;
+const SHORT_DIRECT_ANSWER = /^(?:yes|no|ok|done|ready|pass|fail|fixed|applied|complete|completed)[.!?]?$/i;
 
 export function stripThinkingTags(text: string): string {
   let cleaned = text;
@@ -30,13 +31,19 @@ function isMonologueLine(line: string): boolean {
   return INTERNAL_ACTION_STARTERS.test(trimmed);
 }
 
+function isSubstantiveLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || isMonologueLine(trimmed)) return false;
+  return trimmed.length > 10 || SHORT_DIRECT_ANSWER.test(trimmed);
+}
+
 export function filterMonologue(text: string): string {
   if (!text || !text.trim()) return text;
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim();
     if (!line) continue;
-    if (!isMonologueLine(line) && line.length > 10) {
+    if (isSubstantiveLine(line)) {
       if (i === 0) return text;
       const before = lines.slice(0, i).filter((candidate) => candidate.trim());
       const allMonologue = before.every((candidate) => isMonologueLine(candidate.trim()) || candidate.trim().length < 15);
@@ -61,6 +68,15 @@ function stripLeadingProcessSection(text: string): string {
     if (/^#{1,4}\s*(?:answer|final answer|result|summary|recommendation|verdict)\b/i.test(lines[i].trim())) {
       return lines.slice(i).join('\n').trimStart();
     }
+  }
+
+  const remainder = lines.slice(firstHeadingIndex + 1);
+  for (let i = 0; i < remainder.length; i += 1) {
+    const line = remainder[i].trim();
+    if (!isSubstantiveLine(line)) continue;
+    const before = remainder.slice(0, i).filter((candidate) => candidate.trim());
+    const allProcess = before.every((candidate) => isMonologueLine(candidate.trim()) || candidate.trim().length < 15);
+    if (allProcess) return remainder.slice(i).join('\n').trimStart();
   }
 
   return text;
@@ -104,7 +120,7 @@ export class StreamCleaner {
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i].trim();
       if (!line) continue;
-      if (!isMonologueLine(line) && line.length > 10) {
+      if (isSubstantiveLine(line)) {
         this.monologueFlushed = true;
         const beforeAnswer = lines.slice(0, i).join('\n');
         const monoLines = beforeAnswer.split('\n').filter((candidate) => candidate.trim());
@@ -115,10 +131,12 @@ export class StreamCleaner {
       }
     }
     if (this.monologueBuffer.length > this.maxMonologueBuffer) {
-      this.monologueFlushed = true;
-      const out = stripThinkingTags(this.monologueBuffer);
+      const bufferedLines = this.monologueBuffer.split('\n').filter((candidate) => candidate.trim());
+      const allMono = bufferedLines.every((candidate) => isMonologueLine(candidate.trim()) || candidate.trim().length < 15);
       this.monologueBuffer = '';
-      return out;
+      if (allMono) return null;
+      this.monologueFlushed = true;
+      return stripThinkingTags(bufferedLines.join('\n'));
     }
     return null;
   }

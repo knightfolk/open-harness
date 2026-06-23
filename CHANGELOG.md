@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0-alpha.update.4] - 2026-06-23
+
+- Refined the main workspace toward a calmer Codex-style command center with docked active-work status, protected composer spacing, quieter Agent detail, a slimmer Environment summary, and a less visually loud status bar.
+- Reduced repeated status noise in the sidebar and Agent detail inspector so failed, running, and completed work is easier to scan without overlapping the chat input.
+- Improved Auto-Router cache keys so prompt classification is re-evaluated when routing-relevant context changes, including image presence, tool pressure, input size, dirty git state, and thinking effort.
+- Tightened validation routing so informational questions about tests do not launch execution, while explicit validation runs still require proof.
+- Fixed stream-cleaner edge cases so short direct answers such as "Yes", "No", "Done", and "OK" stream immediately while oversized pure monologue buffers are dropped.
+
 ## [1.0.0-alpha.update.3] - 2026-06-19
 
 - Remediated the repository review findings across trust-mode approvals, credential storage, remote API access, Electron hardening, routing quality, and release gates.

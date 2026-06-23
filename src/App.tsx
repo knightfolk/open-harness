@@ -36,14 +36,14 @@ const ReviewChangesFlyout = lazy(() => import('./components/ReviewChangesFlyout'
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DEFAULT_SIDEBAR_WIDTH = 260;
-const DEFAULT_AGENT_FOCUS_WIDTH = 460;
-const DEFAULT_STATUS_BAR_HEIGHT = 48;
+const DEFAULT_AGENT_FOCUS_WIDTH = 400;
+const DEFAULT_STATUS_BAR_HEIGHT = 38;
 const SIDEBAR_WIDTH_KEY = 'openharness.sidebar-width.v1';
 const AGENT_FOCUS_WIDTH_KEY = 'openharness.agent-focus-width.v1';
 const STATUS_BAR_HEIGHT_KEY = 'openharness.status-bar-height.v1';
 const SIDEBAR_WIDTH_RANGE = { min: 220, max: 420 };
-const AGENT_FOCUS_WIDTH_RANGE = { min: 320, max: 760 };
-const STATUS_BAR_HEIGHT_RANGE = { min: 40, max: 92 };
+const AGENT_FOCUS_WIDTH_RANGE = { min: 320, max: 560 };
+const STATUS_BAR_HEIGHT_RANGE = { min: 34, max: 64 };
 const COMPACT_SIDEBAR_WIDTH = 220;
 const PANEL_PRESSURE_CHAT_MIN_WIDTH = 560;
 const PANEL_PRESSURE_AUX_PANEL_WIDTH = 300;
@@ -596,6 +596,8 @@ function App() {
   const [agentFocusOpen, setAgentFocusOpen] = useState(false);
   const [lastAutoRouterStep, setLastAutoRouterStep] = useState<Extract<HarnessRunStep, { type: 'auto_router' }> | null>(null);
   const { layout, togglePanel, removePanel, resetLayout, addPanel } = useLayoutState();
+  const visibleAgentFocusWidth = Math.min(agentFocusWidth, 420);
+  const visibleStatusBarHeight = Math.min(statusBarHeight, 40);
 
   const streamingTextRef = useRef<Map<string, string>>(new Map());
   const enabledModelsForPanels = useMemo(() => providers.flatMap((provider) =>
@@ -2071,8 +2073,8 @@ function App() {
                 role="region"
                 aria-label="Right-hand Agent detail pane"
                 style={{
-                  width: agentFocusWidth,
-                  ['--agent-focus-width']: `${agentFocusWidth}px`,
+                  width: visibleAgentFocusWidth,
+                  ['--agent-focus-width']: `${visibleAgentFocusWidth}px`,
                 } as CSSProperties & { '--agent-focus-width'?: string }}
               >
                 <button
@@ -2100,7 +2102,7 @@ function App() {
           <div
             className="status-bar-shell"
           role="region" aria-label="Status bar"
-            style={{ ['--status-bar-height']: `${statusBarHeight}px` } as CSSProperties & { '--status-bar-height'?: string }}
+            style={{ ['--status-bar-height']: `${visibleStatusBarHeight}px` } as CSSProperties & { '--status-bar-height'?: string }}
           >
             <button
               type="button"

@@ -983,6 +983,18 @@ function testStreamCleanerFirstPersonHandling() {
   const directCleaner = new StreamCleaner();
   assert.equal(directCleaner.feed('I need a little more context before answering.'), 'I need a little more context before answering.');
   assert.equal(directCleaner.flush(), '');
+
+  for (const answer of ['Yes.', 'No.', 'Done.', 'OK']) {
+    const shortCleaner = new StreamCleaner();
+    assert.equal(shortCleaner.feed(answer), answer, `short direct answer ${answer} should stream without waiting for flush`);
+    assert.equal(shortCleaner.flush(), '', `short direct answer ${answer} should not duplicate on flush`);
+  }
+
+  const longMonologueCleaner = new StreamCleaner();
+  const monologueChunk = 'I need to inspect the files first. '.repeat(80);
+  assert.equal(longMonologueCleaner.feed(monologueChunk), null, 'oversized pure monologue should not leak when the buffer fills');
+  assert.equal(longMonologueCleaner.feed('\nDone.'), 'Done.', 'substantive answer should still stream after monologue overflow is dropped');
+  assert.equal(longMonologueCleaner.flush(), '');
 }
 
 function testDirectAnswerNormalization() {
@@ -1014,6 +1026,12 @@ function testDirectAnswerNormalization() {
     normalizeDirectAnswer('The user wants me to explain routing.\nRouting has two layers: workflow first, then model selection.'),
     'Routing has two layers: workflow first, then model selection.',
     'direct-answer normalization should still remove internal user-intent preamble',
+  );
+
+  assert.equal(
+    normalizeDirectAnswer(['## Reasoning', 'I should inspect first.', '', 'No.'].join('\n')),
+    'No.',
+    'direct-answer normalization should remove leading process sections even without a formal answer heading',
   );
 }
 

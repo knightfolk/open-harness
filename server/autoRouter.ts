@@ -1283,9 +1283,20 @@ function fallbackDecision(
 // ── Cache key ──────────────────────────────────────────
 
 function buildCacheKey(signal: AutoRouterSignal): string {
-  // Use surface + task content hash (truncated for perf)
+  // Include routing-relevant context so the same text can be reclassified when
+  // images, context pressure, tool needs, or thinking effort change.
   const taskHash = simpleHash(signal.task);
-  return `${signal.surface}|${taskHash}`;
+  const context = [
+    signal.hasImages ? 'img' : 'text',
+    `turns:${signal.turns}`,
+    `tools:${signal.toolCount}`,
+    `tokens:${signal.estimatedInputTokens}`,
+    `artifacts:${signal.artifactCount ?? 0}`,
+    signal.dirtyGitState ? 'dirty' : 'clean',
+    `thinking:${signal.thinkingEffort ?? 'medium'}`,
+    signal.requiresStrongToolUse ? 'strong-tools' : 'normal-tools',
+  ].join('|');
+  return `${signal.surface}|${taskHash}|${context}`;
 }
 
 function simpleHash(text: string): string {

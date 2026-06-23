@@ -282,9 +282,10 @@ export function EnvironmentRail({
   }, [branch, fileCount, additions, deletions, hasChanges, hasProject, totalAgents, runningCount, waitingCount, trustMode, accessLabel, accessColor, activeWorkState, onReviewChanges, onFocusAgents]);
 
   const sectionIds = useMemo(() => {
+    if (variant === 'floating') return DEFAULT_ORDER.filter((id) => id === 'git' || id === 'access');
     if (hasAnyAgents) return DEFAULT_ORDER;
     return DEFAULT_ORDER.filter((id) => id !== 'agents' && id !== 'progress');
-  }, [hasAnyAgents]);
+  }, [hasAnyAgents, variant]);
 
   return (
     <aside className={`env-rail ${variant === 'panel' ? 'env-rail-panel' : ''} ${variant === 'floating' ? 'env-rail-floating' : ''} ${variant === 'rail' ? 'right-panel-overlay' : ''}`} data-right-panel="visible" aria-label={variant === 'rail' ? 'Right panel' : 'Super panel'}>

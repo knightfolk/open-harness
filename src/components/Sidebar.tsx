@@ -437,6 +437,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                       const statusText = formatRunStatus(run.status);
                       const agent = agentIdentityForRole(run.runTrace?.role);
                       const runChildrenId = `session-run-children-${safeDomId(run.id)}`;
+                      const visiblePhases = phases.filter((phase) => phase.status !== 'complete');
                       const runAccessibleLabel = [
                         `Focus ${normalizeRunLabel(run)}`,
                         `status ${statusText}`,
@@ -470,7 +471,7 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                               ) : null}
                               {steeringAvailable ? (
                                 <span className="session-run-steerable" title="Steering available" aria-label={`Steering available for ${normalizeRunLabel(run)}`}>
-                                  steerable
+                                  steer
                                 </span>
                               ) : null}
                             </span>
@@ -491,20 +492,13 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                               `elapsed ${formatAgentDuration(run.startTime)}`,
                             ].filter(Boolean).join('. ')}
                           >
-                            <span>
-                              {run.model}
-                              {run.runTrace?.providerId ? ` / ${run.runTrace.providerId}` : ''}
-                            </span>
+                            <span>{run.model}</span>
                             <span>{formatAgentDuration(run.startTime)}</span>
                           </span>
                         </button>
-                        <div id={runChildrenId} className="session-run-children sub-agent-tree" role="list" aria-label={`${normalizeRunLabel(run)} phases`}>
-                          {phases.length === 0 && (
-                            <div className="session-run-empty" role="status" aria-live="polite">
-                              No phase updates yet.
-                            </div>
-                          )}
-                          {phases.map((agent) => (
+                        {visiblePhases.length > 0 && (
+                          <div id={runChildrenId} className="session-run-children sub-agent-tree" role="list" aria-label={`${normalizeRunLabel(run)} active phases`}>
+                            {visiblePhases.map((agent) => (
                             <SubAgentRow
                               key={agent.id}
                               agent={agent}
@@ -513,8 +507,9 @@ function ProjectsTab({ sessions, activeSessionId, activeSubAgents, onSelectSessi
                               parentRole={run.runTrace?.role}
                               compact
                             />
-                          ))}
-                        </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       );
                     })}

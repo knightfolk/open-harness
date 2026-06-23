@@ -293,21 +293,32 @@ if (evalBlockError) {
 let classifierRequests = 0;
 const classifierServer = createServer((req, res) => {
   classifierRequests += 1;
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    choices: [{
-      message: {
-        content: JSON.stringify({
-          scores: {
-            'local:phi-4': 0.55,
-            'local:MiniMax-M3': 0.82,
-            'local:claude-opus-4.8': 0.94,
-          },
-          reasoning: 'Medium implementation task benefits from the balanced coding model.',
-        }),
+  const chunks: Buffer[] = [];
+  req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+  req.on('end', () => {
+    const body = Buffer.concat(chunks).toString('utf-8');
+    const isImageCacheProbe = body.includes('Cache key image probe');
+    const content = JSON.stringify({
+      scores: isImageCacheProbe ? {
+        'local:phi-4': 0.91,
+        'local:MiniMax-M3': 0.82,
+        'local:claude-opus-4.8': 0.94,
+      } : {
+        'local:phi-4': 0.55,
+        'local:MiniMax-M3': 0.82,
+        'local:claude-opus-4.8': 0.94,
       },
-    }],
-  }));
+      reasoning: isImageCacheProbe
+        ? 'Cache key probe prefers the cheap text-only model unless image compatibility is required.'
+        : 'Medium implementation task benefits from the balanced coding model.',
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      choices: [{
+        message: { content },
+      }],
+    }));
+  });
 });
 await new Promise<void>((resolve) => classifierServer.listen(0, '127.0.0.1', resolve));
 const classifierAddress = classifierServer.address();
@@ -383,6 +394,29 @@ try {
   assert.equal(imageRoute.suggestedModels[0], 'local:MiniMax-M3', 'image tasks should skip image-incapable cheap candidates');
   assert.equal(imageRoute.routerData?.modelSelectionPolicy, 'cheap-direct', 'simple image tasks should still avoid classifier overhead');
   assert.equal(classifierRequests, 1, 'simple image tasks should skip classifier while respecting image capability');
+
+  const cachedPolicyConfig: StoredConfig = {
+    ...policyConfig,
+    autoRouter: {
+      ...policyConfig.autoRouter!,
+      cacheTTLMs: 60_000,
+    },
+  };
+  configureAutoRouter(cachedPolicyConfig);
+  clearRouterCache();
+  const cacheProbePrompt = 'Create a small browser app for Cache key image probe.';
+  const textOnlyProbe = await routeWithAutoRouter(cacheProbePrompt, cachedPolicyConfig, {
+    hasImages: false,
+    toolCount: 8,
+  });
+  assert.equal(textOnlyProbe.suggestedModels[0], 'local:phi-4', 'text-only classifier result should allow the cheap text-only model');
+  assert.equal(textOnlyProbe.routerData?.cached, false, 'first cache probe should not be cached');
+  const imageProbe = await routeWithAutoRouter(cacheProbePrompt, cachedPolicyConfig, {
+    hasImages: true,
+    toolCount: 8,
+  });
+  assert.equal(imageProbe.suggestedModels[0], 'local:MiniMax-M3', 'same prompt with images should not reuse a text-only cached decision');
+  assert.equal(imageProbe.routerData?.cached, false, 'image signal change should force a fresh classifier decision');
 } finally {
   await new Promise<void>((resolve, reject) => classifierServer.close((err) => err ? reject(err) : resolve()));
 }

@@ -60,6 +60,17 @@ function agentVisibilityRank(status: SubAgent['status']): number {
   return 4;
 }
 
+function compactAgentTask(agent: SubAgent): string {
+  const task = (agent.task || '').replace(/\s+/g, ' ').trim();
+  if (!task) return 'No objective recorded';
+  const status = task.match(/\bstatus=(complete|error|running|idle|blocked)\b/)?.[1] as SubAgent['status'] | undefined;
+  const model = task.match(/\bmodel=([^\s]+)/)?.[1];
+  if (status || model) {
+    return [status ? `${agentStatusLabel(status)} run` : 'Run detail', model].filter(Boolean).join(' · ');
+  }
+  return task;
+}
+
 export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer }: Props) {
   const orderedAgents = useMemo(
     () => [...agents].sort((a, b) => {
@@ -95,6 +106,13 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
   const complete = agents.filter((a) => a.status === 'complete').length;
   const failed = agents.filter((a) => a.status === 'error').length;
   const blocked = agents.filter((a) => a.status === 'blocked').length;
+  const summaryParts = [
+    running ? `${running} running` : null,
+    blocked ? `${blocked} blocked` : null,
+    failed ? `${failed} failed` : null,
+    complete && !running && !blocked && !failed ? `${complete} complete` : null,
+    waiting ? `${waiting} waiting` : null,
+  ].filter(Boolean).join(' · ') || `${agents.length} run${agents.length === 1 ? '' : 's'}`;
 
   return (
     <div className="agent-focus-root" role="complementary" aria-label="Agent detail inspector">
@@ -109,11 +127,7 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
           aria-live="polite"
           aria-label={`Agent run summary: ${running} running, ${waiting} waiting, ${blocked} blocked, ${complete} complete, ${failed} failed`}
         >
-          <span className="agent-focus-pill running">{running} running</span>
-          {waiting > 0 && <span className="agent-focus-pill">{waiting} waiting</span>}
-          {blocked > 0 && <span className="agent-focus-pill blocked">{blocked} blocked</span>}
-          <span className="agent-focus-pill complete">{complete} complete</span>
-          {failed > 0 && <span className="agent-focus-pill error">{failed} failed</span>}
+          <span className="agent-focus-summary-text">{summaryParts}</span>
         </div>
         <button className="agent-focus-close" type="button" onClick={onExit} aria-label="Close Agent detail" title="Close Agent detail">
           <X size={16} aria-hidden="true" />
@@ -127,11 +141,12 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
           const isRunning = agent.status === 'running';
           const statusLabel = agentStatusLabel(agent.status);
           const identity = agentIdentityForRole(agent.runTrace?.role);
+          const taskLabel = compactAgentTask(agent);
           const listMetaLabel = `Agent list metadata: ${formatTokens(agent.tokensUsed)} tokens, duration ${formatDuration(agent.startTime, agent.endTime)}`;
           const agentLabel = [
             `${isActive ? 'Current agent detail' : 'Open agent detail'} ${identity.name}, ${identity.tagline}`,
             `status ${statusLabel}`,
-            agent.task ? `task ${agent.task}` : null,
+            taskLabel ? `task ${taskLabel}` : null,
             agent.runTrace?.providerId ? `provider ${agent.runTrace.providerId}` : null,
             agent.runTrace?.effectiveModel || agent.model ? `model ${agent.runTrace?.effectiveModel || agent.model}` : null,
           ].filter(Boolean).join('. ');
@@ -151,7 +166,7 @@ export function AgentFocusPanel({ agents, focusedId, onFocus, onExit, onRunSteer
                 <span className="agent-focus-list-avatar agent-id-badge" aria-hidden="true">{identity.avatar}</span>
                 <span className="agent-focus-list-main">
                   <span className="agent-focus-list-name">{identity.name}<span className="agent-focus-list-role">{agent.runTrace?.role || 'agent'}</span></span>
-                  <span className="agent-focus-list-task" aria-label={`Agent objective: ${agent.task || 'No objective recorded'}`}>{agent.task || '—'}</span>
+                  <span className="agent-focus-list-task" aria-label={`Agent objective: ${taskLabel}`}>{taskLabel}</span>
                 </span>
                 <span className="agent-focus-list-meta" role="group" aria-label={listMetaLabel}>
                   <span><Zap size={10} aria-hidden="true" /> {formatTokens(agent.tokensUsed)}</span>

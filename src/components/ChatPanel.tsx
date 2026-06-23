@@ -29,9 +29,9 @@ interface Props {
   onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;
 }
 
-const CHAT_SUPER_WIDTH = 330;
+const CHAT_SUPER_WIDTH = 280;
 const CHAT_SUPER_WIDTH_KEY = 'openharness.environment-width.v1';
-const CHAT_SUPER_WIDTH_RANGE = { min: 210, max: 520 };
+const CHAT_SUPER_WIDTH_RANGE = { min: 220, max: 380 };
 
 function clampSuperWidth(value: number) {
   return Math.min(CHAT_SUPER_WIDTH_RANGE.max, Math.max(CHAT_SUPER_WIDTH_RANGE.min, Math.round(value)));
@@ -57,8 +57,10 @@ function saveSuperWidth(value: number) {
 export function ChatPanel({ messages, activeGoal, isTyping, onSendMessage, activeModel, workingDir, projectProfile, onCompareModel, onProposePatch, trustMode, subAgents, onReviewChanges, onFocusAgents, environmentOpen, onEnvironmentOpenChange, onRunSteer }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const workDeckRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const [inputHeight, setInputHeight] = useState(112);
+  const [workDeckHeight, setWorkDeckHeight] = useState(0);
   const [superWidth, setSuperWidth] = useState(loadSuperWidth);
   const activeWorkState = useMemo(() => getActiveWorkState(subAgents), [subAgents]);
   const superHidden = !environmentOpen;
@@ -116,6 +118,19 @@ export function ChatPanel({ messages, activeGoal, isTyping, onSendMessage, activ
 
   useEffect(() => saveSuperWidth(superWidth), [superWidth]);
 
+  useEffect(() => {
+    const element = workDeckRef.current;
+    if (!element) {
+      setWorkDeckHeight(0);
+      return;
+    }
+    const report = () => setWorkDeckHeight(Math.ceil(element.getBoundingClientRect().height));
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [activeWorkState, activeGoal?.status]);
+
   const beginSuperResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -135,7 +150,16 @@ export function ChatPanel({ messages, activeGoal, isTyping, onSendMessage, activ
   }, [superWidth]);
 
   return (
-    <div ref={rootRef} className={`chat-panel-root ${superHidden ? 'has-hidden-super' : 'has-floating-super'}`} style={{ '--floating-super-width': `${superWidth}px`, '--chat-input-height': `${inputHeight}px` } as CSSProperties}>
+    <div
+      ref={rootRef}
+      className={`chat-panel-root ${superHidden ? 'has-hidden-super' : 'has-floating-super'}`}
+      style={{
+        '--floating-super-width': `${superWidth}px`,
+        '--chat-input-height': `${inputHeight}px`,
+        '--chat-work-deck-height': `${workDeckHeight}px`,
+        '--chat-bottom-stack-height': `${inputHeight + workDeckHeight}px`,
+      } as CSSProperties}
+    >
       <div className="messages" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && !isTyping && (
           <SmartWelcome workingDir={workingDir || null} projectProfile={projectProfile || null} onSuggestionClick={onSendMessage} />
@@ -181,18 +205,22 @@ export function ChatPanel({ messages, activeGoal, isTyping, onSendMessage, activ
           <span aria-hidden="true">↓</span> New messages below
         </button>
       )}
-      {activeWorkState && (
-        <ActiveWorkStrip
-          state={activeWorkState}
-          onOpenDetails={onFocusAgents}
-        />
-      )}
-      {activeGoal?.status === 'active' && (
-        <GoalLoopStrip
-          goal={activeGoal}
-          activeWorkVisible={Boolean(activeWorkState)}
-          onStatus={() => onSendMessage('/goal status')}
-        />
+      {(activeWorkState || activeGoal?.status === 'active') && (
+        <div className="chat-work-deck" ref={workDeckRef} aria-label="Current work status">
+          {activeWorkState && (
+            <ActiveWorkStrip
+              state={activeWorkState}
+              onOpenDetails={onFocusAgents}
+            />
+          )}
+          {activeGoal?.status === 'active' && (
+            <GoalLoopStrip
+              goal={activeGoal}
+              activeWorkVisible={Boolean(activeWorkState)}
+              onStatus={() => onSendMessage('/goal status')}
+            />
+          )}
+        </div>
       )}
       <div className={`floating-super-panel ${superHidden ? 'hidden' : ''}`} style={{ width: superWidth }} aria-hidden={superHidden}>
         <button
@@ -269,7 +297,7 @@ function ActiveWorkStrip({ state, onOpenDetails }: { state: ActiveWorkState; onO
         title="Open Agent detail"
         aria-label={labelParts.join('. ')}
       >
-        <span className="active-work-strip-title">{state.workflowLabel}</span>
+        <span className="active-work-strip-title">Execution flow</span>
         <span className="active-work-strip-body" role="list" aria-label={`${state.workflowLabel} steps`}>
           {state.steps.map((step, index) => (
             <span key={step.id} className="active-work-strip-segment" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'in_progress' ? 'step' : undefined}>

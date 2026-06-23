@@ -81,6 +81,16 @@ assert.equal(executeHarnessRegression.needsValidation, true, 'execute validation
 
 const informationalRunQuestion = routeRequest('how do I run tests for this project?', 'Auto', config.roleAssignments);
 assert.notEqual(informationalRunQuestion.mode, 'execute', 'informational run questions should not launch execute mode');
+assert.equal(informationalRunQuestion.needsValidation, false, 'informational run questions should not require validation proof');
+
+const advisoryTestQuestion = routeRequest('How would you fix the routing tests?', 'Auto', config.roleAssignments);
+assert.equal(advisoryTestQuestion.mode, 'direct', 'advisory fix questions should stay direct when the user has not asked for edits');
+assert.equal(advisoryTestQuestion.needsValidation, false, 'advisory questions that mention tests should not look like validation work');
+
+const readOnlyValidation = routeRequest('Run the routing tests and summarize the result. Do not edit files.', 'Auto', config.roleAssignments);
+assert.equal(readOnlyValidation.mode, 'execute', 'running validation commands is still execute-mode work even without edits');
+assert.equal(readOnlyValidation.needsValidation, true, 'read-only validation runs should require proof');
+assert.match(readOnlyValidation.reason, /run validation/i, 'read-only validation reason should not claim file changes are required');
 
 const compareModels = buildCompareModelSet(teamPlan, config);
 assert.deepEqual(compareModels, ['MiniMax-M3', 'zai:glm-4.6'], 'compare model set should include only distinct resolvable models');

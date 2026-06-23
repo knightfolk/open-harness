@@ -28,7 +28,7 @@
       "observedHeuristicRoute": {
         "mode": "investigate",
         "role": "reviewer",
-        "complexity": "medium",
+        "complexity": "simple",
         "needsTools": true,
         "needsValidation": false
       },

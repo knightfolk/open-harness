@@ -461,7 +461,7 @@ export function StatusBar({
       )}
 
       {/* Model abilities */}
-      <div className="status-bar-item" title="Model abilities" aria-label="Model abilities">
+      <div className="status-bar-item status-bar-abilities" title="Model abilities" aria-label="Model abilities">
         {abilities.map(({ id, active, title }) => {
           const Icon = id === 'thinking' ? Brain : id === 'vision' ? Eye : id === 'tools' ? Wrench : Layers;
           return (
@@ -534,7 +534,7 @@ export function StatusBar({
             : null;
           if (activeProviderAccessMode === 'subscription' || accessMode === 'subscription') {
             return (
-              <div className="status-bar-item" title={`Billing mode: subscription${activeProviderLabel ? ` (${activeProviderLabel})` : ''}`}>
+              <div className="status-bar-item status-bar-cost" title={`Billing mode: subscription${activeProviderLabel ? ` (${activeProviderLabel})` : ''}`}>
                 <DollarSign size={12} />
                 Subscription{activeProviderLabel ? ` · ${activeProviderLabel}` : ''}
               </div>
@@ -549,7 +549,7 @@ export function StatusBar({
             activeProvider?.providerName || providerName,
           );
           return (
-            <div className="status-bar-item" title={`Billing mode: subscription${planLabel ? ` (${planLabel})` : ''}`}>
+            <div className="status-bar-item status-bar-cost" title={`Billing mode: subscription${planLabel ? ` (${planLabel})` : ''}`}>
               <DollarSign size={12} />
               Subscription · {planLabel}
             </div>
@@ -561,7 +561,7 @@ export function StatusBar({
         if (!est || est.total < 0.001) return null;
         const label = est.total < 0.01 ? '< $0.01' : `~$${est.total.toFixed(2)}`;
         return (
-          <div className="status-bar-item" title={`Est. cost: $${est.total.toFixed(4)} (${messageCount} msgs)`}>
+          <div className="status-bar-item status-bar-cost" title={`Est. cost: $${est.total.toFixed(4)} (${messageCount} msgs)`}>
             <DollarSign size={12} />
             {label}
           </div>
@@ -571,7 +571,7 @@ export function StatusBar({
       <div className="status-bar-separator" />
 
       {/* Message count */}
-      <div className="status-bar-item">
+      <div className="status-bar-item status-bar-message-count">
         <Brain size={12} />
         {messageCount} messages
       </div>

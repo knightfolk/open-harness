@@ -8,7 +8,7 @@
   <strong>A source-available, agent-first, optimized harness for routing models, running agents, inspecting proof, and learning which providers perform best.</strong>
 </p>
 
-OpenHarness is an agent-first desktop harness for people who work across multiple AI models, providers, tools, and coding agents. It keeps the chat surface, model routing, provider health, MCP tools, agent traces, eval feedback, and review evidence in one dense workspace so the harness is visible while it works.
+OpenHarness is an agent-first desktop harness for people who work across multiple AI models, providers, tools, and coding agents. It keeps chat as the home base while surfacing model routing, provider health, MCP tools, agent traces, eval feedback, and review evidence only when that context helps the work in front of you.
 
 > **Source-available public preview:** OpenHarness is being built in public for feedback, discussion, and evaluation. It is not open-source licensed yet. Please do not fork for redistribution, repackage, offer as a hosted service, or use the code commercially without written permission. See [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -39,6 +39,7 @@ OpenHarness is built for:
 | **Role-aware agents** | Planner, coder, reviewer, reasoner, summarizer, worker, and title roles can each use different models and model-family prompt strategies. |
 | **Visible run traces** | Active work exposes phase state, selected model, provider, tool calls, final-answer proof, replay artifacts, and recovery paths. |
 | **Goal loop supervision** | `/goal` turns long-running objectives into durable session context with criteria, evidence, blockers, progress, and guarded completion. |
+| **Just-in-time workspace chrome** | Active work, environment context, status, and run detail are docked or collapsed until they add value, keeping the main workspace closer to a calm Codex-style command center. |
 | **Provider failure handling** | Transient overloads, auth problems, missing models, and rate-limit-style failures are treated as runtime events that can be surfaced, retried, or routed around. |
 | **Vision fallback evidence** | Browser screenshots can be converted into bounded text evidence for models that do not accept native image input. |
 | **Tool reliability memory** | Tool-error recovery evidence is recorded so the harness can learn which model/tool/provider combinations recover cleanly. |
@@ -233,7 +234,7 @@ The setup wizard defaults to system appearance, with dark mode as the safe fallb
 
 ## Packaging
 
-Current prerelease: `1.0.0-alpha.update.3`.
+Current prerelease: `1.0.0-alpha.update.4`.
 
 ```bash
 npm run pack

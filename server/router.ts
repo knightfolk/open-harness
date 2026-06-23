@@ -128,7 +128,13 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
   const tinyAmbiguousReview = /^\s*(?:please\s+)?review(?:\s+(?:this|it))?\s*[.!?]?\s*$/.test(lower);
   const asksProjectOverview = /\b(overview|summar|explain|describe)\b[\s\S]{0,80}\b(project|codebase|repo|repository|architecture|components)\b/.test(lower)
     || /\b(project|codebase|repo|repository)\b[\s\S]{0,80}\b(overview|summar|explain|describe|architecture|components)\b/.test(lower);
-  const asksValidation = /\b(tests?|lint|build|typecheck|validate|validation|verification|verify|smoke)\b/.test(lower);
+  const mentionsValidation = /\b(tests?|lint|build|typecheck|validate|validation|verification|verify|smoke)\b/.test(lower);
+  const asksValidation = mentionsValidation && !asksInformationalRunQuestion && (
+    asksExplicitExecution
+    || /\bvalidation checks?\b/.test(intentLower)
+    || /\b(run|perform|execute|do|validate|verify|check|prove|confirm)\b[\s\S]{0,100}\b(tests?|lint|build|typecheck|validation|verification|smoke|result|results?)\b/.test(intentLower)
+    || /\b(tests?|lint|build|typecheck|validation|verification|smoke)\b[\s\S]{0,80}\b(run|pass|passes|fail|fails|result|results?|proof)\b/.test(intentLower)
+  );
   const simpleQuestion = complexitySignals.hasShortLength
     && complexitySignals.hasNoCodeOrFiles
     && /^(what|why|how|is|are|can|should|tell me|say|summarize in one|hello|hi|hey|please|help|show me|show)/.test(lower)
@@ -177,11 +183,13 @@ export function routeRequest(content: string, activeModel: string, roleAssignmen
     activeModel,
   ].filter((modelId) => modelId && modelId.trim().toLowerCase() !== 'auto'))) as string[];
 
+  const asksFileChange = /\b(implement|code|fix|debug|change|modify|wire|add|remove|update|refactor|create file|edit|patch)\b/.test(intentLower);
   const reason = tinyAmbiguousReview ? 'Tiny ambiguous review request uses a bounded shallow review default.'
     : mode === 'direct' ? 'Simple request can be answered by one role model.'
     : mode === 'plan' ? 'Request asks for planning, strategy, roadmap, or architecture and should use Planning Room.'
     : mode === 'investigate' ? 'Request asks for repo analysis, review, debugging, or explanation.'
-      : mode === 'execute' ? 'Request asks for code or file changes and should plan, implement, validate, and review.'
+      : mode === 'execute' && asksValidation && !asksFileChange ? 'Request asks to run validation and report proof without necessarily changing files.'
+        : mode === 'execute' ? 'Request asks for code, file changes, or explicit execution and should plan, implement, validate, and review.'
         : 'Request asks to compare or evaluate alternatives.';
 
   return { mode, role, complexity, needsTools, needsValidation, suggestedModels, reason };
