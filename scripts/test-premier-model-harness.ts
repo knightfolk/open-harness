@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { findModelCatalogCard, modelCatalogFreshness } from '../src/data/modelCatalog';
+import * as apiModule from '../src/utils/api';
 import { modelAbilityStates, modelCapabilityFlags } from '../src/utils/modelCapabilities';
 
 const autoFlags = modelCapabilityFlags('Auto');
@@ -38,10 +39,14 @@ const routingLearning = readFileSync('src/components/RoutingLearningPane.tsx', '
 const modelLab = readFileSync('src/components/ModelLabPanel.tsx', 'utf-8');
 const promptMicroscope = readFileSync('src/components/PromptMicroscope.tsx', 'utf-8');
 const modelCapabilities = readFileSync('src/utils/modelCapabilities.ts', 'utf-8');
+const componentsCss = readFileSync('src/styles/components.css', 'utf-8');
 const api = readFileSync('src/utils/api.ts', 'utf-8');
+const providerRoutes = readFileSync('server/routes/providerRoutes.ts', 'utf-8');
 const autoRouter = readFileSync('server/autoRouter.ts', 'utf-8');
 const serverIndex = readFileSync('server/index.ts', 'utf-8');
-const routingLearningContract = `${routingLearning}\n${api}\n${serverIndex}`;
+const routerRoutes = readFileSync('server/routes/routerRoutes.ts', 'utf-8');
+const routerLearningImport = readFileSync('server/routerLearningImport.ts', 'utf-8');
+const routingLearningContract = `${routingLearning}\n${api}\n${serverIndex}\n${routerRoutes}\n${routerLearningImport}`;
 
 for (const expected of [
   "export type ModelAbilityId = 'thinking' | 'vision' | 'tools' | 'context'",
@@ -92,6 +97,19 @@ for (const expected of [
   );
 }
 
+assert.ok(
+  settings.includes('const enabledProviderModels = useMemo(')
+    && settings.includes('enabledProviderModels.length')
+    && !settings.includes('providers.flatMap((p) => p.configured ? p.models.filter((m) => m.enabled) : []).length'),
+  'Model Library should memoize enabled provider models once for summary text and aria labels instead of recomputing provider filters during render',
+);
+assert.ok(
+  settings.includes('const categoryCounts = useMemo(')
+    && settings.includes('const freshnessCounts = useMemo(')
+    && settings.includes('const filtered = useMemo('),
+  'Model Library should memoize catalog counts and filtered rows so Settings search/filter changes avoid unnecessary catalog recomputation',
+);
+
 for (const expected of [
   'Premium-cost model selected',
   'Luxury-cost model selected',
@@ -111,6 +129,52 @@ for (const expected of [
   );
 }
 
+assert.equal(
+  api.includes('Provider Health stubs'),
+  false,
+  'Provider health client APIs should not describe implemented server-backed routes as stubs',
+);
+assert.ok(
+  api.includes('Provider Health APIs'),
+  'Provider health client APIs should describe the implemented server-backed health route layer',
+);
+assert.ok(
+  providerRoutes.includes("app.post('/api/providers/:id/health/probe'"),
+  'Provider route module should expose provider health probe endpoint',
+);
+assert.ok(
+  providerRoutes.includes("app.get('/api/providers/:id/health'"),
+  'Provider route module should expose per-provider health endpoint',
+);
+assert.ok(
+  providerRoutes.includes("app.get('/api/providers/health'"),
+  'Provider route module should expose provider health index endpoint',
+);
+
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  throw new Error('network down');
+}) as typeof fetch;
+try {
+  const fallbackHealth = await apiModule.getProviderHealth('provider-down');
+  assert.equal(fallbackHealth.summary.providerId, 'provider-down', 'provider health fallback should preserve provider id');
+  assert.equal(fallbackHealth.summary.status, 'stale', 'provider health fallback should mark failed network reads as stale');
+  assert.equal(fallbackHealth.summary.stale, true, 'provider health fallback should surface stale state for Settings badges');
+  assert.deepEqual(fallbackHealth.history, [], 'provider health fallback should keep history empty on network errors');
+  assert.deepEqual(
+    await apiModule.getProviderHealth(),
+    { providers: [], history: {} },
+    'provider health index should fall back to an empty provider-health index on network errors',
+  );
+  assert.equal(
+    await apiModule.probeProviderHealth('provider-down'),
+    null,
+    'provider health probe should return null on network errors instead of throwing into the UI',
+  );
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 for (const expected of [
   '<PaneTitle>Auto-Router</PaneTitle>',
   'Use a classifier model to pick the best candidate model per task.',
@@ -120,6 +184,15 @@ for (const expected of [
   'Treat approved proof as trusted, review unreviewed proof manually, and do not trust needs-attention proof until it is resolved.',
   'Candidate evidence freshness',
   'Auto-Router evidence freshness: candidate evidence refreshed',
+  "const [routerLearningSummaryStatus, setRouterLearningSummaryStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')",
+  "setRouterLearningSummaryStatus('loading')",
+  "setRouterLearningSummaryStatus('ready')",
+  "setRouterLearningSummaryStatus('unavailable')",
+  'const routerLearningEvidenceStatusLabel = routerLearningSummaryStatus === \'loading\'',
+  'Router learning evidence loading',
+  'Router learning evidence unavailable',
+  'Auto-Router learning evidence status:',
+  'settings-router-learning-status',
   'Auto-router catalog contains',
   'Auto-router has ${configuredCandidates.length} configured provider models available to sync',
   'Auto-router has ${arCandidates.length} active routed candidates',
@@ -131,10 +204,30 @@ for (const expected of [
 }
 
 for (const expected of [
+  '.settings-router-learning-status',
+  '.settings-router-learning-status-unavailable',
+  '.routing-evidence-action-cue',
+  '.routing-evidence-action-cue-actionable',
+  '.routing-evidence-action-cue-review',
+  '.routing-evidence-action-cue-context',
+]) {
+  assert.ok(
+    componentsCss.includes(expected),
+    `Router evidence trust affordances should have CSS coverage: ${expected}`,
+  );
+}
+
+for (const expected of [
   'aria-label={`${c.modelId} Auto-Router evidence badges`}',
   'Eval-backed',
   'Eval evidence',
-  'Tool {toolReliability.error}/{toolReliability.total}',
+  'createAutoRouterCandidateEvidenceBuilder(routerLearningSummary)',
+  'routerCandidateEvidenceBuilder.forModel(c.modelId)',
+  'settings-router-evidence-cue',
+  'aria-label={routerCandidateEvidence.ariaLabel}',
+  'title={routerCandidateEvidence.ariaLabel}',
+  '{routerCandidateEvidence.text}',
+  'Tool reliability · {toolReliability.error}/{toolReliability.total}',
   'aria-label={`Auto-router tool reliability for ${c.modelId}:',
   'Risky tools for this model:',
   'session ${example.sessionId}, run ${example.runId}',
@@ -168,16 +261,29 @@ for (const expected of [
   'Derived from saved run traces. Use this to spot models, providers, or tools that cause avoidable retries before a final answer.',
   'First-call failures',
   'Recovery rounds',
-  '<ToolReliabilityColumn title="By model" data={toolReliability.byModel} />',
-  '<ToolReliabilityColumn title="By model/tool pair" data={toolReliability.byModelTool} />',
-  '<ToolReliabilityColumn title="By prompt strategy" data={toolReliability.byPromptStrategy} />',
-  '<ToolReliabilityColumn title="By strategy variant" data={toolReliability.byPromptStrategyVariant} />',
+  'function buildToolReliabilityTopRows',
+  'const toolReliabilityTopRows = useMemo(() => buildToolReliabilityTopRows(summary?.toolReliability), [summary?.toolReliability]);',
+  '<ToolReliabilityColumn title="By model" rows={toolReliabilityTopRows.byModel} />',
+  '<ToolReliabilityColumn title="By provider" rows={toolReliabilityRows(toolReliability.byProvider)} />',
+  '<ToolReliabilityColumn title="By model/tool pair" rows={toolReliabilityTopRows.byModelTool} />',
+  '<ToolReliabilityColumn title="By prompt strategy" rows={toolReliabilityRows(toolReliability.byPromptStrategy)} />',
+  '<ToolReliabilityColumn title="By strategy variant" rows={toolReliabilityTopRows.byPromptStrategyVariant} />',
   'aria-label="Tool-error evidence source summary"',
   'Live tool-error ledger status',
   'Live tool-error ledger',
   'Live ledger status',
   'toolErrorLedgerStatusLabel',
   'toolErrorLedgerStatusHelp',
+  'function toolReliabilityTuningActionCue',
+  "case 'tune_local_router'",
+  "return { label: 'Actionable'",
+  "case 'review_before_tuning'",
+  "return { label: 'Review first'",
+  "case 'context_only'",
+  "return { label: 'Context only'",
+  'Evidence source ${item.source} tuning action ${item.tuningAction}: ${tuningCue.detail}',
+  'routing-evidence-action-cue',
+  'routing-evidence-action-cue-${tuningCue.tone}',
   'No persisted live tool-error ledger exists yet',
   'summary?.toolErrorLedger',
   "'- Tool-error evidence sources:'",
@@ -219,8 +325,14 @@ for (const expected of [
   'bestPracticeNotes: PromptStrategyBestPracticeNote[]',
   'promptBestPracticePreview?: {',
   'bestPracticeNoteCount: number',
-  'promptBestPracticePreview } = buildRouterLearningImportPreview(body)',
+  'providerFailureAdherencePreview } = buildRouterLearningImportPreview(body)',
   'Prompt best-practice metadata was previewed as context-only evidence and was not merged into local prompt strategy profiles.',
+  'preview.providerFailureAdherencePreview',
+  'Provider failure adherence: ${preview.providerFailureAdherencePreview.rowCount} full rows',
+  'full-row sample ${preview.providerFailureAdherencePreview.sampleRowCount}',
+  'shown (cap ${preview.providerFailureAdherencePreview.sampleRowLimit})',
+  "sample is not filtered",
+  'Provider failure adherence was previewed as context-only evidence',
   'aria-label={`Role recommendation ${rec.role} to ${rec.modelId}. Report ${rec.reportName}. Proof ${evalProofStatusLabel(rec)}. ${rec.proofTrusted ? \'Trusted evidence may be applied.\' : \'Not trusted until Model Lab proof is approved.\'}`}',
 ]) {
   assert.ok(
@@ -233,7 +345,9 @@ for (const expected of [
   'evidence ${pattern.exampleEvidenceSources?.join',
   'evidence ${item.exampleEvidenceSources?.join',
   'evidence ${item.evidenceSource}',
-  'Retry-reduction recommendations:',
+  'Actionable retry-reduction recommendations:',
+  'Advisory retry-reduction evidence:',
+  'do not treat it as an automatic routing override',
   'supporting sessions ${item.supportSessionIds?.join',
   'supporting runs ${item.supportRunIds?.join',
   'examples session ${pattern.exampleSessionIds?.join',
@@ -280,6 +394,13 @@ for (const expected of [
   'exampleEvidenceSources: ToolReliabilityEvidenceSource[]',
   'toolReliabilityPreview?:',
   "evidenceSource: 'imported_trace'",
+  'providerFailureAdherencePreview?:',
+  "evidenceSource: 'provider_failure_adherence'",
+  'contextOnly: true',
+  'sampleRowLimit: number',
+  'sampleRowCount: number',
+  'sampleRowsCapped: boolean',
+  "sampleSource: 'fullRows' | 'filteredRows'",
   'bestPractice?: {',
   'evaluationCue: string',
   'sourceRef: string',
@@ -293,8 +414,8 @@ for (const expected of [
 for (const expected of [
   'const advisoryLabel = `${title}: ${totalRuns} ${unit}${totalRuns === 1 ? \'\' : \'s\'}. Provider rate-limit and metered billing caution.`',
   'Model Lab runs execute in the background and can hit provider rate limits or metered billing.',
-  'Provider health: {providerHealthSignal.tracked} tracked',
-  'Latest health check: {new Date(providerHealthSignal.latestChecked).toLocaleString()}',
+  'Provider health: {signal.tracked} tracked',
+  'Latest health check: {formatModelLabTimestamp(signal.latestChecked)}',
   'Provider-budget approval required before running ${label}.',
   'const modelLabPackGuidance = [',
   'Open-source calibration pass',

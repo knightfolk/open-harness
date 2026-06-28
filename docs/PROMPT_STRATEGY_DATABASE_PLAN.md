@@ -27,14 +27,14 @@ Primary sources reviewed:
 - OpenAI prompt engineering and prompt guidance:
   - https://platform.openai.com/docs/guides/prompt-engineering
   - https://platform.openai.com/docs/guides/prompt-guidance
-  - https://platform.openai.com/docs/guides/reasoning-best-practices
+  - https://platform.openai.com/docs/guides/reasoning
 - Anthropic Claude prompting best practices:
   - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview
-  - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting
+  - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/claude-prompting-best-practices
 - Google Gemini prompt design strategies:
   - https://ai.google.dev/gemini-api/docs/prompting-strategies
 - Mistral prompt engineering and prompting capabilities:
-  - https://docs.mistral.ai/models/best-practices/prompt-engineering
+  - https://docs.mistral.ai/studio-api/conversations/chat-completion/prompting
   - https://docs.mistral.ai/studio-api/conversations/function-calling
   - https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities
 - DeepSeek official API behavior and reasoning docs:

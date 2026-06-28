@@ -3,14 +3,20 @@
   "suiteId": "routing-prompt-adherence",
   "name": "Routing Prompt Adherence Baseline",
   "createdAt": "2026-06-06",
-  "observedRouterState": {
+  "historicalObservedRouterState": {
     "enabled": true,
     "classifierModel": "minimax:MiniMax-M2.5-highspeed",
     "threshold": 0.7,
     "candidateCount": 14,
     "routerHealthOk": true,
     "routerHealthLatencyMs": 4481,
-    "note": "Captured from local server endpoints during research; candidate list may drift with user config."
+    "note": "Historical 2026-06-06 local endpoint snapshot; this records an older MiniMax M2.x classifier, not the current preferred policy."
+  },
+  "preferredRouterPolicy": {
+    "classifierModel": "minimax:MiniMax-M3",
+    "defaultModel": "minimax:MiniMax-M3",
+    "threshold": 0.7,
+    "note": "Use MiniMax M3 for future MiniMax-backed adherence runs; older MiniMax M2.x models are fallback-only when M3 is unavailable."
   },
   "dimensions": [
     "routeAccuracy",

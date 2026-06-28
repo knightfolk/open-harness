@@ -22,8 +22,8 @@ OpenHarness already has the important foundation:
 - `server/router.ts` classifies requests into `direct`, `plan`, `investigate`, `execute`, and `compare`, with role and complexity metadata.
 - `server/autoRouter.ts` can score configured model candidates, apply cost-aware selection, cache decisions, annotate candidate cards with eval recommendations, and adjust threshold from historical routing outcomes.
 - `server/orchestrator.ts` runs Planning Room, investigate, execute, and compare pipelines through `agentRuntime.ts`.
-- `server/promptBuilder.ts` adapts system prompts by model family and captures native thinking fields when supported.
-- `server/index.ts` emits run traces, uses a unified stream cleaner, records routing-adherence events, and gates the "start directly" monologue rule away from reasoning models.
+- `server/promptBuilder.ts` adapts system prompts by model family, route mode, role, active `/goal` context, and native thinking support.
+- `server/index.ts` emits run traces, uses a unified stream cleaner, records routing-adherence events, and adds a route-aware opening contract that allows brief useful rationale while keeping private reasoning hidden.
 - `src/components/MessageBubble.tsx`, `PromptMicroscope`, `ArtifactDrawer`, `NextBestActions`, and trace UI already expose parts of the answer lifecycle.
 - `docs/MODEL_PROMPT_PLUGIN_PHASE_PLAN.md` defines prompt plugin, adherence, timeout, and eval concepts that should become part of this roadmap instead of living as a separate branch of product thinking.
 
@@ -71,7 +71,7 @@ Use for quick questions, one-file explanations, short summaries, and casual foll
 Contract:
 - Skip model-team orchestration.
 - Prefer cheapest viable model when quality risk is low.
-- Answer directly with no planning monologue.
+- Answer directly. Include a brief useful rationale only when it helps the user trust or apply the answer; never expose private reasoning or planning transcript.
 - Show model/cost/routing detail as collapsed metadata.
 
 ### Plan
@@ -242,7 +242,7 @@ Work:
 - Keep chat as the home surface; show details in flyouts or collapsible artifact views. **Done through chat-attached artifacts, Patch Review, Model Lab, and Prompt Microscope.**
 - Add compact live progress rows for route, model, tools, and orchestration phases. **Done in run traces, active-agent surfaces, and the run inspector.**
 - Merge prompt details, route details, and cost details into one run-inspector surface. **Done for prompt/route/model/tool/error metadata; exact cost accounting remains tied to provider estimates.**
-- Make "next actions" contextual: execute plan, review patch, run validation, compare model, save as prompt plugin, create companion note. **Partially done:** review/validation/compare/debug actions exist; save-as-prompt-plugin and companion-note flows remain deferred.
+- Make "next actions" contextual: execute plan, review patch, run validation, compare model, save as prompt plugin, create companion note. **Partially done:** review/compare/debug actions exist; execute runs with final output but no validation proof now get one structural Run validation action built only from project validation commands, suppressing duplicate keyword build/test/lint chips. Failed validation proof now turns into a Fix validation failure action with command/status/exit/output-tail evidence, while preserving distinct validation chips for commands that did not fail. Companion handoff notes are suggested for artifacted runs, and prompt/plugin-focused answers can draft a reviewable prompt plugin; true prompt-plugin save/persistence remains deferred.
 - Align with `docs/UI_CLEANUP_PLAN.md`: calm default screen, flat surfaces, progressive disclosure, one path for diffs.
 
 Acceptance:
@@ -292,7 +292,7 @@ Work:
 - Implement read-only prompt plugin registry first. **Done.**
 - Add OpenCode/Codex-style skill importers into OpenHarness-native manifests. **Deferred:** registry supports imported manifest locations, but importer conversion is not enabled yet.
 - Add trust/provenance state: local, project, imported, community, disabled, verified. **Done for schema-backed source/trust display; verified signatures remain future work.**
-- Add prompt pack UI with target route/model, eval status, safety notes, and last-used runs. **Done for targets/evals/safety; last-used run attribution remains future work.**
+- Add prompt pack UI with target route/model, eval status, safety notes, and last-used runs. **Done for targets/evals/safety; pack last-used attribution is visible in the Packs tab and eval History rows.**
 - Allow a Planning Room artifact to become a project-scoped prompt/plan template.
 
 Acceptance:

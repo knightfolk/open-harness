@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import type { LayoutNode, SplitNode, PanelId } from '../../types/layout';
 import type { HarnessRun, RunSteeringAction, SessionGoal } from '../../types';
 import type { VisualContextInfo } from '../../utils/api';
+import type { ModelLabEvidenceScope } from '../../utils/modelLabResultEvidence';
 import { PanelWrapper } from './PanelWrapper';
 import { PanelContent } from './PanelContent';
 import { getPanelConfig } from './panelRegistry';
@@ -37,6 +38,9 @@ interface Props {
   models?: Array<{ id: string; name: string }>;
   enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
   onApplyRoleRecommendation?: (roleId: string, modelId: string) => void;
+  modelLabEvidenceScope?: ModelLabEvidenceScope | null;
+  onModelLabEvidenceScopeConsumed?: () => void;
+  onOpenModelLabEvidence?: (scope: ModelLabEvidenceScope) => void;
   environmentOpen?: boolean;
   onEnvironmentOpenChange?: (open: boolean) => void;
   onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;
@@ -75,6 +79,9 @@ export function LayoutEngine({
     models,
     enabledModels,
     onApplyRoleRecommendation,
+    modelLabEvidenceScope,
+    onModelLabEvidenceScopeConsumed,
+    onOpenModelLabEvidence,
     environmentOpen,
     onEnvironmentOpenChange,
     onRunSteer,
@@ -92,6 +99,9 @@ export function LayoutEngine({
     models,
     enabledModels,
     onApplyRoleRecommendation,
+    modelLabEvidenceScope,
+    onModelLabEvidenceScopeConsumed,
+    onOpenModelLabEvidence,
     environmentOpen,
     onEnvironmentOpenChange,
     onRunSteer,

@@ -4,10 +4,11 @@ import { v4 as uuid } from 'uuid';
 import { estimateTokens } from '../contextManager';
 import { generateSessionTitleWithClassifier } from '../autoRouter';
 import { getProjectProfile } from '../projectProfile';
+import { effectivePromptStrategyTraceForModel } from '../promptBuilder';
 import { getPromptStrategySelectionForModel, toPromptStrategyTrace } from '../promptStrategies';
 import { objectSchema, optionalRecord, optionalString, parseBody, requiredNonBlankString } from '../requestSchemas';
 import { routeRequest, routeWithAutoRouter, type RouteDecision } from '../router';
-import { recordRoutingDecision } from '../routerLearning';
+import { recordModelRequestDuration, recordRoutingDecision } from '../routerLearning';
 import { hashPrompt, recordRoutingAdherenceEvent } from '../routingAdherence';
 import { createHarnessRun, type HarnessRun, type HarnessRunStep } from '../runTrace';
 import { applyGoalCommand, formatGoalForPrompt, parseGoalCommand } from '../sessionGoals';
@@ -41,7 +42,7 @@ interface ChatMessageRouteDeps {
   buildSideChatPromptContext(sideChat: unknown, sideSessionId: string): string | undefined;
   getActiveModel(): string;
   completeHarnessRunAndTrace(run: HarnessRun, status?: 'complete' | 'error'): void;
-  emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep): void;
+  emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep): HarnessRunStep;
   persistAssistantMessage(session: SessionRow, assistantId: string, content: string, run?: HarnessRun): void;
   persistAssistantError(session: SessionRow, assistantId: string, errorContent: string, run?: HarnessRun): void;
   persistAssistantRunTrace(session: SessionRow, assistantId: string, run: HarnessRun): void;
@@ -67,6 +68,15 @@ const chatMessageSchema = objectSchema({
   sideChat: optionalRecord(),
   visualContext: optionalRecord(),
 });
+
+function modelRequestDurationMsForRoutingEvent(run: HarnessRun, selectedModel: string): number | undefined {
+  const requestStep = run.steps.find((step): step is Extract<HarnessRunStep, { type: 'model_request' }> => (
+    step.type === 'model_request' && step.model === selectedModel
+  ));
+  const durationMs = requestStep?.durationMs;
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) return undefined;
+  return Math.round(durationMs);
+}
 
 export function registerChatMessageRoutes(app: express.Express, deps: ChatMessageRouteDeps) {
   const {
@@ -272,10 +282,13 @@ export function registerChatMessageRoutes(app: express.Express, deps: ChatMessag
   try {
   const visibleActivityState = { chars: 0, lastAt: 0 };
   const emitVisibleStep = (step: HarnessRunStep) => {
-    emitRunStep(res, run, step);
+    const appended = emitRunStep(res, run, step);
     emitVisibleRunActivity(res, assistantId, step, visibleActivityState);
+    return appended;
   };
   const rd = route.routerData;
+  const selectedRoutingModel = effectiveModel;
+  let routingEventId: string | null = null;
   if (rd && rd.source === 'auto') {
     emitVisibleStep({
       type: 'auto_router',
@@ -294,6 +307,7 @@ export function registerChatMessageRoutes(app: express.Express, deps: ChatMessag
         },
         policy: rd.policy,
         modelSelectionPolicy: rd.modelSelectionPolicy,
+        threshold: rd.threshold,
         signal: rd.signal,
       },
     });
@@ -304,23 +318,30 @@ export function registerChatMessageRoutes(app: express.Express, deps: ChatMessag
       source: 'router',
     });
 
-    const selectedRoutingModel = route.suggestedModels[0] || requestedModel;
     const promptStrategySelection = getPromptStrategySelectionForModel(selectedRoutingModel);
     const promptStrategy = promptStrategySelection.profile;
-    const promptStrategyTrace = toPromptStrategyTrace(promptStrategy, {
-      role: route.role,
-      taskDescription: content,
-      hasTools: true,
-    }, promptStrategySelection.modelMatch);
-    recordRoutingDecision({
-      timestamp: new Date().toISOString(),
-      sessionId: session.id,
-      taskHash: String(Math.abs(content.split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0)).toString(36)),
+    const promptStrategyTrace = effectivePromptStrategyTraceForModel(
+      selectedRoutingModel,
+      toPromptStrategyTrace(promptStrategy, {
+        role: route.role,
+        taskDescription: content,
+        hasTools: true,
+      }, promptStrategySelection.modelMatch),
+    );
+    routingEventId = recordRoutingDecision({
+	      timestamp: new Date().toISOString(),
+	      sessionId: session.id,
+	      runId: run.id,
+	      taskHash: String(Math.abs(content.split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0)).toString(36)),
+      taskPromptText: content,
       selectedModel: selectedRoutingModel,
       score: rd.score ?? 0,
+      threshold: rd.modelSelectionPolicy === 'classifier' ? rd.threshold : undefined,
       candidateScores: rd.candidateScores || {},
       wasFallback: rd.fallback ?? false,
       wasCached: rd.cached ?? false,
+      modelSelectionPolicy: rd.modelSelectionPolicy,
+      routeSignal: rd.signal,
       classifierModel: rd.classifierModel ?? null,
       surface: 'orchestrator',
       complexity: route.complexity,
@@ -353,6 +374,7 @@ export function registerChatMessageRoutes(app: express.Express, deps: ChatMessag
         },
         policy: route.routerData.policy,
         modelSelectionPolicy: route.routerData.modelSelectionPolicy,
+        threshold: route.routerData.threshold,
         signal: route.routerData.signal,
       } : undefined,
     });
@@ -431,6 +453,10 @@ export function registerChatMessageRoutes(app: express.Express, deps: ChatMessag
   }
 
   completeHarnessRunAndTrace(run, run.status === 'error' ? 'error' : 'complete');
+  if (routingEventId) {
+    const modelRequestDurationMs = modelRequestDurationMsForRoutingEvent(run, selectedRoutingModel);
+    recordModelRequestDuration(routingEventId, modelRequestDurationMs);
+  }
   recordGoalEvidenceFromRun(session, run);
   persistAssistantRunTrace(session, assistantId, run);
   writeSSE(res, 'run_complete', run);

@@ -1,24 +1,47 @@
 import type { BrowserPreviewResult, PatchValidationResult } from '../types';
+import type { RoutingLearningActionCue } from '../../shared/routingLearningActionCues';
 import { TOP_MODEL_CATALOG } from '../data/modelCatalog';
 
+const importMetaEnv = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function formatLocalHost(hostname: string): string {
+  return hostname === '::1' ? '[::1]' : hostname;
+}
+
 function defaultApiBase(): string {
-  const serverPort = import.meta.env.VITE_OPENHARNESS_SERVER_PORT || '3001';
-  const vitePort = import.meta.env.VITE_OPENHARNESS_VITE_PORT || '5173';
+  const serverPort = importMetaEnv.VITE_OPENHARNESS_SERVER_PORT || '3001';
+  const vitePort = importMetaEnv.VITE_OPENHARNESS_VITE_PORT || '5173';
   if (typeof window === 'undefined' || !window.location.hostname) return `http://localhost:${serverPort}`;
   const { protocol, hostname } = window.location;
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+  if (isLocalHostname(hostname)) {
     const pagePort = window.location.port;
     const apiPort = pagePort && pagePort !== vitePort ? pagePort : serverPort;
-    return `http://localhost:${apiPort}`;
+    return `${protocol}//${formatLocalHost(hostname)}:${apiPort}`;
   }
   return `${protocol}//${hostname}:${serverPort}`;
 }
 
+function localApiBaseForPageHost(configured: string, pageHostname: string): string {
+  try {
+    const url = new URL(configured);
+    if (!isLocalHostname(url.hostname) || !isLocalHostname(pageHostname)) return configured;
+    const pathname = url.pathname === '/' ? '' : url.pathname.replace(/\/$/, '');
+    return `${url.protocol}//${formatLocalHost(pageHostname)}${url.port ? `:${url.port}` : ''}${pathname}${url.search}${url.hash}`;
+  } catch {
+    return configured;
+  }
+}
+
 function resolveApiBase(): string {
-  const configured = import.meta.env.VITE_API_URL;
+  const configured = importMetaEnv.VITE_API_URL;
   if (!configured || typeof window === 'undefined') return configured || defaultApiBase();
   const hostname = window.location.hostname;
-  const isLocalPage = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  const isLocalPage = isLocalHostname(hostname);
+  if (isLocalPage) return localApiBaseForPageHost(configured, hostname);
   if (!isLocalPage && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(configured)) {
     return defaultApiBase();
   }
@@ -26,6 +49,71 @@ function resolveApiBase(): string {
 }
 
 export const API_BASE = resolveApiBase();
+
+const CLIENT_ARRAY_READ_CACHE_TTL_MS = 15_000;
+const PROVIDERS_CACHE_KEY = 'providers';
+const MODELS_CACHE_KEY = 'models';
+const MCP_SERVERS_CACHE_KEY = 'mcp-servers';
+const CURATED_MCP_SERVERS_CACHE_KEY = 'curated-mcp-servers';
+
+interface ClientArrayReadCacheEntry {
+  expiresAt: number;
+  value?: unknown[];
+  inflight?: Promise<unknown[]>;
+}
+
+const clientArrayReadCache = new Map<string, ClientArrayReadCacheEntry>();
+const clientArrayReadCacheVersions = new Map<string, number>();
+
+function clientArrayReadCacheVersion(cacheKey: string): number {
+  return clientArrayReadCacheVersions.get(cacheKey) ?? 0;
+}
+
+function cloneClientArray<T>(value: unknown[]): T[] {
+  return [...value] as T[];
+}
+
+async function getCachedClientArrayRead<T>(cacheKey: string, url: string): Promise<T[]> {
+  const now = Date.now();
+  const cached = clientArrayReadCache.get(cacheKey);
+  if (cached?.value && cached.expiresAt > now) return cloneClientArray<T>(cached.value);
+  if (cached?.inflight) return cached.inflight.then((value) => cloneClientArray<T>(value));
+  const version = clientArrayReadCacheVersion(cacheKey);
+
+  const inflight = (async (): Promise<unknown[]> => {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const value = await res.json();
+        if (clientArrayReadCacheVersion(cacheKey) === version) {
+          clientArrayReadCache.set(cacheKey, {
+            value,
+            expiresAt: Date.now() + CLIENT_ARRAY_READ_CACHE_TTL_MS,
+          });
+        }
+        return value;
+      }
+    } catch {
+      // Optional catalogue reads fail soft so settings panes stay usable offline.
+    }
+    if (clientArrayReadCacheVersion(cacheKey) === version) clientArrayReadCache.delete(cacheKey);
+    return [];
+  })();
+
+  clientArrayReadCache.set(cacheKey, {
+    value: cached?.value,
+    expiresAt: cached?.expiresAt ?? 0,
+    inflight,
+  });
+  return inflight.then((value) => cloneClientArray<T>(value));
+}
+
+function invalidateClientArrayReadCache(...cacheKeys: string[]): void {
+  for (const cacheKey of cacheKeys) {
+    clientArrayReadCacheVersions.set(cacheKey, clientArrayReadCacheVersion(cacheKey) + 1);
+    clientArrayReadCache.delete(cacheKey);
+  }
+}
 
 // ── Types ──────────────────────────────────────────────
 
@@ -43,6 +131,21 @@ export interface HarnessRun {
   completedAt?: string;
   context: { tokensUsed: number; budget: number; compressedCount: number; summarized: boolean };
   steps: HarnessRunStep[];
+}
+
+export interface RunDebugBundleManifest {
+  schemaVersion: string;
+  exportedAt: string;
+  sessionId: string;
+  runId: string;
+  messageCount: number;
+  routeDecisionCount: number;
+  modelOutputCount: number;
+  artifactCount: number;
+  errorCount: number;
+  retryableErrorCount: number;
+  retryable: boolean;
+  redactionNote: string;
 }
 
 export interface SessionGoal {
@@ -67,6 +170,8 @@ export interface PromptAssemblySection {
   reason: string;
   redacted: boolean;
   preview: string;
+  pluginId?: string;
+  placement?: string;
 }
 
 export interface PromptAssemblyTrace {
@@ -74,6 +179,12 @@ export interface PromptAssemblyTrace {
   family: string;
   style: string;
   target: string;
+  routeMode?: {
+    requested: string | null;
+    applied: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare' | null;
+    fallback: boolean;
+    reason: string;
+  };
   promptStrategy?: {
     id: string;
     family: string;
@@ -103,6 +214,7 @@ export interface RoutingStageTrace {
   heuristic?: { mode: string; role: string; complexity: string };
   policy?: string;
   modelSelectionPolicy?: 'cheap-direct' | 'classifier' | 'escalated';
+  threshold?: number;
   signal?: {
     hasImages: boolean;
     turns: number;
@@ -246,6 +358,14 @@ export type RunSteeringAction =
   | 'approve-artifact'
   | 'needs-revision';
 
+export interface AgentPhasePlan {
+  timeoutMs: number;
+  primaryModel: string;
+  fallbackModels: string[];
+  plannedRetryCount: number;
+  plannedBackoffMs: number[];
+}
+
 export type HarnessRunStep =
   | { type: 'steering'; action: RunSteeringAction; target?: 'orchestrator' | 'agent'; source: 'user'; note?: string; createdAt: string }
   | {
@@ -262,9 +382,19 @@ export type HarnessRunStep =
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
   | { type: 'artifact'; artifact: WorkProductArtifact }
-  | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace; outputStyle?: OutputStyleTrace }
+  | {
+  type: 'prompt_plugins';
+  enabled: true;
+  allowedPluginCount: number;
+  selectedPluginIds: string[];
+  selectedSectionCount: number;
+  selectionDurationMs: number;
+  manifestsScanned: number;
+  cache: { entries: number; hits: number; misses: number };
+}
+  | { type: 'prompt_built'; promptPreview: string; promptPreviewRedacted?: string; promptPreviewRedactedHits?: number; toolCount: number; assembly?: PromptAssemblyTrace; outputStyle?: OutputStyleTrace }
   | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number>; stages?: RoutingStageTrace }
-  | { type: 'model_request'; round: number; model: string }
+  | { type: 'model_request'; round: number; model: string; timeoutMs?: number; timeoutPolicy?: 'default' | 'slow-model'; timeoutLabel?: string; phasePlan?: AgentPhasePlan; startedAt?: string; completedAt?: string; durationMs?: number }
   | {
   type: 'tool_call';
   id: string;
@@ -307,6 +437,7 @@ export interface SessionInfo {
   preview: string;
   messageCount: number;
   kind?: 'main' | 'side-chat';
+  sideChatParentSessionId?: string | null;
 }
 
 export interface SessionDetail {
@@ -317,6 +448,7 @@ export interface SessionDetail {
   createdAt: string;
   updatedAt: string;
   kind?: 'main' | 'side-chat';
+  sideChatParentSessionId?: string | null;
   goal?: SessionGoal | null;
 }
 
@@ -374,6 +506,20 @@ export interface AutoRouterState {
   enabled: boolean;
   classifierModel: string | null;
   threshold: number;
+  thresholdAdvice?: {
+    configuredThreshold: number;
+    activeThreshold: number;
+    suggestedThreshold: number;
+    reason: string;
+    dataPoints: number;
+    applied: boolean;
+    slowTimingContext?: {
+      advisoryOnly: true;
+      slowRowCount: number;
+      thresholdMs: number;
+      note: string;
+    };
+  } | null;
   configuredCandidateCount?: number;
   candidateCount: number;
   candidates: Array<{
@@ -437,6 +583,11 @@ export interface ProviderRateLimit {
 export interface CapabilitySettings {
   disabledSkills: string[];
   disabledPlugins: string[];
+}
+
+export interface PromptPluginRenderingConfig {
+  enabled: boolean;
+  allowedPluginIds: string[];
 }
 
 export interface CapabilityItem {
@@ -503,6 +654,7 @@ export interface AppConfig {
   modelBudgets?: ModelBudget[];
   providerRateLimits?: ProviderRateLimit[];
   capabilitySettings?: CapabilitySettings;
+  promptPluginRendering?: PromptPluginRenderingConfig;
 }
 
 export interface PersonalizationProfile {
@@ -581,12 +733,13 @@ export async function getConfig(): Promise<AppConfig | null> {
   return null;
 }
 
-export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests' | 'modelBudgets' | 'providerRateLimits' | 'capabilitySettings'>> & { onboardingStep?: number }): Promise<void> {
-  await fetch(`${API_BASE}/api/config`, {
+export async function updateConfig(updates: Partial<Pick<AppConfig, 'personality' | 'activeModel' | 'activeTheme' | 'roleAssignments' | 'thinkingEffort' | 'roleThinking' | 'trustMode' | 'contextConfig' | 'favoriteModels' | 'installedThemePluginManifests' | 'modelBudgets' | 'providerRateLimits' | 'capabilitySettings' | 'promptPluginRendering'>> & { onboardingStep?: number }): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   });
+  if (!res.ok) throw new Error(`Failed to update config: ${res.status}`);
 }
 
 export async function getCapabilities(workingDir?: string | null): Promise<CapabilityRegistry> {
@@ -604,6 +757,28 @@ export async function setCapabilityEnabled(kind: 'skills' | 'plugins', id: strin
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error || `Failed to update capability: ${res.status}`);
+  return body;
+}
+
+export async function setPromptPluginRenderingEnabled(enabled: boolean, workingDir?: string | null): Promise<PromptPluginRenderingConfig> {
+  const res = await fetch(`${API_BASE}/api/prompt-plugin-rendering`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, workingDir: workingDir || undefined }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to update prompt plugin injection: ${res.status}`);
+  return body;
+}
+
+export async function setPromptPluginInjectionAllowed(id: string, allowed: boolean, workingDir?: string | null): Promise<PromptPluginRenderingConfig> {
+  const res = await fetch(`${API_BASE}/api/prompt-plugin-rendering/plugins/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ allowed, workingDir: workingDir || undefined }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to update prompt plugin allowlist: ${res.status}`);
   return body;
 }
 
@@ -794,11 +969,7 @@ export interface ModelInfo {
 }
 
 export async function getProviders(): Promise<ProviderInfo[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/providers`);
-    if (res.ok) return res.json();
-  } catch { /* not available yet */ }
-  return [];
+  return getCachedClientArrayRead<ProviderInfo>(PROVIDERS_CACHE_KEY, `${API_BASE}/api/providers`);
 }
 
 export async function discoverLocalProviders(): Promise<LocalProviderDiscovery[]> {
@@ -816,7 +987,9 @@ export async function addProvider(provider: { id?: string; name: string; type: s
     body: JSON.stringify(provider),
   });
   if (!res.ok) throw new Error(`Failed to add provider: ${res.status}`);
-  return res.json();
+  const created = await res.json();
+  invalidateClientArrayReadCache(PROVIDERS_CACHE_KEY, MODELS_CACHE_KEY);
+  return created;
 }
 
 export async function updateProvider(id: string, updates: Partial<ProviderInfo>): Promise<ProviderInfo> {
@@ -826,11 +999,14 @@ export async function updateProvider(id: string, updates: Partial<ProviderInfo>)
     body: JSON.stringify(updates),
   });
   if (!res.ok) throw new Error(`Failed to update provider: ${res.status}`);
-  return res.json();
+  const updated = await res.json();
+  invalidateClientArrayReadCache(PROVIDERS_CACHE_KEY, MODELS_CACHE_KEY);
+  return updated;
 }
 
 export async function deleteProvider(id: string): Promise<void> {
-  await fetch(`${API_BASE}/api/providers/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${API_BASE}/api/providers/${id}`, { method: 'DELETE' });
+  if (res.ok) invalidateClientArrayReadCache(PROVIDERS_CACHE_KEY, MODELS_CACHE_KEY);
 }
 
 export async function getProviderOAuthStatus(providerId: string): Promise<ProviderOAuthState> {
@@ -849,6 +1025,7 @@ export async function startProviderOAuth(providerId: string): Promise<{ authUrl:
 export async function disconnectProviderOAuth(providerId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/providers/${providerId}/oauth`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`Failed to disconnect OAuth: ${res.status}`);
+  invalidateClientArrayReadCache(PROVIDERS_CACHE_KEY);
 }
 
 export interface TestConnectionResult {
@@ -896,17 +1073,15 @@ export async function fetchProviderModels(providerId: string, tempKey?: string, 
 }
 
 export async function getModels(): Promise<ModelInfo[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/models`);
-    if (res.ok) return res.json();
-  } catch { /* not available yet */ }
-  return [];
+  return getCachedClientArrayRead<ModelInfo>(MODELS_CACHE_KEY, `${API_BASE}/api/models`);
 }
 
 export async function refreshModelMetadata(): Promise<{ ok: boolean; refreshedAt: string; providers: Array<{ providerId: string; models: number }>; modelCount: number }> {
   const res = await fetch(`${API_BASE}/api/models/metadata/refresh`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to refresh model metadata: ${res.status}`);
-  return res.json();
+  const refreshed = await res.json();
+  invalidateClientArrayReadCache(MODELS_CACHE_KEY);
+  return refreshed;
 }
 
 export interface ModelCatalogAuditReport {
@@ -985,11 +1160,7 @@ export interface MCPServerInfo {
 }
 
 export async function getMCPServers(): Promise<MCPServerInfo[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/mcp-servers`);
-    if (res.ok) return res.json();
-  } catch { /* not available yet */ }
-  return [];
+  return getCachedClientArrayRead<MCPServerInfo>(MCP_SERVERS_CACHE_KEY, `${API_BASE}/api/mcp-servers`);
 }
 
 export interface MCPToolStatus {
@@ -1036,11 +1207,14 @@ export async function addMCPServer(server: { name: string; endpoint: string; aut
     body: JSON.stringify(server),
   });
   if (!res.ok) throw new Error(`Failed to add MCP server: ${res.status}`);
-  return res.json();
+  const created = await res.json();
+  invalidateClientArrayReadCache(MCP_SERVERS_CACHE_KEY);
+  return created;
 }
 
 export async function deleteMCPServer(id: string): Promise<void> {
-  await fetch(`${API_BASE}/api/mcp-servers/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${API_BASE}/api/mcp-servers/${id}`, { method: 'DELETE' });
+  if (res.ok) invalidateClientArrayReadCache(MCP_SERVERS_CACHE_KEY, CURATED_MCP_SERVERS_CACHE_KEY);
 }
 
 // ── Docker / Docker MCP readiness (Milestone 19) ──
@@ -1085,11 +1259,7 @@ export interface CuratedMcpServer {
 }
 
 export async function getCuratedMcpServers(): Promise<CuratedMcpServer[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/mcp/curated`);
-    if (res.ok) return res.json();
-  } catch { /* not available yet */ }
-  return [];
+  return getCachedClientArrayRead<CuratedMcpServer>(CURATED_MCP_SERVERS_CACHE_KEY, `${API_BASE}/api/mcp/curated`);
 }
 
 export async function installCuratedMcpServer(id: string): Promise<MCPServerInfo> {
@@ -1099,7 +1269,9 @@ export async function installCuratedMcpServer(id: string): Promise<MCPServerInfo
     body: JSON.stringify({ id }),
   });
   if (!res.ok) throw new Error(`Failed to install curated MCP server: ${res.status}`);
-  return res.json();
+  const installed = await res.json();
+  invalidateClientArrayReadCache(MCP_SERVERS_CACHE_KEY, CURATED_MCP_SERVERS_CACHE_KEY);
+  return installed;
 }
 
 export async function restartMCPServer(serverId: string): Promise<any> {
@@ -1124,7 +1296,9 @@ export async function saveProvidersBatch(providers: Array<{ id?: string; name: s
     body: JSON.stringify({ providers }),
   });
   if (!res.ok) throw new Error(`Failed to save providers: ${res.status}`);
-  return res.json();
+  const saved = await res.json();
+  invalidateClientArrayReadCache(PROVIDERS_CACHE_KEY, MODELS_CACHE_KEY);
+  return saved;
 }
 
 export interface ProjectProfile {
@@ -1261,13 +1435,22 @@ export async function getSession(id: string): Promise<SessionDetail> {
   return res.json();
 }
 
-export async function createSession(title?: string, workingDir?: string, kind?: 'main' | 'side-chat'): Promise<SessionDetail> {
+export async function createSession(title?: string, workingDir?: string, kind?: 'main' | 'side-chat', sideChatParentSessionId?: string): Promise<SessionDetail> {
   const res = await fetch(`${API_BASE}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, workingDir, kind }),
+    body: JSON.stringify({ title, workingDir, kind, sideChatParentSessionId }),
   });
   if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
+  return res.json();
+}
+
+export async function getOrCreateSideChatSession(parentSessionId: string): Promise<SessionDetail> {
+  const res = await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(parentSessionId)}/side-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Failed to open side chat: ${res.status}`);
   return res.json();
 }
 
@@ -2068,8 +2251,27 @@ export interface EvalResult {
 }
 
 export interface EvalSummary {
-  byModel: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }>;
-  byPromptStrategy?: Record<string, { family: string; systemStyle: string; avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number; bestModel: string }>;
+  byModel: Record<string, {
+    avgScore: number;
+    avgLatencyMs: number;
+    avgToolCount: number;
+    totalRuns: number;
+    scoreSampleCount?: number;
+    latencySampleCount?: number;
+    toolSampleCount?: number;
+  }>;
+  byPromptStrategy?: Record<string, {
+    family: string;
+    systemStyle: string;
+    avgScore: number;
+    avgLatencyMs: number;
+    avgToolCount: number;
+    totalRuns: number;
+    bestModel: string;
+    scoreSampleCount?: number;
+    latencySampleCount?: number;
+    toolSampleCount?: number;
+  }>;
   bestPromptStrategy?: string;
   bestModel: string;
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
@@ -2131,6 +2333,7 @@ export interface EvalReportSummary {
   createdAt: string;
   completedAt?: string;
   total: number;
+  packContext?: EvalReport['packContext'];
   proofReview?: ProofReviewState;
   artifactPath?: string;
 }
@@ -2247,16 +2450,18 @@ export async function importSkillPromptPlugin(workingDir: string, sourcePath: st
   return body;
 }
 
-export async function downloadRunDebugBundle(runId: string): Promise<void> {
+export async function downloadRunDebugBundle(runId: string): Promise<RunDebugBundleManifest | null> {
   const res = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/debug-bundle`);
   if (!res.ok) throw new Error(`Failed to export debug bundle: ${res.status}`);
-  const blob = await res.blob();
+  const bundle = await res.json();
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = `openharness-run-${runId}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
+  return bundle?.manifest ?? null;
 }
 
 // ── Project Memory APIs ───────────────────────────────
@@ -2497,6 +2702,8 @@ export interface BenchRun {
       resolvedRate: number;
       avgScore: number; avgValidationScore: number;
       avgLatencyMs: number; avgCost: number; valueScore: number; avgSteps: number; totalRuns: number;
+      scoreSampleCount?: number; validationSampleCount?: number;
+      latencySampleCount?: number; costSampleCount?: number; stepSampleCount?: number;
     }>;
     bestModel: string;
     bestModelReason?: string;
@@ -2872,20 +3079,45 @@ export async function getSafetySummary(dir: string): Promise<SafetySummary> {
   return res.json();
 }
 // ── Router Learning API ─────────────────────────────
+export interface RouterLearningModelSuccess {
+  total: number;
+  success: number;
+  rate: number;
+  sampleCount: number;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+}
+
+export interface RouterLearningBestTaskType extends RouterLearningModelSuccess {
+  taskType: string;
+  model: string;
+}
+
+export interface RouterLearningBucket {
+  total: number;
+  success: number;
+  rate: number;
+  byModel: Record<string, RouterLearningModelSuccess>;
+}
+
 export interface RouterLearningSummary {
   totalEvents: number;
   models: Record<string, { total: number; success: number; rate: number }>;
   successRate: number;
   outdated: boolean;
-  byTaskType: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
-  byRole: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
-  byComplexity: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
-  byPromptStrategy?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
-  byPromptStrategyFamily?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
-  byPromptStrategyVariant?: Record<string, { total: number; success: number; rate: number; byModel: Record<string, { total: number; success: number; rate: number }> }>;
+  byTaskType: Record<string, RouterLearningBucket>;
+  byRole: Record<string, RouterLearningBucket>;
+  byComplexity: Record<string, RouterLearningBucket>;
+  byPromptStrategy?: Record<string, RouterLearningBucket>;
+  byPromptStrategyFamily?: Record<string, RouterLearningBucket>;
+  byPromptStrategyVariant?: Record<string, RouterLearningBucket>;
+  modelRequestDuration: {
+    byModel: Record<string, { samples: number; avgMs: number; slow: boolean; thresholdMs: number }>;
+    byTaskType: Record<string, { samples: number; avgMs: number; slow: boolean; thresholdMs: number }>;
+  };
   toolReliability?: ToolReliabilitySummary;
   toolErrorLedger?: ToolErrorLedgerSummary;
-  bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
+  bestByTaskType: RouterLearningBestTaskType[];
   bestPromptStrategyVariants?: Array<{ strategyVariant: string; model: string; total: number; success: number; rate: number }>;
 }
 
@@ -3172,14 +3404,36 @@ export interface RoutingEvent {
   id: string;
   timestamp: string;
   sessionId: string;
+  runId?: string;
+  taskHash?: string;
+  taskPromptSnapshot?: {
+    text: string;
+    hash: string;
+    charCount: number;
+    redactedHits: number;
+    truncated: boolean;
+    limit: number;
+  };
   taskType: string;
   role: string;
   complexity: string;
   selectedModel: string;
   score: number;
+  threshold?: number;
   candidateScores?: Record<string, number>;
   wasFallback: boolean;
   wasCached: boolean;
+  modelSelectionPolicy?: 'cheap-direct' | 'classifier' | 'escalated';
+  routeSignal?: {
+    hasImages: boolean;
+    turns: number;
+    toolCount: number;
+    estimatedInputTokens: number;
+    artifactCount?: number;
+    dirtyGitState?: boolean;
+    thinkingEffort?: string;
+    requiresStrongToolUse?: boolean;
+  };
   classifierModel?: string | null;
   promptStrategyId?: string;
   promptStrategyFamily?: string;
@@ -3187,9 +3441,36 @@ export interface RoutingEvent {
   promptStrategyVariantId?: string;
   promptStrategyTaskType?: string;
   promptStrategySelectionReason?: string;
+  modelRequestDurationMs?: number;
   outcome: 'success' | 'failure' | 'ambiguous' | null;
   outcomeNote?: string;
   datasetKind?: 'production' | 'benchmark';
+}
+
+export interface RoutingAdherenceEvent {
+  id: string;
+  createdAt: string;
+  kind: 'timeout' | 'error' | 'abort';
+  phase: 'router-classifier' | 'agent-request' | 'provider-stream' | 'tool-call' | 'client-sse' | 'orchestrator-phase';
+  sessionId?: string;
+  runId?: string;
+  routeMode?: string;
+  role?: string;
+  complexity?: string;
+  selectedModel?: string;
+  providerId?: string;
+  classifierModel?: string | null;
+  candidateScores?: Record<string, number>;
+  promptHash?: string;
+  timeoutMs?: number;
+  elapsedMs?: number;
+  error?: string;
+  statusCode?: number;
+  lastEvent?: string;
+  retryable?: boolean;
+  fallbackAttempted?: boolean;
+  fallbackModelId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RouterLearningExport {
@@ -3199,6 +3480,20 @@ export interface RouterLearningExport {
     enabled: boolean;
     candidateEvidenceRefreshedAt: string | null;
     candidateEvidenceRefreshCount: number;
+    thresholdAdvice?: {
+      configuredThreshold: number;
+      activeThreshold: number;
+      suggestedThreshold: number;
+      reason: string;
+      dataPoints: number;
+      applied: boolean;
+      slowTimingContext?: {
+        advisoryOnly: true;
+        slowRowCount: number;
+        thresholdMs: number;
+        note: string;
+      };
+    } | null;
     configuredCandidateCount: number;
     activeCandidateCount: number;
   };
@@ -3209,7 +3504,9 @@ export interface RouterLearningExport {
     sourceRefs: string[];
     bestPracticeNotes: PromptStrategyBestPracticeNote[];
   }>;
-  summary: RouterLearningSummary;
+  summary: RouterLearningSummary & {
+    routingActionCues?: Array<RoutingLearningActionCue>;
+  };
   eventCount: number;
   productionEventCount?: number;
   benchmarkEventCount?: number;
@@ -3245,6 +3542,29 @@ export interface RouterLearningImportResult {
     sourceRefs: string[];
     note: string;
   };
+  providerFailureAdherencePreview?: {
+    evidenceSource: 'provider_failure_adherence';
+    contextOnly: true;
+    scope: string | null;
+    scopeNote: string | null;
+    loadedEventCount: number;
+    renderedRowCount: number;
+    rowCount: number;
+    filteredRowCount: number | null;
+    appliedStrategyFilter: string | null;
+    strategyCount: number;
+    rowScope: {
+      fullRows: string | null;
+      filteredRows: string | null;
+    };
+    hint: string | null;
+    sampleRowLimit: number;
+    sampleRowCount: number;
+    sampleRowsCapped: boolean;
+    sampleSource: 'fullRows' | 'filteredRows';
+    sampleRows: unknown[];
+    note: string;
+  };
 }
 
 export async function getRouterLearning(): Promise<RouterLearningSummary> {
@@ -3257,6 +3577,7 @@ export async function getRouterLearning(): Promise<RouterLearningSummary> {
     byTaskType: {},
     byRole: {},
     byComplexity: {},
+    modelRequestDuration: { byModel: {}, byTaskType: {} },
     bestByTaskType: [],
     bestPromptStrategyVariants: [],
   };
@@ -3268,6 +3589,14 @@ export async function getRouterLearningEvents(sessionId?: string, limit = 50): P
   if (sessionId) params.set('sessionId', sessionId);
   params.set('limit', String(limit));
   const res = await fetch(`${API_BASE}/api/router/learning/events?${params}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function getRouterAdherenceEvents(limit = 100, phase?: RoutingAdherenceEvent['phase']): Promise<RoutingAdherenceEvent[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (phase) params.set('phase', phase);
+  const res = await fetch(`${API_BASE}/api/router/adherence/events?${params}`);
   if (!res.ok) return [];
   return res.json();
 }
@@ -3326,29 +3655,26 @@ export async function recordRoutingOutcome(eventId: string, outcome: 'success' |
 
 
 // ============================================================================
-// Patch Review / Commit Validation stubs (server endpoints TBD)
-// These functions were introduced by PatchReviewPanel and related UI work.
-// The corresponding server endpoints are not yet implemented; the stubs
-// return safe defaults so the frontend builds and renders. When the server
-// routes land, replace the body with real fetch calls.
+// Patch Review / Commit Validation APIs
+// These functions back PatchReviewPanel with the server-side patch proposal,
+// review-comment, validation-gate, and commit-message routes.
 // ============================================================================
 
-export type ReviewCommentSeverity = 'info' | 'warning' | 'error' | 'blocker';
+export type ReviewCommentSeverity = 'blocker' | 'warning' | 'nit' | 'suggestion';
 
 export interface ReviewComment {
   id: string;
-  proposalId: string;
   filePath: string;
   startLine: number;
   endLine?: number;
   severity: ReviewCommentSeverity;
   rationale: string;
   suggestedFix?: string;
-  status: 'open' | 'resolved' | 'dismissed';
+  status: 'open' | 'resolved';
+  resolvedAt?: string;
   resolvedBy?: string;
   author?: string;
   createdAt: string;
-  updatedAt?: string;
 }
 
 export interface CommitMessageResult {
@@ -3417,7 +3743,13 @@ export async function addReviewComment(input: {
 export async function updateReviewComment(
   proposalId: string,
   commentId: string,
-  update: { status?: 'open' | 'resolved' | 'dismissed'; rationale?: string; resolvedBy?: string },
+  update: {
+    status?: 'open' | 'resolved';
+    severity?: ReviewCommentSeverity;
+    rationale?: string;
+    suggestedFix?: string;
+    resolvedBy?: string;
+  },
 ): Promise<ReviewComment | null> {
   const res = await fetch(
     `${API_BASE}/api/patch-proposals/${encodeURIComponent(proposalId)}/comments/${encodeURIComponent(commentId)}`,
@@ -3492,7 +3824,7 @@ export async function exportProjectMemory(workingDir: string): Promise<string> {
 }
 
 // ============================================================================
-// Prompt Microscope stubs
+// Prompt Microscope APIs
 // ============================================================================
 
 export interface SectionEstimate {
@@ -3504,18 +3836,37 @@ export interface SectionEstimate {
   redactedHits: number;
 }
 
-export async function estimatePromptSections(sections: Array<{ id: string; label: string; text: string }>): Promise<SectionEstimate[]> {
-  // Client-side fallback: estimate ~4 chars per token. Used until the
-  // server-side estimator lands.
+export function buildPromptSectionUnavailableEstimates(sections: Array<{ id: string; label: string; text: string }>): SectionEstimate[] {
   return sections.map((s) => {
     const text = s.text || '';
     const tokens = Math.ceil(text.length / 4);
-    return { id: s.id, label: s.label, tokens, truncated: tokens > 4000, text, redactedHits: 0 };
+    return { id: s.id, label: s.label, tokens, truncated: tokens > 4000, text: 'Redacted preview unavailable', redactedHits: -1 };
   });
 }
 
+export function promptSectionEstimatesUnavailable(estimates: readonly SectionEstimate[], sections: readonly { id: string }[]): boolean {
+  return sections.length > 0
+    && estimates.length === sections.length
+    && estimates.every((estimate) => estimate.redactedHits < 0);
+}
+
+export async function estimatePromptSections(sections: Array<{ id: string; label: string; text: string }>): Promise<SectionEstimate[]> {
+  const fallback = buildPromptSectionUnavailableEstimates(sections);
+  try {
+    const res = await fetch(`${API_BASE}/api/prompt/estimate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sections }),
+    });
+    const parsed = await safeJson<{ sections?: SectionEstimate[] }>(res, { sections: fallback });
+    return Array.isArray(parsed.sections) ? parsed.sections : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 // ============================================================================
-// Provider Health stubs
+// Provider Health APIs
 // ============================================================================
 
 export interface ProviderHealthSummary {
@@ -3561,7 +3912,6 @@ export async function getProviderHealth(providerId: string): Promise<ProviderHea
 export async function getProviderHealth(): Promise<ProviderHealthIndex>;
 export async function getProviderHealth(providerId?: string): Promise<ProviderHealthBundle | ProviderHealthIndex> {
   if (providerId) {
-    const res = await fetch(`${API_BASE}/api/providers/${encodeURIComponent(providerId)}/health`);
     const fallback: ProviderHealthBundle = {
       summary: {
         providerId,
@@ -3574,15 +3924,29 @@ export async function getProviderHealth(providerId?: string): Promise<ProviderHe
       },
       history: [],
     };
-    return safeJson<ProviderHealthBundle>(res, fallback);
+    try {
+      const res = await fetch(`${API_BASE}/api/providers/${encodeURIComponent(providerId)}/health`);
+      return safeJson<ProviderHealthBundle>(res, fallback);
+    } catch {
+      return fallback;
+    }
   }
-  const res = await fetch(`${API_BASE}/api/providers/health`);
-  return safeJson<ProviderHealthIndex>(res, { providers: [], history: {} });
+  const fallback: ProviderHealthIndex = { providers: [], history: {} };
+  try {
+    const res = await fetch(`${API_BASE}/api/providers/health`);
+    return safeJson<ProviderHealthIndex>(res, fallback);
+  } catch {
+    return fallback;
+  }
 }
 
 export async function probeProviderHealth(providerId: string): Promise<ProviderHealthRecord | null> {
-  const res = await fetch(`${API_BASE}/api/providers/${encodeURIComponent(providerId)}/health/probe`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-  });
-  return safeJson<ProviderHealthRecord | null>(res, null);
+  try {
+    const res = await fetch(`${API_BASE}/api/providers/${encodeURIComponent(providerId)}/health/probe`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    return safeJson<ProviderHealthRecord | null>(res, null);
+  } catch {
+    return null;
+  }
 }

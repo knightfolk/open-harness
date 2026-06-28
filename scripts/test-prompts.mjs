@@ -5,8 +5,8 @@
  *
  * Usage:
  *   node scripts/test-prompts.mjs                              # all models, all prompts
- *   node scripts/test-prompts.mjs --model MiniMax-M2.7         # specific model
- *   node scripts/test-prompts.mjs --models "MiniMax-M2.7,glm-4.5"  # multi-model comparison
+ *   node scripts/test-prompts.mjs --model MiniMax-M3           # specific model
+ *   node scripts/test-prompts.mjs --models "MiniMax-M3,glm-5.2"  # multi-model comparison
  *   node scripts/test-prompts.mjs --quick                      # first 3 prompts only
  *   node scripts/test-prompts.mjs --output-dir ./my-results    # custom output dir
  */
@@ -14,10 +14,14 @@
 import { writeFileSync, mkdirSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { isGlm5ModelId } from '../shared/glmModelPreference.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const API = 'http://127.0.0.1:3001';
+const UNIT_TEST_IMPORT = import.meta.url.includes('?unit-test');
+const DEFAULT_PROMPT_HARNESS_TIMEOUT_MS = 120_000;
+const GLM5_PROMPT_HARNESS_TIMEOUT_MS = 300_000;
 
 const args = process.argv.slice(2);
 const quickMode = args.includes('--quick');
@@ -123,6 +127,10 @@ async function getModels() {
   return res.json();
 }
 
+export function promptHarnessTimeoutMs(modelId) {
+  return isGlm5ModelId(modelId) ? GLM5_PROMPT_HARNESS_TIMEOUT_MS : DEFAULT_PROMPT_HARNESS_TIMEOUT_MS;
+}
+
 async function runTest(prompt, modelId) {
   const body = { prompt: prompt.prompt, modelId, workingDir: TARGET_DIR, testId: `${modelId}--${prompt.id}` };
   const start = Date.now();
@@ -130,7 +138,7 @@ async function runTest(prompt, modelId) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(promptHarnessTimeoutMs(modelId)),
   });
   if (!res.ok) {
     const errText = await res.text();
@@ -358,7 +366,9 @@ async function main() {
   console.log(`  ${completed - failed}/${totalRuns} passed`);
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+if (!UNIT_TEST_IMPORT) {
+  main().catch(err => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

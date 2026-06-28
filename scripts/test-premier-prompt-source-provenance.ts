@@ -11,9 +11,9 @@ const officialSources = {
   openaiPromptEngineering: 'https://platform.openai.com/docs/guides/prompt-engineering',
   openaiPromptGuidance: 'https://platform.openai.com/docs/guides/prompt-guidance',
   anthropicPromptEngineeringOverview: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview',
-  anthropicClaudeBestPractices: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting',
+  anthropicClaudeBestPractices: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/claude-prompting-best-practices',
   geminiPromptStrategies: 'https://ai.google.dev/gemini-api/docs/prompting-strategies',
-  mistralPromptEngineering: 'https://docs.mistral.ai/models/best-practices/prompt-engineering',
+  mistralPromptEngineering: 'https://docs.mistral.ai/studio-api/conversations/chat-completion/prompting',
   mistralFunctionCalling: 'https://docs.mistral.ai/studio-api/conversations/function-calling',
   mistralPromptingCapabilities: 'https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities',
 } as const;

@@ -15,13 +15,18 @@ import { v4 as uuid } from 'uuid';
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from 'fs';
 import { extname, isAbsolute, join, resolve } from 'path';
 import { parseToolCallMarkup } from './toolCallMarkup';
-import type { HarnessRunStep } from './runTrace';
+import type { AgentPhasePlan, HarnessRunStep } from './runTrace';
 import { safeWebFetch, webFetchToolDefinition } from './webFetch';
 import { hashPrompt, recordRoutingAdherenceEvent } from './routingAdherence';
 import { getAdapter } from './providers/registry';
 import type { ProviderMessage, ProviderTool } from './providers/types';
 import { isPathWithin } from './toolPolicy';
 import { wrapUntrustedBlock } from './untrustedContent';
+import {
+  DEFAULT_AGENT_REQUEST_TIMEOUT_MS,
+  getAgentRequestTimeoutDecision,
+  normalizeAgentTimeout,
+} from './modelTimeouts';
 
 // ── Provider failover: transient-error classification ──
 // A provider error is "transient" if a short retry or a model switch could
@@ -131,7 +136,7 @@ export interface BackgroundAgentRequest {
   workingDir?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
-  onStep?: (step: HarnessRunStep) => void;
+  onStep?: (step: HarnessRunStep) => HarnessRunStep | void;
   tools?: AgentToolDefinition[];
   invokeTool?: (toolName: string, args: Record<string, unknown>, workingDir?: string) => Promise<unknown>;
   maxToolRounds?: number;
@@ -161,17 +166,87 @@ export interface BackgroundAgentHandle {
 }
 
 const ACTIVE: Map<string, BackgroundAgentHandle> = new Map();
-const AGENT_REQUEST_TIMEOUT_MS = 180_000;
-const MIN_AGENT_REQUEST_TIMEOUT_MS = 5_000;
-const MAX_AGENT_REQUEST_TIMEOUT_MS = 180_000;
 const MAX_AGENT_TOOL_ROUNDS = 6;
+const AGENT_MODEL_RETRY_BACKOFF_MS = [2_000, 5_000];
 
-function normalizeAgentTimeout(timeoutMs: number | undefined): number {
-  if (!Number.isFinite(timeoutMs)) return AGENT_REQUEST_TIMEOUT_MS;
-  return Math.max(
-    MIN_AGENT_REQUEST_TIMEOUT_MS,
-    Math.min(MAX_AGENT_REQUEST_TIMEOUT_MS, Math.round(Number(timeoutMs))),
-  );
+function agentAppliedTimeoutMs(modelId: string, providerId: string, overrideTimeoutMs?: number): number {
+  const timeoutDecision = getAgentRequestTimeoutDecision(modelId, providerId);
+  return normalizeAgentTimeout(overrideTimeoutMs, timeoutDecision.timeoutMs);
+}
+
+function agentModelRequestStep(
+  modelId: string,
+  providerId: string,
+  round: number,
+  timeoutMs: number,
+  phasePlan?: AgentPhasePlan,
+): Extract<HarnessRunStep, { type: 'model_request' }> {
+  const timeoutDecision = getAgentRequestTimeoutDecision(modelId, providerId);
+  return {
+    type: 'model_request',
+    round,
+    model: modelId,
+    ...timeoutDecision,
+    timeoutMs,
+    phasePlan,
+  };
+}
+
+async function withTimedAgentModelRequest<T>(
+  step: Extract<HarnessRunStep, { type: 'model_request' }>,
+  onStep: BackgroundAgentRequest['onStep'],
+  operation: () => Promise<T>,
+): Promise<T> {
+  const timedStep = { ...step, startedAt: new Date().toISOString() };
+  const emittedStep = onStep?.(timedStep);
+  const mutableStep = emittedStep && emittedStep.type === 'model_request' ? emittedStep : timedStep;
+  try {
+    return await operation();
+  } finally {
+    const completedAt = new Date();
+    const startedAtMs = new Date(mutableStep.startedAt || timedStep.startedAt).getTime();
+    const completedAtMs = completedAt.getTime();
+    if (Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs) && completedAtMs >= startedAtMs) {
+      mutableStep.completedAt = completedAt.toISOString();
+      mutableStep.durationMs = completedAtMs - startedAtMs;
+    }
+  }
+}
+
+function agentPhasePlan(
+  config: StoredConfig,
+  primaryModelId: string,
+  primaryProviderId: string,
+  fallbackModelIds: string[],
+  overrideTimeoutMs?: number,
+): AgentPhasePlan {
+  return {
+    timeoutMs: agentPhaseTimeoutMs(config, primaryModelId, primaryProviderId, fallbackModelIds, overrideTimeoutMs),
+    primaryModel: primaryModelId,
+    fallbackModels: fallbackModelIds,
+    plannedRetryCount: AGENT_MODEL_RETRY_BACKOFF_MS.length,
+    plannedBackoffMs: AGENT_MODEL_RETRY_BACKOFF_MS.slice(),
+  };
+}
+
+function agentPhaseTimeoutMs(
+  config: StoredConfig,
+  primaryModelId: string,
+  primaryProviderId: string,
+  fallbackModelIds: string[],
+  overrideTimeoutMs?: number,
+): number {
+  if (Number.isFinite(overrideTimeoutMs)) {
+    return agentAppliedTimeoutMs(primaryModelId, primaryProviderId, overrideTimeoutMs);
+  }
+  const primaryAttemptTimeoutMs = agentAppliedTimeoutMs(primaryModelId, primaryProviderId);
+  const primaryRetryBudgetMs = primaryAttemptTimeoutMs * (AGENT_MODEL_RETRY_BACKOFF_MS.length + 1);
+  const backoffBudgetMs = AGENT_MODEL_RETRY_BACKOFF_MS.reduce((sum, ms) => sum + ms, 0);
+  const fallbackBudgetMs = fallbackModelIds.reduce((sum, fallbackModelId) => {
+    const fallbackProvider = pickProviderForModel(config, fallbackModelId);
+    return sum + (fallbackProvider ? agentAppliedTimeoutMs(fallbackModelId, fallbackProvider.providerId) : 0);
+  }, 0);
+  return primaryRetryBudgetMs + backoffBudgetMs + fallbackBudgetMs;
 }
 
 export interface AgentToolDefinition {
@@ -442,7 +517,7 @@ export function startBackgroundAgent(
 
   const id = uuid();
   const controller = new AbortController();
-  const requestTimeoutMs = normalizeAgentTimeout(req.timeoutMs);
+  const requestTimeoutMs = agentAppliedTimeoutMs(modelId, provider.providerId, req.timeoutMs);
   let requestTimedOut = false;
   const timeout = setTimeout(() => {
     requestTimedOut = true;
@@ -604,12 +679,15 @@ export async function runAgentPhase(
 
   const id = uuid();
   const controller = new AbortController();
-  const requestTimeoutMs = normalizeAgentTimeout(req.timeoutMs);
+  const fallbackChain = buildFallbackModelChain(config, modelId, req.fallbackModelIds);
+  const requestTimeoutMs = agentAppliedTimeoutMs(modelId, provider.providerId, req.timeoutMs);
+  const phaseTimeoutMs = agentPhaseTimeoutMs(config, modelId, provider.providerId, fallbackChain, req.timeoutMs);
+  const phasePlan = agentPhasePlan(config, modelId, provider.providerId, fallbackChain, req.timeoutMs);
   let requestTimedOut = false;
   const timeout = setTimeout(() => {
     requestTimedOut = true;
     controller.abort();
-  }, requestTimeoutMs);
+  }, phaseTimeoutMs);
   if (req.signal) {
     req.signal.addEventListener('abort', () => controller.abort());
   }
@@ -641,20 +719,29 @@ export async function runAgentPhase(
     ];
     let exhaustedToolRounds = false;
     const maxToolRounds = Math.max(0, Math.min(req.maxToolRounds ?? MAX_AGENT_TOOL_ROUNDS, MAX_AGENT_TOOL_ROUNDS));
-    const fallbackChain = buildFallbackModelChain(config, modelId, req.fallbackModelIds);
 
     for (let round = 0; round < maxToolRounds; round++) {
-      req.onStep?.({ type: 'model_request', round: round + 1, model: modelId });
+      const primaryRequestStep = agentModelRequestStep(modelId, provider.providerId, round + 1, requestTimeoutMs, round === 0 ? phasePlan : undefined);
       const modelResponse = await retryWithProviderFailover({
-        attempt: () => callAgentModel(provider, modelId, messages, profile.temperature, controller.signal, agentTools, requestTimeoutMs),
+        attempt: () => withTimedAgentModelRequest(
+          primaryRequestStep,
+          req.onStep,
+          () => callAgentModel(provider, modelId, messages, profile.temperature, controller.signal, agentTools, requestTimeoutMs),
+        ),
         isTransient: (err) => !controller.signal.aborted && isTransientProviderError(err),
-        backoffMs: [2000, 5000],
+        backoffMs: AGENT_MODEL_RETRY_BACKOFF_MS,
         fallbackModelIds: fallbackChain,
         fallbackAttempt: (fbModelId) => {
           const fbProvider = pickProviderForModel(config, fbModelId);
           if (!fbProvider) throw new Error(`No provider for fallback model ${fbModelId}`);
+          const fallbackTimeoutMs = agentAppliedTimeoutMs(fbModelId, fbProvider.providerId, req.timeoutMs);
           notes.push(`recover-model=${fbModelId}`);
-          return callAgentModel(fbProvider, fbModelId, messages, profile.temperature, controller.signal, agentTools, requestTimeoutMs);
+          const fallbackRequestStep = agentModelRequestStep(fbModelId, fbProvider.providerId, round + 1, fallbackTimeoutMs);
+          return withTimedAgentModelRequest(
+            fallbackRequestStep,
+            req.onStep,
+            () => callAgentModel(fbProvider, fbModelId, messages, profile.temperature, controller.signal, agentTools, fallbackTimeoutMs),
+          );
         },
         signal: req.signal,
       });
@@ -751,27 +838,12 @@ export async function runAgentPhase(
     }
 
     if (exhaustedToolRounds && !artifact.response.trim()) {
-      req.onStep?.({ type: 'model_request', round: maxToolRounds + 1, model: modelId });
+      const primaryFinalRequestStep = agentModelRequestStep(modelId, provider.providerId, maxToolRounds + 1, requestTimeoutMs);
       const finalResponse = await retryWithProviderFailover({
-        attempt: () => callAgentModel(provider, modelId, [
-          ...messages,
-          {
-            role: 'user',
-            content: [
-              `You have reached the read-only tool limit.`,
-              `Do not request more tools.`,
-              `Produce the final answer now from the evidence already gathered.`,
-            ].join('\n'),
-          },
-        ], profile.temperature, controller.signal, [], requestTimeoutMs),
-        isTransient: (err) => !controller.signal.aborted && isTransientProviderError(err),
-        backoffMs: [2000, 5000],
-        fallbackModelIds: fallbackChain,
-        fallbackAttempt: (fbModelId) => {
-          const fbProvider = pickProviderForModel(config, fbModelId);
-          if (!fbProvider) throw new Error(`No provider for fallback model ${fbModelId}`);
-          notes.push(`recover-model=${fbModelId}`);
-          return callAgentModel(fbProvider, fbModelId, [
+        attempt: () => withTimedAgentModelRequest(
+          primaryFinalRequestStep,
+          req.onStep,
+          () => callAgentModel(provider, modelId, [
             ...messages,
             {
               role: 'user',
@@ -781,7 +853,32 @@ export async function runAgentPhase(
                 `Produce the final answer now from the evidence already gathered.`,
               ].join('\n'),
             },
-          ], profile.temperature, controller.signal, [], requestTimeoutMs);
+          ], profile.temperature, controller.signal, [], requestTimeoutMs),
+        ),
+        isTransient: (err) => !controller.signal.aborted && isTransientProviderError(err),
+        backoffMs: AGENT_MODEL_RETRY_BACKOFF_MS,
+        fallbackModelIds: fallbackChain,
+        fallbackAttempt: (fbModelId) => {
+          const fbProvider = pickProviderForModel(config, fbModelId);
+          if (!fbProvider) throw new Error(`No provider for fallback model ${fbModelId}`);
+          const fallbackTimeoutMs = agentAppliedTimeoutMs(fbModelId, fbProvider.providerId, req.timeoutMs);
+          notes.push(`recover-model=${fbModelId}`);
+          const fallbackFinalRequestStep = agentModelRequestStep(fbModelId, fbProvider.providerId, maxToolRounds + 1, fallbackTimeoutMs);
+          return withTimedAgentModelRequest(
+            fallbackFinalRequestStep,
+            req.onStep,
+            () => callAgentModel(fbProvider, fbModelId, [
+              ...messages,
+              {
+                role: 'user',
+                content: [
+                  `You have reached the read-only tool limit.`,
+                  `Do not request more tools.`,
+                  `Produce the final answer now from the evidence already gathered.`,
+                ].join('\n'),
+              },
+            ], profile.temperature, controller.signal, [], fallbackTimeoutMs),
+          );
         },
         signal: req.signal,
       });
@@ -808,7 +905,7 @@ export async function runAgentPhase(
         selectedModel: modelId,
         providerId: provider.providerId,
         promptHash: hashPrompt(req.prompt),
-        timeoutMs: requestTimeoutMs,
+        timeoutMs: phaseTimeoutMs,
         elapsedMs: Date.now() - new Date(startedAt).getTime(),
         error: artifact.error,
         retryable: true,
@@ -824,7 +921,7 @@ export async function runAgentPhase(
         selectedModel: modelId,
         providerId: provider.providerId,
         promptHash: hashPrompt(req.prompt),
-        timeoutMs: requestTimeoutMs,
+        timeoutMs: phaseTimeoutMs,
         elapsedMs: Date.now() - new Date(startedAt).getTime(),
         error: 'Agent request aborted',
         retryable: true,
@@ -862,7 +959,7 @@ async function callAgentModel(
   temperature: number,
   signal: AbortSignal,
   tools: AgentToolDefinition[] = [],
-  timeoutMs = AGENT_REQUEST_TIMEOUT_MS,
+  timeoutMs = DEFAULT_AGENT_REQUEST_TIMEOUT_MS,
 ): Promise<AgentModelResponse> {
   if (provider.providerType === 'anthropic' || provider.providerType === 'google') {
     return callNativeAgentModel(provider, modelId, messages, temperature, signal, tools, timeoutMs);
@@ -913,7 +1010,7 @@ async function callNativeAgentModel(
   temperature: number,
   signal: AbortSignal,
   tools: AgentToolDefinition[] = [],
-  timeoutMs = AGENT_REQUEST_TIMEOUT_MS,
+  timeoutMs = DEFAULT_AGENT_REQUEST_TIMEOUT_MS,
 ): Promise<AgentModelResponse> {
   const adapter = getAdapter({
     id: 'agent-runtime',

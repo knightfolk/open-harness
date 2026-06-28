@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, RotateCcw,
   ChevronDown, Check, Wrench,
-  Activity, PanelBottom, PanelRight, ArrowLeftRight,
+  Activity, MessageSquare, PanelBottom, PanelRight, ArrowLeftRight,
 } from 'lucide-react';
 import type { PanelId, PanelPlacement } from '../types/layout';
 import { ALL_PANELS, defaultPanelPlacement, oppositePanelPlacement } from '../types/layout';
@@ -74,6 +74,7 @@ export function TopBar({
     panelMenuIds.filter((id) => visiblePanels.has(id)).length,
     [panelMenuIds, visiblePanels],
   );
+  const sideChatOpen = visiblePanels.has('side-chat');
 
   useEffect(() => {
     if (!panelMenuOpen) return;
@@ -181,6 +182,17 @@ export function TopBar({
           aria-label={environmentOpen ? 'Hide Environment' : 'Show Environment'}
         >
           <Activity size={16} aria-hidden="true" />
+        </button>
+
+        <button
+          className={'top-bar-action' + (sideChatOpen ? ' active' : '')}
+          type="button"
+          data-priority="high"
+          onClick={() => onTogglePanel('side-chat', resolvedPanelPlacement('side-chat'))}
+          title={sideChatOpen ? 'Hide Side Chat' : 'Open Side Chat'}
+          aria-label={sideChatOpen ? 'Hide Side Chat' : 'Open Side Chat'}
+        >
+          <MessageSquare size={16} aria-hidden="true" />
         </button>
 
         <div ref={menuRef} style={{ position: 'relative' }}>

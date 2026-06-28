@@ -305,7 +305,7 @@ function ActiveWorkStrip({ state, onOpenDetails }: { state: ActiveWorkState; onO
   ].filter(Boolean);
 
   return (
-    <div className="active-work-strip-host" role="status" aria-live="polite" aria-label={`${state.workflowLabel} active work status`}>
+    <div className="active-work-strip-host" role="status" aria-live="polite" aria-label={`${state.workflowLabel} active work progress`}>
       <button
         className={`active-work-strip ${tone}`}
         type="button"
@@ -318,8 +318,17 @@ function ActiveWorkStrip({ state, onOpenDetails }: { state: ActiveWorkState; onO
           <span className="active-work-strip-title">{headline}</span>
           <span className="active-work-strip-meta">{detail}</span>
         </span>
+        <span className="active-work-strip-steps" role="list" aria-label={`${state.workflowLabel} steps`}>
+          {state.steps.map((step, index) => (
+            <span key={step.id} className="active-work-strip-segment" role="listitem" aria-label={`${step.label}: ${step.status}`} aria-current={step.status === 'in_progress' ? 'step' : undefined}>
+              <span className={`active-work-strip-dot ${step.status}`} aria-hidden="true" />
+              <span className={`active-work-strip-step ${step.status}`}>{step.label}</span>
+              {index < state.steps.length - 1 ? <span className="active-work-strip-separator" aria-hidden="true">›</span> : null}
+            </span>
+          ))}
+        </span>
         {state.progressLabel && <span className="active-work-strip-progress">{state.progressLabel}</span>}
-        <span className="active-work-strip-action">View details</span>
+        <span className="active-work-strip-action">Agent detail</span>
       </button>
     </div>
   );

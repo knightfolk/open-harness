@@ -112,6 +112,7 @@ const REQUIRED_ASSEMBLY_SECTIONS = [
   'context-pack',
   'safety-rules',
   'model-family-guidance',
+  'mode-contract',
   'task-contract',
   'output-style',
 ] as const;
@@ -157,8 +158,9 @@ function assertPromptAssemblyReadiness() {
       workingDir: '/Users/kevink/Projects/OpenHarness',
       projectProfileSummary: 'OpenHarness routes tasks, builds model-aware prompts, and records run traces.',
       taskDescription: 'Inspect routing quality and report readiness for human output review.',
+      routeMode: 'investigate',
       tools: [{ name: 'read_file', description: 'Read a file', input_schema: { type: 'object' } }],
-    });
+    } as any);
 
     assert.equal(prompt.assembly.family, modelCase.expectedFamily, `${modelCase.modelId}: family`);
     assert.equal(prompt.systemInstruction.target, modelCase.expectedTarget, `${modelCase.modelId}: prompt target`);
@@ -173,6 +175,7 @@ function assertPromptAssemblyReadiness() {
 
     assert.ok(prompt.assembly.sections.every((section) => section.reason.trim().length > 0), `${modelCase.modelId}: every section should explain inclusion`);
     assert.match(prompt.systemPrompt, /Treat the system prompt as the control contract for this run/i, `${modelCase.modelId}: system prompt should include the core harness contract`);
+    assert.match(prompt.systemPrompt, /Mode contract: investigate/i, `${modelCase.modelId}: system prompt should include the route/mode contract`);
     assert.match(prompt.systemPrompt, /Model Family Guidance|model_family_guidance|Model family guidance/i, `${modelCase.modelId}: system prompt should include model-family guidance`);
     assert.ok(
       /final answer|review tasks|deliverable|direct answers|delivered result|proof status/i.test(prompt.assembly.sections.find((section) => section.id === 'model-family-guidance')?.preview || ''),

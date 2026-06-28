@@ -31,6 +31,7 @@ export interface PersistedSession {
   createdAt: string;
   updatedAt: string;
   kind?: SessionKind;
+  sideChatParentSessionId?: string | null;
   goal?: SessionGoal | null;
   version?: number;
 }

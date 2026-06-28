@@ -5,7 +5,7 @@ import type { StoredConfig } from '../config';
 import type { ApprovalAction } from '../actionApprovals';
 import * as evals from '../evals';
 import { listCapabilities, setCapabilityEnabled, type CapabilityKind } from '../capabilities';
-import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins } from '../promptPlugins';
+import { ensurePromptPluginRoots, importSkillAsPromptPlugin, listPromptPlugins, type PromptPluginRegistry } from '../promptPlugins';
 import { PROMPT_STRATEGY_PROFILES } from '../promptStrategies';
 import { estimateSections, redactSecrets } from '../sectionRedaction';
 import { isPathWithin } from '../toolPolicy';
@@ -27,6 +27,36 @@ function optionalWorkspace(
   const workingDir = typeof rawWorkingDir === 'string' ? rawWorkingDir : undefined;
   if (!workingDir) return { ok: true, dir: undefined };
   return deps.ensureKnownWorkspace(workingDir);
+}
+
+function promptPluginManifestId(id: string): string {
+  const trimmed = id.trim();
+  return trimmed.startsWith('prompt-plugin.') ? trimmed.slice('prompt-plugin.'.length) : trimmed;
+}
+
+function injectablePromptPluginIds(registry: PromptPluginRegistry): Set<string> {
+  return new Set(registry.plugins
+    .filter((plugin) => (
+      plugin.enabled
+      && plugin.status === 'ready'
+      && !plugin.safety.canOverrideProjectInstructions
+    ))
+    .map((plugin) => plugin.id));
+}
+
+function normalizePromptPluginRenderingForRegistry(
+  config: StoredConfig['promptPluginRendering'],
+  registry: PromptPluginRegistry,
+): NonNullable<StoredConfig['promptPluginRendering']> {
+  const enabled = config?.enabled === true;
+  if (!enabled) return { enabled: false, allowedPluginIds: [] };
+  const injectableIds = injectablePromptPluginIds(registry);
+  const allowedPluginIds = [...new Set((config?.allowedPluginIds || [])
+    .filter((id): id is string => typeof id === 'string')
+    .map(promptPluginManifestId)
+    .filter((id) => injectableIds.has(id)))]
+    .sort();
+  return { enabled: true, allowedPluginIds };
 }
 
 export function registerLabUtilityRoutes(app: express.Express, deps: LabUtilityRouteDeps) {
@@ -98,6 +128,44 @@ export function registerLabUtilityRoutes(app: express.Express, deps: LabUtilityR
     const targetWorkspace = optionalWorkspace(req.body?.workingDir, deps);
     if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
     res.json(listCapabilities(appConfig.capabilitySettings, listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins)));
+  });
+
+  app.put('/api/prompt-plugin-rendering', (req, res) => {
+    const mutation = deps.ensureLocalMutationWithControl(req);
+    if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+    const targetWorkspace = optionalWorkspace(req.body?.workingDir, deps);
+    if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+    const appConfig = deps.getConfig();
+    const registry = listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins);
+    appConfig.promptPluginRendering = normalizePromptPluginRenderingForRegistry({
+      enabled: req.body?.enabled === true,
+      allowedPluginIds: req.body?.enabled === true ? appConfig.promptPluginRendering?.allowedPluginIds || [] : [],
+    }, registry);
+    deps.saveConfig(appConfig);
+    res.json(appConfig.promptPluginRendering);
+  });
+
+  app.put('/api/prompt-plugin-rendering/plugins/:id', (req, res) => {
+    const mutation = deps.ensureLocalMutationWithControl(req);
+    if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+    const targetWorkspace = optionalWorkspace(req.body?.workingDir, deps);
+    if (!targetWorkspace.ok) return res.status(targetWorkspace.status).json({ error: targetWorkspace.error });
+    const appConfig = deps.getConfig();
+    const registry = listPromptPlugins(targetWorkspace.dir, appConfig.capabilitySettings?.disabledPlugins);
+    const current = normalizePromptPluginRenderingForRegistry(appConfig.promptPluginRendering, registry);
+    const allowedIds = new Set(current.allowedPluginIds);
+    const manifestId = promptPluginManifestId(req.params.id || '');
+    if (current.enabled && req.body?.allowed === true && injectablePromptPluginIds(registry).has(manifestId)) {
+      allowedIds.add(manifestId);
+    } else {
+      allowedIds.delete(manifestId);
+    }
+    appConfig.promptPluginRendering = normalizePromptPluginRenderingForRegistry({
+      enabled: current.enabled,
+      allowedPluginIds: [...allowedIds],
+    }, registry);
+    deps.saveConfig(appConfig);
+    res.json(appConfig.promptPluginRendering);
   });
 
   app.get('/api/prompt-plugins', (req, res) => {

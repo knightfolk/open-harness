@@ -14,7 +14,7 @@ This phase should turn that failure mode into durable product data: prompt adher
 - `server/autoRouter.ts` uses a classifier model to score configured candidates, then applies cost after score thresholding.
 - `server/evals.ts` has built-in prompt cases, including `review-project`, `debug-empty-response`, and `compare-route-decisions`.
 - `server/harnessTasks.ts` has a read-only `Review repo` task with rubric items for reading files, structure, hallucination avoidance, and actionable suggestions.
-- `GET /api/router/state` on the live local server reported auto-router enabled with 14 candidates, threshold `0.7`, classifier `minimax:MiniMax-M2.5-highspeed`, and cache size `0`.
+- Historical 2026-06-06 `GET /api/router/state` output reported auto-router enabled with 14 candidates, threshold `0.7`, classifier `minimax:MiniMax-M2.5-highspeed`, and cache size `0`; current MiniMax-backed routing work should prefer `minimax:MiniMax-M3`.
 - `GET /api/router/health` succeeded with `ok: true` and classifier latency around `4481ms`.
 - Existing eval reports under `~/.openharness/evals/reports` are not yet useful for routing: the summaries found have empty `byModel` data.
 

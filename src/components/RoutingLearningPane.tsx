@@ -1,7 +1,28 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { AlertTriangle, BarChart3, CheckCircle2, CircleHelp, Download, Lightbulb, RefreshCw, ShieldCheck, Upload, XCircle } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { AlertTriangle, BarChart3, CheckCircle2, Check, ChevronDown, CircleHelp, Copy, Download, FlaskConical, Lightbulb, RefreshCw, ShieldCheck, Upload, XCircle } from 'lucide-react';
 import * as api from '../utils/api';
-import { ROUTING_FEEDBACK_GUIDANCE, candidateScoresUnavailableLabel, routingEventDecisionLabel, routingOutcomeHelp, routingOutcomeLabel, sortedCandidateScores } from '../utils/autoRouterTrace';
+import { ROUTING_FEEDBACK_GUIDANCE, candidateScoresUnavailableLabel, routingOutcomeHelp, routingOutcomeLabel } from '../utils/autoRouterTrace';
+import { getModelLabEvidenceGate, routingDecisionToModelLabEvidenceScope, type ModelLabEvidenceScope } from '../utils/modelLabResultEvidence';
+import { formatRouteLearningSignalSummary } from '../utils/routeLearningSignalSummary';
+import { MAX_RECENT_EVENT_DISPLAY_LIMIT, RECENT_EVENT_BATCH_SIZE, buildRoutingDecisionScanCards, buildRoutingEventDisplayWindow, buildRoutingEventEvidenceView, buildRoutingLearningRecentDecisionState, routeEventTimeLabelAt as routeEventTimeLabel, type RoutingDecisionScanFilterTarget, type RoutingEventEvidenceView } from '../utils/routingLearningRecentDecisions';
+import { ROUTING_POLICY_FILTERS, routingPolicyFilterLabel, type RoutingPolicyFilter } from '../utils/routingLearningPolicyFilter';
+import { computeRoutingTrend } from '../utils/routingTrend';
+import {
+  ROUTING_ACTION_CUE_CONFIDENCE_FILTERS,
+  buildRoutingLearningActionCues,
+  filterRoutingLearningActionCues,
+  routingLearningActionCueFilterLabel,
+  type RoutingActionCueConfidenceFilter,
+} from '../utils/routingLearningActionCues';
+import { formatPercentDisplay, formatScoreDisplay } from '../utils/scoreDisplay';
+import { buildModelRequestDurationEvidence, modelRequestDurationEvidenceLines, sortModelRequestDurationRows } from '../utils/modelRequestDurationEvidence';
+import { PROVIDER_FAILURE_SCOPE_NOTE, buildProviderFailureRows, buildProviderFailureStrategyBreakdown, buildProviderFailureStrategyEvidence, deriveProviderFailureRoutingHint, formatProviderFailureDistinctStrategyLabel, formatProviderFailureStrategyFailureShareWidth, summarizeProviderFailureAdherence } from '../utils/routingAdherenceDisplay';
+import { RoutingLearningSignalChips } from './RoutingLearningSignalChips';
+
+const PROVIDER_FAILURE_ADHERENCE_PHASE = 'provider-stream';
+const PROVIDER_FAILURE_ADHERENCE_EVENT_LIMIT = 8;
+const PROVIDER_FAILURE_ADHERENCE_ROW_LIMIT = 5;
+const UNKNOWN_ROUTING_CONTEXT_VALUE = '\u2014';
 
 interface EnabledModelRef {
   id: string;
@@ -13,7 +34,43 @@ interface EnabledModelRef {
 interface Props {
   enabledModels?: EnabledModelRef[];
   onApplyRoleRecommendation?: (roleId: string, modelId: string) => void;
+  onOpenModelLabEvidence?: (scope: ModelLabEvidenceScope) => void;
 }
+
+interface RoutingMetricCardProps {
+  label: string;
+  value: ReactNode;
+  detail: ReactNode;
+  tone?: string;
+  ariaLabel: string;
+}
+
+type ToolReliabilityRow = [string, api.ToolReliabilityBucket];
+type ModelRequestDurationRow = [string, { samples: number; avgMs: number; slow: boolean; thresholdMs: number }];
+
+interface ToolReliabilityTopRows {
+  byModel: ToolReliabilityRow[];
+  byTool: ToolReliabilityRow[];
+  byModelTool: ToolReliabilityRow[];
+  byPromptStrategyVariant: ToolReliabilityRow[];
+}
+
+interface ModelRequestDurationRows {
+  byModel: ModelRequestDurationRow[];
+  byTaskType: ModelRequestDurationRow[];
+}
+
+const EMPTY_TOOL_RELIABILITY_TOP_ROWS: ToolReliabilityTopRows = {
+  byModel: [],
+  byTool: [],
+  byModelTool: [],
+  byPromptStrategyVariant: [],
+};
+
+const EMPTY_MODEL_REQUEST_DURATION_ROWS: ModelRequestDurationRows = {
+  byModel: [],
+  byTaskType: [],
+};
 
 function normalizeModelId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -32,8 +89,18 @@ function modelKeyMatches(a: string, b: string): boolean {
   return a === b || a.endsWith(b) || b.endsWith(a);
 }
 
-function pct(value: number): string {
-  return `${Math.round(value * 100)}%`;
+function RoutingMetricCard({ label, value, detail, tone, ariaLabel }: RoutingMetricCardProps) {
+  return (
+    <div className={['routing-metric-card', tone].filter(Boolean).join(' ')} role="listitem" aria-label={ariaLabel}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function pct(value: unknown): string {
+  return formatPercentDisplay(value);
 }
 
 function ms(value: number): string {
@@ -46,6 +113,38 @@ function toolReliabilityRows(data?: Record<string, api.ToolReliabilityBucket>) {
   return Object.entries(data || {})
     .sort(([, a], [, b]) => (b.error - a.error) || (b.total - a.total))
     .slice(0, 6);
+}
+
+function modelRequestDurationRows(data?: Record<string, { samples: number; avgMs: number; slow: boolean; thresholdMs: number }>): ModelRequestDurationRow[] {
+  return sortModelRequestDurationRows(Object.entries(data || {})
+    .filter(([, item]) => item.samples > 0 && Number.isFinite(item.avgMs))
+  )
+    .slice(0, 5);
+}
+
+function buildToolReliabilityTopRows(toolReliability: api.ToolReliabilitySummary | undefined): ToolReliabilityTopRows {
+  if (!toolReliability) return EMPTY_TOOL_RELIABILITY_TOP_ROWS;
+  return {
+    byModel: toolReliabilityRows(toolReliability.byModel),
+    byTool: toolReliabilityRows(toolReliability.byTool),
+    byModelTool: toolReliabilityRows(toolReliability.byModelTool),
+    byPromptStrategyVariant: toolReliabilityRows(toolReliability.byPromptStrategyVariant),
+  };
+}
+
+function buildModelRequestDurationRows(summary: api.RouterLearningSummary['modelRequestDuration'] | undefined): ModelRequestDurationRows {
+  if (!summary) return EMPTY_MODEL_REQUEST_DURATION_ROWS;
+  return {
+    byModel: modelRequestDurationRows(summary.byModel),
+    byTaskType: modelRequestDurationRows(summary.byTaskType),
+  };
+}
+
+function formatProviderFailureCauseCounts(causeCounts: Record<string, number | undefined>): string {
+  const entries = Object.entries(causeCounts)
+    .filter(([, count]) => typeof count === 'number' && count > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return entries.length > 0 ? entries.map(([cause, count]) => `${cause}=${count}`).join(', ') : 'none';
 }
 
 function sampleLabel(total: number): string {
@@ -78,39 +177,22 @@ function toolErrorLedgerStatusHelp(summary: api.ToolErrorLedgerSummary | undefin
   return 'No persisted live tool-error ledger exists yet; run a real tool-error recovery scenario before treating recovery memory as closed.';
 }
 
+function toolReliabilityTuningActionCue(action: api.ToolReliabilityTuningAction): { label: string; detail: string; tone: 'actionable' | 'review' | 'context' } {
+  switch (action) {
+    case 'tune_local_router':
+      return { label: 'Actionable', detail: 'Local saved evidence can inform router tuning after normal review.', tone: 'actionable' };
+    case 'review_before_tuning':
+      return { label: 'Review first', detail: 'Review this evidence source before changing routing behavior.', tone: 'review' };
+    case 'context_only':
+      return { label: 'Context only', detail: 'Use this evidence source as diagnostic context, not as a routing override.', tone: 'context' };
+  }
+}
+
 function eventStatus(event: api.RoutingEvent) {
   if (event.outcome === 'success') return { label: routingOutcomeLabel(event.outcome), icon: CheckCircle2, tone: 'success' };
   if (event.outcome === 'failure') return { label: routingOutcomeLabel(event.outcome), icon: XCircle, tone: 'error' };
   if (event.outcome === 'ambiguous') return { label: routingOutcomeLabel(event.outcome), icon: CircleHelp, tone: 'muted' };
   return { label: routingOutcomeLabel(event.outcome), icon: CircleHelp, tone: 'warning' };
-}
-
-function routeMarginSummary(event: api.RoutingEvent): string {
-  const scores = sortedCandidateScores(event.candidateScores, 4);
-  if (scores.length === 0) return candidateScoresUnavailableLabel({ fallback: event.wasFallback });
-  const selectedScore = event.candidateScores?.[event.selectedModel] ?? event.score;
-  const competitors = scores.filter(([model]) => model !== event.selectedModel);
-  const closest = competitors[0];
-  if (!closest) return `Selected ${event.selectedModel} with no scored alternatives.`;
-  const [altModel, altScore] = closest;
-  const margin = selectedScore - altScore;
-  if (margin >= 0) return `Selected by ${margin.toFixed(2)} over ${altModel}.`;
-  return `Fallback selected ${event.selectedModel}; top scored alternative was ${altModel} at ${altScore.toFixed(2)}.`;
-}
-
-function routeEventTimeLabel(timestamp: string): string {
-  const time = Date.parse(timestamp);
-  if (!Number.isFinite(time)) return 'time unknown';
-  const elapsedMs = Date.now() - time;
-  if (elapsedMs < 0) return new Date(time).toLocaleString();
-  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
-  if (elapsedMinutes < 1) return 'just now';
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `${elapsedHours}h ago`;
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  if (elapsedDays < 7) return `${elapsedDays}d ago`;
-  return new Date(time).toLocaleDateString();
 }
 
 function routeEventExactTime(timestamp: string): string {
@@ -130,18 +212,61 @@ function routeEventPromptBestPractice(
   return ` Prompt eval cue: ${note.evaluationCue}; source: ${note.sourceRef}.`;
 }
 
-function routeEventIsStale(timestamp: string): boolean {
-  const time = Date.parse(timestamp);
-  if (!Number.isFinite(time)) return true;
-  return Date.now() - time > 7 * 24 * 60 * 60 * 1000;
+function activeFilterLabel(showUnratedOnly: boolean, showUnexplainedOnly: boolean, showStaleOnly: boolean, showFallbackOnly: boolean, showBenchmarkOnly: boolean, showEvidenceGapsOnly: boolean, policyFilter: RoutingPolicyFilter): string {
+  let base = 'All recent decisions';
+  if (showUnratedOnly) base = 'Needs outcome';
+  else if (showUnexplainedOnly) base = 'Needs notes';
+  else if (showStaleOnly) base = 'Stale only';
+  else if (showFallbackOnly) base = 'Fallbacks';
+  else if (showBenchmarkOnly) base = 'Benchmarks';
+  else if (showEvidenceGapsOnly) base = 'Evidence gaps';
+  return policyFilter === 'all' ? base : `${base} + ${routingPolicyFilterLabel(policyFilter)}`;
 }
 
-function activeFilterLabel(showUnexplainedOnly: boolean, showStaleOnly: boolean, showFallbackOnly: boolean, showBenchmarkOnly: boolean): string {
-  if (showUnexplainedOnly) return 'Needs notes';
-  if (showStaleOnly) return 'Stale only';
-  if (showFallbackOnly) return 'Fallbacks';
-  if (showBenchmarkOnly) return 'Benchmarks';
-  return 'All recent decisions';
+function routingEventEvidenceExportRow(eventEvidence: RoutingEventEvidenceView) {
+  return {
+    ...eventEvidence.event,
+    outcomeNote: eventEvidence.outcomeNote,
+    traceSummary: eventEvidence.traceSummary,
+    traceChips: eventEvidence.traceChips,
+    scoreEvidenceKey: eventEvidence.scoreEvidenceKey,
+    scoreEvidenceReadiness: eventEvidence.scoreEvidenceReadiness,
+  };
+}
+
+function buildRoutingLearningReviewExportState({
+  events,
+  outcomeNotes,
+  latestEvent,
+  latestEventIsStale,
+  activeFilter,
+  visibleRecentEventCount,
+}: {
+  events: api.RoutingEvent[];
+  outcomeNotes: Record<string, string>;
+  latestEvent: api.RoutingEvent | null;
+  latestEventIsStale: boolean;
+  activeFilter: string;
+  visibleRecentEventCount: number;
+}) {
+  const reviewedEvents = events.filter((event) => event.outcome !== null);
+  const unratedEvents = events.filter((event) => event.outcome === null);
+  const notedEventCount = events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length > 0).length;
+  return {
+    activeFilter,
+    visibleRecentEventCount,
+    reviewedEvents,
+    unratedEvents,
+    notedEventCount,
+    latestEvidenceTimestamp: latestEvent ? routeEventExactTime(latestEvent.timestamp) : null,
+    latestEvidenceAge: latestEvent ? routeEventTimeLabel(latestEvent.timestamp) : null,
+    freshnessWarning: latestEventIsStale
+      ? 'Refresh with newer route outcomes before trusting trends.'
+      : 'Recent routing evidence is loaded.',
+    freshnessWarningBrief: latestEventIsStale
+      ? 'refresh with newer route outcomes before trusting trends'
+      : 'recent routing evidence is loaded',
+  };
 }
 
 function evalProofStatusLabel(rec: api.EvalRecommendation): string {
@@ -163,21 +288,32 @@ function countRecommendationProofStates(recommendations: api.EvalRecommendation[
   }, { approved: 0, unreviewed: 0, 'needs-attention': 0 } as Record<api.EvalRecommendation['proofReviewStatus'], number>);
 }
 
-export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendation }: Props) {
+export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendation, onOpenModelLabEvidence }: Props) {
   const [summary, setSummary] = useState<api.RouterLearningSummary | null>(null);
   const [events, setEvents] = useState<api.RoutingEvent[]>([]);
   const [recommendations, setRecommendations] = useState<api.EvalRecommendation[]>([]);
   const [promptStrategies, setPromptStrategies] = useState<api.PromptStrategyProfile[]>([]);
+  const [adherenceEvents, setAdherenceEvents] = useState<api.RoutingAdherenceEvent[]>([]);
+  const [adherenceLoadError, setAdherenceLoadError] = useState<string | null>(null);
   const [thresholdSuggestion, setThresholdSuggestion] = useState<{ suggestedThreshold: number; reason: string; dataPoints: number } | null>(null);
   const [routerState, setRouterState] = useState<api.AutoRouterState | null>(null);
   const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
+  const [showUnratedOnly, setShowUnratedOnly] = useState(false);
   const [showUnexplainedOnly, setShowUnexplainedOnly] = useState(false);
   const [showStaleOnly, setShowStaleOnly] = useState(false);
   const [showFallbackOnly, setShowFallbackOnly] = useState(false);
   const [showBenchmarkOnly, setShowBenchmarkOnly] = useState(false);
+  const [showEvidenceGapsOnly, setShowEvidenceGapsOnly] = useState(false);
+  const [policyFilter, setPolicyFilter] = useState<RoutingPolicyFilter>('all');
+  const [routingActionCueFilter, setRoutingActionCueFilter] = useState<RoutingActionCueConfidenceFilter>('all');
   const [importAsBenchmark, setImportAsBenchmark] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [routeDecisionNowMs, setRouteDecisionNowMs] = useState(() => Date.now());
+  const [recentEventDisplayLimit, setRecentEventDisplayLimit] = useState(RECENT_EVENT_BATCH_SIZE);
+  const [copiedProviderFailureRowId, setCopiedProviderFailureRowId] = useState<string | null>(null);
+  const [copiedProviderFailureStrategyId, setCopiedProviderFailureStrategyId] = useState<string | null>(null);
+  const [providerFailureStrategyFilter, setProviderFailureStrategyFilter] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const enabledModelKeys = useMemo(() => {
@@ -197,12 +333,21 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   }, [enabledModelKeys]);
 
   const loadData = useCallback(async () => {
-    const [s, e, r, routerState, strategies] = await Promise.all([
+    const [s, e, r, routerState, strategies, adherence] = await Promise.all([
       api.getRouterLearning(),
       api.getRouterLearningEvents(undefined, 100),
       api.getEvalRecommendations(),
       api.getRouterState(),
       api.getPromptStrategies().catch(() => []),
+      api.getRouterAdherenceEvents(PROVIDER_FAILURE_ADHERENCE_EVENT_LIMIT, PROVIDER_FAILURE_ADHERENCE_PHASE)
+        .then((items) => {
+          setAdherenceLoadError(null);
+          return items;
+        })
+        .catch(() => {
+          setAdherenceLoadError('Could not load provider failure adherence');
+          return [] as api.RoutingAdherenceEvent[];
+        }),
     ]);
     const t = await api.suggestRouterThreshold(routerState.threshold);
     setRouterState(routerState);
@@ -210,6 +355,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     setEvents(e);
     setRecommendations(r);
     setPromptStrategies(strategies);
+    setAdherenceEvents(adherence);
     setThresholdSuggestion(t);
     setOutcomeNotes((prev) => {
       const next = { ...prev };
@@ -231,6 +377,17 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     })();
   }, [loadData]);
 
+  useEffect(() => {
+    const refreshRouteDecisionClock = () => setRouteDecisionNowMs(Date.now());
+    refreshRouteDecisionClock();
+    const intervalId = window.setInterval(refreshRouteDecisionClock, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    setRecentEventDisplayLimit(RECENT_EVENT_BATCH_SIZE);
+  }, [showUnratedOnly, showUnexplainedOnly, showStaleOnly, showFallbackOnly, showBenchmarkOnly, showEvidenceGapsOnly, policyFilter]);
+
   const accessibleRecommendations = useMemo(
     () => recommendations.filter(isRecommendationEnabled),
     [isRecommendationEnabled, recommendations],
@@ -246,10 +403,136 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     [accessibleRecommendations],
   );
 
+  const promptStrategyIds = useMemo(
+    () => new Set(promptStrategies.map((strategy) => strategy.id)),
+    [promptStrategies],
+  );
+
   const modelList = useMemo(
     () => Object.entries(summary?.models || {}).sort(([, a]: any, [, b]: any) => b.total - a.total),
     [summary],
   );
+  const recentDecisionState = useMemo(() => buildRoutingLearningRecentDecisionState({
+    events,
+    outcomeNotes,
+    nowMs: routeDecisionNowMs,
+    filters: {
+      showUnratedOnly,
+      showUnexplainedOnly,
+      showStaleOnly,
+      showFallbackOnly,
+      showBenchmarkOnly,
+      showEvidenceGapsOnly,
+      policyFilter,
+    },
+  }), [
+    events,
+    outcomeNotes,
+    showUnratedOnly,
+    showUnexplainedOnly,
+    showStaleOnly,
+    showFallbackOnly,
+    showBenchmarkOnly,
+    showEvidenceGapsOnly,
+    policyFilter,
+    routeDecisionNowMs,
+  ]);
+  const {
+    latestEvent,
+    latestScores,
+    fallbackEvents,
+    ratedFallbackEvents,
+    notedEventCount,
+    latestEventAge,
+    latestEventIsStale,
+    unexplainedEventCount,
+    unratedEventCount,
+    staleEventCount,
+    benchmarkEventCount,
+    productionEventCount,
+    replayGapEventCount,
+    policyFilterCounts,
+    visibleRecentEvents,
+  } = recentDecisionState;
+  const decisionScanCards = useMemo(() => buildRoutingDecisionScanCards(recentDecisionState), [recentDecisionState]);
+  const routingEventEvidenceViews = useMemo(
+    () => events.map((event) => buildRoutingEventEvidenceView(event, routeDecisionNowMs, outcomeNotes[event.id] || event.outcomeNote)),
+    [events, outcomeNotes, routeDecisionNowMs],
+  );
+  const routingEventEvidenceById = useMemo(
+    () => new Map(routingEventEvidenceViews.map((eventEvidence) => [eventEvidence.event.id, eventEvidence])),
+    [routingEventEvidenceViews],
+  );
+  const visibleRecentEventEvidenceViews = useMemo(
+    () => visibleRecentEvents
+      .map((event) => routingEventEvidenceById.get(event.id))
+      .filter((eventEvidence): eventEvidence is RoutingEventEvidenceView => Boolean(eventEvidence)),
+    [routingEventEvidenceById, visibleRecentEvents],
+  );
+  const recentEventDisplayWindow = useMemo(() => buildRoutingEventDisplayWindow(visibleRecentEventEvidenceViews, recentEventDisplayLimit), [visibleRecentEventEvidenceViews, recentEventDisplayLimit]);
+  const displayedRecentEventViews = recentEventDisplayWindow.events;
+  const displayedRecentEvents = displayedRecentEventViews.map((eventEvidence) => eventEvidence.event);
+  const hiddenRecentEventCount = recentEventDisplayWindow.hiddenCount;
+  const showRecentEventSliceControls = hiddenRecentEventCount > 0 || recentEventDisplayWindow.canShowFewer;
+  const routingTrend = useMemo(() => computeRoutingTrend(events, 12), [events]);
+  const providerFailureRows = useMemo(() => buildProviderFailureRows(adherenceEvents, PROVIDER_FAILURE_ADHERENCE_ROW_LIMIT, events), [adherenceEvents, events]);
+  const providerFailureSummary = useMemo(() => summarizeProviderFailureAdherence(providerFailureRows), [providerFailureRows]);
+  const providerFailureHint = useMemo(() => deriveProviderFailureRoutingHint(providerFailureSummary), [providerFailureSummary]);
+  const providerFailureDistinctStrategyLabel = useMemo(() => formatProviderFailureDistinctStrategyLabel(providerFailureSummary), [providerFailureSummary]);
+  const providerFailureStrategyBreakdown = useMemo(() => buildProviderFailureStrategyBreakdown(providerFailureRows), [providerFailureRows]);
+  const maxProviderFailureStrategyFailureCount = useMemo(() => Math.max(0, ...providerFailureStrategyBreakdown.map((item) => item.failureCount)), [providerFailureStrategyBreakdown]);
+  const visibleProviderFailureRows = useMemo(() => providerFailureStrategyFilter
+    ? providerFailureRows.filter((row) => row.routingContext?.promptStrategyId === providerFailureStrategyFilter)
+    : providerFailureRows, [providerFailureRows, providerFailureStrategyFilter]);
+  const toolReliabilityTopRows = useMemo(() => buildToolReliabilityTopRows(summary?.toolReliability), [summary?.toolReliability]);
+  const modelRequestDurationRows = useMemo(() => buildModelRequestDurationRows(summary?.modelRequestDuration), [summary?.modelRequestDuration]);
+  const modelRequestDurationEvidence = useMemo(() => buildModelRequestDurationEvidence(modelRequestDurationRows), [modelRequestDurationRows]);
+  const routingActionCues = useMemo(() => buildRoutingLearningActionCues(summary?.bestByTaskType || []), [summary?.bestByTaskType]);
+  const visibleRoutingActionCues = useMemo(() => filterRoutingLearningActionCues(routingActionCues, routingActionCueFilter), [routingActionCues, routingActionCueFilter]);
+  const reviewExportState = useMemo(() => buildRoutingLearningReviewExportState({
+    events,
+    outcomeNotes,
+    latestEvent,
+    latestEventIsStale,
+    activeFilter: activeFilterLabel(showUnratedOnly, showUnexplainedOnly, showStaleOnly, showFallbackOnly, showBenchmarkOnly, showEvidenceGapsOnly, policyFilter),
+    visibleRecentEventCount: visibleRecentEvents.length,
+  }), [
+    events,
+    outcomeNotes,
+    latestEvent,
+    latestEventIsStale,
+    policyFilter,
+    showBenchmarkOnly,
+    showEvidenceGapsOnly,
+    showFallbackOnly,
+    showStaleOnly,
+    showUnexplainedOnly,
+    showUnratedOnly,
+    visibleRecentEvents.length,
+  ]);
+
+  useEffect(() => {
+    if (!providerFailureStrategyFilter) return;
+    if (!providerFailureRows.some((row) => row.routingContext?.promptStrategyId === providerFailureStrategyFilter)) {
+      setProviderFailureStrategyFilter(null);
+    }
+  }, [providerFailureRows, providerFailureStrategyFilter]);
+  const routingDecisionScanCardPressed = (filterTarget: RoutingDecisionScanFilterTarget | null): boolean => {
+    if (filterTarget === 'needs-outcome') return showUnratedOnly;
+    if (filterTarget === 'fallbacks') return showFallbackOnly;
+    if (filterTarget === 'evidence-gaps') return showEvidenceGapsOnly;
+    if (filterTarget === 'stale') return showStaleOnly;
+    return false;
+  };
+  const handleRoutingDecisionScanCard = (filterTarget: RoutingDecisionScanFilterTarget) => {
+    const shouldClear = routingDecisionScanCardPressed(filterTarget);
+    setShowUnratedOnly(!shouldClear && filterTarget === 'needs-outcome');
+    setShowFallbackOnly(!shouldClear && filterTarget === 'fallbacks');
+    setShowEvidenceGapsOnly(!shouldClear && filterTarget === 'evidence-gaps');
+    setShowStaleOnly(!shouldClear && filterTarget === 'stale');
+    setShowUnexplainedOnly(false);
+    setShowBenchmarkOnly(false);
+  };
 
   const handleApplyRecommendation = (roleId: string, modelId: string) => {
     if (!onApplyRoleRecommendation) return;
@@ -296,18 +579,39 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
     setTimeout(() => setSaving(null), 1200);
   };
 
+  const handleCopyProviderFailureRow = async (row: ReturnType<typeof buildProviderFailureRows>[number]) => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(row, null, 2));
+      setCopiedProviderFailureRowId(row.id);
+      setTimeout(() => setCopiedProviderFailureRowId(null), 1600);
+    } catch {
+      setSaving('Could not copy provider failure row');
+      setTimeout(() => setSaving(null), 1600);
+    }
+  };
+
+  const handleCopyProviderFailureStrategyEvidence = async (strategyId: string) => {
+    try {
+      const payload = buildProviderFailureStrategyEvidence(providerFailureRows, strategyId);
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setCopiedProviderFailureStrategyId(strategyId);
+      setTimeout(() => setCopiedProviderFailureStrategyId(null), 1600);
+    } catch {
+      setSaving('Could not copy provider failure strategy evidence');
+      setTimeout(() => setSaving(null), 1600);
+    }
+  };
+
   const handleExportEvidence = async () => {
     const generatedAt = new Date().toISOString();
-    const reviewedEvents = events.filter((event) => event.outcome !== null);
-    const unratedEvents = events.filter((event) => event.outcome === null);
     const byEvidenceSource = summary?.toolReliability?.byEvidenceSource || [];
     try {
       const fullExport = await api.getRouterLearningExport();
       const payload = {
         schemaVersion: 1,
         generatedAt,
-        activeFilter: activeFilterLabel(showUnexplainedOnly, showStaleOnly, showFallbackOnly, showBenchmarkOnly),
-        activeFilterMatchCount: visibleRecentEvents.length,
+        activeFilter: reviewExportState.activeFilter,
+        activeFilterMatchCount: reviewExportState.visibleRecentEventCount,
         fullExportDatasetCounts: {
           production: fullExport.productionEventCount ?? fullExport.events.filter((event) => event.datasetKind !== 'benchmark').length,
           benchmark: fullExport.benchmarkEventCount ?? fullExport.events.filter((event) => event.datasetKind === 'benchmark').length,
@@ -316,11 +620,13 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           enabled: routerState?.enabled ?? false,
           candidateEvidenceRefreshedAt: routerState?.candidateEvidenceRefreshedAt ?? null,
           candidateEvidenceRefreshCount: routerState?.candidateEvidenceRefreshCount ?? 0,
+          thresholdAdvice: routerState?.thresholdAdvice ?? null,
           configuredCandidateCount: routerState?.configuredCandidateCount ?? 0,
           activeCandidateCount: routerState?.candidateCount ?? 0,
         },
         fullExport,
         summary,
+        modelRequestDurationEvidence,
         thresholdSuggestion,
         recommendations: {
           available: accessibleRecommendations,
@@ -337,26 +643,39 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           tuningAction: item.tuningAction,
           latestTimestamp: item.latestTimestamp,
         })),
-        recentEvents: events.map((event) => ({
-          ...event,
-          outcomeNote: outcomeNotes[event.id] || event.outcomeNote,
-        })),
-        filteredRecentEvents: visibleRecentEvents.map((event) => ({
-          ...event,
-          outcomeNote: outcomeNotes[event.id] || event.outcomeNote,
-        })),
+        providerFailureAdherence: {
+          scope: 'rolling-tail',
+          scopeNote: PROVIDER_FAILURE_SCOPE_NOTE,
+          source: {
+            phase: PROVIDER_FAILURE_ADHERENCE_PHASE,
+            requestedEventLimit: PROVIDER_FAILURE_ADHERENCE_EVENT_LIMIT,
+            renderedRowLimit: PROVIDER_FAILURE_ADHERENCE_ROW_LIMIT,
+            loadedEventCount: adherenceEvents.length,
+            renderedRowCount: providerFailureRows.length,
+          },
+          summary: providerFailureSummary,
+          strategyBreakdown: providerFailureStrategyBreakdown,
+          rowScope: {
+            fullRows: 'rows',
+            filteredRows: providerFailureStrategyFilter ? 'filteredRows contains rows after appliedStrategyFilter' : 'filteredRows is null because no strategy filter is active',
+          },
+          appliedStrategyFilter: providerFailureStrategyFilter,
+          filteredRows: providerFailureStrategyFilter ? visibleProviderFailureRows : null,
+          hint: providerFailureHint,
+          rows: providerFailureRows,
+        },
+        recentEvents: routingEventEvidenceViews.map(routingEventEvidenceExportRow),
+        filteredRecentEvents: visibleRecentEventEvidenceViews.map(routingEventEvidenceExportRow),
         reviewState: {
-          reviewedEventCount: reviewedEvents.length,
-          unratedEventCount: unratedEvents.length,
+          reviewedEventCount: reviewExportState.reviewedEvents.length,
+          unratedEventCount: reviewExportState.unratedEvents.length,
           fallbackEventCount: fallbackEvents.length,
           ratedFallbackEventCount: ratedFallbackEvents.length,
-          notedEventCount: events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length > 0).length,
-          latestEvidenceTimestamp: latestEvent ? routeEventExactTime(latestEvent.timestamp) : null,
-          latestEvidenceAge: latestEvent ? routeEventTimeLabel(latestEvent.timestamp) : null,
+          notedEventCount: reviewExportState.notedEventCount,
+          latestEvidenceTimestamp: reviewExportState.latestEvidenceTimestamp,
+          latestEvidenceAge: reviewExportState.latestEvidenceAge,
           stale: latestEventIsStale,
-          freshnessWarning: latestEventIsStale
-            ? 'Refresh with newer route outcomes before trusting trends.'
-            : 'Recent routing evidence is loaded.',
+          freshnessWarning: reviewExportState.freshnessWarning,
         },
         notes: [
           'schemaVersion=1 records the Routing Learning evidence export format used by this bundle.',
@@ -367,6 +686,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           'Eval recommendations are manual until applied to role assignments, and proofReviewStatus records whether Model Lab proof was approved, unreviewed, or needs attention.',
           'Auto-Router candidates remain separate from role recommendations.',
           'Tool reliability is derived from saved run traces and should be treated as factual runtime evidence, not human outcome review.',
+          'scoreEvidenceKey is derived from task hashes, routing metadata, and redacted prompt snapshot metadata; it does not contain prompt text.',
         ],
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -388,14 +708,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
 
   const handleExportBrief = () => {
     const generatedAt = new Date().toISOString();
-    const reviewedEvents = events.filter((event) => event.outcome !== null);
-    const unratedEvents = events.filter((event) => event.outcome === null);
-    const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
-    const productionEventCount = events.length - benchmarkEventCount;
     const byEvidenceSource = toolReliability?.byEvidenceSource || [];
     const evidenceSourcesPresent = byEvidenceSource.length > 0
       ? byEvidenceSource.map((source) => source.source).join(', ')
       : 'none';
+    const providerFailureCauseCountsLabel = formatProviderFailureCauseCounts(providerFailureSummary.causeCounts);
     const lines = [
       '# OpenHarness Routing Learning Evidence Brief',
       '',
@@ -403,27 +720,67 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       '',
       '## Review State',
       '',
-      `- Active filter at export: ${activeFilterLabel(showUnexplainedOnly, showStaleOnly, showFallbackOnly, showBenchmarkOnly)}`,
-      `- Active filter matching events loaded: ${visibleRecentEvents.length}`,
+      `- Active filter at export: ${reviewExportState.activeFilter}`,
+      `- Active filter matching events loaded: ${reviewExportState.visibleRecentEventCount}`,
       `- Reviewed outcomes: ${summary?.totalEvents || 0}`,
       `- Observed success: ${pct(summary?.successRate || 0)}`,
-      `- Recent reviewed events loaded: ${reviewedEvents.length}`,
-      `- Recent unrated events loaded: ${unratedEvents.length}`,
+      `- Recent reviewed events loaded: ${reviewExportState.reviewedEvents.length}`,
+      `- Recent unrated events loaded: ${reviewExportState.unratedEvents.length}`,
       `- Recent fallback events loaded: ${fallbackEvents.length}`,
       `- Rated fallback events loaded: ${ratedFallbackEvents.length}`,
       `- Loaded production events: ${productionEventCount}`,
       `- Loaded benchmark events: ${benchmarkEventCount}`,
-      `- Recent events with reviewer notes: ${events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length > 0).length}`,
-      `- Latest route evidence: ${latestEvent ? `${routeEventExactTime(latestEvent.timestamp)} (${routeEventTimeLabel(latestEvent.timestamp)})` : 'none loaded'}`,
-      `- Freshness warning: ${latestEventIsStale ? 'refresh with newer route outcomes before trusting trends' : 'recent routing evidence is loaded'}`,
+      `- Score evidence gaps: ${replayGapEventCount} of ${events.length} loaded decisions`,
+      '- Score evidence keys: derived from task hashes, routing metadata, and redacted prompt snapshot metadata; no prompt text is stored in the key.',
+      `- Recent events with reviewer notes: ${reviewExportState.notedEventCount}`,
+      `- Latest route evidence: ${reviewExportState.latestEvidenceTimestamp ? `${reviewExportState.latestEvidenceTimestamp} (${reviewExportState.latestEvidenceAge})` : 'none loaded'}`,
+      `- Freshness warning: ${reviewExportState.freshnessWarningBrief}`,
       `- Confidence: ${sampleLabel(summary?.totalEvents || 0)}`,
       `- Evidence source coverage: ${evidenceSourcesPresent}`,
       `- Candidate evidence refreshed: ${routerState?.candidateEvidenceRefreshedAt ? `${routerState.candidateEvidenceRefreshedAt} (${routerState.candidateEvidenceRefreshCount ?? 0} refresh${(routerState.candidateEvidenceRefreshCount ?? 0) === 1 ? '' : 'es'})` : 'not available'}`,
+      `- Runtime threshold advice: ${routerState?.thresholdAdvice ? routerState.thresholdAdvice.reason : 'not available'}`,
+      `- Provider failure adherence scope: ${PROVIDER_FAILURE_SCOPE_NOTE}`,
+      ...(routerState?.thresholdAdvice ? [
+        `- Configured threshold: ${formatScoreDisplay(routerState.thresholdAdvice.configuredThreshold)}`,
+        `- Active threshold: ${formatScoreDisplay(routerState.thresholdAdvice.activeThreshold)}`,
+        `- Suggested threshold: ${formatScoreDisplay(routerState.thresholdAdvice.suggestedThreshold)}`,
+        `- Applied to runtime: ${routerState.thresholdAdvice.applied ? 'yes' : 'no'}`,
+        `- Threshold advice data points: ${routerState.thresholdAdvice.dataPoints}`,
+        ...(routerState.thresholdAdvice.slowTimingContext ? [
+          `- Slow timing threshold context: ${routerState.thresholdAdvice.slowTimingContext.note}`,
+        ] : []),
+      ] : []),
+      ...(providerFailureSummary.rowCount > 0 ? [
+        '',
+        '### Provider Failure Adherence',
+        '',
+        `- Hint: ${providerFailureHint}`,
+        `- Full rows: ${providerFailureSummary.rowCount} (complete rolling-tail rows; details omitted; see JSON export)`,
+        `- Terminal providers: ${providerFailureSummary.terminalProviderCount}`,
+        `- Attempt paths: ${providerFailureSummary.distinctAttemptPathCount}`,
+        `- Dominant cause: ${providerFailureSummary.dominantCause || 'none'}`,
+        `- Cause counts: ${providerFailureCauseCountsLabel}`,
+        `- Prompt hashes: ${providerFailureSummary.promptHashedFailureCount}`,
+        `- Distinct prompt hashes: ${providerFailureSummary.distinctPromptHashCount}`,
+        `- Strategy-linked rows: ${providerFailureSummary.routingContextLinkedCount}`,
+        `- Unmatched run ids: ${providerFailureSummary.routingContextUnmatchedRunCount}`,
+        `- Active strategy filter: ${providerFailureStrategyFilter || 'none'}`,
+        `- Filtered rows: ${visibleProviderFailureRows.length}${providerFailureStrategyFilter ? ` (${visibleProviderFailureRows.length} of ${providerFailureSummary.rowCount} shown)` : ' (all)'}`,
+        ...(providerFailureDistinctStrategyLabel ? [
+          `- Distinct prompt strategies: ${providerFailureSummary.distinctPromptStrategyCount}`,
+          '',
+          '#### Provider Failures By Prompt Strategy',
+          '',
+          ...providerFailureStrategyBreakdown.map((item) => `- ${item.strategyId}: ${item.failureCount} failure${item.failureCount === 1 ? '' : 's'}; ${item.selectedModelCount} selected model${item.selectedModelCount === 1 ? '' : 's'}; dominant cause ${item.dominantCause || 'none'}; models ${item.modelCounts.map((modelCount) => `${modelCount.model}: ${modelCount.count}`).join(', ')}`),
+        ] : []),
+      ] : [
+        '- Provider failure adherence: no rolling-tail provider-stream failures.',
+      ]),
       '',
       '## Threshold Advice',
       '',
       thresholdSuggestion
-        ? `- Suggested threshold: ${thresholdSuggestion.suggestedThreshold.toFixed(2)}`
+        ? `- Suggested threshold: ${formatScoreDisplay(thresholdSuggestion.suggestedThreshold)}`
         : '- Suggested threshold: unavailable',
       thresholdSuggestion
         ? `- Reason: ${thresholdSuggestion.reason}`
@@ -455,6 +812,14 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       summary?.toolErrorLedger
         ? `- Live tool-error ledger status: ${summary.toolErrorLedger.liveEvidenceStatus}; persisted ledger exists ${summary.toolErrorLedger.persistedLedgerExists}; persisted rows ${summary.toolErrorLedger.persistedEventCount}; log-derived rows ${summary.toolErrorLedger.logTraceEventCount}. ${toolErrorLedgerStatusHelp(summary.toolErrorLedger)}`
         : '- Live tool-error ledger status: unavailable.',
+      ...(modelRequestDurationRows.byModel.length || modelRequestDurationRows.byTaskType.length
+        ? [
+            '',
+            '## Model Request Duration',
+            '',
+            ...modelRequestDurationEvidenceLines(modelRequestDurationRows),
+          ]
+        : ['- Model request duration: no measured samples yet.']),
       ...(toolReliability?.recoveryPatterns?.length
         ? [
             '- Recurring recovery patterns:',
@@ -541,22 +906,22 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             }),
           ]
         : ['- Recent recovery paths: none captured yet.']),
-      ...(toolReliabilityRows(toolReliability?.byModel).length
-        ? toolReliabilityRows(toolReliability?.byModel).map(([model, stats]) => `- Model ${model}: ${stats.error}/${stats.total} tool errors, ${stats.firstCallErrors}/${stats.runs} first-call failures, ${stats.recoveredRuns}/${stats.affectedRuns} recovered error runs`)
+      ...(toolReliabilityTopRows.byModel.length
+        ? toolReliabilityTopRows.byModel.map(([model, stats]) => `- Model ${model}: ${stats.error}/${stats.total} tool errors, ${stats.firstCallErrors}/${stats.runs} first-call failures, ${stats.recoveredRuns}/${stats.affectedRuns} recovered error runs`)
         : ['- No per-model tool reliability rows yet.']),
-      ...(toolReliabilityRows(toolReliability?.byTool).length
-        ? toolReliabilityRows(toolReliability?.byTool).map(([tool, stats]) => `- Tool ${tool}: ${stats.error}/${stats.total} tool errors, ${pct(stats.errorRate)} error rate`)
+      ...(toolReliabilityTopRows.byTool.length
+        ? toolReliabilityTopRows.byTool.map(([tool, stats]) => `- Tool ${tool}: ${stats.error}/${stats.total} tool errors, ${pct(stats.errorRate)} error rate`)
         : ['- No per-tool reliability rows yet.']),
-      ...(toolReliabilityRows(toolReliability?.byModelTool).length
+      ...(toolReliabilityTopRows.byModelTool.length
         ? [
             '- Highest-risk model/tool pairs:',
-            ...toolReliabilityRows(toolReliability?.byModelTool).map(([pair, stats]) => `- ${pair}: ${stats.error}/${stats.total} tool errors, ${stats.firstCallErrors}/${stats.runs} first-call failures, ${stats.recoveredRuns}/${stats.affectedRuns} recovered error runs`),
+            ...toolReliabilityTopRows.byModelTool.map(([pair, stats]) => `- ${pair}: ${stats.error}/${stats.total} tool errors, ${stats.firstCallErrors}/${stats.runs} first-call failures, ${stats.recoveredRuns}/${stats.affectedRuns} recovered error runs`),
           ]
         : ['- No per-model/tool reliability rows yet.']),
-      ...(toolReliabilityRows(toolReliability?.byPromptStrategyVariant).length
+      ...(toolReliabilityTopRows.byPromptStrategyVariant.length
         ? [
             '- Prompt strategy tool reliability:',
-            ...toolReliabilityRows(toolReliability?.byPromptStrategyVariant).map(([strategy, stats]) => `- ${strategy}: ${stats.error}/${stats.total} tool errors, ${stats.firstCallErrors}/${stats.runs} first-call failures, ${stats.recoveredRuns}/${stats.affectedRuns} recovered error runs`),
+            ...toolReliabilityTopRows.byPromptStrategyVariant.map(([strategy, stats]) => `- ${strategy}: ${stats.error}/${stats.total} tool errors, ${stats.firstCallErrors}/${stats.runs} first-call failures, ${stats.recoveredRuns}/${stats.affectedRuns} recovered error runs`),
           ]
         : ['- No prompt-strategy tool reliability rows yet.']),
       ...(toolReliability?.toolHeavyAdvice?.length
@@ -572,6 +937,15 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       ...(summary?.bestByTaskType.length
         ? summary.bestByTaskType.map((row) => `- ${row.taskType}: ${row.model} at ${pct(row.rate)} from ${row.total} reviewed`)
         : ['- No reviewed task-type winners yet.']),
+      ...(routingActionCues.length
+        ? [
+            '',
+            '### Routing Action Cues',
+            '',
+            '- Advisory only; these do not change live routing.',
+            ...routingActionCues.map((cue) => `- ${cue.taskType}: ${cue.label}; ${cue.detail}`),
+          ]
+        : []),
       '',
       '## Prompt Strategy Variants',
       '',
@@ -602,14 +976,19 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       '',
       '## Recent Routing Decisions',
       '',
-      ...(visibleRecentEvents.length
-        ? visibleRecentEvents.slice(0, 12).map((event) => {
-            const note = (outcomeNotes[event.id] || event.outcomeNote || '').trim();
+      ...(hiddenRecentEventCount > 0
+        ? [`Showing ${displayedRecentEvents.length} of ${visibleRecentEvents.length} matching decisions; ${hiddenRecentEventCount} more match the current filters.`]
+        : []),
+      ...(visibleRecentEventEvidenceViews.length
+        ? displayedRecentEventViews.map((eventEvidence) => {
+            const event = eventEvidence.event;
+            const note = (eventEvidence.outcomeNote || '').trim();
             const strategy = event.promptStrategyVariantId
               ? `${event.promptStrategyId || 'unknown'}:${event.promptStrategyVariantId}`
               : event.promptStrategyId || 'unknown strategy';
             const promptCue = routeEventPromptBestPractice(event, promptStrategies);
-            return `- ${routeEventExactTime(event.timestamp)} (${routeEventTimeLabel(event.timestamp)}) — ${event.selectedModel} (${event.taskType || 'unknown'} / ${event.role || 'unknown'} / ${event.complexity || 'unknown'} / ${strategy}): ${routeMarginSummary(event)} Outcome: ${routingOutcomeLabel(event.outcome)}.${promptCue}${note ? ` Note: ${note}` : ''}`;
+            const signalSummary = formatRouteLearningSignalSummary(event.routeSignal);
+            return `- ${routeEventExactTime(event.timestamp)} (${routeEventTimeLabel(event.timestamp)}) — ${event.selectedModel} (${event.taskType || 'unknown'} / ${event.role || 'unknown'} / ${event.complexity || 'unknown'} / ${strategy}): ${eventEvidence.marginSummary} Trace: ${eventEvidence.traceSummary}.${signalSummary ? ` Signal: ${signalSummary}.` : ''} Outcome: ${routingOutcomeLabel(event.outcome)}.${promptCue}${note ? ` Note: ${note}` : ''}`;
           })
         : ['- No recent routing decisions matched the active filter.']),
       '',
@@ -671,8 +1050,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       const promptBestPracticePreview = preview.promptBestPracticePreview
         ? `\nPrompt best practices: ${preview.promptBestPracticePreview.strategyCount} strategies, ${preview.promptBestPracticePreview.bestPracticeNoteCount} notes, sources ${preview.promptBestPracticePreview.sourceRefs.join(', ') || 'none'}\nNote: ${preview.promptBestPracticePreview.note}`
         : '';
+      const providerFailureAdherencePreview = preview.providerFailureAdherencePreview
+        ? `\nProvider failure adherence: ${preview.providerFailureAdherencePreview.rowCount} full rows${preview.providerFailureAdherencePreview.filteredRowCount == null ? '' : `, ${preview.providerFailureAdherencePreview.filteredRowCount} filtered rows`}; ${preview.providerFailureAdherencePreview.strategyCount} strategies; scope ${preview.providerFailureAdherencePreview.scope || 'unknown'}; filter ${preview.providerFailureAdherencePreview.appliedStrategyFilter || 'none'}; full-row sample ${preview.providerFailureAdherencePreview.sampleRowCount}${preview.providerFailureAdherencePreview.sampleRowsCapped ? ` of ${preview.providerFailureAdherencePreview.rowCount} shown (cap ${preview.providerFailureAdherencePreview.sampleRowLimit})` : ' rows'}${preview.providerFailureAdherencePreview.appliedStrategyFilter ? '; sample is not filtered' : ''}\nNote: ${preview.providerFailureAdherencePreview.note}`
+        : '';
       const approved = window.confirm(
-        `Import routing evidence from ${file.name}?\n\nSource: ${preview.importSource || 'unknown'}\nSchema: ${preview.schemaVersion ?? 'unknown'} (${schemaSupportLabel})\nDataset: ${preview.datasetKind || datasetKind}${preview.warnings?.length ? `\nWarning: ${preview.warnings.join(' ')}` : ''}${toolReliabilityPreview}${promptBestPracticePreview}\nNew events: ${preview.imported}\nAlready present: ${preview.skippedExisting}\nRejected: ${preview.rejected}`,
+        `Import routing evidence from ${file.name}?\n\nSource: ${preview.importSource || 'unknown'}\nSchema: ${preview.schemaVersion ?? 'unknown'} (${schemaSupportLabel})\nDataset: ${preview.datasetKind || datasetKind}${preview.warnings?.length ? `\nWarning: ${preview.warnings.join(' ')}` : ''}${toolReliabilityPreview}${promptBestPracticePreview}${providerFailureAdherencePreview}\nNew events: ${preview.imported}\nAlready present: ${preview.skippedExisting}\nRejected: ${preview.rejected}`,
       );
       if (!approved) {
         setSaving('Routing import cancelled');
@@ -687,7 +1069,10 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
       const importedPromptSummary = result.promptBestPracticePreview
         ? ` Prompt best-practice metadata was previewed as context-only evidence and was not merged into local prompt strategy profiles.`
         : '';
-      setSaving(`Imported ${result.imported}; skipped ${result.skippedExisting}; rejected ${result.rejected}.${importedToolSummary}${importedPromptSummary}`);
+      const importedProviderFailureSummary = result.providerFailureAdherencePreview
+        ? ` Provider failure adherence was previewed as context-only evidence (${result.providerFailureAdherencePreview.rowCount} full rows) and was not merged into local routing state.`
+        : '';
+      setSaving(`Imported ${result.imported}; skipped ${result.skippedExisting}; rejected ${result.rejected}.${importedToolSummary}${importedPromptSummary}${importedProviderFailureSummary}`);
       setTimeout(() => setSaving(null), 1800);
     } catch {
       setSaving('Could not import routing learning JSON');
@@ -707,7 +1092,7 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   }
 
   const totalEvents = summary?.totalEvents || 0;
-  const successRate = summary?.successRate || 0;
+  const successRate = summary?.successRate ?? 0;
   const byTaskType = summary?.byTaskType || {};
   const byRole = summary?.byRole || {};
   const byComplexity = summary?.byComplexity || {};
@@ -719,32 +1104,15 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
   const toolRecoveryRate = toolReliability && toolReliability.runsWithToolErrors > 0
     ? toolReliability.recoveredRunsWithToolErrors / toolReliability.runsWithToolErrors
     : 0;
-  const latestEvent = events[0] || null;
-  const latestScores = sortedCandidateScores(latestEvent?.candidateScores, 3);
-  const fallbackEvents = events.filter((event) => event.wasFallback);
-  const ratedFallbackEvents = fallbackEvents.filter((event) => event.outcome !== null);
   const bestLearningSignal = summary?.bestByTaskType[0] || null;
   const bestPromptVariantSignal = summary?.bestPromptStrategyVariants?.[0] || null;
-  const notedEventCount = events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length > 0).length;
-  const latestEventAge = latestEvent ? routeEventTimeLabel(latestEvent.timestamp) : 'No route yet';
-  const latestEventIsStale = !latestEvent || routeEventIsStale(latestEvent.timestamp);
-  const unexplainedEventCount = events.filter((event) => (outcomeNotes[event.id] || event.outcomeNote || '').trim().length === 0).length;
-  const staleEventCount = events.filter((event) => routeEventIsStale(event.timestamp)).length;
-  const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
-  const productionEventCount = events.length - benchmarkEventCount;
   const recommendationProofCounts = countRecommendationProofStates(recommendations);
   const untrustedRecommendationCount = recommendationProofCounts.unreviewed + recommendationProofCounts['needs-attention'];
   const candidateEvidenceAge = routerState?.candidateEvidenceRefreshedAt
     ? routeEventTimeLabel(routerState.candidateEvidenceRefreshedAt)
     : 'Not available';
-  const visibleRecentEvents = events.filter((event) => {
-    const matchesUnexplained = !showUnexplainedOnly || (outcomeNotes[event.id] || event.outcomeNote || '').trim().length === 0;
-    const matchesStale = !showStaleOnly || routeEventIsStale(event.timestamp);
-    const matchesFallback = !showFallbackOnly || event.wasFallback;
-    const matchesBenchmark = !showBenchmarkOnly || event.datasetKind === 'benchmark';
-    return matchesUnexplained && matchesStale && matchesFallback && matchesBenchmark;
-  });
-
+  const runtimeThresholdAdvice = routerState?.thresholdAdvice ?? null;
+  const thresholdSignalReason = runtimeThresholdAdvice?.reason || thresholdSuggestion?.reason || '';
   return (
     <div className="routing-learning-pane">
       <div className="routing-learning-header">
@@ -846,62 +1214,91 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
         </div>
       </section>
 
-      <section className="routing-metrics" aria-label={`Routing Learning trust metrics: ${totalEvents} reviewed outcomes, ${pct(successRate)} observed success, ${notedEventCount} notes attached, latest evidence ${latestEventAge}, ${recommendationProofCounts.approved} approved eval proof recommendation${recommendationProofCounts.approved === 1 ? '' : 's'}`}>
-        <div className="routing-metric-card">
-          <span>Reviewed outcomes</span>
-          <strong>{totalEvents}</strong>
-          <small>{sampleLabel(totalEvents)}</small>
-        </div>
-        <div className="routing-metric-card">
-          <span>Observed success</span>
-          <strong>{pct(successRate)}</strong>
-          <small>Based on marked outcomes only</small>
-        </div>
-        <div className={`routing-metric-card ${sampleTone(totalEvents)}`}>
-          <span>Confidence</span>
-          <strong>{totalEvents < 20 ? 'Learning' : 'Stable'}</strong>
-          <small>{totalEvents < 20 ? 'Mark more recent events before trusting winners' : 'Enough samples for trend checks'}</small>
-        </div>
-        <div className={`routing-metric-card ${notedEventCount === 0 ? 'low' : 'ok'}`}>
-          <span>Notes attached</span>
-          <strong>{notedEventCount}</strong>
-          <small>{notedEventCount === 0 ? 'Add notes to explain wins, misses, and fallbacks' : 'Reviewer context included in exports'}</small>
-        </div>
-        <div className={`routing-metric-card ${latestEventIsStale ? 'low' : 'ok'}`}>
-          <span>Data age</span>
-          <strong>{latestEventAge}</strong>
-          <small>{latestEventIsStale ? 'Refresh with newer route outcomes before trusting trends' : 'Recent routing evidence is loaded'}</small>
-        </div>
-        <div className={`routing-metric-card ${benchmarkEventCount > 0 ? 'low' : 'ok'}`}>
-          <span>Dataset mix</span>
-          <strong>{benchmarkEventCount}</strong>
-          <small>{benchmarkEventCount > 0 ? `${productionEventCount} production in loaded window` : `${productionEventCount} production, no benchmark imports loaded`}</small>
-        </div>
-        <div className={`routing-metric-card ${untrustedRecommendationCount > 0 ? 'low' : 'ok'}`}>
-          <span>Eval proof review</span>
-          <strong>{recommendationProofCounts.approved}</strong>
-          <small>{untrustedRecommendationCount > 0 ? `${untrustedRecommendationCount} unapproved recommendation${untrustedRecommendationCount === 1 ? '' : 's'}` : 'All loaded recommendations approved'}</small>
-        </div>
-        <div className={`routing-metric-card ${routerState?.candidateEvidenceRefreshedAt ? 'ok' : 'low'}`}>
-          <span>Candidate evidence</span>
-          <strong>{routerState?.candidateEvidenceRefreshCount ?? 0}</strong>
-          <small>{routerState?.candidateEvidenceRefreshedAt ? `Refreshed ${candidateEvidenceAge}` : 'No router refresh metadata loaded'}</small>
-        </div>
-        <div className={`routing-metric-card ${(toolReliability?.errorToolCalls || 0) > 0 ? 'low' : 'ok'}`}>
-          <span>Tool-call errors</span>
-          <strong>{toolReliability?.errorToolCalls || 0}</strong>
-          <small>{toolReliability?.totalToolCalls ? `${pct((toolReliability.errorToolCalls || 0) / toolReliability.totalToolCalls)} of ${toolReliability.totalToolCalls} traced calls` : 'No traced tool calls yet'}</small>
-        </div>
-        <div className={`routing-metric-card ${(toolReliability?.runsWithToolErrors || 0) > 0 ? 'low' : 'ok'}`}>
-          <span>Tool recovery</span>
-          <strong>{toolReliability?.recoveredRunsWithToolErrors || 0}</strong>
-          <small>{toolReliability?.runsWithToolErrors ? `${pct(toolRecoveryRate)} of ${toolReliability.runsWithToolErrors} error runs reached final answer` : 'No tool-error recovery data yet'}</small>
-        </div>
-        <div className={`routing-metric-card ${toolErrorLedger?.liveEvidenceStatus === 'available' ? 'ok' : 'low'}`}>
-          <span>Live tool-error ledger</span>
-          <strong>{toolErrorLedgerStatusLabel(toolErrorLedger?.liveEvidenceStatus)}</strong>
-          <small>{toolErrorLedgerStatusHelp(toolErrorLedger)}</small>
-        </div>
+      <section className="routing-metrics" role="list" aria-label={`Routing Learning trust metrics: ${totalEvents} reviewed outcomes, ${pct(successRate)} observed success, ${notedEventCount} notes attached, latest evidence ${latestEventAge}, ${recommendationProofCounts.approved} approved eval proof recommendation${recommendationProofCounts.approved === 1 ? '' : 's'}`}>
+        <RoutingMetricCard
+          label="Reviewed outcomes"
+          value={totalEvents}
+          detail={sampleLabel(totalEvents)}
+          ariaLabel={`Reviewed outcomes: ${totalEvents}. ${sampleLabel(totalEvents)}`}
+        />
+        <RoutingMetricCard
+          label="Observed success"
+          value={pct(successRate)}
+          detail="Based on marked outcomes only"
+          ariaLabel={`Observed success: ${pct(successRate)}. Based on marked outcomes only`}
+        />
+        <RoutingMetricCard
+          label="Confidence"
+          value={totalEvents < 20 ? 'Learning' : 'Stable'}
+          detail={totalEvents < 20 ? 'Mark more recent events before trusting winners' : 'Enough samples for trend checks'}
+          tone={sampleTone(totalEvents)}
+          ariaLabel={`Confidence: ${totalEvents < 20 ? 'Learning' : 'Stable'}. ${totalEvents < 20 ? 'Mark more recent events before trusting winners' : 'Enough samples for trend checks'}`}
+        />
+        <RoutingMetricCard
+          label="Notes attached"
+          value={notedEventCount}
+          detail={notedEventCount === 0 ? 'Add notes to explain wins, misses, and fallbacks' : 'Reviewer context included in exports'}
+          tone={notedEventCount === 0 ? 'low' : 'ok'}
+          ariaLabel={`Notes attached: ${notedEventCount}. ${notedEventCount === 0 ? 'Add notes to explain wins, misses, and fallbacks' : 'Reviewer context included in exports'}`}
+        />
+        <RoutingMetricCard
+          label="Data age"
+          value={latestEventAge}
+          detail={latestEventIsStale ? 'Refresh with newer route outcomes before trusting trends' : 'Recent routing evidence is loaded'}
+          tone={latestEventIsStale ? 'low' : 'ok'}
+          ariaLabel={`Data age: ${latestEventAge}. ${latestEventIsStale ? 'Refresh with newer route outcomes before trusting trends' : 'Recent routing evidence is loaded'}`}
+        />
+        <RoutingMetricCard
+          label="Dataset mix"
+          value={benchmarkEventCount}
+          detail={benchmarkEventCount > 0 ? `${productionEventCount} production in loaded window` : `${productionEventCount} production, no benchmark imports loaded`}
+          tone={benchmarkEventCount > 0 ? 'low' : 'ok'}
+          ariaLabel={`Dataset mix: ${benchmarkEventCount}. ${benchmarkEventCount > 0 ? `${productionEventCount} production in loaded window` : `${productionEventCount} production, no benchmark imports loaded`}`}
+        />
+        <RoutingMetricCard
+          label="Eval proof review"
+          value={recommendationProofCounts.approved}
+          detail={untrustedRecommendationCount > 0 ? `${untrustedRecommendationCount} unapproved recommendation${untrustedRecommendationCount === 1 ? '' : 's'}` : 'All loaded recommendations approved'}
+          tone={untrustedRecommendationCount > 0 ? 'low' : 'ok'}
+          ariaLabel={`Eval proof review: ${recommendationProofCounts.approved}. ${untrustedRecommendationCount > 0 ? `${untrustedRecommendationCount} unapproved recommendation${untrustedRecommendationCount === 1 ? '' : 's'}` : 'All loaded recommendations approved'}`}
+        />
+        <RoutingMetricCard
+          label="Candidate evidence"
+          value={routerState?.candidateEvidenceRefreshCount ?? 0}
+          detail={routerState?.candidateEvidenceRefreshedAt ? `Refreshed ${candidateEvidenceAge}` : 'No router refresh metadata loaded'}
+          tone={routerState?.candidateEvidenceRefreshedAt ? 'ok' : 'low'}
+          ariaLabel={`Candidate evidence: ${routerState?.candidateEvidenceRefreshCount ?? 0}. ${routerState?.candidateEvidenceRefreshedAt ? `Refreshed ${candidateEvidenceAge}` : 'No router refresh metadata loaded'}`}
+        />
+        <RoutingMetricCard
+          label="Runtime threshold"
+          value={runtimeThresholdAdvice ? formatScoreDisplay(runtimeThresholdAdvice.activeThreshold) : '--'}
+          detail={runtimeThresholdAdvice
+            ? `${runtimeThresholdAdvice.applied ? 'Applied learned advice' : 'Advisory only'} · ${runtimeThresholdAdvice.dataPoints} rated outcome${runtimeThresholdAdvice.dataPoints === 1 ? '' : 's'}${runtimeThresholdAdvice.slowTimingContext ? ` · ${runtimeThresholdAdvice.slowTimingContext.slowRowCount} slow timing row${runtimeThresholdAdvice.slowTimingContext.slowRowCount === 1 ? '' : 's'} advisory` : ''}`
+            : 'No runtime threshold advice loaded'}
+          tone={runtimeThresholdAdvice?.applied ? 'ok' : runtimeThresholdAdvice ? 'low' : ''}
+          ariaLabel={`Runtime threshold: ${runtimeThresholdAdvice ? formatScoreDisplay(runtimeThresholdAdvice.activeThreshold) : '--'}. ${runtimeThresholdAdvice ? `${runtimeThresholdAdvice.applied ? 'Applied learned advice' : 'Advisory only'} · ${runtimeThresholdAdvice.dataPoints} rated outcome${runtimeThresholdAdvice.dataPoints === 1 ? '' : 's'}${runtimeThresholdAdvice.slowTimingContext ? ` · ${runtimeThresholdAdvice.slowTimingContext.note}` : ''}` : 'No runtime threshold advice loaded'}`}
+        />
+        <RoutingMetricCard
+          label="Tool-call errors"
+          value={toolReliability?.errorToolCalls || 0}
+          detail={toolReliability?.totalToolCalls ? `${pct((toolReliability.errorToolCalls || 0) / toolReliability.totalToolCalls)} of ${toolReliability.totalToolCalls} traced calls` : 'No traced tool calls yet'}
+          tone={(toolReliability?.errorToolCalls || 0) > 0 ? 'low' : 'ok'}
+          ariaLabel={`Tool-call errors: ${toolReliability?.errorToolCalls || 0}. ${toolReliability?.totalToolCalls ? `${pct((toolReliability.errorToolCalls || 0) / toolReliability.totalToolCalls)} of ${toolReliability.totalToolCalls} traced calls` : 'No traced tool calls yet'}`}
+        />
+        <RoutingMetricCard
+          label="Tool recovery"
+          value={toolReliability?.recoveredRunsWithToolErrors || 0}
+          detail={toolReliability?.runsWithToolErrors ? `${pct(toolRecoveryRate)} of ${toolReliability.runsWithToolErrors} error runs reached final answer` : 'No tool-error recovery data yet'}
+          tone={(toolReliability?.runsWithToolErrors || 0) > 0 ? 'low' : 'ok'}
+          ariaLabel={`Tool recovery: ${toolReliability?.recoveredRunsWithToolErrors || 0}. ${toolReliability?.runsWithToolErrors ? `${pct(toolRecoveryRate)} of ${toolReliability.runsWithToolErrors} error runs reached final answer` : 'No tool-error recovery data yet'}`}
+        />
+        <RoutingMetricCard
+          label="Live tool-error ledger"
+          value={toolErrorLedgerStatusLabel(toolErrorLedger?.liveEvidenceStatus)}
+          detail={toolErrorLedgerStatusHelp(toolErrorLedger)}
+          tone={toolErrorLedger?.liveEvidenceStatus === 'available' ? 'ok' : 'low'}
+          ariaLabel={`Live tool-error ledger: ${toolErrorLedgerStatusLabel(toolErrorLedger?.liveEvidenceStatus)}. ${toolErrorLedgerStatusHelp(toolErrorLedger)}`}
+        />
       </section>
 
       <section className="routing-section">
@@ -915,10 +1312,10 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           <div className="routing-debug-card">
             <span>Latest candidate scores</span>
             <strong>{latestEvent ? latestEvent.selectedModel : 'No route yet'}</strong>
-            {latestScores.length > 0 ? (
+            {latestEvent && latestScores.length > 0 ? (
               <div className="routing-score-chips" role="list" aria-label={`Latest candidate scores for ${latestEvent.selectedModel}`}>
                 {latestScores.map(([model, score]) => (
-                  <span key={model} role="listitem" title={`${model}: ${score.toFixed(2)}`}>{model} {score.toFixed(2)}</span>
+                  <span key={model} role="listitem" title={`${model}: ${formatScoreDisplay(score)}`}>{model} {formatScoreDisplay(score)}</span>
                 ))}
               </div>
             ) : (
@@ -956,10 +1353,196 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             </small>
           </div>
         </div>
-        {thresholdSuggestion && (
+        {(runtimeThresholdAdvice || thresholdSuggestion) && (
           <div className="routing-debug-note">
-            Threshold signal: {thresholdSuggestion.reason}. This is advisory and does not change routing until a config action applies it.
+            {runtimeThresholdAdvice?.applied
+              ? `Runtime threshold advice applied: ${runtimeThresholdAdvice.reason}`
+              : `Runtime threshold advice is advisory: ${thresholdSignalReason}`}
           </div>
+        )}
+      </section>
+
+      <section className="routing-section">
+        <div className="routing-section-header">
+          <div>
+            <h3>Provider Failure Adherence</h3>
+            <p>Router decisions stay separate from execution failures; this shows the provider attempt path when fallback actually ran.</p>
+            <p>{PROVIDER_FAILURE_SCOPE_NOTE}</p>
+            <div className="provider-failure-summary" aria-label={`Provider failure adherence summary: ${providerFailureSummary.rowCount} rows, ${providerFailureSummary.terminalProviderCount} terminal providers, ${providerFailureSummary.distinctAttemptPathCount} attempt paths, ${providerFailureSummary.distinctErrorCount} error messages, ${providerFailureSummary.promptHashedFailureCount} prompt hashes, ${providerFailureSummary.distinctPromptHashCount} distinct prompt hashes, ${providerFailureSummary.routingContextLinkedCount} strategy-linked rows, ${providerFailureSummary.routingContextUnmatchedRunCount} unmatched run ids${providerFailureDistinctStrategyLabel ? `, ${providerFailureDistinctStrategyLabel}` : ''}, dominant cause ${providerFailureSummary.dominantCause || 'none'}, routing hint ${providerFailureHint}`}>
+              <span><strong>{providerFailureSummary.rowCount}</strong> rows</span>
+              <span><strong>{providerFailureSummary.terminalProviderCount}</strong> terminal providers</span>
+              <span><strong>{providerFailureSummary.distinctAttemptPathCount}</strong> paths</span>
+              <span><strong>{providerFailureSummary.distinctErrorCount}</strong> errors</span>
+              <span><strong>{providerFailureSummary.promptHashedFailureCount}</strong> prompt hashes</span>
+              <span><strong>{providerFailureSummary.distinctPromptHashCount}</strong> distinct prompts</span>
+              <span><strong>{providerFailureSummary.routingContextLinkedCount}</strong> strategy-linked</span>
+              <span><strong>{providerFailureSummary.routingContextUnmatchedRunCount}</strong> unmatched runs</span>
+              {providerFailureDistinctStrategyLabel && (
+                <span><strong>{providerFailureSummary.distinctPromptStrategyCount}</strong> prompt strategies</span>
+              )}
+              <span><strong>{providerFailureSummary.dominantCause || 'none'}</strong> Dominant cause</span>
+            </div>
+            <div className="provider-failure-hint" role="note">{providerFailureHint}</div>
+            {providerFailureDistinctStrategyLabel && providerFailureStrategyBreakdown.length > 1 && (
+              <div className="provider-failure-strategy-breakdown" role="list" aria-label="Provider failures by prompt strategy">
+                {providerFailureStrategyBreakdown.map((item) => (
+                  <div
+                    key={item.strategyId}
+                    role="listitem"
+                    aria-label={`${item.strategyId}: ${item.failureCount} provider failure${item.failureCount === 1 ? '' : 's'}, ${item.selectedModelCount} selected model${item.selectedModelCount === 1 ? '' : 's'}, dominant cause ${item.dominantCause || 'none'}`}
+                  >
+                    <strong title={item.strategyId}>{item.strategyId}</strong>
+                    <span className="provider-failure-strategy-failure">
+                      <span className="provider-failure-strategy-bar" aria-hidden="true">
+                        <span style={{ width: formatProviderFailureStrategyFailureShareWidth(item.failureCount, maxProviderFailureStrategyFailureCount) }} />
+                      </span>
+                      <span>{item.failureCount} failure{item.failureCount === 1 ? '' : 's'}</span>
+                    </span>
+                    <span>{item.selectedModelCount} model{item.selectedModelCount === 1 ? '' : 's'}</span>
+                    <span>cause {item.dominantCause || 'none'}</span>
+                    <button
+                      type="button"
+                      className={`settings-mini-button provider-failure-strategy-filter${providerFailureStrategyFilter === item.strategyId ? ' active' : ''}`}
+                      aria-label={`Filter provider failures to ${item.strategyId}`}
+                      aria-pressed={providerFailureStrategyFilter === item.strategyId}
+                      title={providerFailureStrategyFilter === item.strategyId ? 'Clear this prompt strategy filter' : 'Show only provider failures for this prompt strategy'}
+                      onClick={() => setProviderFailureStrategyFilter((value) => value === item.strategyId ? null : item.strategyId)}
+                    >
+                      {providerFailureStrategyFilter === item.strategyId ? 'Focused' : 'Focus'}
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-mini-button provider-failure-strategy-copy"
+                      aria-label={`${copiedProviderFailureStrategyId === item.strategyId ? 'Copied' : 'Copy evidence'} for ${item.strategyId}`}
+                      title="Copy this prompt strategy failure evidence as JSON"
+                      onClick={() => handleCopyProviderFailureStrategyEvidence(item.strategyId)}
+                    >
+                      {copiedProviderFailureStrategyId === item.strategyId ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+                      {copiedProviderFailureStrategyId === item.strategyId ? 'Copied' : 'Copy evidence'}
+                    </button>
+                    <small>{item.modelCounts.map((modelCount) => `${modelCount.model}: ${modelCount.count}`).join(', ')}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="settings-mini-button"
+            aria-label="Refresh provider failure adherence"
+            onClick={() => {
+              api.getRouterAdherenceEvents(PROVIDER_FAILURE_ADHERENCE_EVENT_LIMIT, PROVIDER_FAILURE_ADHERENCE_PHASE)
+                .then((items) => {
+                  setAdherenceEvents(items);
+                  setAdherenceLoadError(null);
+                })
+                .catch(() => setAdherenceLoadError('Could not load provider failure adherence'));
+            }}
+          >
+            <RefreshCw size={13} aria-hidden="true" />
+            Refresh
+          </button>
+        </div>
+        {adherenceLoadError ? (
+          <div className="routing-empty">{adherenceLoadError}</div>
+        ) : providerFailureRows.length === 0 ? (
+          <div className="routing-empty">No provider failure adherence events loaded yet.</div>
+        ) : (
+          <>
+            {providerFailureStrategyFilter && (
+              <div className="provider-failure-filter-note" role="status">
+                <span>Showing {visibleProviderFailureRows.length} provider failure{visibleProviderFailureRows.length === 1 ? '' : 's'} for {providerFailureStrategyFilter}.</span>
+                <button
+                  type="button"
+                  className="settings-mini-button"
+                  aria-label="Clear provider failure strategy filter"
+                  onClick={() => setProviderFailureStrategyFilter(null)}
+                >
+                  Clear filter
+                </button>
+              </div>
+            )}
+          <div className="routing-debug-grid" role="list" aria-label="Provider failure adherence events">
+            {visibleProviderFailureRows.map((row) => (
+              <div key={row.id} className="routing-debug-card" role="listitem" title={row.error}>
+                <span>{row.createdAt}</span>
+                <strong>{row.title}</strong>
+                <small>{row.detail}</small>
+                <div className="routing-score-chips" role="list" aria-label={`Provider attempt path for ${row.title}`}>
+                  <span role="listitem">{row.attemptPath}</span>
+                  <span role="listitem">{row.terminalProvider}</span>
+                  <span role="listitem">{row.terminalTimeout}</span>
+                  <span role="listitem">{row.cause}</span>
+                  {row.promptHash && (
+                    <span role="listitem" title={row.promptHash}>prompt {row.promptHash.slice(0, 8)}</span>
+                  )}
+                  <span role="listitem" title={row.routingContext ? row.routingContext.promptStrategySelectionReason : 'No loaded routing decision matched this provider failure run id'}>
+                    {row.routingContext?.promptStrategyId || 'strategy unknown'}
+                  </span>
+                </div>
+                <details className="provider-failure-details">
+                  <summary aria-label={`Toggle provider failure details for ${row.title}`}>
+                    <ChevronDown size={13} aria-hidden="true" />
+                    Details
+                  </summary>
+                  <button
+                    type="button"
+                    className="settings-mini-button provider-failure-copy"
+                    aria-label={`${copiedProviderFailureRowId === row.id ? 'Copied' : 'Copy'} provider failure JSON for ${row.title}`}
+                    title="Copy this provider failure row as JSON"
+                    onClick={() => handleCopyProviderFailureRow(row)}
+                  >
+                    {copiedProviderFailureRowId === row.id ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+                    {copiedProviderFailureRowId === row.id ? 'Copied' : 'Copy JSON'}
+                  </button>
+                  <dl>
+                    <div>
+                      <dt>Error</dt>
+                      <dd>{row.error}</dd>
+                    </div>
+                    <div>
+                      <dt>Attempt path</dt>
+                      <dd>{row.attemptPath}</dd>
+                    </div>
+                    <div>
+                      <dt>Terminal provider</dt>
+                      <dd>{row.terminalProvider}</dd>
+                    </div>
+                    <div>
+                      <dt>Terminal timeout</dt>
+                      <dd>{row.terminalTimeout}</dd>
+                    </div>
+                    <div>
+                      <dt>Routing strategy</dt>
+                      <dd>
+                        {row.routingContext ? (
+                          <>
+                            {row.routingContext.promptStrategyId || 'unknown strategy'}
+                            {row.routingContext.promptStrategyVariantId ? ` / ${row.routingContext.promptStrategyVariantId}` : ''}
+                          </>
+                        ) : 'unknown - no loaded routing decision matched this run id'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Routing model</dt>
+                      <dd>{row.routingContext ? row.routingContext.selectedModel : UNKNOWN_ROUTING_CONTEXT_VALUE}</dd>
+                    </div>
+                    <div>
+                      <dt>Routing role/task</dt>
+                      <dd>{row.routingContext ? `${row.routingContext.role} / ${row.routingContext.taskType}` : UNKNOWN_ROUTING_CONTEXT_VALUE}</dd>
+                    </div>
+                    <div>
+                      <dt>Selection reason</dt>
+                      <dd title={row.routingContext?.promptStrategySelectionReason || undefined}>
+                        {row.routingContext ? row.routingContext.promptStrategySelectionReason || 'unknown' : UNKNOWN_ROUTING_CONTEXT_VALUE}
+                      </dd>
+                    </div>
+                  </dl>
+                </details>
+              </div>
+            ))}
+          </div>
+          </>
         )}
       </section>
 
@@ -1070,7 +1653,66 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             ))}
           </div>
         )}
+
+        {routingActionCues.length > 0 && (
+          <div className="routing-action-cues" aria-label="Routing Action Cues">
+            <div className="routing-action-cues-header">
+              <strong>Routing Action Cues</strong>
+              <span>Use these as advisory candidate-card context; they do not change live routing.</span>
+            </div>
+            <div className="routing-action-cue-filters" role="group" aria-label="Filter Routing Action Cues by confidence">
+              {ROUTING_ACTION_CUE_CONFIDENCE_FILTERS.map((filter) => {
+                const count = filterRoutingLearningActionCues(routingActionCues, filter).length;
+                const label = routingLearningActionCueFilterLabel(filter);
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={`routing-action-cue-filter ${routingActionCueFilter === filter ? 'active' : ''}`}
+                    aria-pressed={routingActionCueFilter === filter}
+                    aria-label={`${routingActionCueFilter === filter ? 'Showing' : 'Show'} ${label.toLowerCase()} Routing Action Cues (${count})`}
+                    onClick={() => setRoutingActionCueFilter(filter)}
+                  >
+                    {label} ({count})
+                  </button>
+                );
+              })}
+            </div>
+            <div className="routing-action-cue-list">
+              {visibleRoutingActionCues.map((cue) => (
+                <div key={`${cue.taskType}:${cue.model}`} className={`routing-action-cue ${cue.status} ${cue.stale ? 'stale' : ''}`} aria-label={cue.ariaLabel}>
+                  <span>{cue.label}</span>
+                  <strong>{cue.taskType} · {cue.model}</strong>
+                  <small>{cue.detail}</small>
+                  {cue.decisionFreshnessLabel && <small>{cue.decisionFreshnessLabel}</small>}
+                  {cue.freshnessDetail && <small>{cue.freshnessDetail}</small>}
+                  {cue.staleLabel && <small>{cue.staleLabel}</small>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
+
+      {(modelRequestDurationRows.byModel.length > 0 || modelRequestDurationRows.byTaskType.length > 0) && (
+        <section className="routing-section">
+          <div className="routing-section-header">
+            <div>
+              <h3>Model Request Duration</h3>
+              <p>Average measured model request time from routing events with explicit run-trace duration. Missing samples are not counted.</p>
+              {modelRequestDurationEvidence.summary.thresholdMs != null && (
+                <p>
+                  {modelRequestDurationEvidence.summary.slowRowCount} slow row{modelRequestDurationEvidence.summary.slowRowCount === 1 ? '' : 's'} · threshold {ms(modelRequestDurationEvidence.summary.thresholdMs)}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="routing-breakdown-grid">
+            <ModelRequestDurationColumn title="By model" rows={modelRequestDurationRows.byModel} />
+            <ModelRequestDurationColumn title="By task" rows={modelRequestDurationRows.byTaskType} />
+          </div>
+        </section>
+      )}
 
       <section className="routing-section">
         <div className="routing-section-header">
@@ -1126,28 +1768,40 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
 
             {toolReliability.byEvidenceSource.length > 0 && (
               <div className="routing-model-list" aria-label="Tool-error evidence source summary">
-                {toolReliability.byEvidenceSource.map((item) => (
-                  <div key={item.source} className="routing-model-row">
-                    <div className="routing-model-name">{item.source}</div>
-                    <div className="routing-model-meta">
-                      {item.outcomeRuns} outcome run{item.outcomeRuns === 1 ? '' : 's'} · {item.recoveredRuns} recovered · {item.unrecoveredRuns} unrecovered · avg retry distance {item.avgRetryDistance}
+                {toolReliability.byEvidenceSource.map((item) => {
+                  const tuningCue = toolReliabilityTuningActionCue(item.tuningAction);
+                  return (
+                    <div key={item.source} className="routing-model-row">
+                      <div className="routing-model-name">{item.source}</div>
+                      <div className="routing-model-meta">
+                        {item.outcomeRuns} outcome run{item.outcomeRuns === 1 ? '' : 's'} · {item.recoveredRuns} recovered · {item.unrecoveredRuns} unrecovered · avg retry distance {item.avgRetryDistance}
+                      </div>
+                      <div className={`routing-rate ${item.unrecoveredRuns > 0 ? 'warn' : 'good'}`}>
+                        {item.retryReductionRecommendations} rec{item.retryReductionRecommendations === 1 ? '' : 's'}
+                      </div>
+                      <small>
+                        <span
+                          className={`routing-evidence-action-cue routing-evidence-action-cue-${tuningCue.tone}`}
+                          aria-label={`Evidence source ${item.source} tuning action ${item.tuningAction}: ${tuningCue.detail}`}
+                          title={`Raw tuning action ${item.tuningAction}. ${tuningCue.detail}`}
+                        >
+                          {tuningCue.label}
+                        </span>
+                        {' '}Latest evidence {item.latestTimestamp}
+                      </small>
                     </div>
-                    <div className={`routing-rate ${item.unrecoveredRuns > 0 ? 'warn' : 'good'}`}>
-                      {item.retryReductionRecommendations} rec{item.retryReductionRecommendations === 1 ? '' : 's'}
-                    </div>
-                    <small>Tuning action {item.tuningAction}; latest evidence {item.latestTimestamp}</small>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
             <div className="routing-breakdown-grid">
-              <ToolReliabilityColumn title="By model" data={toolReliability.byModel} />
-              <ToolReliabilityColumn title="By provider" data={toolReliability.byProvider} />
-              <ToolReliabilityColumn title="By tool" data={toolReliability.byTool} />
-              <ToolReliabilityColumn title="By model/tool pair" data={toolReliability.byModelTool} />
-              <ToolReliabilityColumn title="By prompt strategy" data={toolReliability.byPromptStrategy} />
-              <ToolReliabilityColumn title="By strategy variant" data={toolReliability.byPromptStrategyVariant} />
+              <ToolReliabilityColumn title="By model" rows={toolReliabilityTopRows.byModel} />
+              <ToolReliabilityColumn title="By provider" rows={toolReliabilityRows(toolReliability.byProvider)} />
+              <ToolReliabilityColumn title="By tool" rows={toolReliabilityTopRows.byTool} />
+              <ToolReliabilityColumn title="By model/tool pair" rows={toolReliabilityTopRows.byModelTool} />
+              <ToolReliabilityColumn title="By prompt strategy" rows={toolReliabilityRows(toolReliability.byPromptStrategy)} />
+              <ToolReliabilityColumn title="By strategy variant" rows={toolReliabilityTopRows.byPromptStrategyVariant} />
             </div>
 
             {toolReliability.toolHeavyAdvice.length > 0 && (
@@ -1334,14 +1988,32 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           </div>
           <button
             type="button"
+            className={`settings-mini-button ${showUnratedOnly ? 'active' : ''}`}
+            aria-pressed={showUnratedOnly}
+            aria-label={`${showUnratedOnly ? 'Disable' : 'Enable'} needs-outcome Routing Learning filter with ${unratedEventCount} matching decision${unratedEventCount === 1 ? '' : 's'}`}
+            onClick={() => {
+              setShowUnratedOnly((value) => !value);
+              setShowUnexplainedOnly(false);
+              setShowStaleOnly(false);
+              setShowFallbackOnly(false);
+              setShowBenchmarkOnly(false);
+              setShowEvidenceGapsOnly(false);
+            }}
+          >
+            {showUnratedOnly ? 'Show all' : `Needs outcome (${unratedEventCount})`}
+          </button>
+          <button
+            type="button"
             className={`settings-mini-button ${showUnexplainedOnly ? 'active' : ''}`}
             aria-pressed={showUnexplainedOnly}
             aria-label={`${showUnexplainedOnly ? 'Disable' : 'Enable'} needs-notes Routing Learning filter with ${unexplainedEventCount} matching decision${unexplainedEventCount === 1 ? '' : 's'}`}
             onClick={() => {
               setShowUnexplainedOnly((value) => !value);
+              setShowUnratedOnly(false);
               setShowStaleOnly(false);
               setShowFallbackOnly(false);
               setShowBenchmarkOnly(false);
+              setShowEvidenceGapsOnly(false);
             }}
           >
             {showUnexplainedOnly ? 'Show all' : `Needs notes (${unexplainedEventCount})`}
@@ -1353,9 +2025,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             aria-label={`${showStaleOnly ? 'Disable' : 'Enable'} stale-only Routing Learning filter with ${staleEventCount} matching decision${staleEventCount === 1 ? '' : 's'}`}
             onClick={() => {
               setShowStaleOnly((value) => !value);
+              setShowUnratedOnly(false);
               setShowUnexplainedOnly(false);
               setShowFallbackOnly(false);
               setShowBenchmarkOnly(false);
+              setShowEvidenceGapsOnly(false);
             }}
           >
             {showStaleOnly ? 'Show all' : `Stale only (${staleEventCount})`}
@@ -1367,9 +2041,11 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             aria-label={`${showFallbackOnly ? 'Disable' : 'Enable'} fallback Routing Learning filter with ${fallbackEvents.length} matching decision${fallbackEvents.length === 1 ? '' : 's'}`}
             onClick={() => {
               setShowFallbackOnly((value) => !value);
+              setShowUnratedOnly(false);
               setShowUnexplainedOnly(false);
               setShowStaleOnly(false);
               setShowBenchmarkOnly(false);
+              setShowEvidenceGapsOnly(false);
             }}
           >
             {showFallbackOnly ? 'Show all' : `Fallbacks (${fallbackEvents.length})`}
@@ -1381,23 +2057,40 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
             aria-label={`${showBenchmarkOnly ? 'Disable' : 'Enable'} benchmark Routing Learning filter with ${benchmarkEventCount} matching decision${benchmarkEventCount === 1 ? '' : 's'}`}
             onClick={() => {
               setShowBenchmarkOnly((value) => !value);
+              setShowUnratedOnly(false);
               setShowUnexplainedOnly(false);
               setShowStaleOnly(false);
               setShowFallbackOnly(false);
+              setShowEvidenceGapsOnly(false);
             }}
           >
             {showBenchmarkOnly ? 'Show all' : `Benchmarks (${benchmarkEventCount})`}
           </button>
-          {(showUnexplainedOnly || showStaleOnly || showFallbackOnly || showBenchmarkOnly) && (
+          {ROUTING_POLICY_FILTERS.map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              className={`settings-mini-button ${policyFilter === filter ? 'active' : ''}`}
+              aria-pressed={policyFilter === filter}
+              aria-label={`${policyFilter === filter ? 'Disable' : 'Enable'} ${routingPolicyFilterLabel(filter)} Routing Learning policy filter with ${policyFilterCounts[filter]} matching decision${policyFilterCounts[filter] === 1 ? '' : 's'}`}
+              onClick={() => setPolicyFilter((value) => value === filter ? 'all' : filter)}
+            >
+              {policyFilter === filter ? 'All policies' : `${routingPolicyFilterLabel(filter)} (${policyFilterCounts[filter]})`}
+            </button>
+          ))}
+          {(showUnratedOnly || showUnexplainedOnly || showStaleOnly || showFallbackOnly || showBenchmarkOnly || showEvidenceGapsOnly || policyFilter !== 'all') && (
             <button
               type="button"
               className="settings-mini-button"
               aria-label="Clear Routing Learning recent-decision filters"
               onClick={() => {
+                setShowUnratedOnly(false);
                 setShowUnexplainedOnly(false);
                 setShowStaleOnly(false);
                 setShowFallbackOnly(false);
                 setShowBenchmarkOnly(false);
+                setShowEvidenceGapsOnly(false);
+                setPolicyFilter('all');
               }}
             >
               Clear filters
@@ -1405,59 +2098,178 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
           )}
         </div>
 
+        <div
+          className="routing-trend-rollup"
+          role="group"
+          aria-label={`Routing trend across ${routingTrend.recentCount} recent decision${routingTrend.recentCount === 1 ? '' : 's'}: ${pct(routingTrend.winRate)} worked${routingTrend.dominantPolicy ? `, dominant policy ${routingTrend.dominantPolicy}` : ''}`}
+        >
+          <span><strong>{routingTrend.recentCount}</strong> recent</span>
+          <span><strong>{pct(routingTrend.winRate)}</strong> worked</span>
+          <span><strong>{routingTrend.dominantPolicy || 'none'}</strong> dominant policy</span>
+          {routingTrend.topSignals.slice(0, 5).map((item) => (
+            <span key={item.signal} title={`${item.count} recent decision${item.count === 1 ? '' : 's'}`}>
+              {item.signal} {item.count}
+            </span>
+          ))}
+        </div>
+
+        <div className="routing-decision-scan" role="list" aria-label="Routing decision scan summary">
+          {decisionScanCards.map((card) => {
+            const scanCardClassName = `routing-scan-card ${card.tone}`;
+            const scanCardPressed = routingDecisionScanCardPressed(card.filterTarget);
+            const scanCardFilterTarget = card.filterTarget;
+            return (
+              <div key={card.id} className="routing-scan-card-shell" role="listitem">
+                {scanCardFilterTarget ? (
+                  <button
+                    type="button"
+                    className={`${scanCardClassName} actionable${scanCardPressed ? ' active' : ''}`}
+                    aria-pressed={scanCardPressed}
+                    aria-label={`${scanCardPressed ? 'Clear' : 'Show'} ${card.label.toLowerCase()} routing decisions. ${card.detail}`}
+                    title={card.detail}
+                    onClick={() => handleRoutingDecisionScanCard(scanCardFilterTarget)}
+                  >
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <small>{card.detail}</small>
+                  </button>
+                ) : (
+                  <div className={scanCardClassName} title={card.detail}>
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <small>{card.detail}</small>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
         {events.length === 0 ? (
           <div className="routing-empty">No routing events recorded yet.</div>
         ) : visibleRecentEvents.length === 0 ? (
           <div className="routing-empty">
-            {showStaleOnly
+            {showUnratedOnly
+              ? 'All loaded routing events have outcomes.'
+              : showStaleOnly
               ? 'No loaded routing events are stale.'
               : showFallbackOnly
                 ? 'No loaded routing events used fallback routing.'
-                : showBenchmarkOnly
-                  ? 'No loaded routing events are marked as benchmark data.'
+                  : showBenchmarkOnly
+                    ? 'No loaded routing events are marked as benchmark data.'
+                  : showEvidenceGapsOnly
+                    ? 'All loaded routing events have the score evidence needed for routing evidence review.'
                   : showUnexplainedOnly
                     ? 'All loaded routing events have reviewer notes.'
-                    : 'No routing events match the current filter.'}
+                    : policyFilter !== 'all'
+                      ? `No loaded routing events match the ${routingPolicyFilterLabel(policyFilter).toLowerCase()} policy filter.`
+                      : 'No routing events match the current filter.'}
           </div>
         ) : (
           <div className="routing-event-list">
-            {visibleRecentEvents.slice(0, 12).map((event) => {
+            {showRecentEventSliceControls && (
+              <div className="routing-event-slice-note" role="status" aria-live="polite">
+                <span>
+                  {hiddenRecentEventCount > 0
+                    ? <>Showing {displayedRecentEvents.length} of {visibleRecentEvents.length} matching decisions; {hiddenRecentEventCount} more match the current filters.</>
+                    : <>Showing all {visibleRecentEvents.length} matching decisions.</>}
+                  {recentEventDisplayWindow.reachedLimit && (
+                    <> Review window cap reached at {MAX_RECENT_EVENT_DISPLAY_LIMIT} decisions.</>
+                  )}
+                </span>
+                <span className="routing-event-slice-actions">
+                  {recentEventDisplayWindow.canShowMore && (
+                    <button
+                      type="button"
+                      className="settings-mini-button"
+                      aria-label={`Show ${recentEventDisplayWindow.nextCount} more matching routing decisions`}
+                      onClick={() => setRecentEventDisplayLimit((limit) => Math.min(visibleRecentEvents.length, limit + RECENT_EVENT_BATCH_SIZE))}
+                    >
+                      Show {recentEventDisplayWindow.nextCount} more
+                    </button>
+                  )}
+                  {recentEventDisplayWindow.canShowFewer && (
+                    <button
+                      type="button"
+                      className="settings-mini-button"
+                      aria-label="Show fewer matching routing decisions"
+                      onClick={() => setRecentEventDisplayLimit(RECENT_EVENT_BATCH_SIZE)}
+                    >
+                      Show fewer
+                    </button>
+                  )}
+                </span>
+              </div>
+            )}
+            {displayedRecentEventViews.map((eventEvidence) => {
+              const event = eventEvidence.event;
               const status = eventStatus(event);
               const Icon = status.icon;
-              const topScores = sortedCandidateScores(event.candidateScores, 4);
+              const { topScores, traceChips, decisionExplanation, marginSummary } = eventEvidence;
+              const evidenceGate = getModelLabEvidenceGate(event, promptStrategyIds);
+              const replayReadiness = eventEvidence.scoreEvidenceReadiness;
+              const scoreEvidenceKey = eventEvidence.scoreEvidenceKey;
               return (
                 <div key={event.id} className="routing-event-row" role="group" aria-label={`Routing decision for ${event.selectedModel}: ${status.label}`}>
                   <div className={`routing-event-status ${status.tone}`}>
                     <Icon size={13} aria-hidden="true" />
                     {status.label}
                   </div>
-                  <div className="routing-event-main" role="group" aria-label={`Route summary for ${event.selectedModel}: ${event.taskType || 'unknown'} task, ${event.role || 'unknown'} role, ${event.complexity || 'unknown'} complexity, score ${event.score.toFixed(2)}`}>
+                  <div className="routing-event-main" role="group" aria-label={`Route summary for ${event.selectedModel}: ${event.taskType || 'unknown'} task, ${event.role || 'unknown'} role, ${event.complexity || 'unknown'} complexity, score ${formatScoreDisplay(event.score)}`}>
                     <div>{event.selectedModel}</div>
                     <span>
-                      {event.taskType || 'unknown'} / {event.role || 'unknown'} / {event.complexity || 'unknown'} / score {event.score.toFixed(2)}
+                      {event.taskType || 'unknown'} / {event.role || 'unknown'} / {event.complexity || 'unknown'} / score {formatScoreDisplay(event.score)}
                     </span>
-                  <div className="routing-event-trace" role="group" aria-label={`Route trace context for ${event.selectedModel}`}>
-                    <span>{routingEventDecisionLabel(event)}</span>
-                  {event.classifierModel && <span>classifier: {event.classifierModel}</span>}
-                  {event.wasCached && <span>cached</span>}
-                  {event.wasFallback && <span>fallback used</span>}
-                  <span title={event.datasetKind === 'benchmark' ? 'Benchmark events are preserved but excluded from production learning summaries.' : 'Production routing event.'}>
-                    {event.datasetKind === 'benchmark' ? 'benchmark data' : 'production data'}
-                  </span>
-                  <span title={routeEventExactTime(event.timestamp)}>{routeEventTimeLabel(event.timestamp)}</span>
-                </div>
-                  <div className="routing-event-margin" aria-label={`Route margin summary for ${event.selectedModel}`}>
-                    {routeMarginSummary(event)}
-                  </div>
-                  <div className="routing-score-chips" role="list" aria-label={`Candidate scores for ${event.selectedModel}`}>
-                    {topScores.length > 0 ? (
+                    <div className="routing-event-trace" role="group" aria-label={`Route trace context for ${event.selectedModel}: ${traceChips.map((chip) => chip.label).join(', ')}`}>
+                      {traceChips.map((chip) => (
+                        <span key={`${event.id}:${chip.label}`} title={chip.title}>
+                          {chip.label}
+                        </span>
+                      ))}
+                    </div>
+                    <RoutingLearningSignalChips signal={event.routeSignal} selectedModel={event.selectedModel} />
+                    <div className="routing-event-decision-explanation" role="group" aria-label={`Route decision explanation for ${event.selectedModel}: ${decisionExplanation.detail}`}>
+                      <strong>{decisionExplanation.reason}</strong>
+                      <span>{decisionExplanation.detail}</span>
+                      {decisionExplanation.contributors.length > 0 && (
+                        <div className="routing-event-explanation-chips" role="list" aria-label={`Decision contributors for ${event.selectedModel}`}>
+                          {decisionExplanation.contributors.map((chip) => (
+                            <span key={`${event.id}:${chip.label}`} role="listitem" title={chip.title}>
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="routing-event-margin" aria-label={`Route margin summary for ${event.selectedModel}`}>
+                      {marginSummary}
+                    </div>
+                    <div
+                      className={`routing-evidence-provenance ${replayReadiness.status}`}
+                      title={replayReadiness.detail}
+                      aria-label={`Route score evidence for ${event.selectedModel}: ${replayReadiness.detail} Evidence key ${scoreEvidenceKey.id}. ${scoreEvidenceKey.detail}`}
+                    >
+                      Score evidence: {replayReadiness.label}
+                      <span title={scoreEvidenceKey.detail}>Evidence key: {scoreEvidenceKey.id}</span>
+                      {replayReadiness.missing.length > 0 && (
+                        <span>Missing: {replayReadiness.missing.join(', ')}</span>
+                      )}
+                    </div>
+                    <div className="routing-score-chips" role="list" aria-label={`Candidate scores for ${event.selectedModel}`}>
+                      {topScores.length > 0 ? (
                         topScores.map(([model, score]) => (
-                          <span key={model} role="listitem" title={`${model}: ${score.toFixed(2)}`}>
-                            {model} {score.toFixed(2)}
+                          <span key={model} role="listitem" title={`${model}: ${formatScoreDisplay(score)}`}>
+                            {model} {formatScoreDisplay(score)}
                           </span>
                         ))
                       ) : (
                         <span className="muted" role="listitem">{candidateScoresUnavailableLabel({ fallback: event.wasFallback })}</span>
+                      )}
+                    </div>
+                    <div className="routing-evidence-provenance" title={evidenceGate.reason || `Prompt strategy ${evidenceGate.strategyLabel} can be opened in Model Lab evidence.`}>
+                      Evidence strategy: {evidenceGate.strategyLabel}
+                      {!evidenceGate.enabled && (
+                        <span>Evidence unavailable: {evidenceGate.reason}</span>
                       )}
                     </div>
                     <div className="routing-event-help">{routingOutcomeHelp(event.outcome)}</div>
@@ -1481,6 +2293,21 @@ export function RoutingLearningPane({ enabledModels = [], onApplyRoleRecommendat
                     </div>
                   </div>
                   <div className="routing-event-actions" role="group" aria-label={`Routing outcome actions for ${event.selectedModel}`}>
+                    {onOpenModelLabEvidence && (
+                      <button
+                        type="button"
+                        aria-label={evidenceGate.enabled ? `Open Model Lab evidence for ${event.selectedModel} route` : `${event.selectedModel} route evidence unavailable: ${evidenceGate.reason}`}
+                        title={evidenceGate.reason || "Open Model Lab evidence filtered to this route's model and prompt strategy"}
+                        onClick={() => {
+                          if (!evidenceGate.enabled) return;
+                          onOpenModelLabEvidence(routingDecisionToModelLabEvidenceScope(event));
+                        }}
+                        disabled={!evidenceGate.enabled}
+                      >
+                        <FlaskConical size={13} aria-hidden="true" />
+                        Evidence
+                      </button>
+                    )}
                     <button type="button" aria-label={`Mark ${event.selectedModel} route as ${routingOutcomeLabel('success')}`} title={routingOutcomeHelp('success')} onClick={() => handleMarkOutcome(event.id, 'success')} disabled={event.outcome === 'success'}>{routingOutcomeLabel('success')}</button>
                     <button type="button" aria-label={`Mark ${event.selectedModel} route as ${routingOutcomeLabel('failure')}`} title={routingOutcomeHelp('failure')} onClick={() => handleMarkOutcome(event.id, 'failure')} disabled={event.outcome === 'failure'}>{routingOutcomeLabel('failure')}</button>
                     <button type="button" aria-label={`Mark ${event.selectedModel} route as ${routingOutcomeLabel('ambiguous')}`} title={routingOutcomeHelp('ambiguous')} onClick={() => handleMarkOutcome(event.id, 'ambiguous')} disabled={event.outcome === 'ambiguous'}>{routingOutcomeLabel('ambiguous')}</button>
@@ -1530,12 +2357,11 @@ function BreakdownColumn({
 
 function ToolReliabilityColumn({
   title,
-  data,
+  rows,
 }: {
   title: string;
-  data: Record<string, api.ToolReliabilityBucket>;
+  rows: ToolReliabilityRow[];
 }) {
-  const rows = toolReliabilityRows(data);
   return (
     <div className="routing-breakdown-card">
       <h4>{title}</h4>
@@ -1573,6 +2399,33 @@ function ToolReliabilityColumn({
               <span>{item.skipped}/{item.running}</span>
             </div>
           </details>
+        ))
+      )}
+    </div>
+  );
+}
+
+function ModelRequestDurationColumn({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: ModelRequestDurationRow[];
+}) {
+  return (
+    <div className="routing-breakdown-card">
+      <h4>{title}</h4>
+      {rows.length === 0 ? (
+        <div className="routing-empty compact">No request duration data</div>
+      ) : (
+        rows.map(([label, item]) => (
+          <div key={`${title}:${label}`} className={item.slow ? 'routing-duration-slow' : undefined}>
+            <span>{label}</span>
+            <span>
+              {ms(item.avgMs)} avg · {item.samples} sample{item.samples === 1 ? '' : 's'}
+              {item.slow ? ` · slow > ${ms(item.thresholdMs)}` : ''}
+            </span>
+          </div>
         ))
       )}
     </div>

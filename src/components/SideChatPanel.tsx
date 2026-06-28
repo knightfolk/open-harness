@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Send, MessageSquare, Trash2 } from 'lucide-react';
 import * as api from '../utils/api';
 import { MarkdownContent } from './MarkdownContent';
@@ -109,17 +109,44 @@ function loadIncludeMainChat() {
   }
 }
 
+function sideMessageFromApi(message: api.MessageInfo): SideMessage | null {
+  if (message.role !== 'user' && message.role !== 'assistant') return null;
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content || '',
+    timestamp: new Date(message.timestamp),
+    status: 'complete',
+    toolCalls: message.toolCalls,
+  };
+}
+
+function uniqueModelOptions(models: SideChatModel[], activeModel: string): SideChatModel[] {
+  const source = models.length > 0 ? models : [{ id: activeModel, name: activeModel }];
+  const seen = new Set<string>();
+  const unique: SideChatModel[] = [];
+  for (const model of source) {
+    const id = model.id.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    unique.push({ id, name: model.name || id });
+  }
+  return unique.length > 0 ? unique : [{ id: activeModel, name: activeModel }];
+}
+
 export function SideChatPanel({ activeModel, models, activeSessionId, workingDir, mainMessages = [] }: Props) {
   const [messages, setMessages] = useState<SideMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isOpening, setIsOpening] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(() => loadSideChatModel(activeModel));
   const [includeMainChat, setIncludeMainChat] = useState(loadIncludeMainChat);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef<Map<string, string>>(new Map());
   const modelOptions = useMemo(
-    () => models.length > 0 ? models : [{ id: activeModel, name: activeModel }],
+    () => uniqueModelOptions(models, activeModel),
     [activeModel, models],
   );
   const fallbackModel = modelOptions.length > 0 ? modelOptions[0].id : activeModel;
@@ -133,23 +160,49 @@ export function SideChatPanel({ activeModel, models, activeSessionId, workingDir
     if (!modelOptions.some((m) => m.id === selectedModel)) setSelectedModel(fallbackModel);
   }, [modelOptions, selectedModel, fallbackModel]);
 
-  useEffect(() => {
-    setMessages([]);
-    setSessionId(null);
-    streamingRef.current.clear();
-  }, [activeSessionId, workingDir]);
-
-  const ensureSession = async (): Promise<string | null> => {
+  const ensureSession = useCallback(async (): Promise<string | null> => {
     if (sessionId) return sessionId;
     try {
-      const s = await api.createSession('Side Chat', workingDir || undefined, 'side-chat');
+      const s = activeSessionId
+        ? await api.getOrCreateSideChatSession(activeSessionId)
+        : await api.createSession('Side Chat', workingDir || undefined, 'side-chat');
       setSessionId(s.id);
+      setMessages(s.messages.map(sideMessageFromApi).filter((message): message is SideMessage => Boolean(message)));
       return s.id;
-    } catch { return null; }
-  };
+    } catch {
+      setOpenError('Side chat could not be opened.');
+      return null;
+    }
+  }, [activeSessionId, sessionId, workingDir]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMessages([]);
+    setSessionId(null);
+    setOpenError(null);
+    setIsTyping(false);
+    streamingRef.current.clear();
+    if (!activeSessionId) return () => { cancelled = true; };
+
+    setIsOpening(true);
+    api.getOrCreateSideChatSession(activeSessionId)
+      .then((s) => {
+        if (cancelled) return;
+        setSessionId(s.id);
+        setMessages(s.messages.map(sideMessageFromApi).filter((message): message is SideMessage => Boolean(message)));
+      })
+      .catch(() => {
+        if (!cancelled) setOpenError('Side chat could not be opened.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsOpening(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [activeSessionId, workingDir]);
 
   const handleSend = async () => {
-    if (!input.trim() || isTyping) return;
+    if (!input.trim() || isTyping || isOpening) return;
     const content = input.trim();
     setInput('');
 
@@ -326,8 +379,8 @@ export function SideChatPanel({ activeModel, models, activeSessionId, workingDir
         {messages.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-tertiary)', fontSize: 12, gap: 8 }}>
             <MessageSquare size={24} style={{ opacity: 0.3 }} />
-            <span>Quick side conversation</span>
-            <span style={{ fontSize: 10 }}>{includeMainChat ? 'Ask with main chat context' : 'Ask without main chat context'}</span>
+            <span>{isOpening ? 'Opening side chat...' : 'Side chat'}</span>
+            <span style={{ fontSize: 10 }}>{openError || (includeMainChat ? 'Current thread context on' : 'Current thread context off')}</span>
           </div>
         )}
         {messages.map((msg) => {
@@ -382,9 +435,9 @@ export function SideChatPanel({ activeModel, models, activeSessionId, workingDir
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Quick question..."
+            placeholder="Ask side chat..."
             rows={1}
-            disabled={isTyping}
+            disabled={isTyping || isOpening}
             style={{
               flex: 1, minWidth: 0, resize: 'none', overflow: 'hidden', background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)',
               borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', padding: '6px 8px',
@@ -392,11 +445,11 @@ export function SideChatPanel({ activeModel, models, activeSessionId, workingDir
               height: 32, minHeight: 32,
             }}
           />
-          <button onClick={handleSend} disabled={!input.trim() || isTyping} style={{
-            background: input.trim() && !isTyping ? 'var(--accent-primary)' : 'var(--bg-active)',
-            color: input.trim() && !isTyping ? 'white' : 'var(--text-tertiary)',
+          <button onClick={handleSend} disabled={!input.trim() || isTyping || isOpening} style={{
+            background: input.trim() && !isTyping && !isOpening ? 'var(--accent-primary)' : 'var(--bg-active)',
+            color: input.trim() && !isTyping && !isOpening ? 'white' : 'var(--text-tertiary)',
             border: 'none', borderRadius: 'var(--radius-sm)', padding: '6px 8px',
-            cursor: input.trim() && !isTyping ? 'pointer' : 'default',
+            cursor: input.trim() && !isTyping && !isOpening ? 'pointer' : 'default',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             height: 32, minWidth: 32, transition: 'all var(--transition-fast)',
           }}>

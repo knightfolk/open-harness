@@ -11,7 +11,7 @@ import {
   recordOutcome,
   suggestThresholdAdjustment,
 } from '../routerLearning';
-import { listRoutingAdherenceEvents } from '../routingAdherence';
+import { listRoutingAdherenceEvents, routingAdherencePhaseFromQuery } from '../routingAdherence';
 import { getToolReliabilityCacheMeta, getToolReliabilitySummaryCached, invalidateToolReliabilitySummaryCache } from '../toolReliabilityStore';
 import { buildToolFailureTrainingExportPayload, getToolErrorLedgerEvents, getToolErrorLedgerSummary } from '../toolErrorLedger';
 import { buildRouterLearningExportPayload } from '../routerLearningExport';
@@ -133,14 +133,16 @@ export function registerRouterRoutes(app: express.Express, deps: RouterRouteDeps
     const body = req.body || {};
     const dryRun = body.dryRun === true || req.query.dryRun === 'true';
     const datasetKind = body.datasetKind === 'production' || req.query.datasetKind === 'production' ? 'production' : 'benchmark';
-    const { events, importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview } = buildRouterLearningImportPreview(body);
+    const { events, importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview, providerFailureAdherencePreview } = buildRouterLearningImportPreview(body);
     if (!Array.isArray(events)) return res.status(400).json({ error: 'events array required' });
-    res.json({ ok: true, ...importRoutingEvents(events, { dryRun, datasetKind }), importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview });
+    res.json({ ok: true, ...importRoutingEvents(events, { dryRun, datasetKind }), importSource, schemaVersion, schemaSupported, warnings, toolReliabilityPreview, promptBestPracticePreview, providerFailureAdherencePreview });
   });
 
   app.get('/api/router/adherence/events', (req, res) => {
     const limit = parseInt(String(req.query.limit || '100'), 10);
-    res.json(listRoutingAdherenceEvents(limit));
+    const phase = routingAdherencePhaseFromQuery(req.query.phase);
+    if (phase === null) return res.status(400).json({ error: 'Unknown routing adherence phase' });
+    res.json(listRoutingAdherenceEvents(limit, { phase }));
   });
 
   app.get('/api/router/learning/success-rates', (_req, res) => {

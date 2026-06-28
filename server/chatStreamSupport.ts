@@ -3,6 +3,7 @@ import { basename, resolve } from 'path';
 
 import type { HarnessRunStep } from './runTrace';
 import { redactSecrets } from './sectionRedaction';
+import { modelRequestLaneLabel } from '../shared/glmModelPreference';
 
 export function openHarnessWorkspaceMismatch(content: string, workingDir: string | null): string | null {
   const targetsOpenHarness = /\bOpenHarness\b/i.test(content)
@@ -69,6 +70,12 @@ export function maybeEmitThinkingSSE(
   });
 }
 
+function modelRequestTimeoutStatus(step: Extract<HarnessRunStep, { type: 'model_request' }>): string {
+  if (typeof step.timeoutMs !== 'number' || !Number.isFinite(step.timeoutMs) || step.timeoutMs <= 0) return '';
+  const seconds = Math.round(step.timeoutMs / 1000);
+  return ` · ${modelRequestLaneLabel(step)} · ${seconds}s timeout`;
+}
+
 function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
   switch (step.type) {
     case 'orchestration': return `Orchestration: ${step.label}`;
@@ -83,7 +90,7 @@ function thinkingMessageForRunStep(step: HarnessRunStep): string | null {
         : step.status === 'auto_discarded'
           ? 'Clean worktree auto-discarded'
           : `Worktree isolation ${step.status}`;
-    case 'model_request': return `Waiting for ${step.model}`;
+    case 'model_request': return `Waiting for ${step.model}${modelRequestTimeoutStatus(step)}`;
     case 'tool_call': return step.durationMs == null ? `Using ${step.name}` : `Finished ${step.name}`;
     case 'model_text': return 'Receiving response text';
     case 'model_thinking': return step.source === 'router' ? 'Routing details saved' : 'Model thinking live';

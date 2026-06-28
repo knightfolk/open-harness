@@ -19,7 +19,6 @@ import {
 import type { SidebarTab, SubAgent, ProviderConfig, CodingRoleAssignment, MCPServerItem, HarnessRunStep } from '../types';
 import type { Message } from '../types';
 import type { SessionInfo } from '../utils/api';
-import { SideChatPanel } from './SideChatPanel';
 import { buildRunTree, phaseLabel, runLabel } from '../utils/agentWorkState';
 import { agentIdentityForRole } from '../utils/agentIdentity';
 
@@ -54,6 +53,7 @@ interface Props {
   onSelectTheme: (themeId: string) => void;
   onPersonalityChange: (text: string) => void;
   onOpenFolder?: () => void;
+  onOpenSideChat?: () => void;
   onFocusAgent?: (agentId: string) => void;
   width?: number;
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -124,7 +124,7 @@ function canSteerRun(run: SubAgent): boolean {
 }
 
 const tabConfig = [
-  { key: 'chat' as SidebarTab, icon: MessageSquare, label: 'Chat' },
+  { key: 'chat' as SidebarTab, icon: MessageSquare, label: 'Side Chat' },
   { key: 'projects' as SidebarTab, icon: FolderOpen, label: 'Projects' },
 ];
 
@@ -136,32 +136,24 @@ export function Sidebar({
   isOpen,
   sessions,
   activeSessionId,
-  workingDir,
   activeTab,
   activeSubAgents,
-  mainMessages = [],
   onActiveTabChange,
   onOpenSettings,
   onSelectSession,
   onNewSession,
   onOpenFolder,
+  onOpenSideChat,
   onFocusAgent,
   width,
   onResizeStart,
   onDeleteSession,
   onDeleteProject,
-  activeModel,
-  providers,
   clickyEnabled,
   onClose,
 }: Props) {
   const [clickyOpen, setClickyOpen] = useState(false);
   const [visiblePanels, setVisiblePanels] = useState({ chat: false, projects: true });
-  const sideChatModels = providers.flatMap((provider) =>
-    provider.models
-      .filter((model) => model.enabled)
-      .map((model) => ({ id: model.id, name: model.name || model.id }))
-  );
 
   useEffect(() => {
     setVisiblePanels((prev) => ({ ...prev, [activeTab]: true }));
@@ -227,13 +219,18 @@ export function Sidebar({
       <div className="sidebar-content" role="region" aria-label="Sidebar panel content">
         {visiblePanels.chat && (
           <div id="sidebar-panel-chat" className="sidebar-panel sidebar-panel--chat">
-            <SideChatPanel
-              activeModel={activeModel}
-              models={sideChatModels}
-              activeSessionId={activeSessionId}
-              workingDir={workingDir}
-              mainMessages={mainMessages}
-            />
+            <div className="sidebar-side-chat-launcher">
+              <MessageSquare size={22} aria-hidden="true" />
+              <div className="sidebar-side-chat-title">Side Chat</div>
+              <button
+                type="button"
+                className="sidebar-side-chat-open"
+                onClick={onOpenSideChat}
+                aria-label="Open Side Chat"
+              >
+                Open Side Chat
+              </button>
+            </div>
           </div>
         )}
         {visiblePanels.projects && (

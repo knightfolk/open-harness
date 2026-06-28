@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { basename, join, resolve } from 'path';
 import { homedir } from 'os';
+import { performance } from 'perf_hooks';
 import { redactSecrets } from './sectionRedaction';
+import type { PromptPluginRenderInput, PromptPluginRenderSection, PromptPluginRenderTargets } from './promptBuilder';
 
 export type PromptPluginTrust = 'trusted' | 'review-required' | 'blocked';
 
@@ -45,11 +47,98 @@ export interface ImportPromptSkillResult {
   error?: string;
 }
 
+export interface PromptPluginSelectionContext {
+  role?: string;
+  routeMode?: string;
+  modelFamily?: string;
+  modelId?: string;
+  allowedPluginIds?: string[];
+}
+
+export interface PromptPluginSelectionTelemetry {
+  allowedPluginCount: number;
+  selectedPluginCount: number;
+  selectedSectionCount: number;
+  selectionDurationMs: number;
+  manifestsScanned: number;
+  cache: {
+    entries: number;
+    hits: number;
+    misses: number;
+  };
+}
+
+export interface PromptPluginSelectionResult {
+  plugins: PromptPluginRenderInput[];
+  telemetry: PromptPluginSelectionTelemetry;
+}
+
 const TRUST_ORDER: Record<PromptPluginTrust, number> = {
   trusted: 0,
   'review-required': 1,
   blocked: 2,
 };
+
+interface PromptPluginManifestRecord {
+  manifest: string;
+  location: PromptPluginSummary['location'];
+  raw?: any;
+  error?: string;
+}
+
+interface PromptPluginManifestReadTelemetry {
+  manifestsScanned: number;
+  cacheHits: number;
+  cacheMisses: number;
+}
+
+interface ManifestCacheEntry {
+  manifest: string;
+  location: PromptPluginSummary['location'];
+  mtimeMs: number;
+  size: number;
+  raw: any;
+  lastUsed: number;
+}
+
+const PROMPT_PLUGIN_MANIFEST_CACHE_LIMIT = 256;
+const promptPluginManifestCache = new Map<string, ManifestCacheEntry>();
+const promptPluginManifestCacheStats = {
+  hits: 0,
+  misses: 0,
+  invalidations: 0,
+};
+
+export function clearPromptPluginManifestCache(rootPath?: string): void {
+  if (!rootPath) {
+    promptPluginManifestCache.clear();
+    promptPluginManifestCacheStats.invalidations += 1;
+    return;
+  }
+
+  const normalized = resolve(rootPath);
+  for (const key of Array.from(promptPluginManifestCache.keys())) {
+    const entry = promptPluginManifestCache.get(key);
+    if (entry && resolve(entry.manifest).startsWith(normalized)) promptPluginManifestCache.delete(key);
+  }
+  promptPluginManifestCacheStats.invalidations += 1;
+}
+
+export function getPromptPluginManifestCacheStats(): {
+  entries: number;
+  roots: number;
+  hits: number;
+  misses: number;
+  invalidations: number;
+} {
+  return {
+    entries: promptPluginManifestCache.size,
+    roots: 0,
+    hits: promptPluginManifestCacheStats.hits,
+    misses: promptPluginManifestCacheStats.misses,
+    invalidations: promptPluginManifestCacheStats.invalidations,
+  };
+}
 
 function pluginRoots(projectDir?: string): Array<{ location: PromptPluginSummary['location']; path: string }> {
   const roots: Array<{ location: PromptPluginSummary['location']; path: string }> = [];
@@ -99,8 +188,108 @@ function findManifestFiles(root: string): string[] {
   return out;
 }
 
+function manifestCacheKey(location: PromptPluginSummary['location'], manifest: string): string {
+  return `${location}:${resolve(manifest)}`;
+}
+
+function evictPromptPluginManifestCacheIfNeeded(): void {
+  while (promptPluginManifestCache.size > PROMPT_PLUGIN_MANIFEST_CACHE_LIMIT) {
+    let oldestKey = '';
+    let oldestUsed = Number.POSITIVE_INFINITY;
+    for (const [key, entry] of promptPluginManifestCache) {
+      if (entry.lastUsed < oldestUsed) {
+        oldestUsed = entry.lastUsed;
+        oldestKey = key;
+      }
+    }
+    if (!oldestKey) return;
+    promptPluginManifestCache.delete(oldestKey);
+  }
+}
+
+function readManifestRecord(
+  root: { location: PromptPluginSummary['location']; path: string },
+  manifest: string,
+  telemetry?: PromptPluginManifestReadTelemetry,
+): PromptPluginManifestRecord {
+  const key = manifestCacheKey(root.location, manifest);
+  let missRecorded = false;
+  try {
+    const stat = statSync(manifest);
+    if (telemetry) telemetry.manifestsScanned += 1;
+    const current = promptPluginManifestCache.get(key);
+    if (current && current.mtimeMs === stat.mtimeMs && current.size === stat.size) {
+      current.lastUsed = Date.now();
+      promptPluginManifestCacheStats.hits += 1;
+      if (telemetry) telemetry.cacheHits += 1;
+      return { manifest, location: root.location, raw: current.raw };
+    }
+
+    promptPluginManifestCacheStats.misses += 1;
+    if (telemetry) telemetry.cacheMisses += 1;
+    missRecorded = true;
+    const raw = JSON.parse(readFileSync(manifest, 'utf-8'));
+    promptPluginManifestCache.set(key, {
+      manifest,
+      location: root.location,
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      raw,
+      lastUsed: Date.now(),
+    });
+    evictPromptPluginManifestCacheIfNeeded();
+    return { manifest, location: root.location, raw };
+  } catch (err) {
+    promptPluginManifestCache.delete(key);
+    if (!missRecorded) {
+      promptPluginManifestCacheStats.misses += 1;
+      if (telemetry) telemetry.cacheMisses += 1;
+    }
+    return {
+      manifest,
+      location: root.location,
+      error: err instanceof Error ? err.message : 'Could not parse manifest',
+    };
+  }
+}
+
+function promptPluginManifestRecords(
+  roots: Array<{ location: PromptPluginSummary['location']; path: string }>,
+  telemetry?: PromptPluginManifestReadTelemetry,
+): PromptPluginManifestRecord[] {
+  const records: PromptPluginManifestRecord[] = [];
+  for (const root of roots) {
+    for (const manifest of findManifestFiles(root.path)) {
+      records.push(readManifestRecord(root, manifest, telemetry));
+    }
+  }
+  return records;
+}
+
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function matchesTargetList(values: string[] | undefined, candidate: string | undefined): boolean {
+  if (!values || values.length === 0) return true;
+  if (!candidate) return false;
+  const normalized = candidate.toLowerCase();
+  return values.some((value) => value.toLowerCase() === normalized);
+}
+
+function targetsMatch(targets: PromptPluginRenderTargets | undefined, context: PromptPluginSelectionContext): boolean {
+  return matchesTargetList(targets?.roles as string[] | undefined, context.role)
+    && matchesTargetList(targets?.routeModes as string[] | undefined, context.routeMode)
+    && matchesTargetList(targets?.modelFamilies as string[] | undefined, context.modelFamily)
+    && matchesTargetList(targets?.modelIds as string[] | undefined, context.modelId);
+}
+
+function allowedPluginIdSet(ids: string[] | undefined): Set<string> {
+  return new Set((ids || []).map((id) => id.trim()).filter(Boolean));
+}
+
+function pluginIsAllowed(id: string, allowed: Set<string>): boolean {
+  return allowed.has(id) || allowed.has(`prompt-plugin.${id}`);
 }
 
 function summarizeManifest(raw: any, path: string, location: PromptPluginSummary['location'], disabledPluginIds: Set<string> = new Set()): PromptPluginSummary {
@@ -218,6 +407,7 @@ export function importSkillAsPromptPlugin(projectDir: string, sourcePath: string
   };
   const manifestPath = join(root.path, `${id}.prompt-plugin.json`);
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  clearPromptPluginManifestCache(root.path);
   const plugin = summarizeManifest(manifest, manifestPath, 'project');
   return { ok: true, manifestPath, plugin };
 }
@@ -226,31 +416,29 @@ export function listPromptPlugins(projectDir?: string, disabledPluginIds: string
   const roots = pluginRoots(projectDir);
   const plugins: PromptPluginSummary[] = [];
   const disabled = new Set(disabledPluginIds);
-  for (const root of roots) {
-    for (const manifest of findManifestFiles(root.path)) {
-      try {
-        plugins.push(summarizeManifest(JSON.parse(readFileSync(manifest, 'utf-8')), manifest, root.location, disabled));
-      } catch (err) {
-        const id = `invalid:${manifest}`;
-        plugins.push({
-          id,
-          name: 'Invalid prompt plugin',
-          version: '0.0.0',
-          description: '',
-          enabled: !disabled.has(id) && !disabled.has(`prompt-plugin.${id}`),
-          source: root.location,
-          trust: 'review-required',
-          location: root.location,
-          path: manifest,
-          targets: { roles: [], routeModes: [], modelFamilies: [], modelIds: [] },
-          sections: [],
-          evals: [],
-          packs: [],
-          safety: { canOverrideProjectInstructions: false, untrustedContextPolicy: 'unknown' },
-          status: 'invalid',
-          issues: [err instanceof Error ? err.message : 'Could not parse manifest'],
-        });
-      }
+  for (const record of promptPluginManifestRecords(roots)) {
+    if (record.raw) {
+      plugins.push(summarizeManifest(record.raw, record.manifest, record.location, disabled));
+    } else {
+      const id = `invalid:${record.manifest}`;
+      plugins.push({
+        id,
+        name: 'Invalid prompt plugin',
+        version: '0.0.0',
+        description: '',
+        enabled: !disabled.has(id) && !disabled.has(`prompt-plugin.${id}`),
+        source: record.location,
+        trust: 'review-required',
+        location: record.location,
+        path: record.manifest,
+        targets: { roles: [], routeModes: [], modelFamilies: [], modelIds: [] },
+        sections: [],
+        evals: [],
+        packs: [],
+        safety: { canOverrideProjectInstructions: false, untrustedContextPolicy: 'unknown' },
+        status: 'invalid',
+        issues: [record.error || 'Could not parse manifest'],
+      });
     }
   }
 
@@ -275,5 +463,102 @@ export function listPromptPlugins(projectDir?: string, disabledPluginIds: string
     roots: roots.map((root) => ({ ...root, exists: existsSync(root.path) })),
     plugins: plugins.sort((a, b) => a.name.localeCompare(b.name)),
     packs: Array.from(packs.values()).sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+export function selectPromptPluginsForPrompt(
+  projectDir: string | undefined,
+  disabledPluginIds: string[] = [],
+  context: PromptPluginSelectionContext = {},
+): PromptPluginRenderInput[] {
+  return selectPromptPluginsForPromptWithTelemetry(projectDir, disabledPluginIds, context).plugins;
+}
+
+export function selectPromptPluginsForPromptWithTelemetry(
+  projectDir: string | undefined,
+  disabledPluginIds: string[] = [],
+  context: PromptPluginSelectionContext = {},
+): PromptPluginSelectionResult {
+  const startedAt = performance.now();
+  const allowed = allowedPluginIdSet(context.allowedPluginIds);
+  if (allowed.size === 0) {
+    return {
+      plugins: [],
+      telemetry: {
+        allowedPluginCount: 0,
+        selectedPluginCount: 0,
+        selectedSectionCount: 0,
+        selectionDurationMs: 0,
+        manifestsScanned: 0,
+        cache: {
+          entries: promptPluginManifestCache.size,
+          hits: 0,
+          misses: 0,
+        },
+      },
+    };
+  }
+  const disabled = new Set(disabledPluginIds);
+  const selected: PromptPluginRenderInput[] = [];
+  const manifestTelemetry: PromptPluginManifestReadTelemetry = {
+    manifestsScanned: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+  };
+
+  for (const record of promptPluginManifestRecords(pluginRoots(projectDir), manifestTelemetry)) {
+    if (!record.raw) continue;
+    const raw = record.raw;
+    const summary = summarizeManifest(raw, record.manifest, record.location, disabled);
+    if (!pluginIsAllowed(summary.id, allowed)) continue;
+    if (!summary.enabled || summary.status !== 'ready') continue;
+    if (summary.safety.canOverrideProjectInstructions) continue;
+    if (!targetsMatch(summary.targets, context)) continue;
+
+    const rawSections = Array.isArray(raw?.sections) ? raw.sections : [];
+    const renderSections: PromptPluginRenderSection[] = rawSections.map((section: any): PromptPluginRenderSection => ({
+        id: String(section?.id || 'unknown'),
+        title: String(section?.title || section?.id || 'Untitled section'),
+        placement: String(section?.placement || 'append-system'),
+        priority: typeof section?.priority === 'number' ? section.priority : 100,
+        content: String(section?.content || ''),
+        conditions: {
+          roles: asStringArray(section?.conditions?.roles),
+          routeModes: asStringArray(section?.conditions?.routeModes),
+          modelFamilies: asStringArray(section?.conditions?.modelFamilies),
+          modelIds: asStringArray(section?.conditions?.modelIds),
+        },
+      }));
+    const sections = renderSections
+      .filter((section) => section.placement !== 'replace-role')
+      .filter((section) => section.content.trim().length > 0)
+      .filter((section) => targetsMatch(section.conditions, context));
+
+    if (sections.length === 0) continue;
+    selected.push({
+      id: summary.id,
+      name: summary.name,
+      enabled: true,
+      status: 'ready',
+      targets: summary.targets,
+      sections,
+    });
+  }
+
+  const plugins = selected.sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    plugins,
+    telemetry: {
+      allowedPluginCount: allowed.size,
+      selectedPluginCount: plugins.length,
+      selectedSectionCount: plugins.reduce((sum, plugin) => sum + plugin.sections.length, 0),
+      selectionDurationMs: Math.max(0, Math.round((performance.now() - startedAt) * 100) / 100),
+      manifestsScanned: manifestTelemetry.manifestsScanned,
+      cache: {
+        entries: promptPluginManifestCache.size,
+        hits: manifestTelemetry.cacheHits,
+        misses: manifestTelemetry.cacheMisses,
+      },
+    },
   };
 }

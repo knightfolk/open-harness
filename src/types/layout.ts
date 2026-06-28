@@ -1,4 +1,4 @@
-export type PanelId = 'chat' | 'browser' | 'terminal' | 'files' | 'model-lab' | 'routing-learning' | 'safety' | 'attention-inbox' | 'workflows' | 'sub-agents';
+export type PanelId = 'chat' | 'side-chat' | 'browser' | 'terminal' | 'files' | 'model-lab' | 'routing-learning' | 'safety' | 'attention-inbox' | 'workflows' | 'sub-agents';
 export type PanelPlacement = 'right' | 'bottom';
 
 /** A layout tree: either a single panel, or a split with direction + children */
@@ -19,7 +19,7 @@ export interface PanelConfig {
 
 export const DEFAULT_LAYOUT: LayoutNode = 'chat';
 
-export const ALL_PANELS: PanelId[] = ['chat', 'browser', 'terminal', 'files', 'model-lab', 'routing-learning', 'safety', 'attention-inbox', 'workflows'];
+export const ALL_PANELS: PanelId[] = ['chat', 'side-chat', 'browser', 'terminal', 'files', 'model-lab', 'routing-learning', 'safety', 'attention-inbox', 'workflows'];
 
 export function defaultPanelPlacement(id: PanelId): PanelPlacement {
   return id === 'terminal' ? 'bottom' : 'right';

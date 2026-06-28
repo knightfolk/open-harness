@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const agentFocusPanel = readFileSync('src/components/AgentFocusPanel.tsx', 'utf-8');
 const subAgentTracker = readFileSync('src/components/SubAgentTracker.tsx', 'utf-8');
+const subAgentReplaySummary = readFileSync('src/utils/subAgentReplaySummary.ts', 'utf-8');
 const appShell = readFileSync('src/App.tsx', 'utf-8');
 
 for (const expected of [
@@ -52,13 +53,32 @@ for (const expected of [
   'Run replay summary:',
   'isolated worktrees',
   'Latest proof',
-  'latestReplayProof(steps)',
+  'buildSubAgentReplaySummary(steps)',
+  'subAgentReplaySummary.latestProof',
+  'subAgentReplaySummary.errors',
+  'subAgentReplaySummary.runningToolCalls',
 ]) {
   assert.ok(
     subAgentTracker.includes(expected),
     `SubAgentTracker should preserve trace-backed workflow/replay detail: ${expected}`,
   );
 }
+
+for (const expected of [
+  'function promptBuiltReplayDetail(step: Extract<HarnessRunStep, { type: \'prompt_built\' }>): string | null',
+  'case \'prompt_built\': return promptBuiltReplayDetail(step)',
+  'step.promptPreviewRedacted',
+  'Prompt preview unavailable',
+]) {
+  assert.ok(
+    subAgentTracker.includes(expected),
+    `SubAgentTracker should default Agent detail prompt previews to redacted replay text: ${expected}`,
+  );
+}
+assert.ok(
+  !subAgentTracker.includes("case 'prompt_built': return step.promptPreview;"),
+  'SubAgentTracker Agent detail should not render the raw prompt preview directly',
+);
 
 for (const expected of [
   "const steeringActions: Array<{ action: RunSteeringAction; label: string }>",
@@ -111,12 +131,20 @@ for (const expected of [
   "case 'worktree_isolation': return Package",
   'Worktree isolation ready',
   'Worktree isolation ${step.status}',
-  'Worktree isolation ready for ${proofStep.agent}',
-  'isolated worktree',
 ]) {
   assert.ok(
     subAgentTracker.includes(expected),
     `SubAgentTracker should expose worktree isolation proof in Agent detail replay: ${expected}`,
+  );
+}
+
+for (const expected of [
+  'Worktree isolation ready for ${proofStep.agent}',
+  'isolated worktree',
+]) {
+  assert.ok(
+    subAgentReplaySummary.includes(expected),
+    `SubAgent replay summary helper should preserve latest worktree proof text: ${expected}`,
   );
 }
 

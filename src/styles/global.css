@@ -15,9 +15,14 @@
   --panel-width: clamp(260px, 28vw, 440px);
   --topbar-height: 52px;
   --surface-flat: transparent;
-  --surface-subtle: var(--bg-tertiary);
+  --surface-primary: var(--bg-primary, #0e1116);
+  --surface-secondary: var(--bg-secondary, #15181e);
+  --surface-tertiary: var(--bg-tertiary, #1b1f26);
+  --surface-elevated: var(--bg-elevated, #212530);
+  --surface-subtle: var(--surface-tertiary, var(--bg-tertiary, #1b1f26));
   --border-subtle: var(--border-secondary);
   --text-muted: var(--text-tertiary);
+  --accent-muted: var(--accent-primary-muted, rgba(99, 102, 241, 0.15));
 
   --bg-primary: #0e1116;
   --bg-secondary: #15181e;

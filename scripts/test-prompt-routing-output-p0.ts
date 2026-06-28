@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeBenchScores, createBenchRun, createOrchestrationProofFailure, exportBenchRunCSV, generateBenchSummary, runSetupCommands, runValidation, saveBenchRun, summarizeValidationFailure, validateChangedFiles, validateExpectedPathChanges } from '../server/benchRuns';
@@ -75,6 +75,96 @@ function testPromptAssemblyMetadata() {
   assert.match(reviewerPrompt.systemPrompt, /findings first, ordered by severity/i);
   assert.equal(reviewerPrompt.assembly.outputStyle.id, 'code-review-findings');
   assert.ok(reviewerPrompt.assembly.outputStyle.mustHave.includes('severity order'));
+}
+
+function testFrontierPromptContracts() {
+  const executePrompt = buildPromptForModel({
+    modelId: 'qwen3-coder-480b',
+    role: 'coder',
+    workingDir: '/Users/kevink/Projects/OpenHarness',
+    projectProfileSummary: [
+      'OpenHarness routes tasks, builds model-aware prompts, and records run traces.',
+      '## Active Session Goal',
+      'Objective: Improve the harness prompt contract.',
+      'Criteria:',
+      '- preserve agent-first identity',
+      '- report validation proof',
+    ].join('\n'),
+    taskDescription: 'Implement the prompt change, validate it, and report proof.',
+    routeMode: 'execute',
+  } as any);
+
+  assert.ok(
+    executePrompt.assembly.sections.some((section) => section.id === 'mode-contract'),
+    'prompt assembly should expose the route/mode contract separately from role style',
+  );
+  assert.ok(
+    executePrompt.assembly.sections.some((section) => section.id === 'goal-contract'),
+    'active /goal context should add a dedicated goal contract section',
+  );
+  assert.match(executePrompt.systemPrompt, /Mode contract: execute/i, 'execute prompts should distinguish execution from direct answers');
+  assert.match(executePrompt.systemPrompt, /Goal-driven work/i, '/goal prompts should preserve goal-specific steering');
+  assert.match(executePrompt.systemPrompt, /do not mark.*complete.*proof/i, '/goal prompts should guard completion claims with proof');
+  assert.match(executePrompt.systemPrompt, /deliver.*proof|proof.*deliver/i, 'execute prompts should lead with delivered result and proof');
+
+  const directPrompt = buildPromptForModel({
+    modelId: 'claude-sonnet-4.6',
+    role: 'reasoner',
+    taskDescription: 'Explain the tradeoff briefly.',
+    routeMode: 'direct',
+  } as any);
+  assert.match(directPrompt.systemPrompt, /Mode contract: direct/i, 'direct prompts should carry a direct-answer contract');
+  assert.match(directPrompt.systemPrompt, /brief useful rationale/i, 'direct prompts should allow concise rationale when it helps');
+  assert.doesNotMatch(directPrompt.systemPrompt, /never explain your approach/i, 'direct prompts should not ban useful approach summaries');
+
+  const unknownModePrompt = buildPromptForModel({
+    modelId: 'qwen3-coder-480b',
+    role: 'coder',
+    taskDescription: 'Answer briefly despite stale route metadata.',
+    routeMode: 'stale-mode',
+  } as any);
+  const unknownModeSection = unknownModePrompt.assembly.sections.find((section) => section.id === 'mode-contract');
+  assert.match(unknownModePrompt.systemPrompt, /Mode contract: direct/i, 'unknown runtime route modes should fall back to the calm direct contract');
+  assert.equal(unknownModeSection?.source, 'route:direct', 'unknown runtime route modes should be traced as the direct fallback contract');
+  assert.match(unknownModeSection?.reason || '', /unsupported route mode/i, 'unknown runtime route modes should leave an explicit trace reason');
+  assert.equal(unknownModePrompt.assembly.routeMode?.requested, 'stale-mode', 'prompt assembly trace should preserve the unsupported requested route mode');
+  assert.equal(unknownModePrompt.assembly.routeMode?.applied, 'direct', 'prompt assembly trace should expose the applied route mode fallback');
+  assert.equal(unknownModePrompt.assembly.routeMode?.fallback, true, 'prompt assembly trace should mark unsupported route mode fallback');
+  assert.match(
+    JSON.stringify({
+      type: 'prompt_built',
+      assembly: unknownModePrompt.assembly,
+    }),
+    /stale-mode.*direct|direct.*stale-mode/,
+    'persisted prompt_built trace JSON should include requested and applied route mode values',
+  );
+
+  const weakToolPrompt = buildPromptForModel({
+    modelId: 'gemma-3-27b',
+    role: 'coder',
+    taskDescription: 'Use the available tool only if needed, then return a structured answer.',
+    tools: [{
+      type: 'function',
+      function: {
+        name: 'read_file',
+        description: 'Read a file',
+        parameters: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+          required: ['path'],
+        },
+      },
+    }],
+  });
+  assert.doesNotMatch(weakToolPrompt.systemPrompt, /Think step by step/i, 'weak tool prompts should not ask for visible step-by-step reasoning');
+  assert.match(weakToolPrompt.systemPrompt, /private check|private plan/i, 'weak tool prompts should keep any reasoning private');
+  assert.match(weakToolPrompt.systemPrompt, /one tool/i, 'weak tool prompts should keep tool use bounded');
+  assert.match(weakToolPrompt.systemPrompt, /structured JSON|schema-shaped/i, 'weak tool prompts should prefer structured tool output');
+
+  const runtimeSource = readFileSync(new URL('../server/index.ts', import.meta.url), 'utf-8');
+  assert.doesNotMatch(runtimeSource, /Do NOT narrate your planning process/, 'runtime prompt should not use the old blunt monologue ban');
+  assert.doesNotMatch(runtimeSource, /Never say things like The user wants me to or Let me or I need to or I will or Now I/, 'runtime prompt should not ban ordinary first-person direct answers');
+  assert.match(runtimeSource, /brief rationale|useful rationale|private reasoning/i, 'runtime prompt should allow concise rationale while keeping private reasoning hidden');
 }
 
 function testSessionGoalCommands() {
@@ -1036,6 +1126,7 @@ function testDirectAnswerNormalization() {
 }
 
 testPromptAssemblyMetadata();
+testFrontierPromptContracts();
 testSessionGoalCommands();
 testOutputStyleRunTraceMetadata();
 testBoundedReviewRouting();

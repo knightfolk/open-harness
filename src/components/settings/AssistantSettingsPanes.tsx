@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Brain,
   Command,
@@ -16,8 +16,14 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
-import type { MemoryEntry } from '../../types';
 import * as api from '../../utils/api';
+import {
+  buildPromptPluginInjectionRows,
+  normalizePromptPluginRenderingConfig,
+  togglePromptPluginInjectionAllowed,
+  togglePromptPluginRenderingEnabled,
+} from '../../utils/promptPluginRenderingSettings';
+import { buildAssistantMemoryEntries } from '../../utils/assistantMemoryInventory';
 
 function PaneTitle({ children }: { children: ReactNode }) {
   return <div className="settings-pane-title">{children}</div>;
@@ -45,6 +51,8 @@ const memoryTypeIcons: Record<string, typeof Brain> = {
   plugin: Layers,
 };
 
+const EMPTY_CAPABILITY_ITEMS: api.CapabilityItem[] = [];
+
 export function ClickySettingsPane({ enabled, onChange }: { enabled: boolean; onChange: (enabled: boolean) => void }) {
   return (
     <>
@@ -65,32 +73,51 @@ export function ClickySettingsPane({ enabled, onChange }: { enabled: boolean; on
 
 export function AssistantCapabilityPane({ kind, workingDir }: { kind: 'skills' | 'plugins'; workingDir?: string | null }) {
   const [registry, setRegistry] = useState<api.CapabilityRegistry | null>(null);
+  const [promptPluginRendering, setPromptPluginRendering] = useState<api.PromptPluginRenderingConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [savingRenderingId, setSavingRenderingId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const isSkills = kind === 'skills';
-  const items = registry?.[kind] || [];
+  const items = registry?.[kind] || EMPTY_CAPABILITY_ITEMS;
   const enabledCount = items.filter((item) => item.enabled).length;
+  const renderingConfig = useMemo(() => (
+    normalizePromptPluginRenderingConfig(promptPluginRendering)
+  ), [promptPluginRendering]);
+  const promptPluginInjectionRows = useMemo(() => (
+    buildPromptPluginInjectionRows(items, renderingConfig)
+  ), [items, renderingConfig]);
+  const promptPluginAllowedCount = promptPluginInjectionRows.filter((row) => row.allowed).length;
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setMessage('');
     try {
-      setRegistry(await api.getCapabilities(workingDir));
+      const [nextRegistry, nextConfig] = await Promise.all([
+        api.getCapabilities(workingDir),
+        kind === 'plugins' ? api.getConfig() : Promise.resolve(null),
+      ]);
+      setRegistry(nextRegistry);
+      if (kind === 'plugins') setPromptPluginRendering(nextConfig?.promptPluginRendering || null);
     } catch (err: any) {
       setMessage(err?.message || 'Could not load capabilities.');
     } finally {
       setLoading(false);
     }
-  }, [workingDir]);
+  }, [kind, workingDir]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setMessage('');
-    api.getCapabilities(workingDir)
-      .then((next) => {
-        if (!cancelled) setRegistry(next);
+    Promise.all([
+      api.getCapabilities(workingDir),
+      kind === 'plugins' ? api.getConfig() : Promise.resolve(null),
+    ])
+      .then(([nextRegistry, nextConfig]) => {
+        if (cancelled) return;
+        setRegistry(nextRegistry);
+        if (kind === 'plugins') setPromptPluginRendering(nextConfig?.promptPluginRendering || null);
       })
       .catch((err) => {
         if (!cancelled) setMessage(err?.message || 'Could not load capabilities.');
@@ -99,7 +126,7 @@ export function AssistantCapabilityPane({ kind, workingDir }: { kind: 'skills' |
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [workingDir]);
+  }, [kind, workingDir]);
 
   const toggle = async (item: api.CapabilityItem) => {
     if (!item.configurable) return;
@@ -112,6 +139,35 @@ export function AssistantCapabilityPane({ kind, workingDir }: { kind: 'skills' |
       setMessage(err?.message || `Could not update ${item.name}.`);
     } finally {
       setSavingId(null);
+    }
+  };
+
+  const togglePromptPluginRendering = async () => {
+    const nextConfig = togglePromptPluginRenderingEnabled(renderingConfig, !renderingConfig.enabled);
+    setSavingRenderingId('prompt-plugin-rendering');
+    setMessage('');
+    try {
+      setPromptPluginRendering(await api.setPromptPluginRenderingEnabled(!renderingConfig.enabled, workingDir));
+      setMessage(nextConfig.enabled ? 'Prompt plugin injection is on.' : 'Prompt plugin injection is off.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Could not update prompt plugin injection.');
+    } finally {
+      setSavingRenderingId(null);
+    }
+  };
+
+  const togglePromptPluginInjection = async (row: ReturnType<typeof buildPromptPluginInjectionRows>[number]) => {
+    const nextConfig = togglePromptPluginInjectionAllowed(renderingConfig, row.id, !row.allowed);
+    setSavingRenderingId(row.id);
+    setMessage('');
+    try {
+      setPromptPluginRendering(await api.setPromptPluginInjectionAllowed(row.id, !row.allowed, workingDir));
+      const changed = nextConfig.allowedPluginIds.includes(row.manifestId);
+      setMessage(`${row.name} prompt injection ${changed ? 'allowed' : 'disallowed'}.`);
+    } catch (err: any) {
+      setMessage(err?.message || `Could not update prompt injection for ${row.name}.`);
+    } finally {
+      setSavingRenderingId(null);
     }
   };
 
@@ -189,34 +245,164 @@ export function AssistantCapabilityPane({ kind, workingDir }: { kind: 'skills' |
           {message || 'Changes are saved immediately.'}
         </div>
       </div>
+      {!isSkills && (
+        <div className="settings-card" style={{ marginTop: 12 }}>
+          <div className="settings-section-header">
+            <div>
+              <div className="settings-section-title">
+                Prompt plugin injection {renderingConfig.enabled ? `(${promptPluginAllowedCount}/${promptPluginInjectionRows.length} allowed)` : '(off)'}
+              </div>
+              <div className="settings-item-desc">
+                Off by default. Allow ready prompt plugins here before their sections can be added to future prompts.
+              </div>
+            </div>
+            <button
+              className={`settings-mini-button ${renderingConfig.enabled ? 'active' : ''}`}
+              type="button"
+              onClick={togglePromptPluginRendering}
+              disabled={loading || !!savingRenderingId}
+              aria-pressed={renderingConfig.enabled}
+              aria-label={`${renderingConfig.enabled ? 'Turn off' : 'Turn on'} prompt plugin injection`}
+            >
+              {savingRenderingId === 'prompt-plugin-rendering' ? <Loader size={11} className="spin" aria-hidden="true" /> : <Layers size={11} aria-hidden="true" />}
+              {renderingConfig.enabled ? 'On' : 'Off'}
+            </button>
+          </div>
+          {promptPluginInjectionRows.length === 0 ? (
+            <div className="settings-item-desc" role="status">No prompt plugins are available for injection.</div>
+          ) : (
+            <div className="assistant-capability-list" role="list" aria-label={`${promptPluginInjectionRows.length} prompt plugin injection controls`}>
+              {promptPluginInjectionRows.map((row) => {
+                const Icon = row.injectable ? Layers : Lock;
+                const disabled = !renderingConfig.enabled || !row.injectable || savingRenderingId === row.id;
+                const disabledReason = !renderingConfig.enabled ? 'Turn on prompt plugin injection first.' : row.reason;
+                return (
+                  <div
+                    key={`inject:${row.id}`}
+                    className={`assistant-capability-row ${row.allowed ? '' : 'muted'} ${!row.injectable ? 'blocked' : ''}`}
+                    role="listitem"
+                    aria-label={`${row.name}, prompt injection ${row.allowed ? 'allowed' : 'not allowed'}${row.reason ? `, ${row.reason}` : ''}`}
+                  >
+                    <span className="assistant-capability-icon"><Icon size={14} aria-hidden="true" /></span>
+                    <span className="assistant-capability-main">
+                      <span className="assistant-capability-title-row">
+                        <span className="assistant-capability-name">{row.name}</span>
+                        <span className={`assistant-capability-pill ${row.allowed ? 'on' : ''}`}>
+                          {row.allowed ? 'Injects' : 'No injection'}
+                        </span>
+                      </span>
+                      <span className="assistant-capability-desc">{row.description}</span>
+                      <span className="assistant-capability-meta">
+                        {row.injectable ? 'Ready for prompt injection' : row.reason}
+                      </span>
+                      {row.path && <span className="assistant-capability-path">{row.path}</span>}
+                    </span>
+                    <button
+                      className={`compact-toggle ${row.allowed ? 'active' : ''}`}
+                      type="button"
+                      onClick={() => togglePromptPluginInjection(row)}
+                      disabled={disabled}
+                      title={disabled ? disabledReason : `${row.allowed ? 'Disallow' : 'Allow'} prompt injection for ${row.name}`}
+                      aria-label={`${row.allowed ? 'Disallow' : 'Allow'} prompt injection for ${row.name}`}
+                      aria-pressed={row.allowed}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
 
-export function AssistantMemoryPane({ entries }: { entries: MemoryEntry[] }) {
+export function AssistantMemoryPane({ workingDir }: { workingDir?: string | null }) {
+  const [memory, setMemory] = useState<api.ProjectMemoryInfo | null>(null);
+  const [loading, setLoading] = useState(Boolean(workingDir));
+  const [message, setMessage] = useState('');
+  const memoryLoadSeq = useRef(0);
+  const entries = useMemo(() => buildAssistantMemoryEntries(memory), [memory]);
+
+  const loadProjectMemory = useCallback(async () => {
+    const requestId = memoryLoadSeq.current + 1;
+    memoryLoadSeq.current = requestId;
+    if (!workingDir) {
+      setMemory(null);
+      setMessage('');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      const nextMemory = await api.getProjectMemory(workingDir);
+      if (requestId !== memoryLoadSeq.current) return;
+      setMemory(nextMemory);
+    } catch (err: any) {
+      if (requestId !== memoryLoadSeq.current) return;
+      setMemory(null);
+      setMessage(err?.message || 'Could not load project memory.');
+    } finally {
+      if (requestId === memoryLoadSeq.current) setLoading(false);
+    }
+  }, [workingDir]);
+
+  const refresh = useCallback(() => {
+    void loadProjectMemory();
+  }, [loadProjectMemory]);
+
+  useEffect(() => {
+    void loadProjectMemory();
+    return () => { memoryLoadSeq.current += 1; };
+  }, [loadProjectMemory]);
+
   return (
     <>
       <PaneTitle>Memory</PaneTitle>
-      <PaneDesc>Demo memory examples. Live Codex memory inventory is not wired into this Settings pane yet.</PaneDesc>
+      <PaneDesc>Live project memory for the active workspace. These notes are treated as untrusted context when used in prompts.</PaneDesc>
       <div className="settings-card" style={{ marginTop: 16 }}>
         <div className="settings-section-header">
-          <div className="settings-section-title">Demo Memory</div>
+          <div>
+            <div className="settings-section-title">Project Memory Inventory</div>
+            <div className="settings-item-desc">
+              {workingDir ? workingDir : 'Open a folder to inspect project memory.'}
+            </div>
+          </div>
+          <button className="settings-mini-button" type="button" onClick={refresh} disabled={loading || !workingDir} aria-label="Refresh project memory inventory">
+            {loading ? <Loader size={11} className="spin" aria-hidden="true" /> : <RefreshCw size={11} aria-hidden="true" />}
+            Refresh
+          </button>
         </div>
-        <div className="assistant-capability-list">
+        {!workingDir ? (
+          <div className="settings-item-desc" role="status">Open a folder to view project memory inventory.</div>
+        ) : loading ? (
+          <div className="settings-item-desc" role="status">Loading project memory...</div>
+        ) : message ? (
+          <div className="settings-item-desc" role="alert">{message}</div>
+        ) : (
+        <div className="assistant-capability-list" role="list" aria-label={`${entries.length} project memory inventor${entries.length === 1 ? 'y' : 'ies'}`}>
           {entries.map((entry) => {
             const Icon = memoryTypeIcons[entry.type] || Brain;
             return (
-              <div key={entry.id} className="assistant-capability-row">
-                <span className="assistant-capability-icon"><Icon size={14} /></span>
+              <div key={entry.id} className="assistant-capability-row" role="listitem" aria-label={`${entry.name}: ${entry.description}`}>
+                <span className="assistant-capability-icon"><Icon size={14} aria-hidden="true" /></span>
                 <span className="assistant-capability-main">
-                  <span className="assistant-capability-name">{entry.name}</span>
+                  <span className="assistant-capability-title-row">
+                    <span className="assistant-capability-name">{entry.name}</span>
+                    <span className="assistant-capability-pill on">Live</span>
+                  </span>
                   <span className="assistant-capability-desc">{entry.description}</span>
                   {entry.path && <span className="assistant-capability-path">{entry.path}</span>}
+                  {entry.lastAccessed && (
+                    <span className="assistant-capability-meta">Updated {entry.lastAccessed.toLocaleString()}</span>
+                  )}
                 </span>
               </div>
             );
           })}
         </div>
+        )}
       </div>
     </>
   );

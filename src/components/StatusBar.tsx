@@ -9,6 +9,7 @@ import { modelCatalogSummary, modelCatalogTooltip } from '../data/modelCatalog';
 import { providerPlanLabel } from '../data/providerPlans';
 import { modelAbilityStates, modelSupportsThinking, THINKING_EFFORTS } from '../utils/modelCapabilities';
 import type { HarnessRunStep, ThinkingEffort } from '../types';
+import { autoRouterConfidenceCue } from '../utils/autoRouterTrace';
 
 const TerminalPanel = lazy(() => import('./TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 
@@ -188,6 +189,10 @@ export function StatusBar({
   const concreteRunningModel = runningModel && runningModel !== AUTO_MODEL_ID ? runningModel : null;
   const visibleAutoModel = concreteRunningModel || autoRouterStep?.modelId;
   const autoModelLabel = visibleAutoModel ? `Auto · ${visibleAutoModel}` : 'Auto';
+  const autoRouterConfidence = autoRouterStep ? autoRouterConfidenceCue(autoRouterStep) : null;
+  const autoModelPickerLabel = autoRouterConfidence
+    ? `Choose model, currently ${autoModelLabel}. ${autoRouterConfidence.ariaLabel}`
+    : 'Choose model, currently Auto';
   const configuredProviderNames = Array.from(new Set(models.map((m) => m.providerName).filter((name) => name && name !== 'Unknown')));
   const providerCount = configuredProviderCount ?? configuredProviderNames.length;
   const servingProvider = currentModel?.providerName || providerName;
@@ -341,8 +346,8 @@ export function StatusBar({
         <button
           ref={modelBtnRef}
           className={`status-bar-item status-bar-model-btn ${isAuto ? 'status-bar-model-btn-auto' : ''}`}
-          title={isAuto ? 'Choose model, currently Auto' : modelCatalogTooltip(activeModel, providerName)}
-          aria-label={isAuto ? 'Choose model, currently Auto' : `Choose model, currently ${activeModel}`}
+          title={isAuto ? autoModelPickerLabel : modelCatalogTooltip(activeModel, providerName)}
+          aria-label={isAuto ? autoModelPickerLabel : `Choose model, currently ${activeModel}`}
           onClick={() => {
             const nextOpen = !modelPickerOpen;
             setModelPickerOpen(nextOpen);
@@ -358,6 +363,15 @@ export function StatusBar({
         >
           {isAuto ? <span className="status-bar-auto-dot" aria-hidden="true" /> : <Cpu size={12} />}
           <span className="status-bar-model-name">{isAuto ? autoModelLabel : activeModel}</span>
+          {isAuto && autoRouterConfidence && (
+            <span
+              className={`status-bar-router-confidence status-bar-router-confidence-${autoRouterConfidence.tone}`}
+              aria-hidden="true"
+              title={autoRouterConfidence.ariaLabel}
+            >
+              {autoRouterConfidence.label}
+            </span>
+          )}
           {currentModel && (
             <span className="status-bar-model-ctx">{formatContext(currentModel.contextWindow)}</span>
           )}

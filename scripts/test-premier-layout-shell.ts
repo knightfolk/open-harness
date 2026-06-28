@@ -5,8 +5,8 @@ import { ALL_PANELS, DEFAULT_LAYOUT } from '../src/types/layout';
 assert.equal(DEFAULT_LAYOUT, 'chat', 'Premier shell should default to chat-only layout');
 assert.deepEqual(
   ALL_PANELS,
-  ['chat', 'browser', 'terminal', 'files', 'model-lab', 'routing-learning', 'safety', 'attention-inbox', 'workflows'],
-  'Default Tools panels should include optional attention/workflow panels without restoring the permanent sub-agents split',
+  ['chat', 'side-chat', 'browser', 'terminal', 'files', 'model-lab', 'routing-learning', 'safety', 'attention-inbox', 'workflows'],
+  'Default Tools panels should include optional side-chat/attention/workflow panels without restoring the permanent sub-agents split',
 );
 
 const useLayoutState = readFileSync('src/components/layout/useLayoutState.ts', 'utf-8');
@@ -120,12 +120,35 @@ for (const expected of [
   );
 }
 
-for (const expected of [
-  '--topbar-height: 52px',
-]) {
+assert.ok(globalStyles.includes('--topbar-height: 52px'), 'Top bar should sit lower with enough vertical room');
+
+function cssVarReferences(source: string, name: string, target: string, fallback: string): boolean {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedFallback = fallback.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escapedName}\\s*:\\s*var\\(\\s*${escapedTarget}\\s*,\\s*${escapedFallback}\\s*\\)`).test(source);
+}
+
+function cssVarDefined(source: string, name: string): boolean {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escapedName}\\s*:`).test(source);
+}
+
+for (const [alias, target, fallback] of [
+  ['--surface-primary', '--bg-primary', '#0e1116'],
+  ['--surface-secondary', '--bg-secondary', '#15181e'],
+  ['--surface-tertiary', '--bg-tertiary', '#1b1f26'],
+  ['--surface-elevated', '--bg-elevated', '#212530'],
+  ['--surface-subtle', '--surface-tertiary', 'var(--bg-tertiary, #1b1f26)'],
+  ['--accent-muted', '--accent-primary-muted', 'rgba(99, 102, 241, 0.15)'],
+] as const) {
   assert.ok(
-    globalStyles.includes(expected),
-    `Top bar should sit lower with enough vertical room: ${expected}`,
+    cssVarReferences(globalStyles, alias, target, fallback),
+    `Global styles should map ${alias} to ${target} with fallback ${fallback}`,
+  );
+  assert.ok(
+    cssVarDefined(globalStyles, target),
+    `Global styles should define ${target}, which is referenced by ${alias}`,
   );
 }
 

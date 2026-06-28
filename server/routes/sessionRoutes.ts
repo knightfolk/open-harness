@@ -4,6 +4,11 @@ import type { PersistedMessage, PersistedSession } from '../sessionStore';
 import * as sessionStore from '../sessionStore';
 import { isMainSessionKind, normalizeSessionKind } from '../sessionKinds';
 import {
+  canOwnSideChat,
+  createSideChatSession,
+  getOrCreateSideChatSessionForParent,
+} from '../sideChatSessions';
+import {
   appendRunStep,
   createHarnessRun,
   type HarnessRun,
@@ -46,6 +51,7 @@ const createSessionSchema = objectSchema({
   title: optionalString({ max: 200 }),
   workingDir: optionalString({ max: 4096 }),
   kind: optionalString({ max: 40 }),
+  sideChatParentSessionId: optionalString({ max: 120 }),
 });
 
 const steeringSchema = objectSchema({
@@ -88,8 +94,35 @@ export function registerSessionRoutes(app: express.Express, deps: SessionRouteDe
   app.get('/api/sessions/:id', (req, res) => {
     const session = deps.sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    const { id, title, workingDir, messages, createdAt, updatedAt, kind, goal } = session;
-    res.json({ id, title, workingDir, messages, createdAt, updatedAt, kind, goal: goal || null });
+    const { id, title, workingDir, messages, createdAt, updatedAt, kind, sideChatParentSessionId, goal } = session;
+    res.json({ id, title, workingDir, messages, createdAt, updatedAt, kind, sideChatParentSessionId: sideChatParentSessionId || null, goal: goal || null });
+  });
+
+  app.post('/api/sessions/:id/side-chat', (req, res) => {
+    const mutation = deps.ensureLocalMutationWithControl(req);
+    if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+
+    const parent = deps.sessions.get(req.params.id);
+    if (!parent) return res.status(404).json({ error: 'Session not found' });
+    if (!canOwnSideChat(parent)) return res.status(400).json({ error: 'Side chats must be spawned from a main session' });
+
+    const opened = getOrCreateSideChatSessionForParent({
+      sessions: deps.sessions,
+      parent,
+      create: () => createSideChatSession({
+        id: uuid(),
+        parent,
+        now: new Date().toISOString(),
+      }),
+    });
+    if (!opened.created) return res.json(opened.session);
+
+    sessionStore.saveSession(opened.session);
+    auditRouteMutation('POST /api/sessions/:id/side-chat', 'created', {
+      sessionId: opened.session.id,
+      parentSessionId: parent.id,
+    });
+    res.status(201).json(opened.session);
   });
 
   app.post('/api/sessions', (req, res) => {
@@ -98,8 +131,14 @@ export function registerSessionRoutes(app: express.Express, deps: SessionRouteDe
     const { title } = body;
     let { workingDir } = body;
     const kind = normalizeSessionKind(body.kind);
+    const sideChatParentSessionId = kind === 'side-chat' ? body.sideChatParentSessionId || null : null;
     const mutation = deps.ensureLocalMutationWithControl(req);
     if (!mutation.ok) return res.status(mutation.status).json({ error: mutation.error });
+    if (sideChatParentSessionId) {
+      const parent = deps.sessions.get(sideChatParentSessionId);
+      if (!canOwnSideChat(parent)) return res.status(400).json({ error: 'Side chats must be linked to a main session' });
+      workingDir = workingDir || parent.workingDir || undefined;
+    }
     if (workingDir) {
       const validation = deps.validateSessionWorkingDir(workingDir);
       if (!validation.ok) return res.status(validation.status).json({ error: validation.error });
@@ -113,6 +152,7 @@ export function registerSessionRoutes(app: express.Express, deps: SessionRouteDe
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       kind,
+      sideChatParentSessionId,
       goal: null,
     };
     deps.sessions.set(session.id, session);

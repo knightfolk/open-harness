@@ -18,7 +18,10 @@ import { dockerDesktopEnv } from './dockerDesktopEnv';
 import { spawnShellCommand, terminateProcessTree } from './shell';
 import { getModelConfig, isReasoningModel, detectModelFamily, estimateCostForRanking } from './modelProfiles';
 import { buildContextWindow, estimateTokens } from './contextManager';
-import { buildPromptForModel } from './promptBuilder';
+import { buildPromptForModel, effectivePromptStrategyTraceForModel } from './promptBuilder';
+import { buildPromptPreviewTrace } from './promptPreviewTrace';
+import { selectPromptPluginsForPromptWithTelemetry } from './promptPlugins';
+import { buildPromptPluginSelectionTraceStep } from './promptPluginTrace';
 import { getPromptStrategyById, getPromptStrategySelectionForModel, toPromptStrategyTrace } from './promptStrategies';
 import { formatProjectProfileForPrompt, getProjectProfile } from './projectProfile';
 import {
@@ -48,6 +51,7 @@ import { normalizeDirectAnswer, StreamCleaner, stripThinkingTags } from './strea
 import { recordToolErrorRunEvents } from './toolErrorLedger';
 import { formatPersonalizationForPrompt } from './personalization';
 import { appendVisualContextToContent, type VisualContext } from './visionFallback';
+import { getModelRequestTimeoutDecision } from './modelTimeouts';
 import { registerAgentRoutes } from './routes/agentRoutes';
 import { registerApprovalRoutes } from './routes/approvalRoutes';
 import { registerAppInfoRoutes } from './routes/appInfoRoutes';
@@ -64,6 +68,7 @@ import { registerGitRoutes } from './routes/gitRoutes';
 import { registerLabUtilityRoutes } from './routes/labUtilityRoutes';
 import { registerOpsRoutes } from './routes/opsRoutes';
 import { registerPatchProposalRoutes } from './routes/patchProposalRoutes';
+import { buildRunDebugBundleManifest } from './runDebugBundleManifest';
 import { registerProjectMemoryRoutes } from './routes/projectMemoryRoutes';
 import { registerProjectRepoRoutes } from './routes/projectRepoRoutes';
 import { registerRouterRoutes } from './routes/routerRoutes';
@@ -94,10 +99,13 @@ function sanitizeFilePart(value: string): string {
 function promptStrategyTraceForModel(modelId: string, promptStrategyId?: string) {
   const override = getPromptStrategyById(promptStrategyId);
   if (override) {
-    return toPromptStrategyTrace(override, undefined, { source: 'applies-to', hint: promptStrategyId || override.id });
+    return effectivePromptStrategyTraceForModel(
+      modelId,
+      toPromptStrategyTrace(override, undefined, { source: 'applies-to', hint: promptStrategyId || override.id }),
+    );
   }
   const selection = getPromptStrategySelectionForModel(modelId);
-  return toPromptStrategyTrace(selection.profile, undefined, selection.modelMatch);
+  return effectivePromptStrategyTraceForModel(modelId, toPromptStrategyTrace(selection.profile, undefined, selection.modelMatch));
 }
 
 function configuredModelSupportsNativeVision(modelId: string): boolean {
@@ -340,7 +348,6 @@ const app = express();
 const runtimeConfig = getRuntimeConfig(process.env);
 const UI_ORIGIN = runtimeConfig.uiOrigin;
 const STATIC_DIR = process.env.OPENHARNESS_STATIC_DIR;
-const MODEL_REQUEST_TIMEOUT_MS = 90_000;
 const SERVER_LISTEN_HOST = runtimeConfig.listenHost;
 const REMOTE_API_ENABLED = process.env.OPENHARNESS_ENABLE_REMOTE_API === '1';
 const REMOTE_API_TOKEN = (process.env.OPENHARNESS_REMOTE_API_TOKEN || '').trim();
@@ -1355,10 +1362,35 @@ function contextPreludeBudgets(modelId: string): { repoMap: number; contextPack:
   return { repoMap: 1800, contextPack: 2200 };
 }
 
-function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep) {
+function emitRunStep(res: express.Response, run: HarnessRun, step: HarnessRunStep): HarnessRunStep {
   const appended = appendRunStep(run, step);
   emitRunTraceStep(appended, run.id);
   writeSSE(res, 'run_step', { runId: run.id, step: appended });
+  return appended;
+}
+
+function startTimedModelRequestStep(
+  res: express.Response,
+  run: HarnessRun,
+  step: Extract<HarnessRunStep, { type: 'model_request' }>,
+): Extract<HarnessRunStep, { type: 'model_request' }> {
+  return emitRunStep(res, run, { ...step, startedAt: new Date().toISOString() }) as Extract<HarnessRunStep, { type: 'model_request' }>;
+}
+
+function completeTimedModelRequestStep(
+  res: express.Response,
+  run: HarnessRun,
+  step: Extract<HarnessRunStep, { type: 'model_request' }> | undefined,
+) {
+  void res;
+  void run;
+  if (!step || step.completedAt || !step.startedAt) return;
+  const completedAt = new Date();
+  const startedAtMs = new Date(step.startedAt).getTime();
+  const completedAtMs = completedAt.getTime();
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(completedAtMs) || completedAtMs < startedAtMs) return;
+  step.completedAt = completedAt.toISOString();
+  step.durationMs = completedAtMs - startedAtMs;
 }
 
 function persistAssistantMessage(
@@ -1424,6 +1456,8 @@ function buildRunDebugBundle(sessionId: string, messageId: string) {
   if (!session) return null;
   const message = session.messages.find((item) => item.id === messageId);
   if (!message?.runTrace) return null;
+  const schemaVersion = '0.1.0';
+  const exportedAt = new Date().toISOString();
   const run = message.runTrace as HarnessRun;
   const steps: HarnessRunStep[] = run.steps || [];
   const promptStep = steps.find((step): step is Extract<HarnessRunStep, { type: 'prompt_built' }> => step.type === 'prompt_built');
@@ -1434,10 +1468,24 @@ function buildRunDebugBundle(sessionId: string, messageId: string) {
     .map((step) => step.artifact);
   const modelOutputs = steps.filter((step) => step.type === 'model_text' || step.type === 'model_thinking' || step.type === 'final_answer');
   const worktreeIsolation = steps.filter((step): step is Extract<HarnessRunStep, { type: 'worktree_isolation' }> => step.type === 'worktree_isolation');
+  const retryable = errors.some((error) => /timeout|rate|network|abort/i.test(error.message));
+  const manifest = buildRunDebugBundleManifest({
+    schemaVersion,
+    exportedAt,
+    sessionId: session.id,
+    runId: run.id,
+    messageCount: session.messages.length,
+    routeDecisionCount: routeSteps.length,
+    modelOutputCount: modelOutputs.length,
+    artifactCount: artifacts.length,
+    errorCount: errors.length,
+    retryable,
+  });
 
   return {
-    schemaVersion: '0.1.0',
-    exportedAt: new Date().toISOString(),
+    schemaVersion,
+    exportedAt,
+    manifest,
     session: {
       id: session.id,
       title: session.title,
@@ -1460,7 +1508,7 @@ function buildRunDebugBundle(sessionId: string, messageId: string) {
       modelOutputs,
       artifacts,
       errors,
-      retryable: errors.some((error) => /timeout|rate|network|abort/i.test(error.message)),
+      retryable,
     },
   };
 }
@@ -1863,9 +1911,11 @@ async function streamWithNativeAdapter(
   res: express.Response,
   assistantId: string,
   session: SessionRow,
-  run?: HarnessRun,
-  abortSignal?: AbortSignal,
+  run: HarnessRun | undefined,
+  abortSignal: AbortSignal | undefined,
+  modelRequestTimeout: ReturnType<typeof getModelRequestTimeoutDecision>,
 ) {
+  const modelRequestTimeoutMs = modelRequestTimeout.timeoutMs;
   try {
     const MAX_TOOL_ROUNDS = 6;
     const toolTracker = createToolTracker();
@@ -1874,7 +1924,9 @@ async function streamWithNativeAdapter(
     const sessionToolCalls: ToolCallRow[] = [];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      if (run) emitRunStep(res, run, { type: 'model_request', round: round + 1, model: apiModelId });
+      const timedModelRequestStep = run
+        ? startTimedModelRequestStep(res, run, { type: 'model_request', round: round + 1, model: apiModelId, ...modelRequestTimeout })
+        : undefined;
 
       // Final round is tool-free and gets a forced-synthesis nudge so the
       // model produces a real answer instead of yet another tool call.
@@ -1904,30 +1956,34 @@ async function streamWithNativeAdapter(
       let abort = false;
       const thinkingSseState = { lastChars: 0, lastAt: 0 };
       const requestSignal = abortSignal
-        ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
-        : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
+        ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(modelRequestTimeoutMs)]))
+        : AbortSignal.timeout(modelRequestTimeoutMs);
 
-      for await (const event of streamWithAdapter(provider, request, requestSignal)) {
-        if (event.type === 'text_delta') {
-          roundContent += event.text;
-          // Only stream text on the last round — intermediate text is
-          // narration and is suppressed so the user doesn't see duplicates.
-          if (isLastRound) {
-            res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: event.text }) + '\n\n');
+      try {
+        for await (const event of streamWithAdapter(provider, request, requestSignal)) {
+          if (event.type === 'text_delta') {
+            roundContent += event.text;
+            // Only stream text on the last round — intermediate text is
+            // narration and is suppressed so the user doesn't see duplicates.
+            if (isLastRound) {
+              res.write('event: text\ndata: ' + JSON.stringify({ id: assistantId, text: event.text }) + '\n\n');
+            }
+          } else if (event.type === 'thinking_delta') {
+            roundThinking += event.text;
+            if (isLastRound) {
+              maybeEmitThinkingSSE(res, assistantId, roundThinking.length, thinkingSseState, 'Model thinking live', roundThinking.slice(-700));
+            }
+          } else if (event.type === 'tool_call_done') {
+            roundToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
+          } else if (event.type === 'error') {
+            if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: event.error }); }
+            res.write('event: error\ndata: ' + JSON.stringify({ error: event.error }) + '\n\n');
+            abort = true;
+            break;
           }
-        } else if (event.type === 'thinking_delta') {
-          roundThinking += event.text;
-          if (isLastRound) {
-            maybeEmitThinkingSSE(res, assistantId, roundThinking.length, thinkingSseState, 'Model thinking live', roundThinking.slice(-700));
-          }
-        } else if (event.type === 'tool_call_done') {
-          roundToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
-        } else if (event.type === 'error') {
-          if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message: event.error }); }
-          res.write('event: error\ndata: ' + JSON.stringify({ error: event.error }) + '\n\n');
-          abort = true;
-          break;
         }
+      } finally {
+        if (run) completeTimedModelRequestStep(res, run, timedModelRequestStep);
       }
       if (abort) return;
       if (run && roundThinking.trim()) {
@@ -2041,7 +2097,7 @@ async function streamWithNativeAdapter(
       const message = err?.name === 'TimeoutError' || err?.name === 'AbortError'
       ? err?.name === 'AbortError'
         ? 'Model request was aborted by user request'
-        : `Model request timed out after ${Math.round(MODEL_REQUEST_TIMEOUT_MS / 1000)}s`
+        : `Model request timed out after ${Math.round(modelRequestTimeoutMs / 1000)}s`
       : err?.message || 'Model request failed';
     if (run) { run.status = 'error'; emitRunStep(res, run, { type: 'error', message }); }
     res.write('event: error\ndata: ' + JSON.stringify({ error: message }) + '\n\n');
@@ -2126,6 +2182,8 @@ async function streamModel(
     console.log(`[role-router] ${classifiedRole} → using ${effectiveModel} (override from Agent Roles)`);
   }
   const apiModelId = splitModelRef(effectiveModel).bareModelId;
+  const modelRequestTimeout = getModelRequestTimeoutDecision(effectiveModel, providerId);
+  const modelRequestTimeoutMs = modelRequestTimeout.timeoutMs;
 
   let projectProfile: ProjectProfile | undefined;
   if (session.workingDir) {
@@ -2170,9 +2228,26 @@ async function streamModel(
     }
   }
 
+  const effectiveModelConfig = getModelConfig(effectiveModel);
+  const promptPluginSelection = appConfig.promptPluginRendering?.enabled && (appConfig.promptPluginRendering.allowedPluginIds?.length || 0) > 0
+    ? selectPromptPluginsForPromptWithTelemetry(session.workingDir || undefined, appConfig.capabilitySettings?.disabledPlugins || [], {
+      role: classifiedRole,
+      routeMode: route.mode,
+      modelFamily: effectiveModelConfig.family,
+      modelId: effectiveModel,
+      allowedPluginIds: appConfig.promptPluginRendering.allowedPluginIds,
+    })
+    : null;
+  const promptPluginsForPrompt = promptPluginSelection?.plugins || [];
+
+  if (run && promptPluginSelection) {
+    emitRunStep(res, run, buildPromptPluginSelectionTraceStep(promptPluginSelection));
+  }
+
   const promptResult = buildPromptForModel({
     modelId: effectiveModel,
     role: classifiedRole,
+    routeMode: route.mode,
     personality: personality || undefined,
     workingDir: session.workingDir || undefined,
     projectProfileSummary: [
@@ -2187,6 +2262,7 @@ async function streamModel(
     taskDescription: systemTaskContext,
     enableThinking: isReasoningModel(effectiveModel),
     promptStrategyId,
+    promptPlugins: promptPluginsForPrompt,
   });
 
   // If the model doesn't support native tool calls, do not advertise tools yet.
@@ -2195,7 +2271,7 @@ async function streamModel(
   let systemPrompt = promptResult.systemPrompt;
   // Prevent model from narrating its thought process before the answer (skip for reasoning models)
   if (!isReasoningModel(effectiveModel)) {
-    systemPrompt += '\n\nRULE: Start your response directly with the answer. Do NOT narrate your planning process. Never say things like The user wants me to or Let me or I need to or I will or Now I. Begin immediately with the substantive response.';
+    systemPrompt += '\n\nRULE: Start with the substantive response for this route, not an internal planning transcript or user-intent recap. You may include a brief rationale, approach summary, or validation note when it helps the user, but keep private reasoning hidden and avoid stock preambles.';
   }
   const currentPromptHash = hashPrompt(systemPrompt);
 
@@ -2214,9 +2290,10 @@ async function streamModel(
   ];
   if (run) {
     run.context = { tokensUsed: ctx.tokensUsed, budget: ctx.budget.availableForHistory, compressedCount: ctx.compressedCount, summarized: ctx.summarized };
+    const promptPreviewTrace = buildPromptPreviewTrace(systemPrompt);
     emitRunStep(res, run, {
       type: 'prompt_built',
-      promptPreview: systemPrompt.slice(0, 500),
+      ...promptPreviewTrace,
       toolCount: filteredMcpTools.length,
       assembly: promptResult.assembly,
       outputStyle: promptResult.assembly.outputStyle,
@@ -2245,7 +2322,7 @@ async function streamModel(
       classifierModel: route.routerData?.classifierModel ?? null,
       candidateScores: route.routerData?.candidateScores,
       promptHash: currentPromptHash,
-      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+      timeoutMs: modelRequestTimeoutMs,
       elapsedMs: Date.now() - providerStartedAt,
       error: message,
       lastEvent: 'budget_check',
@@ -2295,7 +2372,7 @@ async function streamModel(
       classifierModel: route.routerData?.classifierModel ?? null,
       candidateScores: route.routerData?.candidateScores,
       promptHash: currentPromptHash,
-      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+      timeoutMs: modelRequestTimeoutMs,
       elapsedMs: Date.now() - providerStartedAt,
       error: message,
       lastEvent: 'provider_rate_limit',
@@ -2344,6 +2421,7 @@ async function streamModel(
         session,
         run,
         abortSignal,
+        modelRequestTimeout,
       );
     } catch (err: any) {
       recordRoutingAdherenceEvent({
@@ -2359,7 +2437,7 @@ async function streamModel(
         classifierModel: route.routerData?.classifierModel ?? null,
         candidateScores: route.routerData?.candidateScores,
         promptHash: currentPromptHash,
-        timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+        timeoutMs: modelRequestTimeoutMs,
         elapsedMs: Date.now() - providerStartedAt,
         error: err?.message || 'Native provider stream failed',
         lastEvent: 'native_provider_stream',
@@ -2379,8 +2457,6 @@ async function streamModel(
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      if (run) emitRunStep(res, run, { type: 'model_request', round: round + 1, model: effectiveModel });
-
       const requestBody: any = {
         model: apiModelId,
         messages: apiMessages,
@@ -2399,35 +2475,57 @@ async function streamModel(
         });
       }
 
-      const createRequestSignal = () => abortSignal
-        ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
-        : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
+      const createRequestSignal = (timeoutMs: number) => abortSignal
+        ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(timeoutMs)]))
+        : AbortSignal.timeout(timeoutMs);
 
       // Provider failover: try the chosen model, retry with backoff on a transient
       // error (529/429/5xx), then fall over to another configured model before
       // surfacing an error to the user.
       const mainFallbackChain = buildMainChatFallbackChain(effectiveModel, route);
+      type ProviderAttemptTelemetry = { modelId: string; providerId: string; timeoutMs: number; isFallback: boolean };
+      const providerAttemptTelemetry: {
+        attemptedProviderModels: string[];
+        lastProviderAttempt: ProviderAttemptTelemetry | null;
+      } = {
+        attemptedProviderModels: [],
+        lastProviderAttempt: null,
+      };
+      let timedModelRequestStep: Extract<HarnessRunStep, { type: 'model_request' }> | undefined;
       const attemptModelRequest = async (modelRef: string): Promise<Response> => {
         const resolved = resolveProviderForModel(modelRef);
         const attemptChatURL = resolved?.chatURL ?? chatURL;
         const attemptApiKey = resolved?.apiKey ?? apiKey;
+        const attemptProviderId = resolved?.providerId ?? providerId;
+        const attemptTimeout = getModelRequestTimeoutDecision(modelRef, attemptProviderId);
         const attemptApiModelId = splitModelRef(modelRef).bareModelId;
         const attemptBody = { ...requestBody, model: attemptApiModelId };
-        const attemptResponse = await fetch(attemptChatURL, {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + attemptApiKey,
-            'x-api-key': attemptApiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(attemptBody),
-          signal: createRequestSignal(),
-        });
-        if (!attemptResponse.ok) {
-          const errText = await attemptResponse.text().catch(() => '');
-          throw Object.assign(new Error(`Provider returned ${attemptResponse.status}: ${errText.slice(0, 200)}`), { statusCode: attemptResponse.status });
+        const isFallback = modelRef !== effectiveModel || attemptProviderId !== providerId;
+        providerAttemptTelemetry.attemptedProviderModels.push(modelRef);
+        providerAttemptTelemetry.lastProviderAttempt = { modelId: modelRef, providerId: attemptProviderId, timeoutMs: attemptTimeout.timeoutMs, isFallback };
+        timedModelRequestStep = run
+          ? startTimedModelRequestStep(res, run, { type: 'model_request', round: round + 1, model: modelRef, ...attemptTimeout })
+          : undefined;
+        try {
+          const attemptResponse = await fetch(attemptChatURL, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + attemptApiKey,
+              'x-api-key': attemptApiKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(attemptBody),
+            signal: createRequestSignal(attemptTimeout.timeoutMs),
+          });
+          if (!attemptResponse.ok) {
+            const errText = await attemptResponse.text().catch(() => '');
+            throw Object.assign(new Error(`Provider returned ${attemptResponse.status}: ${errText.slice(0, 200)}`), { statusCode: attemptResponse.status });
+          }
+          return attemptResponse;
+        } catch (err) {
+          if (run) completeTimedModelRequestStep(res, run, timedModelRequestStep);
+          throw err;
         }
-        return attemptResponse;
       };
 
       let response: Response;
@@ -2442,7 +2540,10 @@ async function streamModel(
         });
       } catch (err: any) {
         const statusCode = err?.statusCode;
-        const message = `${providerId} API error: ${statusCode ?? ''} ${err?.message ?? err}`.trim();
+        const { attemptedProviderModels, lastProviderAttempt } = providerAttemptTelemetry;
+        const attemptedFallbackModels = attemptedProviderModels.filter((modelId) => modelId !== effectiveModel);
+        const terminalProviderId = lastProviderAttempt?.providerId || providerId;
+        const message = `${terminalProviderId} API error: ${statusCode ?? ''} ${err?.message ?? err}`.trim();
         recordRoutingAdherenceEvent({
           kind: 'error',
           phase: 'provider-stream',
@@ -2456,13 +2557,22 @@ async function streamModel(
           classifierModel: route.routerData?.classifierModel ?? null,
           candidateScores: route.routerData?.candidateScores,
           promptHash: currentPromptHash,
-          timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+          timeoutMs: modelRequestTimeoutMs,
           elapsedMs: Date.now() - providerStartedAt,
           error: message,
           statusCode,
           lastEvent: 'model_request',
           retryable: true,
-          fallbackAttempted: mainFallbackChain.length > 0,
+          fallbackAttempted: attemptedFallbackModels.length > 0,
+          fallbackModelId: lastProviderAttempt?.isFallback ? lastProviderAttempt.modelId : undefined,
+          metadata: {
+            lastAttemptedModelId: lastProviderAttempt?.modelId,
+            lastAttemptedProviderId: lastProviderAttempt?.providerId,
+            lastAttemptedTimeoutMs: lastProviderAttempt?.timeoutMs,
+            attemptedProviderModels,
+            attemptedFallbackModels,
+            configuredFallbackModels: mainFallbackChain,
+          },
         });
         if (run) emitRunStep(res, run, { type: 'error', message });
         if (propagateProviderErrors) throw new Error(message);
@@ -2478,6 +2588,7 @@ async function streamModel(
       const isLastRound = round === MAX_TOOL_ROUNDS - 1;
       const knownToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
       const { content, thinking, toolCalls } = await parseStreamForContentAndTools(response, res, assistantId, isLastRound, knownToolNames);
+      if (run) completeTimedModelRequestStep(res, run, timedModelRequestStep);
       if (run && thinking.trim()) emitRunStep(res, run, {
         type: 'model_thinking',
         chars: thinking.length,
@@ -2593,8 +2704,8 @@ async function streamModel(
         },
         body: JSON.stringify(forcedBody),
         signal: abortSignal
-          ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)]))
-          : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
+          ? (abortSignal.aborted ? abortSignal : AbortSignal.any([abortSignal, AbortSignal.timeout(modelRequestTimeoutMs)]))
+          : AbortSignal.timeout(modelRequestTimeoutMs),
       });
         if (forcedResponse.ok) {
           const forcedToolNames = (filteredMcpTools || []).map((t: any) => t.function?.name || t.name).filter(Boolean);
@@ -2623,7 +2734,7 @@ async function streamModel(
           classifierModel: route.routerData?.classifierModel ?? null,
           candidateScores: route.routerData?.candidateScores,
           promptHash: currentPromptHash,
-          timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+          timeoutMs: modelRequestTimeoutMs,
           elapsedMs: Date.now() - providerStartedAt,
           error: forcedErr?.message || 'Forced answer request failed',
           lastEvent: 'forced_answer_request',
@@ -2674,7 +2785,7 @@ async function streamModel(
       classifierModel: route.routerData?.classifierModel ?? null,
       candidateScores: route.routerData?.candidateScores,
       promptHash: currentPromptHash,
-      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
+      timeoutMs: modelRequestTimeoutMs,
       elapsedMs: Date.now() - providerStartedAt,
       error: errorMessage,
       lastEvent: 'provider_stream',

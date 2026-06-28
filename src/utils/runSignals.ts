@@ -1,4 +1,6 @@
-import type { Message, HarnessRunStep } from '../types';
+import type { Message, HarnessRunStep, WorkProductArtifact } from '../types';
+
+type ValidationProofCommand = Extract<WorkProductArtifact, { type: 'validation_proof' }>['data']['commands'][number];
 
 // ── Confidence signals derived from observable run data ──
 
@@ -109,6 +111,237 @@ function messageHasUnifiedDiff(content: string): boolean {
   return false;
 }
 
+function runArtifacts(message: Message): WorkProductArtifact[] {
+  return (message.runTrace?.steps || [])
+    .filter((step): step is Extract<HarnessRunStep, { type: 'artifact' }> => step.type === 'artifact')
+    .map((step) => step.artifact);
+}
+
+function runHasFinalAnswer(message: Message): boolean {
+  return Boolean(message.runTrace?.steps.some((step) => step.type === 'final_answer'));
+}
+
+function runHasExecuteOrchestration(message: Message): boolean {
+  return Boolean(message.runTrace?.steps.some((step) => step.type === 'orchestration' && step.mode === 'execute'));
+}
+
+function validationCommands(projectProfile?: { validation?: { build?: string; test?: string; lint?: string; typecheck?: string } } | null): string[] {
+  const validation = projectProfile?.validation;
+  if (!validation) return [];
+  return [
+    validation.lint,
+    validation.test,
+    validation.typecheck,
+    validation.build,
+  ].filter((command): command is string => Boolean(command?.trim()));
+}
+
+function toolInputText(input: unknown): string {
+  if (typeof input === 'string') return input;
+  try {
+    return JSON.stringify(input || '');
+  } catch {
+    return '';
+  }
+}
+
+function commandMatchesValidation(input: unknown, commands: string[]): boolean {
+  const text = toolInputText(input);
+  if (!text) return false;
+  if (commands.some((command) => command && text.includes(command))) return true;
+  return /\b(lint|test|build|typecheck|check|verify)\b/i.test(text);
+}
+
+function normalizeValidationCommand(command: string): string {
+  return command.trim().replace(/\s+/g, ' ');
+}
+
+function runHasValidationProof(message: Message, commands: string[]): boolean {
+  const steps = message.runTrace?.steps || [];
+  for (const step of steps) {
+    if (step.type === 'artifact' && step.artifact.type === 'validation_proof') {
+      if (step.artifact.data.commands.some((command) => command.status === 'passed' && (command.exitCode == null || command.exitCode === 0))) {
+        return true;
+      }
+    }
+    if (
+      step.type === 'tool_call'
+      && step.status === 'complete'
+      && (step.name === 'exec_command' || step.name === 'run_command' || step.name === 'shell')
+      && commandMatchesValidation(step.input, commands)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function failedValidationCommands(message: Message): ValidationProofCommand[] {
+  return runArtifacts(message)
+    .filter((artifact): artifact is Extract<WorkProductArtifact, { type: 'validation_proof' }> => artifact.type === 'validation_proof')
+    .flatMap((artifact) => artifact.data.commands)
+    .filter((command) => command.status === 'failed' || (command.exitCode != null && command.exitCode !== 0));
+}
+
+function outputTailPreview(outputTail?: string): string {
+  const trimmed = outputTail?.trim();
+  if (!trimmed) return 'unavailable';
+  const lines = trimmed.split(/\r?\n/);
+  const recentLines = lines.slice(-20).join('\n');
+  if (recentLines.length <= 1600) return recentLines;
+  return `${recentLines.slice(-1600)}\n[truncated to last 1600 chars]`;
+}
+
+function validationFailurePayload(message: Message): string | null {
+  if (
+    message.role !== 'assistant'
+    || message.status === 'streaming'
+    || !message.runTrace
+    || message.runTrace.status !== 'complete'
+    || !runHasFinalAnswer(message)
+    || !runHasExecuteOrchestration(message)
+  ) {
+    return null;
+  }
+
+  const failedCommands = failedValidationCommands(message);
+  if (failedCommands.length === 0) return null;
+
+  const run = message.runTrace;
+  const routeAndModel = `${run.role} via ${run.effectiveModel} (${run.providerId})`;
+  const commandLines = failedCommands.map((command, index) => [
+    `Failure ${index + 1}:`,
+    `command: ${command.command}`,
+    `status: ${command.status}`,
+    `exit code: ${command.exitCode ?? 'unknown'}`,
+    `output tail: ${outputTailPreview(command.outputTail)}`,
+  ].join('\n')).join('\n\n');
+
+  return [
+    'Fix the failed validation from this OpenHarness run.',
+    '',
+    `Run id: ${run.id}`,
+    `Route and model: ${routeAndModel}`,
+    '',
+    'Failed validation evidence:',
+    commandLines,
+    '',
+    'Use the evidence above and the final answer context below to diagnose and fix the validation failure.',
+    'Do not claim the failure is fixed until validation has been rerun and passes.',
+    '',
+    '## Final answer context',
+    message.content,
+  ].join('\n');
+}
+
+function runValidationPayload(
+  message: Message,
+  projectProfile?: { validation?: { build?: string; test?: string; lint?: string; typecheck?: string } } | null,
+): string | null {
+  if (
+    message.role !== 'assistant'
+    || message.status === 'streaming'
+    || !message.runTrace
+    || message.runTrace.status !== 'complete'
+    || !runHasFinalAnswer(message)
+    || !runHasExecuteOrchestration(message)
+  ) {
+    return null;
+  }
+
+  if (failedValidationCommands(message).length > 0) return null;
+
+  const commands = validationCommands(projectProfile);
+  if (commands.length === 0) return null;
+  if (runHasValidationProof(message, commands)) return null;
+  return commands.join(' && ');
+}
+
+function handoffNotePayload(message: Message): string | null {
+  if (message.role !== 'assistant' || message.status === 'streaming' || !message.runTrace || !runHasFinalAnswer(message)) {
+    return null;
+  }
+
+  const artifacts = runArtifacts(message);
+  if (artifacts.length === 0) return null;
+
+  const validationProofs = artifacts.filter((artifact) => artifact.type === 'validation_proof');
+  const artifactSummary = artifacts
+    .map((artifact) => `${artifact.title} (${artifact.type})`)
+    .join(', ');
+  const run = message.runTrace;
+  const routeAndModel = `${run.role} via ${run.effectiveModel} (${run.providerId})`;
+  const validationStatus = validationProofs.length > 0
+    ? `validation proof captured: ${validationProofs.map((artifact) => artifact.summary).join('; ')}`
+    : 'no validation proof artifact captured';
+
+  return [
+    'Create a concise companion note for this OpenHarness run.',
+    '',
+    `Run id: ${run.id}`,
+    `Route and model: ${routeAndModel}`,
+    `Artifacts/proof: ${artifactSummary}`,
+    `Validation status: ${validationStatus}`,
+    '',
+    'Include:',
+    '- What changed or what was decided.',
+    '- The proof or artifact paths a future collaborator should inspect.',
+    '- Any residual risks, missing proof, or assumptions.',
+    '- The next safe step.',
+    '',
+    'Do not claim unverified work. Use only evidence visible in the run and final answer below.',
+    '',
+    '## Final answer context',
+    message.content,
+  ].join('\n');
+}
+
+function messageLooksPromptPluginWorthy(content: string): boolean {
+  if (!content) return false;
+  return /\bprompt[- ]plugin\b/i.test(content)
+    || /\bprompt strategy\b/i.test(content)
+    || /\bprompt contract\b/i.test(content)
+    || /\bmodel-family prompt/i.test(content)
+    || /\boutput style\b/i.test(content);
+}
+
+function promptPluginDraftPayload(message: Message): string | null {
+  if (
+    message.role !== 'assistant'
+    || message.status === 'streaming'
+    || !message.runTrace
+    || !runHasFinalAnswer(message)
+    || !messageLooksPromptPluginWorthy(message.content)
+  ) {
+    return null;
+  }
+
+  const run = message.runTrace;
+  const routeAndModel = `${run.role} via ${run.effectiveModel} (${run.providerId})`;
+  return [
+    'Draft a reusable OpenHarness prompt plugin from this run.',
+    '',
+    'Do not save files, enable plugin injection, or change prompt plugin settings. Produce a reviewable draft only.',
+    '',
+    `Run id: ${run.id}`,
+    `Route and model: ${routeAndModel}`,
+    '',
+    'Suggested manifest fields:',
+    '- id',
+    '- name',
+    '- description',
+    '- target route/role/model family',
+    '- prompt sections to add',
+    '- safety notes',
+    '- eval checks needed before enabling',
+    '',
+    'Use only the final answer context below. Call out what still needs human review before this becomes project-scoped.',
+    '',
+    '## Final answer context',
+    message.content,
+  ].join('\n');
+}
+
 // ── Next-best-action derivation ──────────────────────────
 
 export interface SuggestedAction {
@@ -125,6 +358,12 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
   const content = message.content.toLowerCase();
   const trace = message.runTrace;
   const signals = analyzeConfidence(message);
+  const runValidationCommand = runValidationPayload(message, projectProfile);
+  const fixValidationPayload = validationFailurePayload(message);
+  const failedValidationCommandKeys = new Set(
+    failedValidationCommands(message).map((command) => normalizeValidationCommand(command.command)),
+  );
+  const hasSemanticValidationAction = Boolean(runValidationCommand);
 
   // Always suggest follow-up
   actions.push({
@@ -135,6 +374,52 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
     payload: 'What should we do next based on your last answer?',
     priority: 50,
   });
+
+  const handoffPayload = handoffNotePayload(message);
+  if (handoffPayload) {
+    actions.push({
+      id: 'create-handoff-note',
+      label: 'Create handoff note',
+      icon: '🧭',
+      action: 'send-message',
+      payload: handoffPayload,
+      priority: 47,
+    });
+  }
+
+  if (runValidationCommand) {
+    actions.push({
+      id: 'run-validation',
+      label: 'Run validation',
+      icon: '✅',
+      action: 'run-command',
+      payload: runValidationCommand,
+      priority: 48,
+    });
+  }
+
+  if (fixValidationPayload) {
+    actions.push({
+      id: 'fix-validation-failure',
+      label: 'Fix validation failure',
+      icon: '🛠️',
+      action: 'send-message',
+      payload: fixValidationPayload,
+      priority: 49,
+    });
+  }
+
+  const draftPromptPluginPayload = promptPluginDraftPayload(message);
+  if (draftPromptPluginPayload) {
+    actions.push({
+      id: 'draft-prompt-plugin',
+      label: 'Draft prompt plugin',
+      icon: '🧩',
+      action: 'send-message',
+      payload: draftPromptPluginPayload,
+      priority: 46,
+    });
+  }
 
   // If tools were used, suggest reviewing what happened
   if (signals.toolsUsed > 0) {
@@ -171,40 +456,49 @@ export function deriveNextActions(message: Message, projectProfile?: { validatio
   }
 
   // If content mentions build/test/lint, suggest running it
-  if (content.includes('build') || content.includes('compile')) {
+  if (!hasSemanticValidationAction && (content.includes('build') || content.includes('compile'))) {
     const buildCmd = projectProfile?.validation?.build;
-    actions.push({
-      id: 'run-build',
-      label: 'Run build',
-      icon: '🔨',
-      action: 'run-command',
-      payload: buildCmd || 'npm run build',
-      priority: 45,
-    });
+    const payload = buildCmd || 'npm run build';
+    if (!failedValidationCommandKeys.has(normalizeValidationCommand(payload))) {
+      actions.push({
+        id: 'run-build',
+        label: 'Run build',
+        icon: '🔨',
+        action: 'run-command',
+        payload,
+        priority: 45,
+      });
+    }
   }
 
-  if (content.includes('test') || content.includes('tests')) {
+  if (!hasSemanticValidationAction && (content.includes('test') || content.includes('tests'))) {
     const testCmd = projectProfile?.validation?.test;
-    actions.push({
-      id: 'run-test',
-      label: 'Run tests',
-      icon: '🧪',
-      action: 'run-command',
-      payload: testCmd || 'npm test',
-      priority: 44,
-    });
+    const payload = testCmd || 'npm test';
+    if (!failedValidationCommandKeys.has(normalizeValidationCommand(payload))) {
+      actions.push({
+        id: 'run-test',
+        label: 'Run tests',
+        icon: '🧪',
+        action: 'run-command',
+        payload,
+        priority: 44,
+      });
+    }
   }
 
-  if (content.includes('lint') || content.includes('format')) {
+  if (!hasSemanticValidationAction && (content.includes('lint') || content.includes('format'))) {
     const lintCmd = projectProfile?.validation?.lint;
-    actions.push({
-      id: 'run-lint',
-      label: 'Run lint',
-      icon: '✨',
-      action: 'run-command',
-      payload: lintCmd || 'npm run lint',
-      priority: 43,
-    });
+    const payload = lintCmd || 'npm run lint';
+    if (!failedValidationCommandKeys.has(normalizeValidationCommand(payload))) {
+      actions.push({
+        id: 'run-lint',
+        label: 'Run lint',
+        icon: '✨',
+        action: 'run-command',
+        payload,
+        priority: 43,
+      });
+    }
   }
 
   // If the message itself contains a unified diff, always offer to

@@ -760,8 +760,8 @@ When the harness selects a model, it should:
    - Use `defaultCodingTemperature` as base
    - Set `max_tokens` to `recommendedMaxTokens`
    - Add `stop` sequences
-6. **Add CoT trigger if needed:**
-   - If `needsExplicitCotTrigger` and task requires reasoning, append `Let's think step by step:`
+6. **Add private reasoning guidance if needed:**
+   - If `needsExplicitCotTrigger` and task requires reasoning, ask for a brief private check and a concise rationale/proof in the final answer. Do not request visible chain-of-thought.
 
 #### 4. Subagent Model Selection Defaults
 
@@ -941,7 +941,7 @@ After receiving the tool result, continue with your response.
 ---
 
 *Document generated: June 17, 2026*
-*Last reviewed: June 17, 2026*
+*Last reviewed: June 23, 2026*
 *Next review: Quarterly or on major model releases*
 *Sources: OpenRouter live model data, official model documentation, provider guidance, and repository-level benchmarking notes*
 
@@ -950,14 +950,14 @@ After receiving the tool result, continue with your response.
 - OpenAI prompt guidance
   - https://platform.openai.com/docs/guides/prompt-engineering
   - https://platform.openai.com/docs/guides/prompt-guidance
-  - https://platform.openai.com/docs/guides/reasoning-best-practices
+  - https://platform.openai.com/docs/guides/reasoning
 - Anthropic Claude prompting
   - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview
-  - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting
+  - https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/claude-prompting-best-practices
 - Google Gemini prompting
   - https://ai.google.dev/gemini-api/docs/prompting-strategies
 - Mistral prompting guidance
-  - https://docs.mistral.ai/models/best-practices/prompt-engineering
+  - https://docs.mistral.ai/studio-api/conversations/chat-completion/prompting
   - https://docs.mistral.ai/studio-api/conversations/function-calling
   - https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities
 - DeepSeek official APIs and guides

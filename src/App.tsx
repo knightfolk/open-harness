@@ -24,6 +24,9 @@ import {
   SYSTEM_THEME_ID,
 } from './theme/builtins';
 import { describeAutoRouterRunStep, latestAutoRouterStep } from './utils/autoRouterTrace';
+import { formatModelRequestDurationSuffix, formatModelRequestTimeoutSuffix } from './utils/modelRequestTimeoutDisplay';
+import { chooseOnboardingActiveModel } from './utils/onboardingModelPreference';
+import type { ModelLabEvidenceScope } from './utils/modelLabResultEvidence';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -237,6 +240,7 @@ function describeRunStep(step: HarnessRunStep): string {
     case 'orchestration': return `${step.label}: ${step.detail || step.mode}`;
     case 'route': return `Routed to ${step.role} using ${step.model}${step.reason ? ` (${step.reason})` : ''}`;
     case 'artifact': return `Created artifact: ${step.artifact.title}`;
+    case 'prompt_plugins': return `Selected ${step.selectedPluginIds.length} prompt plugin${step.selectedPluginIds.length === 1 ? '' : 's'} with ${step.selectedSectionCount} section${step.selectedSectionCount === 1 ? '' : 's'} in ${step.selectionDurationMs}ms`;
     case 'prompt_built': return `Built prompt with ${step.toolCount} available tool${step.toolCount === 1 ? '' : 's'}`;
     case 'auto_router': return describeAutoRouterRunStep(step);
     case 'steering': return `Steering applied: ${step.action}${step.target ? ` (${step.target})` : ''}${step.note ? ` · ${step.note}` : ''}`;
@@ -247,7 +251,7 @@ function describeRunStep(step: HarnessRunStep): string {
       : step.status === 'auto_discarded'
         ? `Clean worktree auto-discarded for ${step.agent}: ${step.worktreeId || step.branch || step.path || 'isolated checkout'}`
       : `Worktree isolation ${step.status} for ${step.agent}: ${step.error || step.reason}`;
-    case 'model_request': return `Sent model request round ${step.round} to ${step.model}`;
+    case 'model_request': return `Sent model request round ${step.round} to ${step.model}${formatModelRequestTimeoutSuffix(step)}${formatModelRequestDurationSuffix(step)}`;
     case 'tool_call': return step.durationMs == null ? `Started tool: ${step.name}` : `Finished tool: ${step.name} in ${step.durationMs}ms`;
     case 'model_text': return `Received ${step.chars} characters from model`;
     case 'model_thinking': return step.source === 'router'
@@ -596,6 +600,7 @@ function App() {
   const [agentFocusOpen, setAgentFocusOpen] = useState(false);
   const [lastAutoRouterStep, setLastAutoRouterStep] = useState<Extract<HarnessRunStep, { type: 'auto_router' }> | null>(null);
   const { layout, togglePanel, removePanel, resetLayout, addPanel } = useLayoutState();
+  const [pendingModelLabEvidenceScope, setPendingModelLabEvidenceScope] = useState<ModelLabEvidenceScope | null>(null);
   const visibleAgentFocusWidth = Math.min(agentFocusWidth, 420);
   const visibleStatusBarHeight = Math.min(statusBarHeight, 40);
 
@@ -686,7 +691,7 @@ function App() {
     } catch { /* ignore */ }
   }, []);
 
-  // Keyboard shortcut: ⇧⌘S or ⌘\ opens the left side chat.
+  // Keyboard shortcut: ⇧⌘S or ⌘\ opens the spawned side chat.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -695,21 +700,19 @@ function App() {
       // ⇧⌘S — explicit toggle
       if (e.shiftKey && key === 's') {
         e.preventDefault();
-        setSidebarOpen(true);
-        setSidebarTab('chat');
+        addPanel('side-chat', 'right');
         return;
       }
       // ⌘\ — also toggles
       if (!e.shiftKey && e.key === '\\') {
         e.preventDefault();
-        setSidebarOpen(true);
-        setSidebarTab('chat');
+        addPanel('side-chat', 'right');
         return;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [addPanel]);
 
   // Load project profile whenever the active folder changes.
   useEffect(() => {
@@ -1853,6 +1856,13 @@ function App() {
     setEnvironmentOpen(open);
     try { localStorage.setItem(ENVIRONMENT_HIDDEN_KEY, open ? 'false' : 'true'); } catch { /* ignore */ }
   }, []);
+  const handleModelLabEvidenceScopeConsumed = useCallback(() => {
+    setPendingModelLabEvidenceScope(null);
+  }, []);
+  const handleOpenModelLabEvidence = useCallback((scope: ModelLabEvidenceScope) => {
+    setPendingModelLabEvidenceScope(scope);
+    addPanel('model-lab', 'right');
+  }, [addPanel]);
   const openAgentFocusPanel = useCallback((agentId: string | null) => {
     if (agentId) setFocusedSubAgentId(agentId);
     setAgentFocusOpen(true);
@@ -1965,6 +1975,9 @@ function App() {
     models: Array.from(modelContextWindows.entries()).map(([id]) => ({ id, name: id })),
     enabledModels: enabledModelsForPanels,
     onApplyRoleRecommendation: handleAssignRoleModel,
+    modelLabEvidenceScope: pendingModelLabEvidenceScope,
+    onModelLabEvidenceScopeConsumed: handleModelLabEvidenceScopeConsumed,
+    onOpenModelLabEvidence: handleOpenModelLabEvidence,
     environmentOpen,
     onEnvironmentOpenChange: setChatEnvironmentOpen,
     onRunSteer: handleRunSteer,
@@ -2024,6 +2037,7 @@ function App() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onOpenFolder={handleOpenFolder}
+        onOpenSideChat={() => addPanel('side-chat', 'right')}
         onFocusAgent={(id) => focusSubAgentInPanel(id)}
         width={sidebarWidth}
         onResizeStart={beginSidebarResize}
@@ -2193,7 +2207,7 @@ function App() {
                 for (const m of models) ctxMap.set(m.id, m.contextWindowTokens);
                 setModelContextWindows(ctxMap);
                 if (result?.activeModel) setActiveModel(result.activeModel);
-                else setActiveModel(models[0].id);
+                else setActiveModel(chooseOnboardingActiveModel(models));
               }
               // Adopt personality, trust mode, and agent roles from onboarding.
                 if (result?.personality) setPersonalityText(result.personality);

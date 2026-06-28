@@ -273,6 +273,40 @@ assert.equal(sourceMappedRecommendations.find((item) => item.evidenceSource === 
 assert.equal(sourceMappedRecommendations.find((item) => item.evidenceSource === 'imported_trace')?.tuningAction, 'context_only', 'imported recommendations should stay context-only until reviewed merge');
 assert.match(sourceMappedRecommendations.find((item) => item.evidenceSource === 'log_trace')?.tuningGuidance || '', /review the originating log/i, 'log-derived tuning guidance should require log review');
 assert.match(sourceMappedRecommendations.find((item) => item.evidenceSource === 'imported_trace')?.tuningGuidance || '', /context only/i, 'imported tuning guidance should prevent silent local tuning');
+const weakEvidenceOnlyCard = annotateCandidatesWithToolReliability([
+  {
+    modelId: 'provider:qwen3-primary-model',
+    cost: 1,
+    supportsImages: false,
+    card: 'Primary model candidate.',
+  },
+], {
+  ...summary,
+  retryReductionRecommendations: sourceMappedRecommendations,
+})[0].card;
+assert.match(weakEvidenceOnlyCard, /Advisory retry-reduction evidence/i, 'log/imported retry advice should be clearly advisory in classifier-facing candidate cards');
+assert.doesNotMatch(weakEvidenceOnlyCard, /Prefer these observed working paths before adding more retries/i, 'log/imported retry advice should not use the trusted saved-session routing imperative');
+const mixedEvidenceCard = annotateCandidatesWithToolReliability([
+  {
+    modelId: 'provider:qwen3-primary-model',
+    cost: 1,
+    supportsImages: false,
+    card: 'Primary model candidate.',
+  },
+], {
+  ...summary,
+  retryReductionRecommendations: [
+    summary.retryReductionRecommendations[0],
+    ...sourceMappedRecommendations,
+  ],
+})[0].card;
+assert.match(mixedEvidenceCard, /Actionable retry-reduction recommendations/i, 'trusted saved-session retry advice should be separated as actionable evidence');
+assert.match(mixedEvidenceCard, /Advisory retry-reduction evidence/i, 'weak retry advice should stay visible as advisory context when mixed with trusted evidence');
+assert.equal(
+  (mixedEvidenceCard.match(/Prefer these observed working paths before adding more retries/g) || []).length,
+  1,
+  'mixed candidate-card retry advice should only use the routing imperative for trusted saved-session evidence',
+);
 const annotatedCandidates = annotateCandidatesWithToolReliability([
   {
     modelId: 'provider:qwen3-primary-model',

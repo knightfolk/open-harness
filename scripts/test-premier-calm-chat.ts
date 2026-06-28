@@ -63,6 +63,29 @@ for (const expected of [
   );
 }
 
+for (const expected of [
+  'function templatePromptFromTeamPlan(artifact: TeamPlanArtifact): string',
+  'Create a reusable Planning Room plan template from this team-plan artifact.',
+  'Do not save files or change prompt plugin settings yet.',
+  "templateType: 'planning-room-plan'",
+  'sourceArtifactId: artifact.id',
+  'validation: artifact.data.validation',
+  'risks: artifact.data.risks',
+  'decisionLog: artifact.data.finalDecisionLog',
+  'participantDeltas: artifact.data.participantDeltas',
+  'JSON.stringify(payload, null, 2)',
+  'onClick={() => onPromote(templatePromptFromTeamPlan(artifact))}',
+  'title="Draft a reusable plan template from this team plan"',
+  'aria-label={`Create reusable plan template from team plan ${artifact.title}; draft a schema-ready prompt without saving files`}',
+  '<FileText size={12} aria-hidden="true" />',
+  'Template',
+]) {
+  assert.ok(
+    messageBubble.includes(expected),
+    `Team plan artifact card should expose a schema-ready reusable-template action: ${expected}`,
+  );
+}
+
 const exportReplayIndex = messageBubble.indexOf('Export replay');
 const detailsRegionIndex = messageBubble.indexOf('className="message-details-region" role="region" aria-label="Message details"');
 assert.ok(

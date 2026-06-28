@@ -7,6 +7,13 @@ const event = {
   selectedModel: 'provider:model',
 };
 
+const providerFailureRows = Array.from({ length: 21 }, (_, index) => ({
+  id: `provider-failure-${index + 1}`,
+  routingContext: {
+    promptStrategyId: index % 2 === 0 ? 'qwen-xml-code-v1' : 'glm-patient-review-v1',
+  },
+}));
+
 const schemaOne = buildRouterLearningImportPreview({ schemaVersion: 1, events: [event] });
 assert.equal(schemaOne.importSource, 'events', 'events payload should be detected');
 assert.equal(schemaOne.schemaVersion, 1, 'schema version 1 should be detected');
@@ -51,6 +58,29 @@ const fullExportWithToolReliability = buildRouterLearningImportPreview({
       },
     },
   },
+  providerFailureAdherence: {
+    scope: 'rolling-tail',
+    scopeNote: 'Provider failure adherence is limited to the most recent provider-stream failures rendered in Settings.',
+    source: {
+      loadedEventCount: 3,
+      renderedRowCount: 2,
+    },
+    summary: {
+      rowCount: 2,
+    },
+    strategyBreakdown: [
+      { strategyId: 'qwen-xml-code-v1', failureCount: 1 },
+      { strategyId: 'glm-patient-review-v1', failureCount: 1 },
+    ],
+    rowScope: {
+      fullRows: 'rows',
+      filteredRows: 'filteredRows contains rows after appliedStrategyFilter',
+    },
+    appliedStrategyFilter: 'qwen-xml-code-v1',
+    filteredRows: [{ id: 'provider-failure-1', routingContext: { promptStrategyId: 'qwen-xml-code-v1' } }],
+    hint: 'Provider fallback happened after routing selected the model.',
+    rows: providerFailureRows,
+  },
 });
 assert.equal(fullExportWithToolReliability.importSource, 'fullExport.events', 'full export with tool reliability summary should still import events');
 assert.equal(fullExportWithToolReliability.schemaSupported, true, 'full export with tool reliability should keep schema version support');
@@ -66,6 +96,25 @@ assert.equal(fullExportWithToolReliability.promptBestPracticePreview?.strategyCo
 assert.equal(fullExportWithToolReliability.promptBestPracticePreview?.bestPracticeNoteCount, 1, 'prompt best-practice import preview should count best-practice notes');
 assert.deepEqual(fullExportWithToolReliability.promptBestPracticePreview?.sourceRefs, ['docs/MODEL_PROMPTING_GUIDE.md'], 'prompt best-practice import preview should preserve source refs');
 assert.match(fullExportWithToolReliability.promptBestPracticePreview?.note || '', /context-only evidence/i, 'prompt best-practice import preview should explain that metadata is context-only');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.evidenceSource, 'provider_failure_adherence', 'provider failure import preview should label provider adherence as separate context evidence');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.contextOnly, true, 'provider failure import preview should be explicitly context-only');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.scope, 'rolling-tail', 'provider failure import preview should preserve rolling-tail scope');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.loadedEventCount, 3, 'provider failure import preview should preserve loaded adherence event count');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.renderedRowCount, 2, 'provider failure import preview should preserve rendered row count');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.rowCount, 2, 'provider failure import preview should count the full rows array');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.filteredRowCount, 1, 'provider failure import preview should distinguish filtered row count from full row count');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.appliedStrategyFilter, 'qwen-xml-code-v1', 'provider failure import preview should preserve the active strategy filter');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.strategyCount, 2, 'provider failure import preview should count strategy breakdown rows');
+assert.deepEqual(fullExportWithToolReliability.providerFailureAdherencePreview?.rowScope, {
+  fullRows: 'rows',
+  filteredRows: 'filteredRows contains rows after appliedStrategyFilter',
+}, 'provider failure import preview should preserve row scope labels');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.sampleRowLimit, 20, 'provider failure import preview should expose the bounded sample limit');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.sampleRowCount, 20, 'provider failure import preview should expose the actual sampled row count');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.sampleRowsCapped, true, 'provider failure import preview should mark when full rows exceed the sample limit');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.sampleSource, 'fullRows', 'provider failure import preview should make clear that sample rows come from full provenance rows');
+assert.equal(fullExportWithToolReliability.providerFailureAdherencePreview?.sampleRows.length, 20, 'provider failure import preview should include a bounded sample of full rows');
+assert.match(fullExportWithToolReliability.providerFailureAdherencePreview?.note || '', /not merged into local routing learning state/i, 'provider failure import preview should explain that adherence rows are preview-only');
 
 const recentEvents = buildRouterLearningImportPreview({ recentEvents: [event] });
 assert.equal(recentEvents.importSource, 'recentEvents', 'recentEvents payload should be detected');

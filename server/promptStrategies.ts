@@ -7,7 +7,7 @@
  * Sources are tracked in docs/PROMPT_STRATEGY_DATABASE_PLAN.md.
  */
 
-import { detectModelFamily } from './modelProfiles';
+import { promptStrategyAppliesTo, resolvePromptStrategyForModel } from '../src/utils/promptStrategyResolver';
 
 export type PromptSystemStyle = 'outcome-first' | 'structured' | 'xml-tagged' | 'concise' | 'minimal';
 export type PromptInstructionPlacement = 'system' | 'developer' | 'first-user' | 'repeat-in-user';
@@ -85,23 +85,17 @@ export interface PromptStrategyTrace {
   updatedAt: string;
 }
 
-const UPDATED_AT = '2026-06-17';
-
-interface PromptStrategyModelOverride {
-  match: RegExp;
-  promptStrategyFamily: string;
-  hint: string;
-}
+const UPDATED_AT = '2026-06-23';
 
 export const PROMPT_STRATEGY_SOURCES = {
   openaiPromptEngineering: 'https://platform.openai.com/docs/guides/prompt-engineering',
   openaiPromptGuidance: 'https://platform.openai.com/docs/guides/prompt-guidance',
-  openaiReasoningBestPractices: 'https://platform.openai.com/docs/guides/reasoning-best-practices',
+  openaiReasoningBestPractices: 'https://platform.openai.com/docs/guides/reasoning',
   anthropicPromptEngineeringOverview: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview',
-  anthropicClaudeBestPractices: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/multishot-prompting',
+  anthropicClaudeBestPractices: 'https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/claude-prompting-best-practices',
   geminiPromptStrategies: 'https://ai.google.dev/gemini-api/docs/prompting-strategies',
   gemmaPromptFormat: 'https://ai.google.dev/gemma/docs/core/prompt-structure',
-  mistralPromptEngineering: 'https://docs.mistral.ai/models/best-practices/prompt-engineering',
+  mistralPromptEngineering: 'https://docs.mistral.ai/studio-api/conversations/chat-completion/prompting',
   mistralFunctionCalling: 'https://docs.mistral.ai/studio-api/conversations/function-calling',
   mistralPromptingCapabilities: 'https://docs.mistral.ai/resources/cookbooks/mistral-prompting-prompting_capabilities',
   deepseekChatCompletion: 'https://api-docs.deepseek.com/api/create-chat-completion',
@@ -117,14 +111,6 @@ export const PROMPT_STRATEGY_SOURCES = {
   phiPromptTemplate: 'https://huggingface.co/docs/transformers/model_doc/phi3',
   openHarnessGuide: 'docs/MODEL_PROMPTING_GUIDE.md',
 } as const;
-
-const PROMPT_STRATEGY_MODEL_OVERRIDES: PromptStrategyModelOverride[] = [
-  {
-    match: /\bo1\b|\bo3\b/i,
-    promptStrategyFamily: 'openaiReasoning',
-    hint: 'OpenAI reasoning model IDs (o1/o3) use stricter reasoning-aware contracts.',
-  },
-];
 
 function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracticeNote[] {
   const common: PromptStrategyBestPracticeNote[] = [
@@ -302,6 +288,19 @@ function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracti
       ...common,
     ];
   }
+  if (family === 'glm') {
+    return [
+      {
+        id: 'glm-compact-english-proof',
+        sourceRef: PROMPT_STRATEGY_SOURCES.openHarnessGuide,
+        appliesTo: ['coding', 'tool-use', 'review', 'direct'],
+        guidance: 'Use compact English instructions with explicit tool expectations, proof-first output, and no visible chain-of-thought.',
+        rationale: 'OpenHarness GLM model profiles mark GLM as a concise, tool-capable coding family that may drift language without explicit English guidance.',
+        evaluationCue: 'Track GLM prompt-strategy variants separately from unknown models and compare English output stability, first-call tool success, and proof quality.',
+      },
+      ...common,
+    ];
+  }
   if (family === 'llama') {
     return [
       {
@@ -357,11 +356,25 @@ function sourceBackedBestPracticeNotes(family: string): PromptStrategyBestPracti
   ];
 }
 
+function glmPatientPartnerBestPracticeNotes(): PromptStrategyBestPracticeNote[] {
+  return [
+    {
+      id: 'glm-5-patient-partner-proof',
+      sourceRef: PROMPT_STRATEGY_SOURCES.openHarnessGuide,
+      appliesTo: ['coding', 'tool-use', 'review', 'reasoning'],
+      guidance: 'Treat GLM 5.x as a patient partner for difficult work: allow careful private planning, preserve English tool discipline, and require proof-first output without visible chain-of-thought.',
+      rationale: 'OpenHarness GLM 5 usage treats the model as slower but higher-skill than the compact GLM worker lane, so the prompt should invite careful evidence handling without leaking internal reasoning.',
+      evaluationCue: 'Compare GLM 5.x against GLM 4.7 on stubborn coding and review tasks for evidence quality, tool patience, English stability, and absence of visible planning transcript.',
+    },
+    ...sourceBackedBestPracticeNotes('glm'),
+  ];
+}
+
 export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   openai: {
     id: 'openai-outcome-first-v1',
     family: 'openai',
-    appliesTo: ['gpt', 'openai', 'codex', 'o-series'],
+    appliesTo: promptStrategyAppliesTo('openai-outcome-first-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.openaiPromptEngineering, PROMPT_STRATEGY_SOURCES.openaiPromptGuidance],
     bestPracticeNotes: sourceBackedBestPracticeNotes('openai'),
     updatedAt: UPDATED_AT,
@@ -381,7 +394,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   openaiReasoning: {
     id: 'openai-openai-reasoning-v1',
     family: 'openaiReasoning',
-    appliesTo: ['o1', 'o3'],
+    appliesTo: promptStrategyAppliesTo('openai-openai-reasoning-v1'),
     sourceRefs: [
       PROMPT_STRATEGY_SOURCES.openaiPromptEngineering,
       PROMPT_STRATEGY_SOURCES.openaiPromptGuidance,
@@ -405,7 +418,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   anthropic: {
     id: 'anthropic-xml-evidence-v1',
     family: 'anthropic',
-    appliesTo: ['claude', 'anthropic'],
+    appliesTo: promptStrategyAppliesTo('anthropic-xml-evidence-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.anthropicPromptEngineeringOverview, PROMPT_STRATEGY_SOURCES.anthropicClaudeBestPractices],
     bestPracticeNotes: sourceBackedBestPracticeNotes('anthropic'),
     updatedAt: UPDATED_AT,
@@ -425,7 +438,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   gemini: {
     id: 'gemini-specific-iterative-v1',
     family: 'gemini',
-    appliesTo: ['gemini', 'google'],
+    appliesTo: promptStrategyAppliesTo('gemini-specific-iterative-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.geminiPromptStrategies],
     bestPracticeNotes: sourceBackedBestPracticeNotes('gemini'),
     updatedAt: UPDATED_AT,
@@ -445,7 +458,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   mistral: {
     id: 'mistral-structured-purpose-v1',
     family: 'mistral',
-    appliesTo: ['mistral', 'devstral', 'codestral'],
+    appliesTo: promptStrategyAppliesTo('mistral-structured-purpose-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.mistralPromptEngineering, PROMPT_STRATEGY_SOURCES.mistralPromptingCapabilities],
     bestPracticeNotes: sourceBackedBestPracticeNotes('mistral'),
     updatedAt: UPDATED_AT,
@@ -465,7 +478,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   deepseek: {
     id: 'deepseek-structured-code-v1',
     family: 'deepseek',
-    appliesTo: ['deepseek'],
+    appliesTo: promptStrategyAppliesTo('deepseek-structured-code-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.deepseekChatCompletion, PROMPT_STRATEGY_SOURCES.deepseekMultiRound, PROMPT_STRATEGY_SOURCES.deepseekThinkingMode, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('deepseek'),
     updatedAt: UPDATED_AT,
@@ -485,7 +498,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   qwen: {
     id: 'qwen-xml-code-v1',
     family: 'qwen',
-    appliesTo: ['qwen'],
+    appliesTo: promptStrategyAppliesTo('qwen-xml-code-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.qwenQuickstart, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('qwen'),
     updatedAt: UPDATED_AT,
@@ -505,7 +518,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   minimax: {
     id: 'minimax-long-context-agent-v1',
     family: 'minimax',
-    appliesTo: ['minimax', 'm3'],
+    appliesTo: promptStrategyAppliesTo('minimax-long-context-agent-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.minimaxPromptingBestPractices, PROMPT_STRATEGY_SOURCES.minimaxOpenAIApiCompatibility, PROMPT_STRATEGY_SOURCES.minimaxCodingPlanAgent],
     bestPracticeNotes: sourceBackedBestPracticeNotes('minimax'),
     updatedAt: UPDATED_AT,
@@ -522,10 +535,50 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
     risks: ['large context can hide relevant evidence', 'provider compatibility differs by endpoint'],
     recommendedTests: ['test:prompt-routing-output-p0'],
   },
+  glm: {
+    id: 'glm-compact-english-tool-v1',
+    family: 'glm',
+    appliesTo: promptStrategyAppliesTo('glm-compact-english-tool-v1'),
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    bestPracticeNotes: sourceBackedBestPracticeNotes('glm'),
+    updatedAt: UPDATED_AT,
+    systemStyle: 'concise',
+    maxSystemPromptTokens: 1000,
+    instructionPlacement: 'system',
+    contextOrder: 'instructions-first',
+    examplePolicy: 'format-only',
+    reasoningPolicy: 'brief-private-plan',
+    toolPolicy: 'native-tools',
+    outputContract: 'proof-first',
+    variants: defaultPromptStrategyVariants('glm'),
+    strengths: ['compact English coding prompts', 'native tool-compatible workflows', 'proof-first implementation reports'],
+    risks: ['can drift output language without explicit instruction', 'verbose reasoning prompts may reduce tool focus'],
+    recommendedTests: ['test:prompt-routing-quality-readiness', 'test:prompt-strategy-database'],
+  },
+  glmPatient: {
+    id: 'glm-5-patient-partner-v1',
+    family: 'glm',
+    appliesTo: ['glm-5', 'glm-5.1', 'glm-5.2', 'z-ai/glm-5', 'zhipu/glm-5'],
+    sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
+    bestPracticeNotes: glmPatientPartnerBestPracticeNotes(),
+    updatedAt: UPDATED_AT,
+    systemStyle: 'concise',
+    maxSystemPromptTokens: 2000,
+    instructionPlacement: 'system',
+    contextOrder: 'instructions-first',
+    examplePolicy: 'format-only',
+    reasoningPolicy: 'brief-private-plan',
+    toolPolicy: 'native-tools',
+    outputContract: 'proof-first',
+    variants: defaultPromptStrategyVariants('glm'),
+    strengths: ['patient evidence review for difficult tasks', 'native tool-compatible workflows', 'proof-first implementation and review reports'],
+    risks: ['slower first response can feel stalled without bounded patience', 'visible planning prompts can waste output and expose hidden reasoning'],
+    recommendedTests: ['test:prompt-strategy-database', 'test:prompt-routing-quality-readiness'],
+  },
   grok: {
     id: 'grok-structured-pragmatic-v1',
     family: 'grok',
-    appliesTo: ['grok', 'xai'],
+    appliesTo: promptStrategyAppliesTo('grok-structured-pragmatic-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.xaiOverview, PROMPT_STRATEGY_SOURCES.xaiFunctionCalling],
     bestPracticeNotes: sourceBackedBestPracticeNotes('grok'),
     updatedAt: UPDATED_AT,
@@ -545,7 +598,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   llama: {
     id: 'llama-repeat-rules-v1',
     family: 'llama',
-    appliesTo: ['llama'],
+    appliesTo: promptStrategyAppliesTo('llama-repeat-rules-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.llamaPromptFormats, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('llama'),
     updatedAt: UPDATED_AT,
@@ -565,7 +618,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   gemma: {
     id: 'gemma-concise-first-user-v1',
     family: 'gemma',
-    appliesTo: ['gemma'],
+    appliesTo: promptStrategyAppliesTo('gemma-concise-first-user-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.gemmaPromptFormat, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('gemma'),
     updatedAt: UPDATED_AT,
@@ -585,7 +638,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   phi: {
     id: 'phi-minimal-router-v1',
     family: 'phi',
-    appliesTo: ['phi'],
+    appliesTo: promptStrategyAppliesTo('phi-minimal-router-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.phiPromptTemplate, PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('phi'),
     updatedAt: UPDATED_AT,
@@ -605,7 +658,7 @@ export const PROMPT_STRATEGY_PROFILES: Record<string, PromptStrategyProfile> = {
   unknown: {
     id: 'unknown-safe-structured-v1',
     family: 'unknown',
-    appliesTo: ['unknown', 'custom'],
+    appliesTo: promptStrategyAppliesTo('unknown-safe-structured-v1'),
     sourceRefs: [PROMPT_STRATEGY_SOURCES.openHarnessGuide],
     bestPracticeNotes: sourceBackedBestPracticeNotes('unknown'),
     updatedAt: UPDATED_AT,
@@ -669,61 +722,18 @@ function defaultPromptStrategyVariants(family: string): PromptStrategyVariant[] 
   ];
 }
 
-const FAMILY_ALIASES: Record<string, string> = {
-  gpt: 'openai',
-  openai: 'openai',
-  codex: 'openai',
-  anthropic: 'anthropic',
-  claude: 'anthropic',
-  devstral: 'mistral',
-  codestral: 'mistral',
-};
-
 export interface PromptStrategyModelSelection {
   profile: PromptStrategyProfile;
   modelMatch: NonNullable<PromptStrategyTrace['modelMatch']>;
 }
 
-function normalizeModelIdForPromptStrategy(modelId: string): string {
-  return modelId.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
-}
-
 export function getPromptStrategySelectionForModel(modelId: string): PromptStrategyModelSelection {
-  const normalized = normalizeModelIdForPromptStrategy(modelId);
-  for (const override of PROMPT_STRATEGY_MODEL_OVERRIDES) {
-    if (override.match.test(normalized)) {
-      const profile = PROMPT_STRATEGY_PROFILES[override.promptStrategyFamily];
-      if (profile) {
-        return {
-          profile,
-          modelMatch: { source: 'applies-to', hint: override.hint },
-        };
-      }
-    }
-  }
-
-  for (const [family, profile] of Object.entries(PROMPT_STRATEGY_PROFILES)) {
-    if (family === 'unknown') continue;
-    const hint = profile.appliesTo.find((candidate) => normalized.includes(candidate.toLowerCase()));
-    if (hint) {
-      return {
-        profile,
-        modelMatch: { source: 'applies-to', hint },
-      };
-    }
-  }
-  const detected = detectModelFamily(modelId);
-  const family = FAMILY_ALIASES[detected] || detected;
-  const profile = PROMPT_STRATEGY_PROFILES[family];
-  if (profile) {
-    return {
-      profile,
-      modelMatch: { source: 'detected-family', hint: family },
-    };
-  }
+  const resolution = resolvePromptStrategyForModel(modelId);
+  const profile = getPromptStrategyById(resolution.strategyId) || PROMPT_STRATEGY_PROFILES[resolution.family];
+  if (profile) return { profile, modelMatch: resolution.modelMatch };
   return {
     profile: PROMPT_STRATEGY_PROFILES.unknown,
-    modelMatch: { source: 'fallback', hint: detected || 'unknown' },
+    modelMatch: resolution.modelMatch,
   };
 }
 

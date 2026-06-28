@@ -1,15 +1,86 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import * as api from '../utils/api';
+import {
+  buildPromptPackEvidenceBrief,
+  buildPromptPackLastUsedMap,
+  formatPromptPackHistoryProvenance,
+  formatPromptPackLastUsed,
+  summarizePromptPackEvalReadiness,
+  type PromptPackEvalReadinessStatus,
+  type PromptPackLastUsed,
+} from '../utils/modelLabPackEvidence';
+import {
+  createModelLabBenchResultIndex,
+  type BenchResultStatusFilter,
+} from '../utils/modelLabBenchEvidence';
+import { averageModelLabBreakdown, buildModelLabBreakdownByModel } from '../utils/modelLabBreakdownSummary';
+import { formatModelLabHistoryTimestamp, getRecentModelLabHistory, getVisibleModelLabHistoryWindow } from '../utils/modelLabHistory';
+import { createModelLabResultIndex, findModelLabEvidenceReportMatches, formatModelLabEvidenceReportMatch, formatModelLabEvidenceSearchDiagnostics, summarizeModelLabEvidenceReportSearch, summarizeModelLabEvidenceScope, type ModelLabEvidenceReportMatch, type ModelLabEvidenceScope, type ModelLabEvidenceSearchDiagnostics, type ModelLabEvidenceSummary } from '../utils/modelLabResultEvidence';
+import { buildPromptStrategyComparisonSummary, formatPromptStrategyWindowSummary, getVisiblePromptStrategyWindow } from '../utils/modelLabStrategyEvidence';
+import {
+  averageModelLabMetricValues,
+  buildModelLabBreakdownDisplaySegments,
+  compareModelLabMetricRatios,
+  compareModelLabMetricValues,
+  formatModelLabCostForSamples,
+  formatModelLabDurationMs,
+  formatModelLabDurationMsForSamples,
+  formatModelLabLatencyMs,
+  formatModelLabMetricRatio,
+  formatModelLabMetricRatioForSamples,
+  formatModelLabMetricValue,
+  formatModelLabMetricValueForSamples,
+  formatModelLabPercent,
+  formatModelLabRubricCoverage,
+  formatModelLabSignedDelta,
+  formatModelLabTimestamp,
+  isMalformedModelLabMetricRatio,
+  modelLabDeltaColor,
+  modelLabRubricCoverageColor,
+  modelLabScoreColor,
+  modelLabScoreColorForSamples,
+  modelLabTimestampMs,
+} from '../utils/scoreDisplay';
 
 interface Props {
   workingDir: string | null;
   models: Array<{ id: string; name: string }>;
   enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
+  initialEvidenceScope?: ModelLabEvidenceScope | null;
+  onInitialEvidenceScopeConsumed?: () => void;
 }
 
 const HISTORY_VISIBLE_LIMIT = 20;
+const PROMPT_STRATEGY_VISIBLE_LIMIT = 12;
+const MODEL_LAB_RESULT_VISIBLE_LIMIT = 50;
+const EVIDENCE_REPORT_SEARCH_WINDOW = 8;
+const EVIDENCE_REPORT_MATCH_LIMIT = 3;
 type ModelSourceCategory = 'all' | 'frontier' | 'open-source';
+type BenchModelSummary = NonNullable<api.BenchRun['summary']>['byModel'][string];
+
+function modelLabCompositeSampleCount(...sampleCounts: unknown[]): number | undefined {
+  let sawSampleCount = false;
+  for (const sampleCount of sampleCounts) {
+    if (sampleCount === undefined) continue;
+    sawSampleCount = true;
+    if (typeof sampleCount !== 'number' || !Number.isFinite(sampleCount) || sampleCount <= 0) return 0;
+  }
+  return sawSampleCount ? 1 : undefined;
+}
+
+function formatBenchValueScore(data: BenchModelSummary): string {
+  return formatModelLabMetricValueForSamples(
+    data.valueScore,
+    modelLabCompositeSampleCount(
+      data.scoreSampleCount,
+      data.validationSampleCount,
+      data.latencySampleCount,
+      data.costSampleCount,
+    ),
+  );
+}
 type ModelLabTab = 'recommendations' | 'benchmark' | 'configure' | 'results' | 'history' | 'tasks' | 'bench' | 'packs';
+type ModelLabEvidenceSearchStatus = 'idle' | 'loading' | 'done' | 'error';
 interface ModelLabSelectableModel {
   id: string;
   name: string;
@@ -34,7 +105,7 @@ function providerModelKey(providerName?: string) {
   return providerName?.trim() || 'unknown provider';
 }
 
-export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props) {
+export function ModelLabPanel({ workingDir, models, enabledModels = [], initialEvidenceScope = null, onInitialEvidenceScopeConsumed }: Props) {
   const selectableModels = useMemo<ModelLabSelectableModel[]>(() => {
     const source = enabledModels.length > 0 ? enabledModels : models;
     return source.map((model) => ({
@@ -71,6 +142,14 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
   const [selectedBenchRun, setSelectedBenchRun] = useState<api.BenchRun | null>(null);
   const [selectedPromptIds, setSelectedPromptIds] = useState<Set<string>>(new Set());
   const [selectedPromptStrategyIds, setSelectedPromptStrategyIds] = useState<Set<string>>(new Set());
+  const [promptStrategyFilter, setPromptStrategyFilter] = useState('');
+  const [resultFilter, setResultFilter] = useState('');
+  const [activeEvidenceScope, setActiveEvidenceScope] = useState<ModelLabEvidenceScope | null>(null);
+  const [evidenceReportMatches, setEvidenceReportMatches] = useState<ModelLabEvidenceReportMatch[]>([]);
+  const [evidenceSearchDiagnostics, setEvidenceSearchDiagnostics] = useState<ModelLabEvidenceSearchDiagnostics | null>(null);
+  const [evidenceReportSearchStatus, setEvidenceReportSearchStatus] = useState<ModelLabEvidenceSearchStatus>('idle');
+  const [benchResultFilter, setBenchResultFilter] = useState('');
+  const [benchResultStatusFilter, setBenchResultStatusFilter] = useState<BenchResultStatusFilter>('all');
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [runName, setRunName] = useState('');
@@ -80,9 +159,152 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeBenchId, setActiveBenchId] = useState<string | null>(null);
   const [tab, setTab] = useState<ModelLabTab>('recommendations');
+  const [historyFilter, setHistoryFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [diagnostic, setDiagnostic] = useState<{ tone: 'error' | 'warning' | 'info'; title: string; detail: string } | null>(null);
   const [providerHealthSignal, setProviderHealthSignal] = useState<ProviderHealthSignal | null>(null);
+  const evidenceReportSearchGenerationRef = useRef(0);
+  const packLastUsed = useMemo(() => buildPromptPackLastUsedMap(reports), [reports]);
+  const visibleReportWindow = useMemo(() => getVisibleModelLabHistoryWindow(reports, HISTORY_VISIBLE_LIMIT, historyFilter), [historyFilter, reports]);
+  const visibleBenchRunWindow = useMemo(() => getVisibleModelLabHistoryWindow(benchRuns, HISTORY_VISIBLE_LIMIT, historyFilter), [benchRuns, historyFilter]);
+  const visibleReports = visibleReportWindow.rows;
+  const visibleBenchRuns = visibleBenchRunWindow.rows;
+  const historyFilterActive = historyFilter.trim().length > 0;
+  const visibleReportMatchCount = historyFilterActive ? visibleReportWindow.matchCount : reports.length;
+  const visibleBenchRunMatchCount = historyFilterActive ? visibleBenchRunWindow.matchCount : benchRuns.length;
+  const visiblePromptStrategyWindow = useMemo(
+    () => getVisiblePromptStrategyWindow(promptStrategies, PROMPT_STRATEGY_VISIBLE_LIMIT, promptStrategyFilter, selectedPromptStrategyIds),
+    [promptStrategies, promptStrategyFilter, selectedPromptStrategyIds],
+  );
+  const visiblePromptStrategies = visiblePromptStrategyWindow.rows;
+  const promptStrategyWindowSummary = formatPromptStrategyWindowSummary(visiblePromptStrategyWindow, promptStrategyFilter);
+  const selectedReportResultIndex = useMemo(
+    () => selectedReport ? createModelLabResultIndex(selectedReport.results) : null,
+    [selectedReport],
+  );
+  const selectedBenchResultIndex = useMemo(
+    () => selectedBenchRun ? createModelLabBenchResultIndex(selectedBenchRun.results) : null,
+    [selectedBenchRun],
+  );
+  const activeEvidenceSummary = useMemo(
+    () => activeEvidenceScope ? summarizeModelLabEvidenceScope(activeEvidenceScope, selectedReport, selectedReportResultIndex) : null,
+    [activeEvidenceScope, selectedReport, selectedReportResultIndex],
+  );
+  const activeEvidenceStatus = activeEvidenceSummary?.status || null;
+  const selectedReportResultWindow = useMemo(
+    () => selectedReportResultIndex ? selectedReportResultIndex.getVisibleResultWindow(MODEL_LAB_RESULT_VISIBLE_LIMIT, activeEvidenceScope || resultFilter) : { rows: [], matchCount: 0 },
+    [activeEvidenceScope, resultFilter, selectedReportResultIndex],
+  );
+  const visibleSelectedBenchResultWindow = useMemo(
+    () => selectedBenchResultIndex ? selectedBenchResultIndex.getVisibleResultWindow(MODEL_LAB_RESULT_VISIBLE_LIMIT, benchResultFilter, benchResultStatusFilter) : { rows: [], matchCount: 0 },
+    [benchResultFilter, benchResultStatusFilter, selectedBenchResultIndex],
+  );
+  const selectedReportBreakdownsByModel = useMemo(
+    () => selectedReport ? buildModelLabBreakdownByModel(selectedReport.results) : new Map<string, api.EvalScoreBreakdown>(),
+    [selectedReport],
+  );
+  const selectedBenchBreakdownsByModel = useMemo(
+    () => selectedBenchRun ? buildModelLabBreakdownByModel(selectedBenchRun.results) : new Map<string, api.EvalScoreBreakdown>(),
+    [selectedBenchRun],
+  );
+  const resultFiltersActive = resultFilter.trim().length > 0;
+  const benchResultFiltersActive = benchResultFilter.trim().length > 0 || benchResultStatusFilter !== 'all';
+  const visibleSelectedReportResults = selectedReportResultWindow.rows;
+  const selectedReportResultMatchCount = activeEvidenceScope || resultFiltersActive ? selectedReportResultWindow.matchCount : selectedReport?.results.length || 0;
+  const showExactEvidenceEmptyState = Boolean(activeEvidenceScope && visibleSelectedReportResults.length === 0);
+  const showResultFilterEmptyState = Boolean(selectedReport && selectedReport.results.length > 0 && visibleSelectedReportResults.length === 0 && resultFilter.trim() && !activeEvidenceScope);
+  const visibleSelectedBenchResults = visibleSelectedBenchResultWindow.rows;
+  const selectedBenchResultMatchCount = benchResultFiltersActive ? visibleSelectedBenchResultWindow.matchCount : selectedBenchRun?.results.length || 0;
+  const shouldShowEvidenceSummaryCallout = Boolean(activeEvidenceSummary && activeEvidenceSummary.status !== 'matched');
+
+  useEffect(() => {
+    evidenceReportSearchGenerationRef.current += 1;
+    const generation = evidenceReportSearchGenerationRef.current;
+
+    if (!activeEvidenceScope || activeEvidenceStatus !== 'no-match' || !selectedReport) {
+      setEvidenceReportMatches([]);
+      setEvidenceSearchDiagnostics(null);
+      setEvidenceReportSearchStatus('idle');
+      return;
+    }
+
+    const recentReports = getRecentModelLabHistory(reports, EVIDENCE_REPORT_SEARCH_WINDOW)
+      .filter((report) => report.id !== selectedReport.id);
+    if (recentReports.length === 0) {
+      setEvidenceReportMatches([]);
+      setEvidenceSearchDiagnostics(null);
+      setEvidenceReportSearchStatus('done');
+      return;
+    }
+
+    setEvidenceReportMatches([]);
+    setEvidenceSearchDiagnostics(null);
+    setEvidenceReportSearchStatus('loading');
+
+    (async () => {
+      const fetchedReports: api.EvalReport[] = [];
+      let failedFetchCount = 0;
+      let stoppedAtMatchLimit = false;
+      for (const report of recentReports) {
+        try {
+          const fetchedReport = await api.getEvalReport(report.id);
+          if (generation !== evidenceReportSearchGenerationRef.current) return;
+          fetchedReports.push(fetchedReport);
+          const matches = findModelLabEvidenceReportMatches(activeEvidenceScope, fetchedReports, {
+            maxMatches: EVIDENCE_REPORT_MATCH_LIMIT,
+            excludeReportId: selectedReport.id,
+          });
+          if (matches.length >= EVIDENCE_REPORT_MATCH_LIMIT) {
+            stoppedAtMatchLimit = fetchedReports.length + failedFetchCount < recentReports.length;
+            break;
+          }
+        } catch {
+          failedFetchCount += 1;
+          if (generation !== evidenceReportSearchGenerationRef.current) return;
+        }
+      }
+      if (generation !== evidenceReportSearchGenerationRef.current) return;
+      if (fetchedReports.length === 0 && failedFetchCount > 0) {
+        setEvidenceReportMatches([]);
+        setEvidenceSearchDiagnostics(null);
+        setEvidenceReportSearchStatus('error');
+        return;
+      }
+      const searchSummary = summarizeModelLabEvidenceReportSearch(activeEvidenceScope, fetchedReports, {
+        maxMatches: EVIDENCE_REPORT_MATCH_LIMIT,
+        excludeReportId: selectedReport.id,
+        candidateReportCount: recentReports.length,
+        failedReportCount: failedFetchCount,
+        stoppedAtMatchLimit,
+      });
+      setEvidenceReportMatches(searchSummary.matches);
+      setEvidenceSearchDiagnostics(searchSummary.diagnostics);
+      setEvidenceReportSearchStatus('done');
+    })().catch(() => {
+      if (generation !== evidenceReportSearchGenerationRef.current) return;
+      setEvidenceReportMatches([]);
+      setEvidenceSearchDiagnostics(null);
+      setEvidenceReportSearchStatus('error');
+    });
+  }, [activeEvidenceScope, activeEvidenceStatus, reports, selectedReport]);
+
+  const handleModelLabResultFilterChange = useCallback((value: string) => {
+    setActiveEvidenceScope(null);
+    setResultFilter(value);
+  }, []);
+
+  const clearModelLabResultFilter = useCallback(() => {
+    setActiveEvidenceScope(null);
+    setResultFilter('');
+  }, []);
+
+  useEffect(() => {
+    if (!initialEvidenceScope) return;
+    setTab('results');
+    setResultFilter(initialEvidenceScope.resultFilter);
+    setActiveEvidenceScope(initialEvidenceScope);
+    onInitialEvidenceScopeConsumed?.();
+  }, [initialEvidenceScope, onInitialEvidenceScopeConsumed]);
 
   // Load data
   useEffect(() => {
@@ -106,11 +328,11 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
         setBenchRuns(b);
         setPromptPlugins(plugins);
         setProviderHealthSignal(summarizeProviderHealth(health));
-        const latestReport = [...r].sort((a, b) => new Date(b.completedAt || b.createdAt).getTime() - new Date(a.completedAt || a.createdAt).getTime())[0];
+        const latestReport = getRecentModelLabHistory(r, 1)[0];
         if (latestReport) {
           api.getEvalReport(latestReport.id).then(setSelectedReport).catch(() => {});
         }
-        const latestBenchRun = [...b].sort((a, b) => new Date(b.completedAt || b.createdAt).getTime() - new Date(a.completedAt || a.createdAt).getTime())[0];
+        const latestBenchRun = getRecentModelLabHistory(b, 1)[0];
         if (latestBenchRun) {
           api.getBenchRun(latestBenchRun.id).then(setSelectedBenchRun).catch(() => {});
         }
@@ -652,7 +874,34 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                 <div style={{ color: 'var(--text-tertiary)', fontSize: 10, lineHeight: 1.4, marginBottom: 6 }}>
                   Leave empty to use each model's default strategy. Select one or more strategies to compare the same prompt/model across prompt contracts.
                 </div>
-                {promptStrategies.slice(0, 12).map((strategy) => {
+                <input
+                  type="search"
+                  value={promptStrategyFilter}
+                  onChange={(event) => setPromptStrategyFilter(event.target.value)}
+                  placeholder="Filter prompt strategies"
+                  aria-label="Filter prompt strategies by id, family, contract, guidance, or eval cue"
+                  style={{
+                    width: '100%',
+                    marginBottom: 8,
+                    padding: '6px 8px',
+                    borderRadius: 4,
+                    border: '1px solid var(--border-primary)',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    fontSize: 11,
+                  }}
+                />
+                {visiblePromptStrategies.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 10, color: 'var(--text-tertiary)', fontSize: 11 }}>
+                    No prompt strategies match this filter.
+                  </div>
+                )}
+                {promptStrategyWindowSummary && (
+                  <div aria-live="polite" style={{ color: 'var(--text-tertiary)', fontSize: 10, lineHeight: 1.4, marginBottom: 6 }}>
+                    {promptStrategyWindowSummary}
+                  </div>
+                )}
+                {visiblePromptStrategies.map((strategy) => {
                   const bestPractice = strategy.bestPracticeNotes?.[0];
                   return (
                     <label key={strategy.id} style={checkboxRowStyle(selectedPromptStrategyIds.has(strategy.id))}>
@@ -666,6 +915,9 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                         <div style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{strategy.id}</div>
                         <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 1 }}>
                           {strategy.family} · {strategy.systemStyle} · {strategy.reasoningPolicy} · {strategy.outputContract}
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: 10, marginTop: 4, lineHeight: 1.35 }}>
+                          <strong>Routing proof:</strong> {buildPromptStrategyComparisonSummary(strategy)}
                         </div>
                         {bestPractice && (
                           <div style={{ color: 'var(--text-secondary)', fontSize: 10, marginTop: 4, lineHeight: 1.35 }}>
@@ -850,6 +1102,7 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
             <PromptPacksTab
               registry={promptPlugins}
               prompts={prompts}
+              packLastUsed={packLastUsed}
               onPrepare={handlePreparePromptPluginRoots}
               onImportSkill={handleImportPromptSkill}
               onSelectEvalIds={(evalIds, pack) => {
@@ -940,17 +1193,17 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                             {' · '}<span style={{ color: '#ef4444' }}>{data.unresolved} failed</span>
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                            Score: {data.avgScore}/10 · Validation: {data.avgValidationScore}/2 · Latency: {(data.avgLatencyMs / 1000).toFixed(1)}s
+                            Score: {formatModelLabMetricRatioForSamples(data.avgScore, 10, data.scoreSampleCount)} · Validation: {formatModelLabMetricRatioForSamples(data.avgValidationScore, 2, data.validationSampleCount)} · Latency: {formatModelLabDurationMsForSamples(data.avgLatencyMs, data.latencySampleCount)}
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                            Value: {data.valueScore} · Resolved: {Math.round(data.resolvedRate * 100)}% · Cost: ${data.avgCost.toFixed(6)}
+                            Value: {formatBenchValueScore(data)} · Resolved: {formatModelLabPercent(data.resolvedRate)} · Cost: {formatModelLabCostForSamples(data.avgCost, data.costSampleCount)}
                           </div>
                           {modelId === selectedBenchRun.summary?.bestModel && selectedBenchRun.summary?.bestModelReason && (
                             <div style={{ fontSize: 10, color: 'var(--accent-primary)', marginTop: 4 }}>
                               {selectedBenchRun.summary.bestModelReason}
                             </div>
                           )}
-                          <StackedScoreBreakdown breakdown={averageBreakdown(selectedBenchRun.results.filter(r => r.modelId === modelId))} />
+                          <StackedScoreBreakdown breakdown={selectedBenchBreakdownsByModel.get(modelId) || averageModelLabBreakdown([])} />
                         </div>
                       ))}
                     </div>
@@ -973,6 +1226,70 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                 <PerTaskScoreTable run={selectedBenchRun} />
 
                 {/* Per-result table */}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(120px, 150px) max-content', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="search"
+                      value={benchResultFilter}
+                      onChange={(event) => setBenchResultFilter(event.target.value)}
+                      placeholder="Filter bench rows"
+                      aria-label="Filter Model Lab bench result rows by task, model, status, score, strategy, trace, validation, or tool"
+                      style={{
+                        width: '100%',
+                        padding: '6px 8px',
+                        borderRadius: 4,
+                        border: '1px solid var(--border-primary)',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        fontSize: 11,
+                      }}
+                    />
+                    <select
+                      value={benchResultStatusFilter}
+                      onChange={(event) => setBenchResultStatusFilter(event.target.value as BenchResultStatusFilter)}
+                      aria-label="Filter Model Lab bench result rows by status"
+                      style={{
+                        width: '100%',
+                        padding: '6px 8px',
+                        borderRadius: 4,
+                        border: '1px solid var(--border-primary)',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        fontSize: 11,
+                      }}
+                    >
+                      <option value="all">All rows</option>
+                      <option value="attention">Needs attention</option>
+                      <option value="resolved">Resolved</option>
+                      <option value="assisted">Assisted</option>
+                      <option value="partial">Partial</option>
+                      <option value="unresolved">Unresolved</option>
+                      <option value="error">Errors</option>
+                      <option value="timeout">Timeouts</option>
+                      <option value="validation-failed">Validation failed</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBenchResultFilter('');
+                        setBenchResultStatusFilter('all');
+                      }}
+                      disabled={!benchResultFiltersActive}
+                      aria-label="Clear Model Lab bench result row filters"
+                      style={smallBtnStyle}
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                  {(selectedBenchRun.results.length > MODEL_LAB_RESULT_VISIBLE_LIMIT || benchResultFiltersActive) && (
+                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6 }}>
+                      Showing {visibleSelectedBenchResults.length} of {selectedBenchResultMatchCount} bench result rows{benchResultFiltersActive ? ' that match filters' : ''}.
+                    </div>
+                  )}
+                </div>
+                {selectedBenchRun.results.length > 0 && visibleSelectedBenchResults.length === 0 && benchResultFiltersActive && (
+                  <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>No bench result rows match this filter.</div>
+                )}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
@@ -989,15 +1306,15 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedBenchRun.results.map((r, i) => (
+                    {visibleSelectedBenchResults.map((r, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--border-primary)' }}>
                         <td style={tdStyle}>{r.taskName}</td>
                         <td style={tdStyle}>{r.modelId}</td>
                         <td style={{ ...tdStyle, color: resolvedColor(r.scores.resolvedStatus) }}>
                           {r.scores.resolvedStatus}
                         </td>
-                        <td style={{ ...tdStyle, color: scoreColor(r.scores.overallScore) }}>
-                          {r.scores.overallScore}/10
+                        <td style={{ ...tdStyle, color: modelLabScoreColor(r.scores.overallScore) }}>
+                          {formatModelLabMetricRatio(r.scores.overallScore, 10)}
                         </td>
                         <td style={tdStyle}>
                           <StackedScoreBreakdown breakdown={r.scores.breakdown} compact />
@@ -1014,7 +1331,7 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
 	                            r.validationPassed ? '✓ Pass' : `✗ ${firstValidationFinding(r) || 'Fail'}`
 	                          ) : '—'}
 	                        </td>
-                        <td style={tdStyle}>{(r.wallMs / 1000).toFixed(1)}s</td>
+                        <td style={tdStyle}>{formatModelLabDurationMs(r.wallMs)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1031,6 +1348,15 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
           <div {...tabPanelProps('results')} style={{ padding: 10 }}>
             {!selectedReport ? (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>
+                {shouldShowEvidenceSummaryCallout && activeEvidenceSummary && (
+                  <ExactEvidenceStatusCallout
+                    summary={activeEvidenceSummary}
+                    status={evidenceReportSearchStatus}
+                    matches={evidenceReportMatches}
+                    diagnostics={evidenceSearchDiagnostics}
+                    onOpenReport={handleSelectReport}
+                  />
+                )}
                 No results yet. Configure and run an eval.
               </div>
             ) : (
@@ -1081,11 +1407,11 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                             {modelId} {modelId === selectedReport.summary?.bestModel && '👑'}
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-                            Score: <span style={{ color: 'var(--accent-success)' }}>{data.avgScore}/10</span>
-                            {' · '}Latency: {(data.avgLatencyMs / 1000).toFixed(1)}s
-                            {' · '}Tools: {data.avgToolCount}
+                            Score: <span style={{ color: modelLabScoreColorForSamples(data.avgScore, data.scoreSampleCount) }}>{formatModelLabMetricRatioForSamples(data.avgScore, 10, data.scoreSampleCount)}</span>
+                            {' · '}Latency: {formatModelLabDurationMsForSamples(data.avgLatencyMs, data.latencySampleCount)}
+                            {' · '}Tools: {formatModelLabMetricValueForSamples(data.avgToolCount, data.toolSampleCount)}
                           </div>
-                          <StackedScoreBreakdown breakdown={averageBreakdown(selectedReport.results.filter(r => r.modelId === modelId))} />
+                          <StackedScoreBreakdown breakdown={selectedReportBreakdownsByModel.get(modelId) || averageModelLabBreakdown([])} />
                         </div>
                       ))}
                     </div>
@@ -1103,7 +1429,60 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                   </div>
                 )}
                 <EvalProofReviewCallout report={selectedReport} onSaveReview={handleSaveEvalProofReview} />
+                {shouldShowEvidenceSummaryCallout && activeEvidenceSummary && (
+                  <ExactEvidenceStatusCallout
+                    summary={activeEvidenceSummary}
+                    status={evidenceReportSearchStatus}
+                    matches={evidenceReportMatches}
+                    diagnostics={evidenceSearchDiagnostics}
+                    onOpenReport={handleSelectReport}
+                  />
+                )}
 
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) max-content', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                    <input
+                      type="search"
+                      value={resultFilter}
+                      onChange={(event) => handleModelLabResultFilterChange(event.target.value)}
+                      placeholder="Filter result rows"
+                      aria-label="Filter Model Lab result rows by model, prompt, status, score, strategy, weakest signal, or tool"
+                      style={{
+                        width: '100%',
+                        padding: '6px 8px',
+                        borderRadius: 4,
+                        border: '1px solid var(--border-primary)',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        fontSize: 11,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={clearModelLabResultFilter}
+                      disabled={!resultFiltersActive}
+                      aria-label="Clear Model Lab result row filters"
+                      style={smallBtnStyle}
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                  {(selectedReport.results.length > MODEL_LAB_RESULT_VISIBLE_LIMIT || activeEvidenceScope || resultFiltersActive) && (
+                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+                      Showing {visibleSelectedReportResults.length} of {selectedReportResultMatchCount} result rows{activeEvidenceScope ? ' matching exact route evidence' : resultFiltersActive ? ' that match filters' : ''}.
+                    </div>
+                  )}
+                </div>
+                {showExactEvidenceEmptyState && (
+                  <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>
+                    No result rows match this exact route evidence. Use History or run an eval with this model and prompt strategy to create matching evidence.
+                  </div>
+                )}
+                {showResultFilterEmptyState && (
+                  <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>
+                    No result rows match this filter.
+                  </div>
+                )}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
@@ -1118,14 +1497,14 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedReport.results.map((r, i) => (
+                    {visibleSelectedReportResults.map((r, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--border-primary)' }}>
                         <td style={tdStyle}>{r.modelId}</td>
                         <td style={tdStyle}>{r.promptName}</td>
-                        <td style={{ ...tdStyle, color: scoreColor(r.scores.overallScore) }}>{r.scores.overallScore}/10</td>
+                        <td style={{ ...tdStyle, color: modelLabScoreColor(r.scores.overallScore) }}>{formatModelLabMetricRatio(r.scores.overallScore, 10)}</td>
                         <td style={tdStyle}><StackedScoreBreakdown breakdown={r.scores.breakdown} compact /></td>
                         <td style={tdStyle}>{r.scores.breakdown?.weakestSignal?.label ?? '—'}</td>
-                        <td style={tdStyle}>{(r.wallMs / 1000).toFixed(1)}s</td>
+                        <td style={tdStyle}>{formatModelLabDurationMs(r.wallMs)}</td>
                         <td style={tdStyle}>{r.toolCallCount}</td>
                         <td style={{ ...tdStyle, color: r.status === 'ok' ? 'var(--accent-success)' : 'var(--accent-error)' }}>{r.status}</td>
                       </tr>
@@ -1141,85 +1520,114 @@ export function ModelLabPanel({ workingDir, models, enabledModels = [] }: Props)
         {/* ── History Tab ── */}
         {tab === 'history' && (
           <div {...tabPanelProps('history')} style={{ padding: 10 }}>
+            <input
+              type="search"
+              value={historyFilter}
+              onChange={(event) => setHistoryFilter(event.target.value)}
+              placeholder="Filter history"
+              aria-label="Filter Model Lab history by name, id, status, pack, proof, or artifact"
+              style={{
+                width: '100%',
+                marginBottom: 10,
+                padding: '6px 8px',
+                borderRadius: 4,
+                border: '1px solid var(--border-primary)',
+                background: 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                fontSize: 11,
+              }}
+            />
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
               Eval Reports
             </div>
             {reports.length === 0 && <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>No eval runs yet.</div>}
-            {reports.length > HISTORY_VISIBLE_LIMIT && (
+            {reports.length > 0 && visibleReports.length === 0 && historyFilterActive && (
+              <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>No eval reports match this history filter.</div>
+            )}
+            {visibleReports.length > 0 && (reports.length > HISTORY_VISIBLE_LIMIT || historyFilterActive) && (
               <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 6 }}>
-                Showing latest {HISTORY_VISIBLE_LIMIT} of {reports.length} eval reports.
+                Showing latest {visibleReports.length} of {visibleReportMatchCount} eval reports{historyFilterActive ? ' matching filter' : ''}.
               </div>
             )}
-            {reports
-              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-              .slice(0, HISTORY_VISIBLE_LIMIT)
-              .map(r => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => handleSelectReport(r.id)}
-                aria-label={`Open eval report ${r.name}`}
-                style={historyItemStyle}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
-                  <span style={{
-                    fontSize: 9, padding: '1px 6px', borderRadius: 3,
-                    background: statusPillColors(r.status).background,
-                    color: statusPillColors(r.status).color,
-                  }}>{r.status}</span>
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                  {r.total} runs · {new Date(r.createdAt).toLocaleString()}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                  {r.artifactPath ? `Artifact: ${r.artifactPath}` : 'Artifact: not available'}
-                </div>
-                <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
-                  {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
-                </div>
-              </button>
-            ))}
+            {visibleReports.map(r => {
+                const packProvenance = formatPromptPackHistoryProvenance(r);
+                const reportTimestamp = formatModelLabHistoryTimestamp(r);
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => handleSelectReport(r.id)}
+                    aria-label={`Open eval report ${r.name}${packProvenance ? `. Prompt pack provenance for ${r.name}: ${packProvenance}` : ''}`}
+                    style={historyItemStyle}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
+                      <span style={{
+                        fontSize: 9, padding: '1px 6px', borderRadius: 3,
+                        background: statusPillColors(r.status).background,
+                        color: statusPillColors(r.status).color,
+                      }}>{r.status}</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }} title={reportTimestamp.iso || undefined}>
+                      {r.total} runs · {reportTimestamp.label}: {reportTimestamp.display}
+                    </div>
+                    {packProvenance && (
+                      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
+                        {packProvenance}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                      {r.artifactPath ? `Artifact: ${r.artifactPath}` : 'Artifact: not available'}
+                    </div>
+                    <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
+                      {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
+                    </div>
+                  </button>
+                );
+              })}
 
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 8 }}>
               Bench Runs
             </div>
             {benchRuns.length === 0 && <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>No bench runs yet.</div>}
-            {benchRuns.length > HISTORY_VISIBLE_LIMIT && (
+            {benchRuns.length > 0 && visibleBenchRuns.length === 0 && historyFilterActive && (
+              <div style={{ textAlign: 'center', padding: 15, color: 'var(--text-tertiary)', fontSize: 11 }}>No bench runs match this history filter.</div>
+            )}
+            {visibleBenchRuns.length > 0 && (benchRuns.length > HISTORY_VISIBLE_LIMIT || historyFilterActive) && (
               <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 6 }}>
-                Showing latest {HISTORY_VISIBLE_LIMIT} of {benchRuns.length} bench runs.
+                Showing latest {visibleBenchRuns.length} of {visibleBenchRunMatchCount} bench runs{historyFilterActive ? ' matching filter' : ''}.
               </div>
             )}
-            {benchRuns
-              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-              .slice(0, HISTORY_VISIBLE_LIMIT)
-              .map(r => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => handleSelectBenchRun(r.id)}
-                aria-label={`Open bench run ${r.name}`}
-                style={historyItemStyle}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
-                  <span style={{
-                    fontSize: 9, padding: '1px 6px', borderRadius: 3,
-                    background: statusPillColors(r.status).background,
-                    color: statusPillColors(r.status).color,
-                  }}>{r.status}</span>
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                  {r.total} tasks · {new Date(r.createdAt).toLocaleString()}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                  {r.artifactPath ? `Artifact: ${r.artifactPath}` : 'Artifact: not available'}
-                </div>
-                <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
-                  {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
-                </div>
-              </button>
-            ))}
+            {visibleBenchRuns.map(r => {
+              const benchTimestamp = formatModelLabHistoryTimestamp(r);
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => handleSelectBenchRun(r.id)}
+                  aria-label={`Open bench run ${r.name}`}
+                  style={historyItemStyle}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{r.name}</span>
+                    <span style={{
+                      fontSize: 9, padding: '1px 6px', borderRadius: 3,
+                      background: statusPillColors(r.status).background,
+                      color: statusPillColors(r.status).color,
+                    }}>{r.status}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }} title={benchTimestamp.iso || undefined}>
+                    {r.total} tasks · {benchTimestamp.label}: {benchTimestamp.display}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                    {r.artifactPath ? `Artifact: ${r.artifactPath}` : 'Artifact: not available'}
+                  </div>
+                  <div style={{ fontSize: 10, color: proofReviewHistoryColor((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview), marginTop: 2 }}>
+                    {proofReviewHistoryLabel((r as api.BenchRunSummary & { proofReview?: api.ProofReviewState }).proofReview)}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1360,18 +1768,7 @@ function RecommendationsDashboard({
       </div>
 
       {providerHealthSignal && (
-        <div style={{
-          marginBottom: 12,
-          padding: 8,
-          borderRadius: 6,
-          border: '1px solid var(--border-primary)',
-          background: 'var(--bg-secondary)',
-          fontSize: 10,
-          color: providerHealthSignal.failing > 0 || providerHealthSignal.stale > 0 ? 'var(--accent-warning)' : 'var(--accent-success)',
-        }}>
-          Provider health: {providerHealthSignal.tracked} tracked, {providerHealthSignal.failing} failing, {providerHealthSignal.stale} stale
-          {providerHealthSignal.maxLatencyMs ? `, slowest ${Math.round(providerHealthSignal.maxLatencyMs)}ms` : ''}
-        </div>
+        <ProviderHealthSummary signal={providerHealthSignal} compact />
       )}
 
       {visibleRecommendations.length === 0 ? (
@@ -1571,6 +1968,127 @@ function proofReviewHistoryColor(review?: api.ProofReviewState): string {
   return 'var(--text-tertiary)';
 }
 
+function packReadinessColor(status: PromptPackEvalReadinessStatus): string {
+  if (status === 'ready') return 'var(--accent-success)';
+  if (status === 'partial') return 'var(--accent-warning)';
+  if (status === 'missing') return 'var(--accent-error)';
+  return 'var(--text-tertiary)';
+}
+
+function ExactEvidenceStatusCallout({
+  summary,
+  status,
+  matches,
+  diagnostics,
+  onOpenReport,
+}: {
+  summary: ModelLabEvidenceSummary;
+  status: ModelLabEvidenceSearchStatus;
+  matches: ModelLabEvidenceReportMatch[];
+  diagnostics: ModelLabEvidenceSearchDiagnostics | null;
+  onOpenReport: (reportId: string) => void;
+}) {
+  if (summary.status === 'matched') return null;
+
+  const title = summary.status === 'no-report'
+    ? 'Evidence check needs a selected eval report.'
+    : 'This selected report has no exact rows for the route evidence scope.';
+  const detail = summary.status === 'no-report'
+    ? `Open an eval report from History or run an eval using ${summary.modelId} with ${summary.promptStrategyId}.`
+    : summary.totalRows === 0
+      ? `Selected report ${summary.reportName || summary.reportId || 'unknown'} has no result rows yet. Run or refresh an eval using ${summary.modelId} with ${summary.promptStrategyId}.`
+      : `Selected report ${summary.reportName || summary.reportId || 'unknown'} has ${summary.totalRows} result row${summary.totalRows === 1 ? '' : 's'}, but 0 exact matches for ${summary.modelId} with ${summary.promptStrategyId}. Open History to try another report or run an eval with this strategy.`;
+  const diagnosticsDisplay = diagnostics
+    ? formatModelLabEvidenceSearchDiagnostics(diagnostics, summary)
+    : null;
+
+  return (
+    <div
+      className="exact-evidence-status"
+      role="status"
+      aria-label={`Exact route evidence check: ${summary.matchCount} of ${summary.totalRows} rows match ${summary.modelId} with ${summary.promptStrategyId}`}
+    >
+      <div className="exact-evidence-status-title">{title}</div>
+      <div className="exact-evidence-status-detail">{detail}</div>
+      {summary.reportId && (
+        <div className="exact-evidence-status-meta">
+          Report: {summary.reportName || summary.reportId} ({summary.reportId})
+        </div>
+      )}
+      {summary.status === 'no-match' && (
+        <div className="exact-evidence-status-reports">
+          {status === 'loading' && (
+            <div className="exact-evidence-status-meta">
+              Checking the last 8 eval reports for this exact route evidence.
+            </div>
+          )}
+          {diagnosticsDisplay?.coverageLabel && (
+            <div className="exact-evidence-status-coverage">
+              {diagnosticsDisplay.coverageLabel}
+            </div>
+          )}
+          {diagnosticsDisplay?.warningLabel && (
+            <div className="exact-evidence-status-warning">
+              {diagnosticsDisplay.warningLabel}
+            </div>
+          )}
+          {diagnosticsDisplay?.summaryLabel && (
+            <div
+              className="exact-evidence-status-diagnostics"
+              aria-label={diagnosticsDisplay.accessibleLabel || undefined}
+            >
+              {diagnosticsDisplay.summaryLabel}
+            </div>
+          )}
+          {status === 'error' && (
+            <div className="exact-evidence-status-meta">
+              Recent report search could not finish. Open History to inspect older eval reports.
+            </div>
+          )}
+          {status === 'done' && matches.length === 0 && (
+            <div className="exact-evidence-status-meta">
+              No exact matches found in the last 8 eval reports.
+            </div>
+          )}
+          {matches.length > 0 && (
+            <>
+              <div className="exact-evidence-status-reports-title">Recent matching reports</div>
+              <div className="exact-evidence-status-report-actions" role="list">
+                {matches.map((match) => {
+                  const matchDisplay = formatModelLabEvidenceReportMatch(match);
+                  return (
+                    <button
+                      key={match.reportId}
+                      type="button"
+                      className="exact-evidence-status-report"
+                      onClick={() => onOpenReport(match.reportId)}
+                      aria-label={matchDisplay.accessibleLabel}
+                    >
+                      <span>Open matching report</span>
+                      <strong>{match.reportName}</strong>
+                      <small>
+                        {match.matchCount} exact match{match.matchCount === 1 ? '' : 'es'} of {match.totalRows} row{match.totalRows === 1 ? '' : 's'}
+                      </small>
+                      {matchDisplay.sampleLabel && (
+                        <small className="exact-evidence-status-report-sample">
+                          {matchDisplay.sampleLabel}
+                        </small>
+                      )}
+                      <small className={`exact-evidence-status-report-suffix ${matchDisplay.statusTone}`}>
+                        {matchDisplay.suffixLabel}
+                      </small>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function buildEvalProofBrief(
   report: api.EvalReport,
   preparedPackRun?: { packId: string; packName: string; evalIds: string[]; matchedEvalIds: string[] } | null,
@@ -1579,7 +2097,7 @@ function buildEvalProofBrief(
   const byModel = summary ? Object.entries(summary.byModel) : [];
   const byPromptStrategy = summary?.byPromptStrategy ? Object.entries(summary.byPromptStrategy) : [];
   const failed = report.results.filter((result) => result.status !== 'ok');
-  const weakest = averageBreakdown(report.results).weakestSignal;
+  const weakest = averageModelLabBreakdown(report.results).weakestSignal;
   const promptIds = Array.from(new Set(report.results.map((result) => result.promptId)));
   const promptStrategies = summarizePromptStrategies(report.results);
   const sameModelComparisons = summarizeSameModelPromptStrategyComparisons(report.results);
@@ -1611,7 +2129,7 @@ function buildEvalProofBrief(
     '## Summary',
     '',
     `Best model: ${summary?.bestModel || 'not available'}`,
-    `Weakest signal: ${weakest.label} (${weakest.score}/${weakest.maxScore})`,
+    `Weakest signal: ${weakest.label} (${formatModelLabMetricRatio(weakest.score, weakest.maxScore)})`,
     `Failures: ${failed.length}/${report.results.length}`,
     `Prompt strategies observed: ${promptStrategies.length > 0 ? promptStrategies.join('; ') : 'not recorded'}`,
     `Same-model prompt strategy comparisons: ${sameModelComparisons.length > 0 ? sameModelComparisons.join('; ') : 'not recorded'}`,
@@ -1619,14 +2137,14 @@ function buildEvalProofBrief(
     '## Model results',
     '',
     ...(byModel.length > 0
-      ? byModel.map(([modelId, data]) => `- ${modelId}: score ${data.avgScore}/10, latency ${(data.avgLatencyMs / 1000).toFixed(1)}s, tools ${data.avgToolCount}`)
+      ? byModel.map(([modelId, data]) => `- ${modelId}: score ${formatModelLabMetricRatioForSamples(data.avgScore, 10, data.scoreSampleCount)}, latency ${formatModelLabDurationMsForSamples(data.avgLatencyMs, data.latencySampleCount)}, tools ${formatModelLabMetricValueForSamples(data.avgToolCount, data.toolSampleCount)}`)
       : ['- No summary by model recorded.']),
     '',
     '## Prompt strategy results',
     '',
     `Best prompt strategy: ${summary?.bestPromptStrategy || 'not available'}`,
     ...(byPromptStrategy.length > 0
-      ? byPromptStrategy.map(([strategyId, data]) => `- ${strategyId}: score ${data.avgScore}/10, family ${data.family}, style ${data.systemStyle}, latency ${(data.avgLatencyMs / 1000).toFixed(1)}s, tools ${data.avgToolCount}, best model ${data.bestModel || 'not available'}`)
+      ? byPromptStrategy.map(([strategyId, data]) => `- ${strategyId}: score ${formatModelLabMetricRatioForSamples(data.avgScore, 10, data.scoreSampleCount)}, family ${data.family}, style ${data.systemStyle}, latency ${formatModelLabDurationMsForSamples(data.avgLatencyMs, data.latencySampleCount)}, tools ${formatModelLabMetricValueForSamples(data.avgToolCount, data.toolSampleCount)}, best model ${data.bestModel || 'not available'}`)
       : ['- No prompt strategy summary recorded.']),
     '',
     '## Recommendations',
@@ -1641,7 +2159,7 @@ function buildEvalProofBrief(
     ...report.results
       .filter((result) => result.status !== 'ok' || !result.scores.breakdown?.weakestSignal?.passed)
       .slice(0, 12)
-      .map((result) => `- ${result.modelId} / ${result.promptName}: ${result.status}, score ${result.scores.overallScore}/10, weakest ${result.scores.breakdown?.weakestSignal?.label || 'none'}`),
+      .map((result) => `- ${result.modelId} / ${result.promptName}: ${result.status}, score ${formatModelLabMetricRatio(result.scores.overallScore, 10)}, weakest ${result.scores.breakdown?.weakestSignal?.label || 'none'}`),
     '',
     '## Evidence available',
     '',
@@ -1688,14 +2206,14 @@ function buildBenchProofBrief(run: api.BenchRun): string {
     ...(byModel.length > 0
       ? byModel.map(([modelId, data]) => [
         `- ${modelId}: ${data.resolved} resolved, ${data.partial} partial, ${data.unresolved} unresolved, ${data.assisted || 0} assisted`,
-        `  Score ${data.avgScore}/10, validation ${data.avgValidationScore}/2, latency ${(data.avgLatencyMs / 1000).toFixed(1)}s, cost $${data.avgCost.toFixed(6)}, value ${data.valueScore}`,
+        `  Score ${formatModelLabMetricRatioForSamples(data.avgScore, 10, data.scoreSampleCount)}, validation ${formatModelLabMetricRatioForSamples(data.avgValidationScore, 2, data.validationSampleCount)}, latency ${formatModelLabDurationMsForSamples(data.avgLatencyMs, data.latencySampleCount)}, cost ${formatModelLabCostForSamples(data.avgCost, data.costSampleCount)}, value ${formatBenchValueScore(data)}`,
       ].join('\n'))
       : ['- No summary by model recorded.']),
     '',
     '## Failed or weak rows',
     '',
     ...(failed.length > 0
-      ? failed.slice(0, 12).map((result) => `- ${result.taskName} / ${result.modelId}: ${result.status}, validation ${result.validationPassed ? 'pass' : 'fail'}, score ${result.scores.overallScore}/10${firstValidationFinding(result) ? `, finding: ${firstValidationFinding(result)}` : ''}`)
+      ? failed.slice(0, 12).map((result) => `- ${result.taskName} / ${result.modelId}: ${result.status}, validation ${result.validationPassed ? 'pass' : 'fail'}, score ${formatModelLabMetricRatio(result.scores.overallScore, 10)}${firstValidationFinding(result) ? `, finding: ${firstValidationFinding(result)}` : ''}`)
       : ['- No failed rows recorded.']),
     '',
     '## Trace warnings',
@@ -1711,107 +2229,33 @@ function buildBenchProofBrief(run: api.BenchRun): string {
   ].join('\n');
 }
 
-function buildPromptPackEvidenceBrief(
-  pack: api.PromptPluginRegistry['packs'][number],
-  plugins: api.PromptPluginSummary[],
-  prompts: api.PromptCase[],
-): string {
-  const installedPromptIds = new Set(prompts.map((prompt) => prompt.id));
-  const evals = plugins.flatMap((plugin) =>
-    plugin.evals.map((ev) => ({
-      pluginId: plugin.id,
-      id: ev.id,
-      minimumScore: ev.minimumScore,
-      installed: installedPromptIds.has(ev.id),
-    }))
-  );
-  const installed = evals.filter((ev) => ev.installed);
-  const blockedPlugins = plugins.filter((plugin) => plugin.status !== 'ready' || plugin.trust === 'blocked');
-  return [
-    '# Prompt Pack Evidence Brief',
-    '',
-    `Pack: ${pack.name}`,
-    `Pack id: ${pack.id}`,
-    `Trust: ${pack.trust}`,
-    `Sources: ${pack.sources.join(', ') || 'none recorded'}`,
-    `Manifest count: ${pack.pluginCount}`,
-    `Plugin ids: ${pack.pluginIds.join(', ') || 'none recorded'}`,
-    '',
-    '## Eval coverage',
-    '',
-    `Declared eval ids: ${evals.length}`,
-    `Installed eval prompts: ${installed.length}/${evals.length}`,
-    '',
-    ...(evals.length > 0
-      ? evals.map((ev) => `- ${ev.id}: ${ev.installed ? 'installed' : 'missing'}; minimum score ${ev.minimumScore}; plugin ${ev.pluginId}`)
-      : ['- No eval IDs declared by this pack.']),
-    '',
-    '## Manifest health',
-    '',
-    ...(plugins.length > 0
-      ? plugins.map((plugin) => [
-        `- ${plugin.name} (${plugin.id})`,
-        `  Status: ${plugin.status}; trust: ${plugin.trust}; version: ${plugin.version}`,
-        `  Sections: ${plugin.sections.length}; evals: ${plugin.evals.length}; path: ${plugin.path}`,
-        plugin.issues.length > 0 ? `  Issues: ${plugin.issues.join('; ')}` : '',
-      ].filter(Boolean).join('\n'))
-      : ['- No plugin manifests matched this pack in the current registry.']),
-    '',
-    '## Risks',
-    '',
-    ...(blockedPlugins.length > 0
-      ? blockedPlugins.map((plugin) => `- ${plugin.id}: ${plugin.status}/${plugin.trust}${plugin.issues.length ? ` - ${plugin.issues.join('; ')}` : ''}`)
-      : ['- No blocked or invalid plugin manifests detected for this pack.']),
-    '',
-    '## Next proof action',
-    '',
-    installed.length > 0
-      ? `Run Model Lab Eval with the ${installed.length} installed prompt id${installed.length === 1 ? '' : 's'} selected from this pack, then export the eval proof brief.`
-      : 'Add or install matching eval prompt cases before claiming this pack has runnable proof.',
-  ].join('\n');
-}
-
-function averageBreakdown(results: Array<{ scores: api.EvalScores }>): api.EvalScoreBreakdown {
-  const count = results.length || 1;
-  const structural = results.reduce((sum, r) => sum + (r.scores.breakdown?.structural ?? 0), 0) / count;
-  const runtime = results.reduce((sum, r) => sum + (r.scores.breakdown?.runtime ?? 0), 0) / count;
-  const style = results.reduce((sum, r) => sum + (r.scores.breakdown?.style ?? 0), 0) / count;
-  const weakest = results
-    .flatMap(r => r.scores.breakdown?.signals ?? [])
-    .sort((a, b) => (a.score / a.maxScore) - (b.score / b.maxScore))[0] ?? {
-      id: 'none',
-      label: 'No signals',
-      category: 'style' as const,
-      passed: false,
-      score: 0,
-      maxScore: 1,
-    };
-  return {
-    structural: Math.round(structural * 10) / 10,
-    runtime: Math.round(runtime * 10) / 10,
-    style: Math.round(style * 10) / 10,
-    total: Math.round((structural + runtime + style) * 10) / 10,
-    weakestSignal: weakest,
-    signals: [],
-  };
-}
-
 function StackedScoreBreakdown({ breakdown, compact = false }: { breakdown?: api.EvalScoreBreakdown; compact?: boolean }) {
   if (!breakdown) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
-  const total = Math.max(10, breakdown.structural + breakdown.runtime + breakdown.style);
+  const segments = buildModelLabBreakdownDisplaySegments(breakdown);
   const height = compact ? 6 : 8;
   return (
     <div style={{ marginTop: compact ? 0 : 6, minWidth: compact ? 90 : 0 }}>
       <div style={{ display: 'flex', height, borderRadius: 999, overflow: 'hidden', background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-        <div title={`Structural ${breakdown.structural}/4.5`} style={{ width: `${(breakdown.structural / total) * 100}%`, background: 'var(--accent-primary)' }} />
-        <div title={`Runtime ${breakdown.runtime}/3.5`} style={{ width: `${(breakdown.runtime / total) * 100}%`, background: '#22c55e' }} />
-        <div title={`Style ${breakdown.style}/2`} style={{ width: `${(breakdown.style / total) * 100}%`, background: '#f59e0b' }} />
+        {segments.map((segment) => (
+          <div
+            key={segment.key}
+            title={segment.title}
+            style={{
+              width: segment.width,
+              background: segment.key === 'structural'
+                ? 'var(--accent-primary)'
+                : segment.key === 'runtime'
+                  ? '#22c55e'
+                  : '#f59e0b',
+            }}
+          />
+        ))}
       </div>
       {!compact && (
         <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 9, color: 'var(--text-tertiary)' }}>
-          <span>Structural {breakdown.structural}</span>
-          <span>Runtime {breakdown.runtime}</span>
-          <span>Style {breakdown.style}</span>
+          {segments.map((segment) => (
+            <span key={segment.key}>{segment.label} {segment.valueLabel}</span>
+          ))}
         </div>
       )}
     </div>
@@ -1819,27 +2263,29 @@ function StackedScoreBreakdown({ breakdown, compact = false }: { breakdown?: api
 }
 
 function WeakestSignalCallout({ results }: { results: Array<{ scores: api.EvalScores }> }) {
-  const weakest = averageBreakdown(results).weakestSignal;
+  const weakest = averageModelLabBreakdown(results).weakestSignal;
   return (
     <div style={{ marginTop: 8, padding: 6, borderRadius: 4, background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', fontSize: 10 }}>
       Weakest signal: <span style={{ color: weakest.passed ? 'var(--accent-success)' : 'var(--accent-error)', fontWeight: 600 }}>{weakest.label}</span>
-      <span style={{ color: 'var(--text-tertiary)' }}> · {weakest.score}/{weakest.maxScore}</span>
+      <span style={{ color: 'var(--text-tertiary)' }}> · {formatModelLabMetricRatio(weakest.score, weakest.maxScore)}</span>
     </div>
   );
 }
 
 function BenchDeltaCallout({ delta }: { delta: NonNullable<api.BenchRun['previousDelta']> }) {
-  const positive = delta.avgScoreDelta >= 0;
+  const scoreDeltaLabel = formatModelLabSignedDelta(delta.avgScoreDelta);
+  const scoreDeltaPctLabel = formatModelLabSignedDelta(delta.avgScoreDeltaPct);
+  const deltaTone = modelLabDeltaColor(delta.avgScoreDelta);
   return (
     <div style={{ marginBottom: 12, padding: 8, borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
       <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
         Compared with previous run
       </div>
-      <div style={{ fontSize: 12, color: positive ? 'var(--accent-success)' : 'var(--accent-error)', fontWeight: 600 }}>
-        {positive ? '+' : ''}{delta.avgScoreDeltaPct}% score ({positive ? '+' : ''}{delta.avgScoreDelta}/10)
+      <div style={{ fontSize: 12, color: deltaTone, fontWeight: 600 }}>
+        {scoreDeltaPctLabel === '—' ? '—' : `${scoreDeltaPctLabel}%`} score ({scoreDeltaLabel === '—' ? '—' : `${scoreDeltaLabel}/10`})
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-        vs {delta.previousRunName} · validation {formatSigned(delta.avgValidationDelta)} · style {formatSigned(delta.avgStyleDelta)}
+        vs {delta.previousRunName} · validation {formatModelLabSignedDelta(delta.avgValidationDelta)} · style {formatModelLabSignedDelta(delta.avgStyleDelta)}
       </div>
     </div>
   );
@@ -1848,7 +2294,7 @@ function BenchDeltaCallout({ delta }: { delta: NonNullable<api.BenchRun['previou
 function EvalProofReviewCallout({ report, onSaveReview }: { report: api.EvalReport; onSaveReview: (status: api.ProofReviewState['status'], note?: string) => void }) {
   const failed = report.results.filter((result) => result.status !== 'ok');
   const complete = report.status === 'complete' && report.completed === report.total;
-  const weakest = averageBreakdown(report.results).weakestSignal;
+  const weakest = averageModelLabBreakdown(report.results).weakestSignal;
   const packContext = report.packContext;
   const needsAttention = !complete || failed.length > 0 || !weakest.passed;
   const checklist = [
@@ -1977,16 +2423,16 @@ function PerTaskScoreTable({ run }: { run: api.BenchRun }) {
   const rows = [...new Set(run.results.map(r => r.taskId))].map(taskId => {
     const taskResults = run.results.filter(r => r.taskId === taskId);
     const first = taskResults[0];
-    const avgScore = taskResults.reduce((sum, r) => sum + r.scores.overallScore, 0) / (taskResults.length || 1);
-    const avgValidation = taskResults.reduce((sum, r) => sum + r.scores.validationScore, 0) / (taskResults.length || 1);
-    const avgStyle = taskResults.reduce((sum, r) => sum + (r.scores.breakdown?.style ?? 0), 0) / (taskResults.length || 1);
+    const avgScore = averageModelLabMetricValues(taskResults.map((result) => result.scores.overallScore));
+    const avgValidation = averageModelLabMetricValues(taskResults.map((result) => result.scores.validationScore));
+    const avgStyle = averageModelLabMetricValues(taskResults.map((result) => result.scores.breakdown?.style));
     const delta = run.previousDelta?.taskDeltas.find(d => d.taskId === taskId);
     return {
       taskId,
       taskName: first?.taskName ?? taskId,
-      avgScore: Math.round(avgScore * 10) / 10,
-      avgValidation: Math.round(avgValidation * 10) / 10,
-      avgStyle: Math.round(avgStyle * 10) / 10,
+      avgScore,
+      avgValidation,
+      avgStyle,
       delta: delta?.delta,
     };
   });
@@ -2008,11 +2454,11 @@ function PerTaskScoreTable({ run }: { run: api.BenchRun }) {
           {rows.map(row => (
             <tr key={row.taskId} style={{ borderBottom: '1px solid var(--border-primary)' }}>
               <td style={tdStyle}>{row.taskName}</td>
-              <td style={{ ...tdStyle, color: scoreColor(row.avgScore) }}>{row.avgScore}/10</td>
-              <td style={tdStyle}>{row.avgValidation}</td>
-              <td style={tdStyle}>{row.avgStyle}</td>
-              <td style={{ ...tdStyle, color: row.delta == null ? 'var(--text-tertiary)' : row.delta >= 0 ? 'var(--accent-success)' : 'var(--accent-error)' }}>
-                {row.delta == null ? '—' : formatSigned(row.delta)}
+              <td style={{ ...tdStyle, color: modelLabScoreColor(row.avgScore) }}>{formatModelLabMetricRatio(row.avgScore, 10)}</td>
+              <td style={tdStyle}>{formatModelLabMetricValue(row.avgValidation)}</td>
+              <td style={tdStyle}>{formatModelLabMetricValue(row.avgStyle)}</td>
+              <td style={{ ...tdStyle, color: modelLabDeltaColor(row.delta) }}>
+                {formatModelLabSignedDelta(row.delta)}
               </td>
             </tr>
           ))}
@@ -2144,7 +2590,7 @@ function EvalEvidencePanel({ report }: { report: api.EvalReport }) {
   if (report.results.length === 0) return null;
   const sorted = [...report.results].sort((a, b) => {
     if (a.status !== b.status) return a.status === 'error' ? -1 : 1;
-    return a.scores.overallScore - b.scores.overallScore;
+    return compareModelLabMetricValues(a.scores.overallScore, b.scores.overallScore);
   });
 
   return (
@@ -2157,7 +2603,7 @@ function EvalEvidencePanel({ report }: { report: api.EvalReport }) {
               {result.promptName}
             </span>
             <span>{result.modelId}</span>
-            <span style={{ color: scoreColor(result.scores.overallScore) }}>{result.scores.overallScore}/10</span>
+            <span style={{ color: modelLabScoreColor(result.scores.overallScore) }}>{formatModelLabMetricRatio(result.scores.overallScore, 10)}</span>
             <span style={{ color: result.status === 'ok' ? 'var(--accent-success)' : 'var(--accent-error)' }}>{result.status}</span>
           </summary>
           <EvidenceBlock title="Failed or weak signals">
@@ -2184,7 +2630,7 @@ function BenchEvidencePanel({ run }: { run: api.BenchRun }) {
   if (run.results.length === 0) return null;
   const sorted = [...run.results].sort((a, b) => {
     if (a.status !== b.status) return a.status === 'ok' ? 1 : -1;
-    return a.scores.overallScore - b.scores.overallScore;
+    return compareModelLabMetricValues(a.scores.overallScore, b.scores.overallScore);
   });
 
   return (
@@ -2198,7 +2644,7 @@ function BenchEvidencePanel({ run }: { run: api.BenchRun }) {
             </span>
             <span>{result.modelId}</span>
             <span style={{ color: resolvedColor(result.scores.resolvedStatus) }}>{result.scores.resolvedStatus}</span>
-            <span style={{ color: scoreColor(result.scores.overallScore) }}>{result.scores.overallScore}/10</span>
+            <span style={{ color: modelLabScoreColor(result.scores.overallScore) }}>{formatModelLabMetricRatio(result.scores.overallScore, 10)}</span>
           </summary>
           {result.error && (
             <EvidenceBlock title="Run error">
@@ -2296,9 +2742,52 @@ interface ProviderHealthSignal {
   tracked: number;
   failing: number;
   stale: number;
-  latestChecked?: string;
+  latestChecked?: string | number;
   maxLatencyMs?: number;
   errors: string[];
+}
+
+function ProviderHealthSummary({ signal, compact = false }: { signal: ProviderHealthSignal; compact?: boolean }) {
+  const latencyMs = formatModelLabLatencyMs(signal.maxLatencyMs);
+  const latencyLabel = latencyMs === 'unavailable' ? '' : compact ? `, slowest ${latencyMs}` : ` · slowest ${latencyMs}`;
+  if (compact) {
+    return (
+      <div style={{
+        marginBottom: 12,
+        padding: 8,
+        borderRadius: 6,
+        border: '1px solid var(--border-primary)',
+        background: 'var(--bg-secondary)',
+        fontSize: 10,
+        color: signal.failing > 0 || signal.stale > 0 ? 'var(--accent-warning)' : 'var(--accent-success)',
+      }}>
+        Provider health: {signal.tracked} tracked, {signal.failing} failing, {signal.stale} stale
+        {latencyLabel}
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      marginTop: 8,
+      paddingTop: 8,
+      borderTop: '1px solid var(--border-primary)',
+      display: 'grid',
+      gap: 3,
+    }}>
+      <div style={{ color: signal.failing > 0 ? 'var(--accent-error)' : signal.stale > 0 ? 'var(--accent-warning)' : 'var(--text-secondary)', fontWeight: 700 }}>
+        Provider health: {signal.tracked} tracked
+        {signal.failing > 0 ? ` · ${signal.failing} failing` : ''}
+        {signal.stale > 0 ? ` · ${signal.stale} stale` : ''}
+        {latencyLabel}
+      </div>
+      {signal.latestChecked != null && (
+        <div style={{ color: 'var(--text-tertiary)' }}>Latest health check: {formatModelLabTimestamp(signal.latestChecked)}</div>
+      )}
+      {signal.errors.length > 0 && (
+        <div style={{ color: 'var(--accent-error)' }}>{signal.errors.join(' · ')}</div>
+      )}
+    </div>
+  );
 }
 
 function summarizeProviderHealth(raw: unknown): ProviderHealthSignal | null {
@@ -2315,7 +2804,8 @@ function summarizeProviderHealth(raw: unknown): ProviderHealthSignal | null {
 
   let failing = 0;
   let stale = 0;
-  let latestChecked: string | undefined;
+  let latestChecked: string | number | undefined;
+  let latestCheckedMs: number | undefined;
   let maxLatencyMs: number | undefined;
   const errors: string[] = [];
 
@@ -2326,14 +2816,22 @@ function summarizeProviderHealth(raw: unknown): ProviderHealthSignal | null {
       continue;
     }
     const ok = latest.ok === true || latest.status === 'ok';
-    const timestamp = latest.timestamp || latest.lastChecked;
-    const ageMs = timestamp ? Date.now() - new Date(timestamp).getTime() : Number.POSITIVE_INFINITY;
-    const isStale = latest.stale === true || ageMs > 6 * 60 * 60 * 1000;
+    const timestamp = latest.timestamp ?? latest.lastChecked;
+    const timestampMs = modelLabTimestampMs(timestamp);
+    const ageMs = timestampMs == null ? Number.POSITIVE_INFINITY : Date.now() - timestampMs;
+    const isStale = latest.stale === true || timestampMs == null || ageMs > 6 * 60 * 60 * 1000;
     if (!ok) failing += 1;
     if (isStale) stale += 1;
-    if (timestamp && (!latestChecked || timestamp > latestChecked)) latestChecked = timestamp;
+    if (
+      timestampMs != null
+      && (typeof timestamp === 'string' || typeof timestamp === 'number')
+      && (latestCheckedMs == null || timestampMs > latestCheckedMs)
+    ) {
+      latestChecked = timestamp;
+      latestCheckedMs = timestampMs;
+    }
     const latencyMs = typeof latest.latencyMs === 'number' ? latest.latencyMs : latest.lastLatencyMs;
-    if (typeof latencyMs === 'number') maxLatencyMs = Math.max(maxLatencyMs || 0, latencyMs);
+    if (typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0) maxLatencyMs = Math.max(maxLatencyMs || 0, latencyMs);
     const error = latest.error || latest.lastError;
     if (error) errors.push(`${providerId}: ${String(error).slice(0, 90)}`);
   }
@@ -2363,36 +2861,33 @@ function traceProofColor(trace?: api.BenchRunResult['traceProof']) {
 }
 
 function rubricCoverageLabel(coverage?: api.BenchScores['rubricCoverage']) {
-  if (!coverage || coverage.totalPoints <= 0) return '—';
-  const passed = roundTenth(coverage.passedPoints);
-  const total = roundTenth(coverage.totalPoints);
-  return `${passed}/${total} pts · ${Math.round(coverage.ratio * 100)}%`;
+  return formatModelLabRubricCoverage(coverage);
 }
 
 function rubricCoverageColor(coverage?: api.BenchScores['rubricCoverage']) {
-  if (!coverage) return 'var(--text-tertiary)';
-  if (coverage.ratio >= 0.7) return 'var(--accent-success)';
-  if (coverage.ratio >= 0.4) return '#f59e0b';
-  return 'var(--accent-error)';
-}
-
-function roundTenth(value: number) {
-  return Math.round(value * 10) / 10;
+  return modelLabRubricCoverageColor(coverage);
 }
 
 function SignalList({ signals }: { signals: api.EvalSignalScore[] }) {
+  const malformed = signals
+    .filter((signal) => isMalformedModelLabMetricRatio(signal.score, signal.maxScore))
+    .sort((a, b) => a.label.localeCompare(b.label));
   const weak = signals
-    .filter((signal) => !signal.passed || signal.score < signal.maxScore)
-    .sort((a, b) => (a.score / a.maxScore) - (b.score / b.maxScore))
+    .filter((signal) => !isMalformedModelLabMetricRatio(signal.score, signal.maxScore) && (!signal.passed || compareModelLabMetricRatios(signal.score, signal.maxScore, signal.maxScore, signal.maxScore) < 0))
+    .sort((a, b) => compareModelLabMetricRatios(a.score, a.maxScore, b.score, b.maxScore))
     .slice(0, 8);
-  if (weak.length === 0) return <span>No weak signals recorded.</span>;
+  const visibleSignals = [...malformed, ...weak].slice(0, 8);
+  if (visibleSignals.length === 0) return <span>No weak signals recorded.</span>;
   return (
     <>
-      {weak.map((signal) => (
-        <div key={signal.id} style={{ color: signal.passed ? 'var(--text-tertiary)' : 'var(--accent-error)' }}>
-          {signal.label}: {signal.score}/{signal.maxScore}
-        </div>
-      ))}
+      {visibleSignals.map((signal) => {
+        const malformedSignal = isMalformedModelLabMetricRatio(signal.score, signal.maxScore);
+        return (
+          <div key={signal.id} style={{ color: malformedSignal || !signal.passed ? 'var(--accent-error)' : 'var(--text-tertiary)' }}>
+            {signal.label}: {malformedSignal ? 'Data issue - ' : ''}{formatModelLabMetricRatio(signal.score, signal.maxScore)}
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -2401,10 +2896,6 @@ function trimEvidence(text: string, max: number): string {
   const trimmed = text.trim();
   if (trimmed.length <= max) return trimmed;
   return `${trimmed.slice(0, max - 40).trimEnd()}\n\n... truncated ${trimmed.length - max + 40} chars`;
-}
-
-function formatSigned(n: number): string {
-  return `${n >= 0 ? '+' : ''}${n}`;
 }
 
 const modelLabPackGuidance = [
@@ -2428,9 +2919,10 @@ const modelLabPackGuidance = [
   },
 ];
 
-function PromptPacksTab({ registry, prompts, onPrepare, onImportSkill, onSelectEvalIds }: {
+function PromptPacksTab({ registry, prompts, packLastUsed, onPrepare, onImportSkill, onSelectEvalIds }: {
   registry: api.PromptPluginRegistry | null;
   prompts: api.PromptCase[];
+  packLastUsed: Map<string, PromptPackLastUsed>;
   onPrepare: () => void;
   onImportSkill: (sourcePath: string) => Promise<void>;
   onSelectEvalIds: (evalIds: string[], pack: api.PromptPluginRegistry['packs'][number]) => void;
@@ -2565,10 +3057,15 @@ function PromptPacksTab({ registry, prompts, onPrepare, onImportSkill, onSelectE
                 {(() => {
                   const evalIds = packEvalIds(pack);
                   const matched = evalIds.filter((id) => promptIds.has(id));
+                  const readiness = summarizePromptPackEvalReadiness(evalIds, promptIds);
+                  const lastUsed = packLastUsed.get(pack.id);
                   return (
                     <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-primary)' }}>
-                      <div style={{ fontSize: 10, color: matched.length > 0 ? 'var(--accent-success)' : 'var(--text-tertiary)' }}>
-                        Eval evidence: {matched.length}/{evalIds.length} prompt id{evalIds.length === 1 ? '' : 's'} installed
+                      <div style={{ fontSize: 10, color: packReadinessColor(readiness.status) }}>
+                        Eval readiness: {readiness.detail}
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 10, color: lastUsed ? 'var(--text-secondary)' : 'var(--text-tertiary)', lineHeight: 1.35 }}>
+                        <span style={{ fontWeight: 600 }}>Last-used evidence</span>: {formatPromptPackLastUsed(lastUsed)}
                       </div>
                       {evalIds.length > 0 && (
                         <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -2591,7 +3088,7 @@ function PromptPacksTab({ registry, prompts, onPrepare, onImportSkill, onSelectE
                       <button
                         type="button"
                         style={{ ...smallBtnStyle, marginTop: 6, width: '100%' }}
-                        onClick={() => downloadText(`openharness-pack-evidence-${pack.id}.md`, buildPromptPackEvidenceBrief(pack, packPlugins(pack), prompts))}
+                        onClick={() => downloadText(`openharness-pack-evidence-${pack.id}.md`, buildPromptPackEvidenceBrief(pack, packPlugins(pack), prompts, lastUsed))}
                         aria-label={`Export evidence brief for ${pack.name} prompt pack`}
                       >
                         Export pack evidence brief
@@ -2816,26 +3313,7 @@ function MatrixRunCaution({
         Start with a small matrix, prefer subscription/low-cost candidates for sweeps, and reserve premium models for final comparisons.
       </div>
       {providerHealthSignal && (
-        <div style={{
-          marginTop: 8,
-          paddingTop: 8,
-          borderTop: '1px solid var(--border-primary)',
-          display: 'grid',
-          gap: 3,
-        }}>
-          <div style={{ color: providerHealthSignal.failing > 0 ? 'var(--accent-error)' : providerHealthSignal.stale > 0 ? 'var(--accent-warning)' : 'var(--text-secondary)', fontWeight: 700 }}>
-            Provider health: {providerHealthSignal.tracked} tracked
-            {providerHealthSignal.failing > 0 ? ` · ${providerHealthSignal.failing} failing` : ''}
-            {providerHealthSignal.stale > 0 ? ` · ${providerHealthSignal.stale} stale` : ''}
-            {typeof providerHealthSignal.maxLatencyMs === 'number' ? ` · slowest ${providerHealthSignal.maxLatencyMs}ms` : ''}
-          </div>
-          {providerHealthSignal.latestChecked && (
-            <div style={{ color: 'var(--text-tertiary)' }}>Latest health check: {new Date(providerHealthSignal.latestChecked).toLocaleString()}</div>
-          )}
-          {providerHealthSignal.errors.length > 0 && (
-            <div style={{ color: 'var(--accent-error)' }}>{providerHealthSignal.errors.join(' · ')}</div>
-          )}
-        </div>
+        <ProviderHealthSummary signal={providerHealthSignal} />
       )}
     </div>
   );
@@ -2883,12 +3361,6 @@ function runBtnStyle(disabled: boolean): React.CSSProperties {
     color: disabled ? 'var(--text-tertiary)' : '#fff',
     border: 'none', borderRadius: 6, cursor: disabled ? 'default' : 'pointer',
   };
-}
-
-function scoreColor(score: number): string {
-  if (score >= 7) return 'var(--accent-success)';
-  if (score >= 4) return 'var(--accent-warning)';
-  return 'var(--accent-error)';
 }
 
 function resolvedColor(status: string): string {

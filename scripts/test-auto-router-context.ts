@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { createServer } from 'node:http';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configureAutoRouter, clearRouterCache, getAutoRouterState, getAvailableCandidates, routeTask } from '../server/autoRouter';
@@ -69,6 +69,33 @@ assert.equal(configuredState.candidateCount, 3, 'all authenticated candidates sh
 assert.deepEqual(configuredState.unavailableCandidates, [], 'usable config should not report dropped candidates');
 assert.ok(configuredState.candidateEvidenceRefreshedAt, 'router state should expose candidate evidence refresh time');
 assert.equal(configuredState.candidateEvidenceRefreshCount, 1, 'configure should build candidate evidence once');
+assert.ok(configuredState.thresholdAdvice, 'router state should expose learned threshold advice');
+assert.equal(configuredState.thresholdAdvice.configuredThreshold, 0.7, 'threshold advice should preserve the user-configured threshold');
+assert.equal(configuredState.thresholdAdvice.activeThreshold, configuredState.threshold, 'threshold advice should identify the active routing threshold');
+
+configureAutoRouter({
+  ...config,
+  autoRouter: {
+    ...config.autoRouter!,
+    candidates: [config.autoRouter!.candidates[0]],
+  },
+});
+clearRouterCache();
+const singleCandidateDecision = await routeTask({
+  task: 'Use the only configured model.',
+  surface: 'orchestrator',
+  hasImages: false,
+  turns: 1,
+  toolCount: 2,
+  estimatedInputTokens: 500,
+}, config);
+assert.equal(singleCandidateDecision?.modelId, 'local:phi-4', 'single-candidate router should use the only configured candidate');
+assert.match(singleCandidateDecision?.reason || '', /single candidate/i, 'single-candidate route should explain that no classifier routing was needed');
+assert.equal(singleCandidateDecision?.classifierModel, null, 'single-candidate route should not report a classifier model when no classifier ran');
+
+configureAutoRouter(config);
+clearRouterCache();
+const restoredState = getAutoRouterState();
 
 const smallDecision = await routeTask({
   task: 'Rename a variable in one file.',
@@ -110,7 +137,7 @@ const refreshedCandidateCard = getAvailableCandidates().find((candidate) => cand
 assert.equal((refreshedCandidateCard.match(/Native thinking:/g) || []).length, 1, 'candidate evidence refresh should not duplicate normalized capability hints');
 assert.equal((refreshedCandidateCard.match(/Tool quality:/g) || []).length, 1, 'candidate evidence refresh should rebuild from baseline candidates instead of stacking annotations');
 const refreshedState = getAutoRouterState();
-assert.ok(refreshedState.candidateEvidenceRefreshCount > configuredState.candidateEvidenceRefreshCount, 'route-time candidate evidence refreshes should be visible in router state');
+assert.equal(refreshedState.candidateEvidenceRefreshCount, restoredState.candidateEvidenceRefreshCount, 'deterministic routeTask paths should not rebuild classifier-facing candidate evidence');
 assert.ok(refreshedState.candidateEvidenceRefreshedAt, 'route-time candidate evidence refresh should preserve a timestamp');
 
 const priorHome = process.env.HOME;
@@ -275,10 +302,158 @@ try {
     /proof needs attention; do not trust yet/i,
     'needs-attention recommendations should remain explicit in candidate evidence',
   );
+  assert.match(
+    fuzzyEvalCandidateCard,
+    /do not use as an automatic routing override/i,
+    'needs-attention eval evidence should be advisory-only in classifier-facing candidate cards',
+  );
   const fuzzyEvalCandidate = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4');
   assert.ok(
     fuzzyEvalCandidate?.evalEvidence?.some((entry) => entry.statusSummary === 'needs-attention'),
     'fuzzy candidate should expose needs-attention evidence metadata from matching recommendation',
+  );
+
+  writeFileSync(evalReportPath, JSON.stringify({
+    id: `${evalReportId}-unreviewed`,
+    name: 'Unreviewed strategy-comparison proof',
+    status: 'complete',
+    total: 1,
+    completed: 1,
+    results: [],
+    createdAt: '2026-06-17T01:30:00.000Z',
+    completedAt: '2026-06-17T01:30:00.150Z',
+    summary: {
+      byModel: {
+        'local:phi-4': {
+          avgScore: 8.5,
+          avgLatencyMs: 118,
+          avgToolCount: 2,
+          totalRuns: 4,
+        },
+      },
+      bestModel: 'local:phi-4',
+      byPromptStrategy: {
+        'qwen-xml-code-v1': {
+          family: 'qwen',
+          systemStyle: 'xml-tagged',
+          avgScore: 8.7,
+          avgLatencyMs: 108,
+          avgToolCount: 1,
+          totalRuns: 3,
+          bestModel: 'local:phi-4',
+        },
+      },
+      recommendations: [
+        {
+          role: 'coder',
+          modelId: 'local:phi-4',
+          reason: 'Unreviewed strategy comparison suggests this candidate but lacks proof approval.',
+        },
+      ],
+    },
+  }, null, 2));
+  configureAutoRouter(config);
+  clearRouterCache();
+  const unreviewedEvalCandidateCard = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4')?.card || '';
+  assert.match(
+    unreviewedEvalCandidateCard,
+    /proof unreviewed; verify before trusting/i,
+    'unreviewed recommendations should remain explicit in candidate evidence',
+  );
+  assert.match(
+    unreviewedEvalCandidateCard,
+    /do not use as an automatic routing override/i,
+    'unreviewed eval evidence should be advisory-only in classifier-facing candidate cards',
+  );
+  assert.doesNotMatch(
+    approvedEvalCandidateCard,
+    /do not use as an automatic routing override/i,
+    'approved eval evidence should stay actionable and should not inherit the advisory-only guard',
+  );
+
+  writeFileSync(evalReportPath, JSON.stringify({
+    id: `${evalReportId}-malformed-comparisons`,
+    name: 'Malformed strategy comparison proof',
+    status: 'complete',
+    total: 1,
+    completed: 1,
+    results: [],
+    createdAt: '2026-06-17T01:45:00.000Z',
+    completedAt: '2026-06-17T01:45:00.150Z',
+    proofReview: {
+      status: 'approved',
+      reviewedAt: '2026-06-17T01:45:00.160Z',
+      note: 'Approved report with stale malformed comparison rows.',
+    },
+    summary: {
+      byModel: {
+        'local:phi-4': {
+          avgScore: 8.8,
+          avgLatencyMs: 118,
+          avgToolCount: 2,
+          totalRuns: 4,
+        },
+      },
+      bestModel: 'local:phi-4',
+      byPromptStrategy: {
+        'poison-string-score': {
+          family: 'qwen',
+          systemStyle: 'xml-tagged',
+          avgScore: 'bad-score',
+          avgLatencyMs: 108,
+          avgToolCount: 1,
+          totalRuns: 3,
+          bestModel: 'local:phi-4',
+        },
+        'poison-string-runs': {
+          family: 'qwen',
+          systemStyle: 'xml-tagged',
+          avgScore: 9.9,
+          avgLatencyMs: 108,
+          avgToolCount: 1,
+          totalRuns: '3',
+          bestModel: 'local:phi-4',
+        },
+        'poison-infinite-score': {
+          family: 'qwen',
+          systemStyle: 'xml-tagged',
+          avgScore: Number.POSITIVE_INFINITY,
+          avgLatencyMs: 108,
+          avgToolCount: 1,
+          totalRuns: 3,
+          bestModel: 'local:phi-4',
+        },
+        'valid-routing-comparison': {
+          family: 'qwen',
+          systemStyle: 'xml-tagged',
+          avgScore: 8.4,
+          avgLatencyMs: 108,
+          avgToolCount: 1,
+          totalRuns: 3,
+          bestModel: 'local:phi-4',
+        },
+      },
+      recommendations: [
+        {
+          role: 'coder',
+          modelId: 'local:phi-4',
+          reason: 'Approved report should pass only trustworthy strategy comparison evidence to routing.',
+        },
+      ],
+    },
+  }, null, 2));
+  configureAutoRouter(config);
+  clearRouterCache();
+  const malformedEvalCandidateCard = getAvailableCandidates().find((candidate) => candidate.modelId === 'local:phi-4')?.card || '';
+  assert.match(
+    malformedEvalCandidateCard,
+    /valid-routing-comparison \(avg 8\.4 from 3 runs, provider-approved\)/i,
+    'valid strategy comparison rows should still annotate classifier-facing candidate cards',
+  );
+  assert.doesNotMatch(
+    malformedEvalCandidateCard,
+    /poison-string-score|poison-string-runs|poison-infinite-score|bad-score|Infinity/i,
+    'malformed strategy comparison rows should be dropped before they reach classifier-facing candidate cards',
   );
 } catch (error) {
   evalBlockError = error as Error;
@@ -291,12 +466,15 @@ if (evalBlockError) {
 }
 
 let classifierRequests = 0;
+let lastClassifierSystemPrompt = '';
 const classifierServer = createServer((req, res) => {
   classifierRequests += 1;
   const chunks: Buffer[] = [];
   req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
   req.on('end', () => {
     const body = Buffer.concat(chunks).toString('utf-8');
+    const parsedBody = JSON.parse(body) as { messages?: Array<{ role: string; content: string }> };
+    lastClassifierSystemPrompt = parsedBody.messages?.find((message) => message.role === 'system')?.content || '';
     const isImageCacheProbe = body.includes('Cache key image probe');
     const content = JSON.stringify({
       scores: isImageCacheProbe ? {
@@ -355,6 +533,7 @@ try {
   assert.equal(directQuestionRoute.suggestedModels[0], 'local:phi-4', 'tiny direct questions should pick the cheapest viable model');
   assert.equal(directQuestionRoute.routerData?.modelSelectionPolicy, 'cheap-direct');
   assert.equal(classifierRequests, 0, 'tiny direct questions should not call the classifier');
+  const beforeClassifierState = getAutoRouterState();
 
   const mediumCodingRoute = await routeWithAutoRouter('Create a small browser app for testing model routing.', policyConfig, { toolCount: 8 });
   assert.equal(mediumCodingRoute.mode, 'execute', 'medium coding request should still route to execute workflow');
@@ -362,7 +541,34 @@ try {
   assert.equal(mediumCodingRoute.suggestedModels[0], 'local:MiniMax-M3', 'classifier flow should choose the cheapest candidate above threshold');
   assert.equal(mediumCodingRoute.routerData?.modelSelectionPolicy, 'classifier', 'medium tasks should use classifier policy');
   assert.equal(mediumCodingRoute.routerData?.classifierModel, 'local:phi-4', 'medium tasks should record the classifier model');
+  assert.equal(mediumCodingRoute.routerData?.threshold, 0.7, 'classifier routes should preserve the configured viability threshold in route data');
   assert.equal(classifierRequests, 1, 'medium tasks should call the classifier exactly once');
+  const afterClassifierState = getAutoRouterState();
+  assert.equal(
+    afterClassifierState.candidateEvidenceRefreshCount,
+    beforeClassifierState.candidateEvidenceRefreshCount + 1,
+    'classifier cache misses should refresh classifier-facing candidate evidence exactly once',
+  );
+  assert.match(
+    lastClassifierSystemPrompt,
+    /approved\/actionable evidence[\s\S]{0,160}advisory\/context-only evidence/i,
+    'classifier system prompt should partition actionable evidence from advisory evidence',
+  );
+  assert.match(
+    lastClassifierSystemPrompt,
+    /advisory\/context-only evidence[\s\S]{0,160}must not move the score/i,
+    'classifier system prompt should tell the scorer that advisory evidence is context-only',
+  );
+  assert.match(
+    lastClassifierSystemPrompt,
+    /automatic routing override/i,
+    'classifier system prompt should make advisory evidence non-overriding at the scoring layer',
+  );
+  assert.match(
+    lastClassifierSystemPrompt,
+    /capability: Tiny local model with a 16K context limit/i,
+    'classifier system prompt should still include candidate cards verbatim while changing their weighting rule',
+  );
 
   const shallowReviewRoute = await routeWithAutoRouter('review', policyConfig, { toolCount: 8 });
   assert.equal(shallowReviewRoute.mode, 'investigate', 'one-word review should remain a bounded investigation workflow');
@@ -411,6 +617,13 @@ try {
   });
   assert.equal(textOnlyProbe.suggestedModels[0], 'local:phi-4', 'text-only classifier result should allow the cheap text-only model');
   assert.equal(textOnlyProbe.routerData?.cached, false, 'first cache probe should not be cached');
+  assert.equal(textOnlyProbe.routerData?.classifierModel, 'local:phi-4', 'fresh classifier cache probe should record the classifier model');
+  const cachedTextOnlyProbe = await routeWithAutoRouter(cacheProbePrompt, cachedPolicyConfig, {
+    hasImages: false,
+    toolCount: 8,
+  });
+  assert.equal(cachedTextOnlyProbe.routerData?.cached, true, 'repeat cache probe should reuse the cached classifier decision');
+  assert.equal(cachedTextOnlyProbe.routerData?.classifierModel, 'local:phi-4', 'cached classifier decision should preserve the classifier model metadata');
   const imageProbe = await routeWithAutoRouter(cacheProbePrompt, cachedPolicyConfig, {
     hasImages: true,
     toolCount: 8,
@@ -458,5 +671,45 @@ assert.match(
   /no API key or OAuth token/i,
   'router state should explain dropped candidates',
 );
+
+const apiSource = readFileSync('src/utils/api.ts', 'utf8');
+for (const expected of [
+  'thresholdAdvice?: {',
+  'configuredThreshold: number;',
+  'activeThreshold: number;',
+  'suggestedThreshold: number;',
+  'reason: string;',
+  'dataPoints: number;',
+  'applied: boolean;',
+  'slowTimingContext?: {',
+  'advisoryOnly: true;',
+  'slowRowCount: number;',
+  'thresholdMs: number;',
+  'note: string;',
+]) {
+  assert.ok(apiSource.includes(expected), `AutoRouterState API type should expose threshold advice: ${expected}`);
+}
+
+const settingsSource = readFileSync('src/components/SettingsModal.tsx', 'utf8');
+for (const expected of [
+  'const thresholdAdvice = routerState?.thresholdAdvice;',
+  'Auto-Router threshold advice',
+  'Learned threshold advice',
+  "import { formatScoreDisplay } from '../utils/scoreDisplay';",
+  'Configured {formatScoreDisplay(thresholdAdvice.configuredThreshold)}',
+  'active {formatScoreDisplay(thresholdAdvice.activeThreshold)}',
+  'suggested {formatScoreDisplay(thresholdAdvice.suggestedThreshold)}',
+  '{thresholdAdvice.reason}',
+  'Slow timing context: {thresholdAdvice.slowTimingContext.note}',
+]) {
+  assert.ok(settingsSource.includes(expected), `Auto-Router settings should show threshold advice near the slider: ${expected}`);
+}
+for (const forbidden of [
+  'thresholdAdvice.configuredThreshold.toFixed(2)',
+  'thresholdAdvice.activeThreshold.toFixed(2)',
+  'thresholdAdvice.suggestedThreshold.toFixed(2)',
+]) {
+  assert.ok(!settingsSource.includes(forbidden), `Auto-Router settings should not use raw threshold advice formatting: ${forbidden}`);
+}
 
 console.log('Auto-router context-limit tests passed.');

@@ -67,6 +67,8 @@ export interface PromptAssemblySection {
   reason: string;
   redacted: boolean;
   preview: string;
+  pluginId?: string;
+  placement?: string;
 }
 
 export interface PromptAssemblyTrace {
@@ -74,6 +76,12 @@ export interface PromptAssemblyTrace {
   family: string;
   style: string;
   target: string;
+  routeMode?: {
+    requested: string | null;
+    applied: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare' | null;
+    fallback: boolean;
+    reason: string;
+  };
   promptStrategy?: {
     id: string;
     family: string;
@@ -117,6 +125,7 @@ export interface RoutingStageTrace {
   heuristic?: { mode: string; role: string; complexity: string };
   policy?: string;
   modelSelectionPolicy?: 'cheap-direct' | 'classifier' | 'escalated';
+  threshold?: number;
   signal?: {
     hasImages: boolean;
     turns: number;
@@ -250,6 +259,14 @@ export type WorkProductArtifact =
   data: ValidationProofArtifactData;
 };
 
+export interface AgentPhasePlan {
+  timeoutMs: number;
+  primaryModel: string;
+  fallbackModels: string[];
+  plannedRetryCount: number;
+  plannedBackoffMs: number[];
+}
+
 export type HarnessRunStep =
   | { type: 'steering'; action: RunSteeringAction; target?: 'orchestrator' | 'agent'; source: 'user'; note?: string; createdAt: string }
   | {
@@ -266,9 +283,19 @@ export type HarnessRunStep =
   | { type: 'orchestration'; mode: 'direct' | 'plan' | 'investigate' | 'execute' | 'compare'; label: string; detail?: string }
   | { type: 'route'; role: string; model: string; reason?: string; stages?: RoutingStageTrace }
   | { type: 'artifact'; artifact: WorkProductArtifact }
-  | { type: 'prompt_built'; promptPreview: string; toolCount: number; assembly?: PromptAssemblyTrace; outputStyle?: OutputStyleTrace }
+  | {
+  type: 'prompt_plugins';
+  enabled: true;
+  allowedPluginCount: number;
+  selectedPluginIds: string[];
+  selectedSectionCount: number;
+  selectionDurationMs: number;
+  manifestsScanned: number;
+  cache: { entries: number; hits: number; misses: number };
+}
+  | { type: 'prompt_built'; promptPreview: string; promptPreviewRedacted?: string; promptPreviewRedactedHits?: number; toolCount: number; assembly?: PromptAssemblyTrace; outputStyle?: OutputStyleTrace }
   | { type: 'auto_router'; modelId: string; score: number; reason: string; cached: boolean; fallback: boolean; classifierModel: string | null; candidateScores?: Record<string, number>; stages?: RoutingStageTrace }
-  | { type: 'model_request'; round: number; model: string }
+  | { type: 'model_request'; round: number; model: string; timeoutMs?: number; timeoutPolicy?: 'default' | 'slow-model'; timeoutLabel?: string; phasePlan?: AgentPhasePlan; startedAt?: string; completedAt?: string; durationMs?: number }
   | {
   type: 'tool_call';
   id: string;

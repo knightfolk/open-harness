@@ -6,6 +6,7 @@ const KNOWN_MODEL_FAMILIES: Array<[RegExp, string]> = [
   [/grok|xai/i, 'Grok'],
   [/llama/i, 'Llama'],
   [/qwen/i, 'Qwen'],
+  [/glm|zhipu/i, 'GLM'],
   [/deepseek/i, 'DeepSeek'],
   [/mistral|mixtral/i, 'Mistral'],
   [/ollama/i, 'Ollama'],

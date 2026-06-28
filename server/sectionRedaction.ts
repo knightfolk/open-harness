@@ -79,13 +79,17 @@ export function redactSecrets(input: string): RedactionResult {
     }
   }
   if (hits.length === 0) return { redacted, hits };
+  const nonOverlappingHits: RedactionHit[] = [];
+  for (const hit of [...hits].sort((a, b) => a.start - b.start || b.end - a.end)) {
+    const previous = nonOverlappingHits[nonOverlappingHits.length - 1];
+    if (!previous || hit.start >= previous.end) nonOverlappingHits.push(hit);
+  }
   // Apply redactions in reverse so indices stay valid.
-  hits.sort((a, b) => b.start - a.start);
-  for (const h of hits) {
+  for (const h of [...nonOverlappingHits].sort((a, b) => b.start - a.start)) {
     const placeholder = `<redacted:${h.preview}>`;
     redacted = redacted.slice(0, h.start) + placeholder + redacted.slice(h.end);
   }
-  return { redacted, hits };
+  return { redacted, hits: nonOverlappingHits };
 }
 
 export function estimateTokens(text: string | undefined | null): number {
@@ -101,17 +105,20 @@ export interface SectionEstimate {
   label: string;
   text: string;
   tokens: number;
+  truncated: boolean;
   redactedHits: number;
 }
 
 export function estimateSections(sections: Array<{ id: string; label: string; text: string }>): SectionEstimate[] {
   return sections.map((s) => {
     const r = redactSecrets(s.text);
+    const tokens = estimateTokens(r.redacted);
     return {
       id: s.id,
       label: s.label,
       text: r.redacted,
-      tokens: estimateTokens(r.redacted),
+      tokens,
+      truncated: tokens > 4000,
       redactedHits: r.hits.length,
     };
   });

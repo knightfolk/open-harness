@@ -110,6 +110,19 @@ export function registerConfigRoutes(app: express.Express, deps: ConfigRouteDeps
         disabledPlugins: normalizeIds(raw.disabledPlugins),
       };
     }
+    if (updates.promptPluginRendering !== undefined) {
+      const raw = updates.promptPluginRendering || {};
+      const normalizeIds = (value: unknown) => Array.isArray(value)
+        ? [...new Set(value
+          .filter((entry: unknown): entry is string => typeof entry === 'string')
+          .map((entry: string) => entry.trim())
+          .filter(Boolean))]
+        : [];
+      appConfig.promptPluginRendering = {
+        enabled: raw.enabled === true,
+        allowedPluginIds: normalizeIds(raw.allowedPluginIds),
+      };
+    }
     if (updates.autoRouter !== undefined) {
       (appConfig as any).autoRouter = updates.autoRouter;
       deps.configureAutoRouter(appConfig);

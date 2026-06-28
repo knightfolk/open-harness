@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HarnessRun, HarnessRunStep, RunSteeringAction, SubAgent } from '../types';
 import { getActiveWorkState, type ActiveWorkState } from '../utils/agentWorkState';
 import { formatAutoRouterStepDetail, formatAutoRouterStepTitle } from '../utils/autoRouterTrace';
+import { formatModelRequestDurationDetail, formatModelRequestPatienceDetail, formatModelRequestTimeoutDetail } from '../utils/modelRequestTimeoutDisplay';
+import { buildSubAgentReplaySummary } from '../utils/subAgentReplaySummary';
 
 interface Props {
   agents: SubAgent[];
@@ -171,6 +173,11 @@ function compactToolBundle(steps: Array<Extract<HarnessRunStep, { type: 'tool_ca
   return `${status}${names.length > 0 ? ` · ${names.join(', ')}` : ''}`;
 }
 
+function promptBuiltReplayDetail(step: Extract<HarnessRunStep, { type: 'prompt_built' }>): string | null {
+  const redactedPreview = step.promptPreviewRedacted?.trim();
+  return redactedPreview || 'Prompt preview unavailable';
+}
+
 function WorkFlowStrip({ state }: { state: ActiveWorkState }) {
   return (
     <div className="active-flow-strip" role="group" aria-label={`${state.workflowLabel} workflow progress`}>
@@ -212,6 +219,7 @@ function stepIcon(step: HarnessRunStep) {
     case 'route': return Route;
     case 'artifact': return FileText;
     case 'auto_router': return Gauge;
+    case 'prompt_plugins': return Gauge;
     case 'prompt_built': return FileText;
     case 'worktree_isolation': return Package;
     case 'model_request': return Zap;
@@ -232,6 +240,7 @@ function stepTitle(step: HarnessRunStep): string {
     case 'route': return `Route: ${step.role} → ${step.model}`;
     case 'artifact': return `Artifact · ${step.artifact.title}`;
     case 'auto_router': return formatAutoRouterStepTitle(step);
+    case 'prompt_plugins': return `Prompt plugins · ${step.selectedPluginIds.length} selected`;
     case 'prompt_built': return `Prompt built · ${step.toolCount} tool${step.toolCount === 1 ? '' : 's'}`;
     case 'worktree_isolation': {
       if (step.status === 'ready') return `Worktree isolation ready · ${step.agent}`;
@@ -262,7 +271,14 @@ function stepDetail(step: HarnessRunStep): string | null {
       ? `Validation proof · ${step.artifact.summary}`
       : `${step.artifact.type} · ${step.artifact.summary}`;
     case 'auto_router': return formatAutoRouterStepDetail(step);
-    case 'prompt_built': return step.promptPreview;
+    case 'prompt_plugins': return [
+      `${step.selectedSectionCount} section${step.selectedSectionCount === 1 ? '' : 's'}`,
+      `${step.selectionDurationMs}ms selection`,
+      `${step.manifestsScanned} manifest${step.manifestsScanned === 1 ? '' : 's'} scanned`,
+      `${step.cache.hits} cache hit${step.cache.hits === 1 ? '' : 's'}`,
+      `${step.cache.misses} cache miss${step.cache.misses === 1 ? '' : 'es'}`,
+    ].join(' · ');
+    case 'prompt_built': return promptBuiltReplayDetail(step);
     case 'worktree_isolation': {
       const target = step.path ? `path: ${basename(step.path)}` : '';
       const branch = step.branch ? `branch: ${step.branch}` : '';
@@ -273,7 +289,7 @@ function stepDetail(step: HarnessRunStep): string | null {
         .filter(Boolean)
         .join(' · ');
     }
-    case 'model_request': return step.model;
+    case 'model_request': return [step.model, formatModelRequestTimeoutDetail(step), formatModelRequestPatienceDetail(step), formatModelRequestDurationDetail(step)].filter(Boolean).join(' · ');
     case 'tool_call': {
       const parts = [];
       const input = compactToolInput(step.input);
@@ -305,61 +321,30 @@ function stepDetail(step: HarnessRunStep): string | null {
   }
 }
 
-function latestReplayProof(steps: HarnessRunStep[]): string {
-  const proofStep = steps
-    .slice()
-    .reverse()
-    .find((step) => step.type === 'artifact' || step.type === 'final_answer' || step.type === 'worktree_isolation' || step.type === 'tool_call' || step.type === 'error');
-  if (!proofStep) return 'Waiting for proof.';
-  if (proofStep.type === 'artifact') return `${proofStep.artifact.title}: ${proofStep.artifact.summary}`;
-  if (proofStep.type === 'final_answer') return `Final answer captured (${proofStep.chars} chars).`;
-  if (proofStep.type === 'worktree_isolation') return proofStep.status === 'ready'
-    ? `Worktree isolation ready for ${proofStep.agent}: ${proofStep.worktreeId || proofStep.branch || proofStep.path || 'isolated checkout'}`
-    : proofStep.status === 'preserved'
-      ? `Worktree preserved for Safety: ${proofStep.worktreeId || proofStep.branch || proofStep.path || 'isolated checkout'}`
-    : proofStep.status === 'auto_discarded'
-      ? `Clean worktree auto-discarded: ${proofStep.worktreeId || proofStep.branch || proofStep.path || 'isolated checkout'}`
-    : `Worktree isolation ${proofStep.status}: ${proofStep.error || proofStep.reason}`;
-  if (proofStep.type === 'tool_call') return proofStep.durationMs == null
-    ? `Tool running: ${proofStep.name}`
-    : `Tool finished: ${proofStep.name}${proofStep.outputPreview ? ` · ${compactToolOutput(proofStep.outputPreview)}` : ''}`;
-  return proofStep.message;
-}
-
 function RunReplaySummary({ steps }: { steps: HarnessRunStep[] }) {
-  const artifacts = steps.filter((step) => step.type === 'artifact').length;
-  const validationProofs = steps.filter((step) => step.type === 'artifact' && step.artifact.type === 'validation_proof').length;
-  const tools = steps.filter((step) => step.type === 'tool_call').length;
-  const worktreeIsolation = steps.filter((step) => step.type === 'worktree_isolation' && step.status === 'ready').length;
-  const steering = steps.filter((step) => step.type === 'steering').length;
-  const modelRequests = steps.filter((step) => step.type === 'model_request').length;
-  const contextFiles = new Set(
-    steps.flatMap((step) => {
-      if (step.type === 'context_pack') return step.files;
-      if (step.type === 'repo_map') return step.topFiles;
-      return [];
-    }),
-  ).size;
-  const hasFinal = steps.some((step) => step.type === 'final_answer');
+  const subAgentReplaySummary = buildSubAgentReplaySummary(steps);
   return (
-    <div className="sub-agent-replay" role="group" aria-label={`Run replay summary: ${steps.length} events, ${artifacts} artifacts, ${validationProofs} validation proofs, ${contextFiles} context files, ${worktreeIsolation} isolated worktrees, ${tools} tool calls, ${steering} steering events, ${modelRequests} model requests, ${hasFinal ? 'final answer captured' : 'final answer pending'}`}>
+    <div className="sub-agent-replay" role="group" aria-label={`Run replay summary: ${subAgentReplaySummary.totalEvents} events, ${subAgentReplaySummary.artifacts} artifacts, ${subAgentReplaySummary.validationProofs} validation proofs, ${subAgentReplaySummary.contextFiles} context files, ${subAgentReplaySummary.readyWorktreeIsolations} isolated worktrees, ${subAgentReplaySummary.toolCalls} tool calls, ${subAgentReplaySummary.runningToolCalls} running tools, ${subAgentReplaySummary.steeringEvents} steering events, ${subAgentReplaySummary.modelRequests} model requests, ${subAgentReplaySummary.errors} errors, ${subAgentReplaySummary.hasFinalAnswer ? 'final answer captured' : 'final answer pending'}`}>
       <div className="sub-agent-replay-header">
         <span>Run replay</span>
-        <span>{steps.length} event{steps.length === 1 ? '' : 's'}</span>
+        <span>{subAgentReplaySummary.totalEvents} event{subAgentReplaySummary.totalEvents === 1 ? '' : 's'}</span>
       </div>
       <div className="sub-agent-replay-grid">
-        <span><FileText size={11} aria-hidden="true" /> {artifacts} artifact{artifacts === 1 ? '' : 's'}</span>
-        <span><CheckCircle2 size={11} aria-hidden="true" /> {validationProofs} validation proof{validationProofs === 1 ? '' : 's'}</span>
-        <span><FileText size={11} aria-hidden="true" /> {contextFiles} context file{contextFiles === 1 ? '' : 's'}</span>
-        <span><Package size={11} aria-hidden="true" /> {worktreeIsolation} isolated worktree{worktreeIsolation === 1 ? '' : 's'}</span>
-        <span><Terminal size={11} aria-hidden="true" /> {tools} tool call{tools === 1 ? '' : 's'}</span>
-        <span><Flag size={11} aria-hidden="true" /> {steering} steering</span>
-        <span><Zap size={11} aria-hidden="true" /> {modelRequests} request{modelRequests === 1 ? '' : 's'}</span>
-        <span><CheckCircle2 size={11} aria-hidden="true" /> {hasFinal ? 'final answer' : 'in progress'}</span>
+        <span><FileText size={11} aria-hidden="true" /> {subAgentReplaySummary.artifacts} artifact{subAgentReplaySummary.artifacts === 1 ? '' : 's'}</span>
+        <span><CheckCircle2 size={11} aria-hidden="true" /> {subAgentReplaySummary.validationProofs} validation proof{subAgentReplaySummary.validationProofs === 1 ? '' : 's'}</span>
+        <span><FileText size={11} aria-hidden="true" /> {subAgentReplaySummary.contextFiles} context file{subAgentReplaySummary.contextFiles === 1 ? '' : 's'}</span>
+        <span><Package size={11} aria-hidden="true" /> {subAgentReplaySummary.readyWorktreeIsolations} isolated worktree{subAgentReplaySummary.readyWorktreeIsolations === 1 ? '' : 's'}</span>
+        <span><Terminal size={11} aria-hidden="true" /> {subAgentReplaySummary.toolCalls} tool call{subAgentReplaySummary.toolCalls === 1 ? '' : 's'}</span>
+        {subAgentReplaySummary.runningToolCalls > 0 && <span><Clock size={11} aria-hidden="true" /> {subAgentReplaySummary.runningToolCalls} running tool{subAgentReplaySummary.runningToolCalls === 1 ? '' : 's'}</span>}
+        <span><Flag size={11} aria-hidden="true" /> {subAgentReplaySummary.steeringEvents} steering</span>
+        <span><Zap size={11} aria-hidden="true" /> {subAgentReplaySummary.modelRequests} request{subAgentReplaySummary.modelRequests === 1 ? '' : 's'}</span>
+        {subAgentReplaySummary.phaseDeadline && <span><Clock size={11} aria-hidden="true" /> {subAgentReplaySummary.phaseDeadline}</span>}
+        {subAgentReplaySummary.errors > 0 && <span><AlertTriangle size={11} aria-hidden="true" /> {subAgentReplaySummary.errors} error{subAgentReplaySummary.errors === 1 ? '' : 's'}</span>}
+        <span><CheckCircle2 size={11} aria-hidden="true" /> {subAgentReplaySummary.hasFinalAnswer ? 'final answer' : 'in progress'}</span>
       </div>
       <div className="sub-agent-replay-proof">
         <span>Latest proof</span>
-        <span>{latestReplayProof(steps)}</span>
+        <span>{subAgentReplaySummary.latestProof}</span>
       </div>
     </div>
   );

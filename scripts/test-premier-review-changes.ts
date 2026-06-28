@@ -12,6 +12,18 @@ const reviewChanges = readFileSync('src/components/ReviewChangesFlyout.tsx', 'ut
 const environmentRail = readFileSync('src/components/EnvironmentRail.tsx', 'utf-8');
 const messageBubble = readFileSync('src/components/MessageBubble.tsx', 'utf-8');
 const panelRegistry = readFileSync('src/components/layout/panelRegistry.tsx', 'utf-8');
+const patchReviewPanel = readFileSync('src/components/PatchReviewPanel.tsx', 'utf-8');
+const apiSource = readFileSync('src/utils/api.ts', 'utf-8');
+const patchProposalRoutes = readFileSync('server/routes/patchProposalRoutes.ts', 'utf-8');
+const reviewCommentsStore = readFileSync('server/reviewComments.ts', 'utf-8');
+
+function sourceSlice(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  assert.notEqual(startIndex, -1, `Expected source slice start: ${start}`);
+  const endIndex = source.indexOf(end, startIndex);
+  assert.notEqual(endIndex, -1, `Expected source slice end: ${end}`);
+  return source.slice(startIndex, endIndex);
+}
 
 for (const expected of [
   "type Tab = 'summary' | 'files' | 'patches' | 'validate' | 'commit'",
@@ -131,5 +143,73 @@ for (const forbidden of [
     `Panel registry should not reintroduce duplicated permanent diff/patch panels: ${forbidden}`,
   );
 }
+
+assert.ok(
+  apiSource.includes("export type ReviewCommentSeverity = 'blocker' | 'warning' | 'nit' | 'suggestion'"),
+  'Client review-comment severity type should match the server contract exactly',
+);
+assert.ok(
+  apiSource.includes("status: 'open' | 'resolved';"),
+  'Client review-comment status type should match the server contract exactly',
+);
+const clientReviewCommentInterface = sourceSlice(apiSource, 'export interface ReviewComment {', 'export interface CommitMessageResult');
+assert.equal(
+  clientReviewCommentInterface.includes('proposalId: string'),
+  false,
+  'Client review-comment type should not require proposalId because the server derives it from the route and does not return it',
+);
+assert.equal(
+  clientReviewCommentInterface.includes('updatedAt'),
+  false,
+  'Client review-comment type should not expose updatedAt because the server returns resolvedAt for resolution metadata',
+);
+assert.ok(
+  clientReviewCommentInterface.includes('resolvedAt?: string'),
+  'Client review-comment type should expose server-returned resolvedAt metadata',
+);
+const clientReviewCommentUpdatePayload = sourceSlice(apiSource, 'export async function updateReviewComment(', '): Promise<ReviewComment | null>');
+assert.ok(
+  clientReviewCommentUpdatePayload.includes("status?: 'open' | 'resolved';"),
+  'Client review-comment update payload should not expose server-rejected statuses',
+);
+assert.ok(
+  clientReviewCommentUpdatePayload.includes('severity?: ReviewCommentSeverity'),
+  'Client review-comment update payload should allow server-supported severity edits',
+);
+assert.ok(
+  clientReviewCommentUpdatePayload.includes('suggestedFix?: string'),
+  'Client review-comment update payload should allow server-supported suggested-fix edits',
+);
+assert.ok(
+  patchProposalRoutes.includes("const validSeverities: reviewComments.ReviewCommentSeverity[] = ['blocker', 'warning', 'nit', 'suggestion']"),
+  'Server patch proposal routes should validate the same review-comment severities as the client exposes',
+);
+assert.ok(
+  patchProposalRoutes.includes("const validStatuses: reviewComments.ReviewCommentStatus[] = ['open', 'resolved']"),
+  'Server patch proposal routes should validate the same review-comment statuses as the client exposes',
+);
+assert.ok(
+  patchProposalRoutes.includes("app.patch('/api/patch-proposals/:id/comments/:commentId'"),
+  'Server patch proposal routes should expose the review-comment update endpoint guarded by the client API type',
+);
+assert.ok(
+  reviewCommentsStore.includes("export type ReviewCommentSeverity = 'blocker' | 'warning' | 'nit' | 'suggestion'"),
+  'Review comment store should persist the same severities exposed in the UI',
+);
+assert.ok(
+  patchReviewPanel.includes('<option value="nit">nit</option>')
+    && patchReviewPanel.includes('<option value="suggestion">suggestion</option>'),
+  'Patch review UI should offer the server-supported nit and suggestion severities',
+);
+assert.equal(
+  apiSource.includes("'dismissed'"),
+  false,
+  'Client review-comment API should not expose dismissed because the server only accepts open/resolved',
+);
+assert.equal(
+  apiSource.includes("Patch Review / Commit Validation stubs (server endpoints TBD)"),
+  false,
+  'Client patch-review API comments should not describe implemented endpoints as stubs',
+);
 
 console.log('Premier Review Changes checks passed.');

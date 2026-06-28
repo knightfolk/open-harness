@@ -6,8 +6,11 @@ import {
   CheckCircle2, Circle, X, Container, Eye,
 } from 'lucide-react';
 import * as api from '../utils/api';
+import { chooseOnboardingActiveModel, chooseOnboardingAutoRouterConfig, chooseOnboardingRoleAssignments } from '../utils/onboardingModelPreference';
 import { defaultProviderPlan } from '../data/providerPlans';
 import { applyTheme, getThemeById, getThemesByMode, isSystemThemePreference, SYSTEM_THEME_ID } from '../theme/builtins';
+import { glmOnboardingProviderDescription } from '../../shared/glmModelPreference';
+import { miniMaxOnboardingProviderDescription } from '../../shared/minimaxModelPreference';
 
 // ── Provider catalog (shared with onboarding) ──────────
 interface OnboardingProvider {
@@ -25,7 +28,7 @@ interface OnboardingProvider {
 
 const QUICK_PROVIDERS: OnboardingProvider[] = [
   { id: 'openai', name: 'OpenAI', color: '#10a37f', desc: 'GPT-4.1, o3, o4-mini', baseURL: 'https://api.openai.com/v1', placeholder: 'sk-...', quickConnect: true },
-  { id: 'minimax', name: 'MiniMax', color: '#6366f1', desc: 'M2.7, M3 — fast & affordable', baseURL: 'https://api.minimax.io/v1', placeholder: 'sk-cp-...', quickConnect: true },
+  { id: 'minimax', name: 'MiniMax', color: '#6366f1', desc: miniMaxOnboardingProviderDescription(), baseURL: 'https://api.minimax.io/v1', placeholder: 'sk-cp-...', quickConnect: true },
   { id: 'anthropic', name: 'Anthropic', type: 'anthropic', color: '#d97706', desc: 'Claude Sonnet, Haiku, Opus', baseURL: 'https://api.anthropic.com/v1', placeholder: 'sk-ant-...', quickConnect: true },
   { id: 'google', name: 'Google Gemini', type: 'google', color: '#4285f4', desc: 'Gemini 2.5 Pro/Flash', baseURL: 'https://generativelanguage.googleapis.com/v1beta', placeholder: 'AIza...', quickConnect: true },
   { id: 'ollama', name: 'Ollama', type: 'local', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:11434/v1', placeholder: '(no key needed)', isLocal: true, quickConnect: true },
@@ -35,7 +38,7 @@ const EXTENDED_PROVIDERS: OnboardingProvider[] = [
   { id: 'deepseek', name: 'DeepSeek', color: '#4a9eff', desc: 'V4, V4 Flash, R2', baseURL: 'https://api.deepseek.com/v1', placeholder: 'sk-...' },
   { id: 'xai', name: 'xAI (Grok)', color: '#1d9bf0', desc: 'Grok models', baseURL: 'https://api.x.ai/v1', placeholder: 'xai-...' },
   { id: 'mistral', name: 'Mistral', color: '#f54e42', desc: 'Mistral Large, Codestral', baseURL: 'https://api.mistral.ai/v1', placeholder: '...' },
-  { id: 'zhipu', name: 'Z.AI / Zhipu', color: '#3b5998', desc: 'GLM coding models', baseURL: 'https://api.z.ai/api/coding/paas/v4', placeholder: '...' },
+  { id: 'zhipu', name: 'Z.AI / Zhipu', color: '#3b5998', desc: glmOnboardingProviderDescription('glm-5.2'), baseURL: 'https://api.z.ai/api/coding/paas/v4', placeholder: '...' },
   { id: 'openrouter', name: 'OpenRouter', color: '#6d28d9', desc: 'Gateway to many models', baseURL: 'https://openrouter.ai/api/v1', placeholder: 'sk-or-...' },
   { id: 'qwen', name: 'Alibaba Qwen', color: '#ff6a00', desc: 'Qwen via DashScope', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', placeholder: 'sk-...' },
   { id: 'lmstudio', name: 'LM Studio', type: 'local', color: '#6b7280', desc: 'Free local models', baseURL: 'http://localhost:1234/v1', placeholder: '(no key needed)', isLocal: true },
@@ -222,19 +225,45 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
 
       // Get available models and pick active model
       const models = await api.getModels();
-      const activeModel = models[0]?.id || '';
+      const activeModel = chooseOnboardingActiveModel(models);
+      const localProviderIds = toSave
+        .filter((provider) => provider.type === 'local')
+        .map((provider) => provider.id);
 
       // Build default role assignments (all -> active model; user can override later)
-      const roleAssignments: Record<string, string> = {};
-      if (activeModel) {
-        for (const role of AGENT_ROLES) roleAssignments[role.id] = activeModel;
+      const roleAssignments = chooseOnboardingRoleAssignments(
+        models,
+        optimizationPref,
+        activeModel,
+        AGENT_ROLES.map((role) => role.id),
+        { localProviderIds },
+      );
+      const onboardingRouterConfig = chooseOnboardingAutoRouterConfig(
+        models,
+        optimizationPref,
+        activeModel,
+        { localProviderIds },
+      );
+      const existingConfig = await api.getConfig().catch(() => null);
+      const hasExistingRouterCandidates = Boolean(existingConfig?.autoRouter?.candidates?.length);
+      const shouldConfigureOnboardingRouter = onboardingRouterConfig.candidates.length > 0
+        && !hasExistingRouterCandidates;
+      let routerConfigured = false;
+      if (shouldConfigureOnboardingRouter) {
+        try {
+          await api.configureRouter(onboardingRouterConfig);
+          routerConfigured = true;
+        } catch { /* router setup is best-effort during onboarding */ }
       }
+      const shouldPreserveExistingAutoRouter = hasExistingRouterCandidates
+        && String(existingConfig?.activeModel || '').toLowerCase() === 'auto';
+      const persistedActiveModel = routerConfigured || shouldPreserveExistingAutoRouter ? 'Auto' : activeModel;
 
       // Persist personality + trust + active model + role assignments
       await api.updateConfig({
         activeTheme,
         personality,
-        activeModel,
+        activeModel: persistedActiveModel,
         trustMode,
         roleAssignments: roleAssignments as any,
       });
@@ -242,7 +271,7 @@ export function OnboardingWizard({ onComplete, onSkip }: Props) {
       onComplete({
         providers: toSave,
         activeTheme,
-        activeModel,
+        activeModel: persistedActiveModel,
         personality,
         trustMode,
         roleAssignments,

@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { buildRouterLearningExportPayload } from '../server/routerLearningExport';
 import type { LearningSummary, RoutingEvent } from '../server/routerLearning';
 import type { ToolReliabilitySummary } from '../server/toolReliability';
@@ -25,6 +26,7 @@ const event = {
   promptStrategyVariantId: 'qwen-coder-tool-proof',
   promptStrategyTaskType: 'coding',
   promptStrategySelectionReason: 'Coding and tool-heavy work should lead with applied result, proof, and concise changed-file evidence.',
+  modelRequestDurationMs: 30001,
   userTurns: 1,
   outcome: 'success',
   datasetKind: 'production',
@@ -48,7 +50,20 @@ const learningSummary: LearningSummary = {
   byPromptStrategy: {},
   byPromptStrategyFamily: {},
   byPromptStrategyVariant: {},
-  bestByTaskType: [],
+  modelRequestDuration: {
+    byModel: {
+      'provider:model': { samples: 1, avgMs: 30001, slow: true, thresholdMs: 30000 },
+    },
+    byTaskType: {
+      execute: { samples: 1, avgMs: 30001, slow: true, thresholdMs: 30000 },
+    },
+  },
+  bestByTaskType: [
+    { taskType: 'execute', model: 'provider:model', total: 8, success: 7, rate: 0.875, sampleCount: 8, firstSeenAt: '2026-05-01T00:00:00.000Z', lastSeenAt: '2026-05-20T00:00:00.000Z' },
+    { taskType: 'direct', model: 'provider:veteran-model', total: 12, success: 11, rate: 0.917 },
+    { taskType: 'investigate', model: 'provider:research-model', total: 3, success: 3, rate: 1 },
+    { taskType: 'compare', model: 'provider:mixed-model', total: 6, success: 4, rate: 0.667 },
+  ],
   bestPromptStrategyVariants: [],
 };
 
@@ -249,6 +264,14 @@ const payload = buildRouterLearningExportPayload({
     enabled: true,
     candidateEvidenceRefreshedAt: '2026-06-17T00:59:00.000Z',
     candidateEvidenceRefreshCount: 3,
+    thresholdAdvice: {
+      configuredThreshold: 0.7,
+      activeThreshold: 0.8,
+      suggestedThreshold: 0.8,
+      reason: 'Low success rate (0% over 10 rated outcomes); raising threshold for safety',
+      dataPoints: 10,
+      applied: true,
+    },
     configuredCandidateCount: 4,
     candidateCount: 2,
   },
@@ -259,6 +282,79 @@ assert.equal(payload.generatedAt, '2026-06-17T01:00:00.000Z', 'export should pre
 assert.equal(payload.eventCount, 2, 'export should count all events');
 assert.equal(payload.productionEventCount, 1, 'export should count production events');
 assert.equal(payload.benchmarkEventCount, 1, 'export should count benchmark events');
+assert.equal(payload.events[0].modelRequestDurationMs, 30001, 'export should preserve measured model-request duration on routing events');
+assert.equal((payload.events[0] as any).model_request_duration_ms, 30001, 'export should include machine-friendly measured request duration field');
+assert.equal((payload.events[1] as any).model_request_duration_ms, 30001, 'benchmark export rows should preserve imported measured request duration when present');
+assert.deepEqual(
+  payload.summary.modelRequestDuration.byModel['provider:model'],
+  { samples: 1, avgMs: 30001, slow: true, thresholdMs: 30000 },
+  'export should preserve measured request duration aggregates and slow flags by model',
+);
+assert.deepEqual(
+  (payload.summary as any).model_request_duration.by_task_type.execute,
+  { samples: 1, avg_ms: 30001, slow: true, threshold_ms: 30000 },
+  'export should include machine-friendly measured request duration aggregates and slow flags by task type',
+);
+assert.deepEqual(
+  (payload.summary as any).routingActionCues.map((cue: any) => ({
+    taskType: cue.taskType,
+    model: cue.model,
+    status: cue.status,
+    confidence: cue.confidence,
+    confidenceLabel: cue.confidenceLabel,
+    confidenceDetail: cue.confidenceDetail,
+    detail: cue.detail,
+    stale: cue.stale,
+    freshnessDetail: cue.freshnessDetail,
+  })),
+  [
+    {
+      taskType: 'execute',
+      model: 'provider:model',
+      status: 'actionable',
+      confidence: 'limited',
+      confidenceLabel: 'Limited sample',
+      confidenceDetail: 'Only 8 reviewed execute outcomes support this cue.',
+      detail: 'Use as advisory routing-card evidence: provider:model handled execute at 88% across 8 reviewed outcomes. Confidence: limited sample; review before relying on this cue.',
+      stale: false,
+      freshnessDetail: 'Decision freshness: 8 reviewed routing decisions; first routed 2026-05-01, most recent routed 2026-05-20. This is routing-decision age, not outcome-review age.',
+    },
+    {
+      taskType: 'direct',
+      model: 'provider:veteran-model',
+      status: 'actionable',
+      confidence: 'high',
+      confidenceLabel: 'High confidence',
+      confidenceDetail: '12 reviewed direct outcomes support this cue.',
+      detail: 'Use as advisory routing-card evidence: provider:veteran-model handled direct at 92% across 12 reviewed outcomes.',
+      stale: false,
+      freshnessDetail: '',
+    },
+    {
+      taskType: 'investigate',
+      model: 'provider:research-model',
+      status: 'learning',
+      confidence: 'learning',
+      confidenceLabel: 'Learning',
+      confidenceDetail: '3 reviewed investigate outcomes is below the 5-outcome action bar.',
+      detail: 'Collect 2 more reviewed investigate outcomes before using provider:research-model as routing-card evidence.',
+      stale: false,
+      freshnessDetail: '',
+    },
+    {
+      taskType: 'compare',
+      model: 'provider:mixed-model',
+      status: 'context',
+      confidence: 'weak',
+      confidenceLabel: 'Weak signal',
+      confidenceDetail: '67% is below the 80% action bar for compare.',
+      detail: 'provider:mixed-model is the current compare winner, but 67% is below the 80% action bar.',
+      stale: false,
+      freshnessDetail: '',
+    },
+  ],
+  'export should preserve Routing Learning action cue confidence exactly as the UI and Prompt Microscope derive it',
+);
 assert.equal(payload.promptStrategyBestPractices.length, 1, 'export should include source-backed prompt strategy metadata for referenced strategies');
 assert.equal(payload.promptStrategyBestPractices[0].strategyId, 'qwen-xml-code-v1', 'export should identify the referenced prompt strategy');
 assert.ok(
@@ -314,9 +410,32 @@ assert.deepEqual(payload.routerEvidenceFreshness, {
   enabled: true,
   candidateEvidenceRefreshedAt: '2026-06-17T00:59:00.000Z',
   candidateEvidenceRefreshCount: 3,
+  thresholdAdvice: {
+    configuredThreshold: 0.7,
+    activeThreshold: 0.8,
+    suggestedThreshold: 0.8,
+    reason: 'Low success rate (0% over 10 rated outcomes); raising threshold for safety',
+    dataPoints: 10,
+    applied: true,
+  },
   configuredCandidateCount: 4,
   activeCandidateCount: 2,
 }, 'export should preserve router candidate evidence freshness');
+
+const apiSource = readFileSync('src/utils/api.ts', 'utf8');
+for (const expected of [
+  'thresholdAdvice?: {',
+  'configuredThreshold: number;',
+  'activeThreshold: number;',
+  'suggestedThreshold: number;',
+  'reason: string;',
+  'dataPoints: number;',
+  'applied: boolean;',
+  "import type { RoutingLearningActionCue } from '../../shared/routingLearningActionCues';",
+  'routingActionCues?: Array<RoutingLearningActionCue>;',
+]) {
+  assert.ok(apiSource.includes(expected), `Router learning export API type should expose action-cue confidence: ${expected}`);
+}
 
 const toolFailureEvents: ToolErrorLedgerEvent[] = [
   {

@@ -16,15 +16,23 @@
  */
 
 import { getProviderForModel, providerAuthToken, splitModelRef } from './config';
-import { suggestThresholdAdjustment } from './routerLearning';
+import { getLearningSummary, suggestThresholdAdjustment } from './routerLearning';
 import { getLatestEvalRecommendations } from './evals';
 import type { EvalRecommendation } from './evals';
+import { finiteNumber, formatFiniteNumber } from './reportNumberSafety';
 import { estimateTokens } from './contextManager';
 import { getModelConfig, isReasoningModel } from './modelProfiles';
 import { getToolReliabilitySummaryCached } from './toolReliabilityStore';
-import type { ToolReliabilitySummary } from './toolReliability';
+import type { ToolReliabilityRetryReductionRecommendation, ToolReliabilitySummary } from './toolReliability';
 import { getPromptStrategySelectionForModel } from './promptStrategies';
 import type { StoredConfig, StoredProvider } from './config';
+import { buildRoutingLearningActionCues } from '../shared/routingLearningActionCues';
+import { getClassifierRequestTimeoutDecision } from './modelTimeouts';
+import {
+  isMiniMaxM2SeriesModelId,
+  isMiniMaxM3ModelId,
+  miniMaxSameProvider,
+} from '../shared/minimaxModelPreference';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -70,6 +78,21 @@ export interface AutoRouterCandidateDiagnostic {
   reason?: string;
 }
 
+export interface AutoRouterThresholdAdvice {
+  configuredThreshold: number;
+  activeThreshold: number;
+  suggestedThreshold: number;
+  reason: string;
+  dataPoints: number;
+  applied: boolean;
+  slowTimingContext?: {
+    advisoryOnly: true;
+    slowRowCount: number;
+    thresholdMs: number;
+    note: string;
+  };
+}
+
 export interface AutoRouterSignal {
   /** The latest user message text */
   task: string;
@@ -110,6 +133,8 @@ export interface AutoRouterDecision {
   classifierModel: string | null;
   /** Short classifier-provided scoring rationale, when available. */
   classifierRationale?: string;
+  /** Quality threshold used for classifier viability decisions. Undefined when no classifier gate ran. */
+  threshold?: number;
 }
 
 export interface AutoRouterDecisionOptions {
@@ -128,10 +153,12 @@ let autoRouterBaseCandidates: AutoRouterCandidate[] = [];
 let candidateDiagnostics: AutoRouterCandidateDiagnostic[] = [];
 let candidateEvidenceRefreshedAt: string | null = null;
 let candidateEvidenceRefreshCount = 0;
+let latestThresholdAdvice: AutoRouterThresholdAdvice | null = null;
 const CANDIDATE_CARD_MAX_CHARS = 5200;
 
 const decisionCache = new Map<string, { decision: AutoRouterDecision; expiresAt: number }>();
 const CACHE_MAX_ENTRIES = 256;
+const EVAL_ADVISORY_ROUTING_GUARD = 'advisory only; do not use as an automatic routing override';
 
 function normalizeRecommendationModelKey(modelId: string): string {
   return modelId.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -164,18 +191,24 @@ function annotateCandidatesWithEvalRecommendations(
   if (recommendations.length === 0) return candidates;
 
   const normalizeComparisons = (comparisons: NonNullable<(typeof recommendations)[number]['comparedPromptStrategies']>) =>
-    comparisons.length === 0
-      ? ''
-      : ` Prompt strategy comparison: ${comparisons
-        .slice(0, 2)
+    {
+      const safeComparisons = comparisons
         .map((comparison) => {
+          const avgScore = finiteNumber(comparison.strategy.avgScore);
+          const runs = finiteNumber(comparison.strategy.runs, { min: 0 });
+          if (avgScore === null || runs === null || runs <= 1) return null;
           const strategyLabel = comparison.variant
             ? `${comparison.strategy.strategyId}:${comparison.variant.variantId}`
             : comparison.strategy.strategyId;
           const status = comparison.status === 'provider-approved' ? 'provider-approved' : comparison.status;
-          return `${strategyLabel} (avg ${comparison.strategy.avgScore.toFixed(1)} from ${comparison.strategy.runs} runs, ${status})`;
+          return `${strategyLabel} (avg ${formatFiniteNumber(avgScore, 1)} from ${formatFiniteNumber(runs, 0)} runs, ${status})`;
         })
-        .join('; ')}.`;
+        .filter((comparison): comparison is string => comparison !== null)
+        .slice(0, 2);
+      return safeComparisons.length === 0
+        ? ''
+        : ` Prompt strategy comparison: ${safeComparisons.join('; ')}.`;
+    };
 
   const recs = recommendations
     .filter((rec) => rec.modelId && rec.role && rec.reason)
@@ -224,8 +257,8 @@ function annotateCandidatesWithEvalRecommendations(
     const base = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
     const evalLine = matchingRecs.map((r) => {
       if (r.proofTrusted) return `${r.role} (approved proof): ${r.reason}`;
-      if (r.proofReviewStatus === 'needs-attention') return `${r.role} (proof needs attention; do not trust yet): ${r.reason}`;
-      return `${r.role} (proof unreviewed; verify before trusting): ${r.reason}`;
+      if (r.proofReviewStatus === 'needs-attention') return `${r.role} (${EVAL_ADVISORY_ROUTING_GUARD}; proof needs attention; do not trust yet): ${r.reason}`;
+      return `${r.role} (${EVAL_ADVISORY_ROUTING_GUARD}; proof unreviewed; verify before trusting): ${r.reason}`;
     }).join(' | ');
     const evalEvidence: AutoRouterCandidate['evalEvidence'] = matchingRecs.map((r) => ({
       role: r.role,
@@ -242,10 +275,16 @@ function annotateCandidatesWithEvalRecommendations(
         ? ` Comparison artifact: ${r.comparisonArtifactPath}`
         : '';
       const note = r.proofReviewNote ? ` Proof review note: ${r.proofReviewNote}` : '';
-      return `${r.role} strategy evidence:${comparisons}${artifact}${note}`;
+      const strategyLabel = r.proofTrusted
+        ? `${r.role} strategy evidence:`
+        : `${r.role} advisory strategy evidence:`;
+      const guard = r.proofTrusted ? '' : ` ${EVAL_ADVISORY_ROUTING_GUARD}.`;
+      return `${strategyLabel}${comparisons}${artifact}${note}${guard}`;
     }).join(' | ');
     const trustedCount = matchingRecs.filter((r) => r.proofTrusted).length;
-    const label = trustedCount === matchingRecs.length ? 'Eval-backed recommendation' : 'Eval evidence caution';
+    const label = trustedCount === matchingRecs.length
+      ? 'Eval-backed recommendation'
+      : `Eval evidence caution (${EVAL_ADVISORY_ROUTING_GUARD})`;
     const merged = `${base} ${label}: ${evalLine} ${strategyEvidence}`.trim();
 
     return {
@@ -264,6 +303,46 @@ function modelKeysMatch(a: string, b: string): boolean {
 
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+function miniMaxM3PreferenceReplacement(
+  selected: AutoRouterCandidate,
+  candidates: AutoRouterCandidate[],
+): AutoRouterCandidate | null {
+  if (!isMiniMaxM2SeriesModelId(selected.modelId)) return null;
+  return candidates.find((candidate) =>
+    isMiniMaxM3ModelId(candidate.modelId) && miniMaxSameProvider(candidate.modelId, selected.modelId)
+  ) || null;
+}
+
+function miniMaxM3PreferenceReason(replacedModelId: string): string {
+  return ` MiniMax M3 preference applied over older same-provider MiniMax candidate ${replacedModelId}.`;
+}
+
+function roundedThreshold(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function formatDurationSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function buildSlowTimingContext(): AutoRouterThresholdAdvice['slowTimingContext'] {
+  const summary = getLearningSummary();
+  const rows = [
+    ...Object.values(summary.modelRequestDuration.byModel),
+    ...Object.values(summary.modelRequestDuration.byTaskType),
+  ];
+  const slowRows = rows.filter((row) => row.slow);
+  if (slowRows.length === 0) return undefined;
+  const thresholdMs = slowRows.find((row) => Number.isFinite(row.thresholdMs))?.thresholdMs ?? 30_000;
+  const slowRowLabel = `${slowRows.length} slow model-request duration row${slowRows.length === 1 ? '' : 's'}`;
+  return {
+    advisoryOnly: true,
+    slowRowCount: slowRows.length,
+    thresholdMs,
+    note: `${slowRowLabel} exceed ${formatDurationSeconds(thresholdMs)}; use as review context only, not threshold control.`,
+  };
 }
 
 function modelToolPairMatchesCandidate(pair: string, candidateModelId: string): boolean {
@@ -372,21 +451,33 @@ function errorSignatureLine(candidateModelId: string, summary: ToolReliabilitySu
   }).join('; ')}. Use matching signatures to avoid repeating the same failed first tool or to choose the known recovered path earlier.`;
 }
 
+function retryReductionRecommendationText(item: ToolReliabilityRetryReductionRecommendation): string {
+  const strategy = item.promptStrategyVariantId
+    ? `strategy variant ${item.promptStrategyVariantId} (${item.promptStrategyId || 'unknown'})`
+    : item.promptStrategyId
+      ? `strategy ${item.promptStrategyId}`
+      : 'default strategy';
+  return `first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}, recovered ${item.preferPath}, prefer after ${item.retryDistance} rounds; avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; ${strategy}; recommendation ${item.recommendation}`;
+}
+
 function retryReductionRecommendationLine(candidateModelId: string, summary: ToolReliabilitySummary): string {
-  const recommendations = (summary.retryReductionRecommendations || [])
+  const matchingRecommendations = (summary.retryReductionRecommendations || [])
     .filter((item) => modelKeysMatch(item.failedModel, candidateModelId))
+  if (matchingRecommendations.length === 0) return '';
+  const actionableRecommendations = matchingRecommendations
+    .filter((item) => item.tuningAction === 'tune_local_router')
     .slice(0, 2);
-  if (recommendations.length === 0) return '';
-  return ` Retry-reduction recommendations: ${recommendations.map((item) =>
-    (() => {
-      const strategy = item.promptStrategyVariantId
-        ? `strategy variant ${item.promptStrategyVariantId} (${item.promptStrategyId || 'unknown'})`
-        : item.promptStrategyId
-          ? `strategy ${item.promptStrategyId}`
-          : 'default strategy';
-    return `first failed ${item.failedProviderId || 'unknown'}:${item.avoidPath}, recovered ${item.preferPath}, prefer after ${item.retryDistance} rounds; avg recovery distance ${item.avgRetryDistance}; evidence ${item.evidenceSource}; confidence ${item.evidenceConfidence} from ${item.supportRunCount} run${item.supportRunCount === 1 ? '' : 's'}; supporting sessions ${item.supportSessionIds?.join(', ') || item.sessionId}; supporting runs ${item.supportRunIds?.join(', ') || item.runId}; tuning action ${item.tuningAction}; ${item.tuningGuidance}; provider path avoid ${item.avoidProviderPath}; provider path prefer ${item.preferProviderPath}; ${strategy}; recommendation ${item.recommendation}`
-    })()
-  ).join('; ')}. Prefer these observed working paths before adding more retries.`;
+  const advisoryRecommendations = matchingRecommendations
+    .filter((item) => item.tuningAction !== 'tune_local_router')
+    .slice(0, 2);
+  return [
+    actionableRecommendations.length > 0
+      ? ` Actionable retry-reduction recommendations: ${actionableRecommendations.map(retryReductionRecommendationText).join('; ')}. Prefer these observed working paths before adding more retries.`
+      : '',
+    advisoryRecommendations.length > 0
+      ? ` Advisory retry-reduction evidence: ${advisoryRecommendations.map(retryReductionRecommendationText).join('; ')}. Review or promote this evidence before using it to change model choice; do not treat it as an automatic routing override.`
+      : '',
+  ].filter(Boolean).join('');
 }
 
 export function annotateCandidatesWithToolReliability(
@@ -470,8 +561,44 @@ export function annotateCandidatesWithToolReliability(
   });
 }
 
+export function annotateCandidatesWithRoutingLearningActionCues(
+  candidates: AutoRouterCandidate[],
+  learningSummary: Pick<ReturnType<typeof getLearningSummary>, 'bestByTaskType'>,
+  nowMs: number = Date.now(),
+): AutoRouterCandidate[] {
+  const actionCues = buildRoutingLearningActionCues(learningSummary.bestByTaskType, nowMs)
+    .filter((cue) => cue.status === 'actionable' && !cue.stale);
+  if (actionCues.length === 0) return candidates;
+  return candidates.map((candidate) => {
+    const matchingCues = actionCues.filter((cue) => modelKeysMatch(cue.model, candidate.modelId));
+    if (matchingCues.length === 0) return candidate;
+    const base = candidate.card?.trim() ? candidate.card.trim() : 'General-purpose model. No capability card provided.';
+    const cueLine = matchingCues
+      .map((cue) => {
+        const confidenceSuffix = cue.confidence === 'limited' ? '; limited sample, review before relying' : '';
+        return `Routing learning action cue: advisory only; ${cue.model} handled ${cue.taskType} at ${pct(cue.rate)} across ${cue.total} reviewed outcomes${confidenceSuffix}`;
+      })
+      .join('; ');
+    const merged = `${base} ${cueLine}.`;
+    return {
+      ...candidate,
+      card: merged.length > CANDIDATE_CARD_MAX_CHARS
+        ? `${merged.slice(0, CANDIDATE_CARD_MAX_CHARS - 3)}…`
+        : merged,
+    };
+  });
+}
+
 function annotateCandidatesWithCurrentEvidence(candidates: AutoRouterCandidate[]): AutoRouterCandidate[] {
   let annotatedCandidates = annotateCandidatesWithEvalRecommendations(candidates);
+  try {
+    annotatedCandidates = annotateCandidatesWithRoutingLearningActionCues(
+      annotatedCandidates,
+      getLearningSummary(),
+    );
+  } catch {
+    // Best-effort; routing learning data may be unavailable during tests/startup.
+  }
   try {
     annotatedCandidates = annotateCandidatesWithToolReliability(
       annotatedCandidates,
@@ -484,7 +611,6 @@ function annotateCandidatesWithCurrentEvidence(candidates: AutoRouterCandidate[]
   candidateEvidenceRefreshCount += 1;
   return annotatedCandidates;
 }
-
 function normalizeCandidate(candidate: AutoRouterCandidate): AutoRouterCandidate {
   const supportsThinking = typeof candidate.supportsThinking === 'boolean'
     ? candidate.supportsThinking
@@ -527,6 +653,7 @@ export function configureAutoRouter(config: StoredConfig): void {
     autoRouterBaseCandidates = [];
     candidateEvidenceRefreshedAt = null;
     candidateEvidenceRefreshCount = 0;
+    latestThresholdAdvice = null;
     candidateDiagnostics = [];
     return;
   }
@@ -543,16 +670,18 @@ export function configureAutoRouter(config: StoredConfig): void {
     autoRouterBaseCandidates = [];
     candidateEvidenceRefreshedAt = null;
     candidateEvidenceRefreshCount = 0;
+    latestThresholdAdvice = null;
     return;
   }
 
   autoRouterBaseCandidates = validCandidates;
   const annotatedCandidates = annotateCandidatesWithCurrentEvidence(autoRouterBaseCandidates);
+  const configuredThreshold = roundedThreshold(typeof ar.threshold === 'number' ? ar.threshold : 0.7);
 
   autoRouterConfig = {
     enabled: true,
     classifierModel: ar.classifierModel,
-    threshold: typeof ar.threshold === 'number' ? ar.threshold : 0.7,
+    threshold: configuredThreshold,
     defaultModel: ar.defaultModel || validCandidates[0].modelId,
     cacheTTLMs: typeof ar.cacheTTLMs === 'number' ? ar.cacheTTLMs : 300_000,
     candidates: annotatedCandidates,
@@ -560,13 +689,26 @@ export function configureAutoRouter(config: StoredConfig): void {
 
   // Auto-adjust threshold from historical data if available
   try {
-    const adj = suggestThresholdAdjustment(autoRouterConfig.threshold);
-    if (adj.dataPoints >= 10 && adj.suggestedThreshold !== autoRouterConfig.threshold) {
-      console.log("[autoRouter] Auto-adjusting threshold from " + autoRouterConfig.threshold.toFixed(2) + " to " + adj.suggestedThreshold.toFixed(2) + " — " + adj.reason);
-      autoRouterConfig.threshold = adj.suggestedThreshold;
+    const adj = suggestThresholdAdjustment(configuredThreshold);
+    const suggestedThreshold = roundedThreshold(adj.suggestedThreshold);
+    const applied = adj.dataPoints >= 10 && suggestedThreshold !== configuredThreshold;
+    if (applied) {
+      console.log("[autoRouter] Auto-adjusting threshold from " + configuredThreshold.toFixed(2) + " to " + suggestedThreshold.toFixed(2) + " — " + adj.reason);
+      autoRouterConfig.threshold = suggestedThreshold;
     }
+    const slowTimingContext = buildSlowTimingContext();
+    latestThresholdAdvice = {
+      configuredThreshold,
+      activeThreshold: autoRouterConfig.threshold,
+      suggestedThreshold,
+      reason: adj.reason,
+      dataPoints: adj.dataPoints,
+      applied,
+      ...(slowTimingContext ? { slowTimingContext } : {}),
+    };
   } catch {
     // Best-effort; learning data may not exist yet
+    latestThresholdAdvice = null;
   }
 }
 
@@ -594,6 +736,7 @@ export function getAutoRouterState(): {
   unavailableCandidates: AutoRouterCandidateDiagnostic[];
   candidateEvidenceRefreshedAt: string | null;
   candidateEvidenceRefreshCount: number;
+  thresholdAdvice: AutoRouterThresholdAdvice | null;
   cacheSize: number;
 } {
   if (!autoRouterConfig) {
@@ -607,6 +750,7 @@ export function getAutoRouterState(): {
       unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
       candidateEvidenceRefreshedAt,
       candidateEvidenceRefreshCount,
+      thresholdAdvice: latestThresholdAdvice,
       cacheSize: 0,
     };
   }
@@ -628,6 +772,7 @@ export function getAutoRouterState(): {
     unavailableCandidates: candidateDiagnostics.filter((d) => !d.available),
     candidateEvidenceRefreshedAt,
     candidateEvidenceRefreshCount,
+    thresholdAdvice: latestThresholdAdvice,
     cacheSize: decisionCache.size,
   };
 }
@@ -698,10 +843,10 @@ export async function routeTask(
 ): Promise<AutoRouterDecision | null> {
   if (!autoRouterConfig || !autoRouterConfig.enabled) return null;
 
-  const candidates = autoRouterBaseCandidates.length > 0
-    ? annotateCandidatesWithCurrentEvidence(autoRouterBaseCandidates)
+  const baseCandidates = autoRouterBaseCandidates.length > 0
+    ? autoRouterBaseCandidates
     : autoRouterConfig.candidates;
-  autoRouterConfig.candidates = candidates;
+  const candidates = baseCandidates;
   if (candidates.length === 0) return null;
 
   // Single candidate: no routing needed
@@ -713,7 +858,7 @@ export async function routeTask(
       scores: { [candidates[0].modelId]: 1.0 },
       cached: false,
       fallback: false,
-      classifierModel: autoRouterConfig.classifierModel,
+      classifierModel: null,
     };
   }
 
@@ -739,21 +884,27 @@ export async function routeTask(
     return fallbackDecision(candidates, autoRouterConfig, 'classifier provider not found');
   }
 
+  const classifierCandidates = autoRouterBaseCandidates.length > 0
+    ? annotateCandidatesWithCurrentEvidence(autoRouterBaseCandidates)
+    : autoRouterConfig.candidates;
+  autoRouterConfig.candidates = classifierCandidates;
+  if (classifierCandidates.length === 0) return null;
+
   try {
     const classifierResult = await callClassifier(
       { ...classifierResolved.provider, apiKey: classifierResolved.apiKey },
       classifierModel,
       signal,
-      candidates,
+      classifierCandidates,
     );
 
     if (!classifierResult?.scores || Object.keys(classifierResult.scores).length === 0) {
-      return fallbackDecision(candidates, autoRouterConfig, 'classifier returned empty scores');
+      return fallbackDecision(classifierCandidates, autoRouterConfig, classifierResult?.failureReason || 'classifier returned empty scores');
     }
 
     const decision = pickCandidate(
       classifierResult.scores,
-      candidates,
+      classifierCandidates,
       autoRouterConfig.threshold,
       signal.hasImages,
       signal.estimatedInputTokens,
@@ -761,6 +912,7 @@ export async function routeTask(
       autoRouterConfig.defaultModel,
       classifierResult.reasoning,
     );
+    const classifierDecision = { ...decision, cached: false, fallback: false, classifierModel };
 
     // Cache the decision
     if (autoRouterConfig.cacheTTLMs > 0) {
@@ -770,14 +922,14 @@ export async function routeTask(
         if (oldest) decisionCache.delete(oldest);
       }
       decisionCache.set(cacheKey, {
-        decision,
+        decision: classifierDecision,
         expiresAt: Date.now() + autoRouterConfig.cacheTTLMs,
       });
     }
 
-    return { ...decision, cached: false, fallback: false, classifierModel };
+    return classifierDecision;
   } catch (err: any) {
-    return fallbackDecision(candidates, autoRouterConfig, `classifier error: ${err?.message || err}`);
+    return fallbackDecision(classifierCandidates, autoRouterConfig, `classifier error: ${err?.message || err}`);
   }
 }
 
@@ -793,29 +945,33 @@ async function callClassifier(
   classifierModelId: string,
   signal: AutoRouterSignal,
   candidates: AutoRouterCandidate[],
-): Promise<{ scores: Record<string, number>; reasoning?: string } | null> {
+): Promise<{ scores?: Record<string, number>; reasoning?: string; failureReason?: string } | null> {
   const systemPrompt = buildClassifierSystemPrompt(candidates);
   const userContent = buildClassifierUserContent(signal, candidates);
 
   // Build the request for an OpenAI-compatible chat completions endpoint
   const apiModelId = splitModelRef(classifierModelId).bareModelId;
+  const timeoutDecision = getClassifierRequestTimeoutDecision(classifierModelId, provider.id);
 
   try {
     let responseText: string;
 
     if (provider.type === 'anthropic') {
-      responseText = await callAnthropicClassifier(provider, apiModelId, systemPrompt, userContent);
+      responseText = await callAnthropicClassifier(provider, apiModelId, systemPrompt, userContent, 600, timeoutDecision.timeoutMs);
     } else if (provider.type === 'google') {
-      responseText = await callGoogleClassifier(provider, apiModelId, systemPrompt, userContent);
+      responseText = await callGoogleClassifier(provider, apiModelId, systemPrompt, userContent, 600, timeoutDecision.timeoutMs);
     } else {
       // OpenAI-compatible (default path)
-      responseText = await callOpenAICompatibleClassifier(provider, apiModelId, systemPrompt, userContent);
+      responseText = await callOpenAICompatibleClassifier(provider, apiModelId, systemPrompt, userContent, 600, timeoutDecision.timeoutMs);
     }
 
     return parseClassifierScores(responseText, candidates.map((c) => c.modelId));
   } catch (err) {
     console.warn('[autoRouter] classifier call failed:', err);
-    return null;
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      failureReason: `classifier error (${timeoutDecision.timeoutPolicy}, ${timeoutDecision.timeoutLabel}, ${timeoutDecision.timeoutMs}ms): ${message}`,
+    };
   }
 }
 
@@ -985,6 +1141,9 @@ function buildClassifierSystemPrompt(candidates: AutoRouterCandidate[]): string 
     'Use the full range. A short prompt is NOT necessarily an easy task — hidden',
     'complexity (multi-file edits, debugging, niche domains, strict correctness)',
     'should pull scores down for weaker models. Default to ~0.5–0.6 when unsure.',
+    'Evidence trust rule: approved/actionable evidence may move the score.',
+    'Advisory/context-only evidence is background context; it must not move the score',
+    'or be treated as an automatic routing override.',
     '',
     'Candidate models:',
   ];
@@ -1140,32 +1299,54 @@ function pickCandidate(
   const viable = scored.filter((s) => s.score >= threshold);
   if (viable.length > 0) {
     viable.sort((a, b) => a.candidate.cost - b.candidate.cost);
-    const winner = viable[0];
+    const initialWinner = viable[0];
+    const preferredCandidate = miniMaxM3PreferenceReplacement(
+      initialWinner.candidate,
+      viable.map((item) => item.candidate),
+    );
+    const winner = preferredCandidate
+      ? viable.find((item) => item.candidate.modelId === preferredCandidate.modelId) || initialWinner
+      : initialWinner;
+    const preferenceReason = preferredCandidate
+      ? miniMaxM3PreferenceReason(initialWinner.candidate.modelId)
+      : '';
     return {
       modelId: winner.candidate.modelId,
       score: winner.score,
-      reason: `score=${winner.score.toFixed(2)} >= ${threshold.toFixed(2)}, cheapest among viable.${rationale}`,
+      reason: `score=${winner.score.toFixed(2)} >= ${threshold.toFixed(2)}, cheapest among viable.${preferenceReason}${rationale}`,
       scores: Object.fromEntries(scored.map((s) => [s.candidate.modelId, s.score])),
       cached: false,
       fallback: false,
       classifierModel: null, // set by caller
       classifierRationale,
+      threshold,
     };
   }
 
   // No candidate clears threshold — pick highest score
   scored.sort((a, b) => b.score - a.score);
   if (scored.length > 0 && scored[0].score > 0) {
-    const best = scored[0];
+    const initialBest = scored[0];
+    const positiveCandidates = scored
+      .filter((item) => item.score > 0)
+      .map((item) => item.candidate);
+    const preferredCandidate = miniMaxM3PreferenceReplacement(initialBest.candidate, positiveCandidates);
+    const best = preferredCandidate
+      ? scored.find((item) => item.candidate.modelId === preferredCandidate.modelId) || initialBest
+      : initialBest;
+    const preferenceReason = preferredCandidate
+      ? miniMaxM3PreferenceReason(initialBest.candidate.modelId)
+      : '';
     return {
       modelId: best.candidate.modelId,
       score: best.score,
-      reason: `no candidate >= ${threshold.toFixed(2)}; picked highest score (${best.score.toFixed(2)}).${rationale}`,
+      reason: `no candidate >= ${threshold.toFixed(2)}; picked highest score (${best.score.toFixed(2)}).${preferenceReason}${rationale}`,
       scores: Object.fromEntries(scored.map((s) => [s.candidate.modelId, s.score])),
       cached: false,
       fallback: false,
       classifierModel: null,
       classifierRationale,
+      threshold,
     };
   }
 
@@ -1179,6 +1360,7 @@ function pickCandidate(
     cached: false,
     fallback: true,
     classifierModel: null,
+    threshold,
   };
 }
 
@@ -1215,7 +1397,11 @@ function pickByCost(
     strategy === 'cheapest' ? a.cost - b.cost : b.cost - a.cost
   ));
 
-  const selected = ordered[0];
+  const initialSelected = ordered[0];
+  const selected = miniMaxM3PreferenceReplacement(initialSelected, effectiveCandidates) || initialSelected;
+  const preferenceReason = selected.modelId !== initialSelected.modelId
+    ? miniMaxM3PreferenceReason(initialSelected.modelId)
+    : '';
   const skippedForContext = capabilitySafeCandidates.length - contextSafeCandidates.length;
   const skippedForTools = requiresStrongToolUse ? imageSafeCandidates.length - toolSafeCandidates.length : 0;
   const contextReason = skippedForContext > 0
@@ -1241,7 +1427,7 @@ function pickByCost(
         : strategy === 'premium'
           ? 'xHigh thinking selected; using strongest native-thinking candidate when available.'
           : 'High thinking selected; using strongest native-thinking candidate when available.';
-  const reason = baseReason + premiumFallback + thinkingFallback + toolReason + contextReason;
+  const reason = baseReason + preferenceReason + premiumFallback + thinkingFallback + toolReason + contextReason;
   const scores = Object.fromEntries(candidates.map((c) => [c.modelId, c.modelId === selected.modelId ? 1.0 : 0]));
   return {
     modelId: selected.modelId,

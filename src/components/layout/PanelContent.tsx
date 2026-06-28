@@ -2,8 +2,10 @@ import { Suspense, lazy } from 'react';
 import type { HarnessRun, RunSteeringAction, SessionGoal } from '../../types';
 import type { PanelId } from '../../types/layout';
 import type { VisualContextInfo } from '../../utils/api';
+import type { ModelLabEvidenceScope } from '../../utils/modelLabResultEvidence';
 
 const ChatPanel = lazy(() => import('../ChatPanel').then((m) => ({ default: m.ChatPanel })));
+const SideChatPanel = lazy(() => import('../SideChatPanel').then((m) => ({ default: m.SideChatPanel })));
 const BrowserPanel = lazy(() => import('../BrowserPanel').then((m) => ({ default: m.BrowserPanel })));
 const TerminalPanel = lazy(() => import('../TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 const FilesPanel = lazy(() => import('../FilesPanel').then((m) => ({ default: m.FilesPanel })));
@@ -42,6 +44,9 @@ interface Props {
     models?: Array<{ id: string; name: string }>;
     enabledModels?: Array<{ id: string; name: string; providerId: string; providerName: string; providerType?: 'openai-compatible' | 'anthropic' | 'google' | 'local' | 'custom' }>;
     onApplyRoleRecommendation?: (roleId: string, modelId: string) => void;
+    modelLabEvidenceScope?: ModelLabEvidenceScope | null;
+    onModelLabEvidenceScopeConsumed?: () => void;
+    onOpenModelLabEvidence?: (scope: ModelLabEvidenceScope) => void;
     environmentOpen?: boolean;
     onEnvironmentOpenChange?: (open: boolean) => void;
     onRunSteer?: (runId: string, action: RunSteeringAction, target?: 'orchestrator' | 'agent', note?: string) => Promise<HarnessRun | null> | void;
@@ -73,6 +78,8 @@ export function PanelContent({ panelId, context }: Props) {
   switch (panelId) {
     case 'chat':
       return wrapped(<ChatPanel messages={context.messages} activeGoal={context.activeGoal || null} isTyping={context.isTyping} onSendMessage={context.onSendMessage} activeModel={context.activeModel} workingDir={context.workingDir} projectProfile={context.projectProfile} onCompareModel={context.onCompareModel} onProposePatch={context.onProposePatch} trustMode={context.trustMode || 'workspace-write'} subAgents={context.subAgents} onReviewChanges={context.onReviewChanges || (() => {})} onFocusAgents={context.onFocusAgents || (() => {})} environmentOpen={context.environmentOpen ?? false} onEnvironmentOpenChange={context.onEnvironmentOpenChange || (() => {})} onRunSteer={context.onRunSteer} />);
+    case 'side-chat':
+      return wrapped(<SideChatPanel activeModel={context.activeModel} models={(context.enabledModels || []).map((model: any) => ({ id: model.id, name: model.name || model.id }))} activeSessionId={context.sessionId || undefined} workingDir={context.workingDir} mainMessages={context.messages} />);
     case 'browser':
       return wrapped(<BrowserPanel workingDir={context.workingDir} onAskAboutScreenshot={context.onAskAboutScreenshot} />);
     case 'terminal':
@@ -80,9 +87,9 @@ export function PanelContent({ panelId, context }: Props) {
     case 'files':
       return wrapped(<FilesPanel workingDir={context.workingDir} projectProfile={context.projectProfile} />);
     case 'model-lab':
-      return wrapped(<ModelLabPanel workingDir={context.workingDir} models={context.models || []} enabledModels={context.enabledModels || []} />);
+      return wrapped(<ModelLabPanel workingDir={context.workingDir} models={context.models || []} enabledModels={context.enabledModels || []} initialEvidenceScope={context.modelLabEvidenceScope || null} onInitialEvidenceScopeConsumed={context.onModelLabEvidenceScopeConsumed} />);
     case 'routing-learning':
-      return wrapped(<RoutingLearningPane enabledModels={context.enabledModels || []} onApplyRoleRecommendation={context.onApplyRoleRecommendation} />);
+      return wrapped(<RoutingLearningPane enabledModels={context.enabledModels || []} onApplyRoleRecommendation={context.onApplyRoleRecommendation} onOpenModelLabEvidence={context.onOpenModelLabEvidence} />);
     case 'safety':
       return wrapped(<SafetyPanel workingDir={context.workingDir} />);
     case 'attention-inbox':

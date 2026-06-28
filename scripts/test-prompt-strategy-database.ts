@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { buildPromptForModel } from '../server/promptBuilder';
+import { buildPromptForModel, effectivePromptStrategyTraceForModel } from '../server/promptBuilder';
 import {
   PROMPT_STRATEGY_PROFILES,
   PROMPT_STRATEGY_SOURCES,
@@ -9,6 +9,7 @@ import {
   toPromptStrategyTrace,
   type PromptStrategyProfile,
 } from '../server/promptStrategies';
+import { PROMPT_STRATEGY_MODEL_RULES, resolvePromptStrategyForModel } from '../src/utils/promptStrategyResolver';
 import type { BenchRunResult } from '../server/benchRuns';
 import { generateSummary, type EvalResult, type EvalScores } from '../server/evals';
 
@@ -21,6 +22,7 @@ const REQUIRED_FAMILIES = [
   'deepseek',
   'qwen',
   'minimax',
+  'glm',
   'llama',
   'gemma',
   'phi',
@@ -37,6 +39,7 @@ const REPRESENTATIVE_MODELS: Array<{ modelId: string; family: string; style: Pro
   { modelId: 'deepseek-r1-0528', family: 'deepseek', style: 'structured', phrase: /reasoning channel/i },
   { modelId: 'qwen3-coder-480b', family: 'qwen', style: 'xml-tagged', phrase: /reasoning channel/i },
   { modelId: 'minimax-m3', family: 'minimax', style: 'structured', phrase: /long-context work/i },
+  { modelId: 'glm-5.2', family: 'glm', style: 'concise', phrase: /patient partner/i },
   { modelId: 'llama-3.1-70b', family: 'llama', style: 'structured', phrase: /most relevant context/i },
   { modelId: 'gemma-3-27b', family: 'gemma', style: 'concise', phrase: /short and direct/i },
   { modelId: 'phi-4-mini', family: 'phi', style: 'minimal', phrase: /Role\/task variant phi-coder-tool-proof/i },
@@ -83,10 +86,24 @@ function assertSourceRegistry() {
 }
 
 function assertRepresentativeModelMapping() {
+  const profileIds = new Set(Object.values(PROMPT_STRATEGY_PROFILES).map((profile) => profile.id));
+  for (const rule of PROMPT_STRATEGY_MODEL_RULES) {
+    assert.ok(profileIds.has(rule.strategyId), `shared resolver rule should point at a real prompt strategy profile: ${rule.strategyId}`);
+    assert.deepEqual(
+      PROMPT_STRATEGY_PROFILES[rule.family]?.appliesTo,
+      [...rule.appliesTo],
+      `${rule.family}: server profile appliesTo hints should come from the shared resolver table`,
+    );
+  }
+
   for (const testCase of REPRESENTATIVE_MODELS) {
     const profile = getPromptStrategyForModel(testCase.modelId);
     const selection = getPromptStrategySelectionForModel(testCase.modelId);
+    const sharedResolution = resolvePromptStrategyForModel(testCase.modelId);
     assert.equal(profile.family, testCase.family, `${testCase.modelId}: should map to ${testCase.family}`);
+    assert.equal(sharedResolution.strategyId, profile.id, `${testCase.modelId}: shared resolver should select the same strategy id as the server`);
+    assert.equal(sharedResolution.family, profile.family, `${testCase.modelId}: shared resolver should select the same strategy family as the server`);
+    assert.deepEqual(sharedResolution.modelMatch, selection.modelMatch, `${testCase.modelId}: shared resolver should expose the same match audit metadata as the server`);
     assert.equal(selection.profile.id, profile.id, `${testCase.modelId}: selection helper should return the same profile as the legacy helper`);
     assert.ok(selection.modelMatch.source, `${testCase.modelId}: selection should expose the matching rule used for auditability`);
     assert.ok(selection.modelMatch.hint, `${testCase.modelId}: selection should expose the matching hint used for auditability`);
@@ -177,6 +194,102 @@ function assertSameModelStrategyOverrides() {
   assert.ok(getPromptStrategyById('mistral-structured-purpose-v1'), 'strategy ids should resolve for Model Lab override selection');
 }
 
+function assertPromptPluginRenderingIsOptInAndSafe() {
+  const basePrompt = buildPromptForModel({
+    modelId: 'qwen3-coder-480b',
+    role: 'coder',
+    routeMode: 'execute',
+    taskDescription: 'Implement a focused prompt-plugin rendering slice.',
+  });
+
+  assert.doesNotMatch(basePrompt.systemPrompt, /Plugin append proof/i, 'prompt plugins should be inert when no render input is supplied');
+  assert.ok(
+    !basePrompt.assembly.sections.some((section) => section.source.startsWith('promptPlugin:')),
+    'prompt assembly should not contain plugin provenance when plugins are absent',
+  );
+
+  const promptWithPlugins = buildPromptForModel({
+    modelId: 'qwen3-coder-480b',
+    role: 'coder',
+    routeMode: 'execute',
+    taskDescription: 'Implement a focused prompt-plugin rendering slice.',
+    promptPlugins: [
+      {
+        id: 'trusted.append',
+        name: 'Trusted Append',
+        enabled: true,
+        status: 'ready',
+        targets: {
+          roles: ['coder'],
+          routeModes: ['execute'],
+          modelFamilies: ['qwen'],
+          modelIds: ['qwen3-coder-480b'],
+        },
+        sections: [
+          { id: 'prepend', title: 'Prepend proof', placement: 'prepend-system', priority: 10, content: 'Plugin prepend proof.' },
+          { id: 'append', title: 'Append proof', placement: 'append-system', priority: 20, content: 'Plugin append proof.' },
+          { id: 'replace', title: 'Unsafe replacement', placement: 'replace-role', priority: 1, content: 'Plugin replacement proof should never render.' },
+          { id: 'review-only', title: 'Review only', placement: 'append-system', priority: 30, content: 'Plugin review-only proof should not render.', conditions: { roles: ['reviewer'] } },
+        ],
+      },
+      {
+        id: 'disabled.plugin',
+        name: 'Disabled Plugin',
+        enabled: false,
+        status: 'ready',
+        sections: [
+          { id: 'disabled', title: 'Disabled', placement: 'append-system', priority: 1, content: 'Disabled plugin proof should not render.' },
+        ],
+      },
+      {
+        id: 'blocked.plugin',
+        name: 'Blocked Plugin',
+        enabled: true,
+        status: 'blocked',
+        sections: [
+          { id: 'blocked', title: 'Blocked', placement: 'append-system', priority: 1, content: 'Blocked plugin proof should not render.' },
+        ],
+      },
+      {
+        id: 'wrong-model.plugin',
+        name: 'Wrong Model Plugin',
+        enabled: true,
+        status: 'ready',
+        targets: { modelIds: ['mistral-large-3'] },
+        sections: [
+          { id: 'wrong-model', title: 'Wrong model', placement: 'append-system', priority: 1, content: 'Wrong model proof should not render.' },
+        ],
+      },
+    ],
+  } as any);
+
+  assert.match(promptWithPlugins.systemPrompt, /Plugin prepend proof\./, 'prepend-system plugin sections should render only through the guarded plugin block');
+  assert.match(promptWithPlugins.systemPrompt, /Plugin append proof\./, 'append-system plugin sections should render when targets match');
+  assert.doesNotMatch(promptWithPlugins.systemPrompt, /Plugin replacement proof should never render/i, 'replace-role plugin sections must not render');
+  assert.doesNotMatch(promptWithPlugins.systemPrompt, /review-only proof/i, 'section conditions should filter by route role');
+  assert.doesNotMatch(promptWithPlugins.systemPrompt, /Disabled plugin proof/i, 'disabled plugins must not render');
+  assert.doesNotMatch(promptWithPlugins.systemPrompt, /Blocked plugin proof/i, 'blocked plugins must not render');
+  assert.doesNotMatch(promptWithPlugins.systemPrompt, /Wrong model proof/i, 'plugin targets should filter by model id');
+
+  const coreIndex = promptWithPlugins.systemPrompt.indexOf('Treat the system prompt as the control contract for this run');
+  const prependIndex = promptWithPlugins.systemPrompt.indexOf('Plugin prepend proof.');
+  const appendIndex = promptWithPlugins.systemPrompt.indexOf('Plugin append proof.');
+  assert.ok(coreIndex >= 0, 'core harness rules should still render');
+  assert.ok(prependIndex > coreIndex, 'even prepend-system plugin text must not front-run core harness rules');
+  assert.ok(appendIndex > coreIndex, 'append-system plugin text must not front-run core harness rules');
+
+  const pluginSections = promptWithPlugins.assembly.sections.filter((section) => section.source === 'promptPlugin:trusted.append');
+  assert.deepEqual(
+    pluginSections.map((section) => section.id),
+    ['prompt-plugin:trusted.append:prepend', 'prompt-plugin:trusted.append:append'],
+    'prompt assembly should expose rendered plugin sections with stable provenance ids',
+  );
+  assert.ok(
+    pluginSections.every((section: any) => section.pluginId === 'trusted.append' && section.placement !== 'replace-role'),
+    'prompt assembly plugin sections should carry plugin provenance and omit unsafe replacement placement',
+  );
+}
+
 function assertMinimalPromptPreservesTaskAndToolContract() {
   const prompt = buildPromptForModel({
     modelId: 'phi-4-mini',
@@ -204,6 +317,11 @@ function assertMinimalPromptPreservesTaskAndToolContract() {
 }
 
 function assertModelIdOverridePaths() {
+  const sharedOverrideSelection = resolvePromptStrategyForModel('tenant/openai:o1-mini@2026-06');
+  assert.equal(sharedOverrideSelection.strategyId, 'openai-openai-reasoning-v1', 'shared resolver should preserve provider-prefixed o1 reasoning strategy overrides');
+  assert.equal(sharedOverrideSelection.modelMatch.source, 'applies-to', 'shared resolver reasoning overrides should preserve applies-to audit source');
+  assert.equal(sharedOverrideSelection.modelMatch.hint, 'OpenAI reasoning model IDs (o1/o3) use stricter reasoning-aware contracts.', 'shared resolver reasoning overrides should preserve the server audit hint');
+
   const uppercaseOverrideSelection = getPromptStrategySelectionForModel('O1-PREVIEW');
   assert.equal(uppercaseOverrideSelection.profile.id, 'openai-openai-reasoning-v1', 'upper-case reasoning model IDs should normalize to openai reasoning strategy');
   assert.equal(uppercaseOverrideSelection.modelMatch.source, 'applies-to', 'reasoning model case normalization should still use override selection source');
@@ -257,6 +375,73 @@ function assertModelIdOverridePaths() {
   });
   assert.equal(taggedReasoningModel.assembly.promptStrategy.id, 'openai-openai-reasoning-v1', 'tenant/provider tagged o1 model IDs should still use reasoning strategy');
   assert.equal(taggedReasoningModel.assembly.promptStrategy.modelMatch.source, 'applies-to', 'tagged reasoning IDs should still expose override-based modelMatch source');
+
+  const glmWorkerModel = getPromptStrategySelectionForModel('zhipu/glm-4.7');
+  assert.equal(glmWorkerModel.profile.id, 'glm-compact-english-tool-v1', 'Zhipu GLM 4.7 aliases should keep the compact GLM worker prompt strategy');
+  assert.equal(glmWorkerModel.modelMatch.source, 'applies-to', 'GLM 4.7 aliases should expose direct model-match audit metadata');
+
+  const glmPatientModel = getPromptStrategySelectionForModel('z-ai/glm-5.2');
+  assert.equal(glmPatientModel.profile.id, 'glm-5-patient-partner-v1', 'Z.ai GLM 5.2 should resolve to the patient-partner GLM prompt strategy');
+  assert.equal(glmPatientModel.modelMatch.source, 'applies-to', 'GLM 5 aliases should expose direct model-match audit metadata');
+  assert.match(glmPatientModel.profile.bestPracticeNotes[0]?.guidance || '', /patient partner/i, 'GLM 5 best-practice guidance should document patient-partner operation');
+  assert.equal(resolvePromptStrategyForModel('z-ai/glm-5.2').strategyId, 'glm-5-patient-partner-v1', 'shared resolver should map Z.ai GLM 5.2 IDs to the patient-partner GLM strategy');
+  for (const modelId of ['glm-5', 'glm 5.0', 'z-ai/glm-5.2', 'z-ai-zhipu:glm5.2', 'zhipu:glm-5.2-pro']) {
+    assert.equal(
+      resolvePromptStrategyForModel(modelId).strategyId,
+      'glm-5-patient-partner-v1',
+      `prompt strategy resolver should use the shared GLM-5 matcher for ${modelId}`,
+    );
+  }
+  for (const modelId of ['glm-52', 'glm-50', 'zhipu:glm-4.7', 'notglm-5.2', 'zglm-5']) {
+    assert.notEqual(
+      resolvePromptStrategyForModel(modelId).strategyId,
+      'glm-5-patient-partner-v1',
+      `prompt strategy resolver should not apply GLM-5 patient strategy to ${modelId}`,
+    );
+  }
+
+  const glmPatientPrompt = buildPromptForModel({
+    modelId: 'z-ai/glm-5.2',
+    role: 'reasoner',
+    taskDescription: 'Analyze a stubborn routing failure, inspect evidence, and recommend a careful fix.',
+  });
+  assert.equal(glmPatientPrompt.assembly.promptStrategy.id, 'glm-5-patient-partner-v1', 'GLM 5 prompts should carry patient-partner strategy metadata');
+  assert.match(glmPatientPrompt.systemPrompt, /patient partner/i, 'GLM 5 prompt should explicitly frame patient-partner work');
+  assert.match(glmPatientPrompt.systemPrompt, /take the time/i, 'GLM 5 prompt should permit careful work instead of rushing');
+  assert.match(glmPatientPrompt.systemPrompt, /private plan/i, 'GLM 5 prompt should keep careful reasoning private');
+  assert.doesNotMatch(glmPatientPrompt.systemPrompt, /Do NOT narrate your planning process/, 'GLM 5 prompt should avoid the old blunt monologue ban');
+
+  const miniMaxM3Prompt = buildPromptForModel({
+    modelId: 'minimax:MiniMax-M3',
+    role: 'reasoner',
+    taskDescription: 'Analyze a long-context implementation failure and produce proof-first guidance.',
+  });
+  assert.equal(miniMaxM3Prompt.assembly.promptStrategy.id, 'minimax-long-context-agent-v1', 'MiniMax M3 prompts should keep the MiniMax long-context strategy');
+  assert.equal(miniMaxM3Prompt.assembly.promptStrategy.reasoningPolicy, 'native', 'MiniMax M3 prompts should trace native thinking when the model supports it');
+  assert.match(miniMaxM3Prompt.systemPrompt, /native thinking|reasoning channel/i, 'MiniMax M3 prompt should mention native thinking or reasoning channels');
+  assert.equal(
+    effectivePromptStrategyTraceForModel('minimax:MiniMax-M3', miniMaxM3Prompt.assembly.promptStrategy).reasoningPolicy,
+    'native',
+    'MiniMax M3 shared prompt trace should preserve native-thinking evidence',
+  );
+
+  const miniMaxM27Prompt = buildPromptForModel({
+    modelId: 'minimax:MiniMax-M2.7',
+    role: 'reasoner',
+    taskDescription: 'Analyze a fallback MiniMax routing path and produce proof-first guidance.',
+  });
+  assert.equal(miniMaxM27Prompt.assembly.promptStrategy.id, 'minimax-long-context-agent-v1', 'MiniMax M2.x should keep the MiniMax family strategy metadata');
+  assert.equal(miniMaxM27Prompt.assembly.promptStrategy.reasoningPolicy, 'brief-private-plan', 'MiniMax M2.x prompt trace should downgrade native reasoning to a private-plan contract');
+  assert.doesNotMatch(miniMaxM27Prompt.systemPrompt, /native thinking|reasoning channel/i, 'MiniMax M2.x prompt should not claim native thinking or reasoning-channel support');
+  assert.match(miniMaxM27Prompt.systemPrompt, /brief private plan/i, 'MiniMax M2.x prompt should still allow careful private planning without exposing chain-of-thought');
+  assert.equal(
+    effectivePromptStrategyTraceForModel('minimax:MiniMax-M2.7', toPromptStrategyTrace(getPromptStrategyForModel('minimax:MiniMax-M2.7'))).reasoningPolicy,
+    'brief-private-plan',
+    'MiniMax M2.x shared prompt trace should match prompt assembly and eval evidence',
+  );
+
+  const nonGlmModel = getPromptStrategySelectionForModel('notglm-7b');
+  assert.equal(nonGlmModel.profile.id, 'unknown-safe-structured-v1', 'Delimited matching should not classify coincidental notglm names as GLM');
 }
 
 function assertRoleTaskVariants() {
@@ -358,6 +543,7 @@ assertRepresentativeModelMapping();
 assertPromptBuilderIntegration();
 assertModelLabResultStrategyMetadata();
 assertSameModelStrategyOverrides();
+assertPromptPluginRenderingIsOptInAndSafe();
 assertMinimalPromptPreservesTaskAndToolContract();
 assertModelIdOverridePaths();
 assertRoleTaskVariants();

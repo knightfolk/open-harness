@@ -1,6 +1,8 @@
 import type { LearningSummary, RoutingEvent } from './routerLearning';
 import type { ToolReliabilitySummary } from './toolReliability';
+import type { AutoRouterThresholdAdvice } from './autoRouter';
 import { PROMPT_STRATEGY_PROFILES } from './promptStrategies';
+import { buildRoutingLearningActionCues } from '../shared/routingLearningActionCues';
 
 type TunableEvidenceSource = ToolReliabilitySummary['byEvidenceSource'][number]['source'];
 
@@ -36,21 +38,35 @@ export interface RouterEvidenceFreshness {
   enabled: boolean;
   candidateEvidenceRefreshedAt: string | null;
   candidateEvidenceRefreshCount: number;
+  thresholdAdvice?: AutoRouterThresholdAdvice | null;
   configuredCandidateCount: number;
   activeCandidateCount: number;
 }
+
+type RouterLearningExportSummary = LearningSummary & {
+  toolReliability: ToolReliabilitySummary;
+  routingActionCues: ReturnType<typeof buildRoutingLearningActionCues>;
+  model_request_duration: {
+    by_model: Record<string, { samples: number; avg_ms: number; slow: boolean; threshold_ms: number }>;
+    by_task_type: Record<string, { samples: number; avg_ms: number; slow: boolean; threshold_ms: number }>;
+  };
+};
 
 export interface RouterLearningExportPayload {
   schemaVersion: 1;
   generatedAt: string;
   routerEvidenceFreshness: RouterEvidenceFreshness;
   promptStrategyBestPractices: RouterLearningPromptStrategyBestPractice[];
-  summary: LearningSummary & { toolReliability: ToolReliabilitySummary };
+  summary: RouterLearningExportSummary;
   eventCount: number;
   productionEventCount: number;
   benchmarkEventCount: number;
-  events: RoutingEvent[];
+  events: RouterLearningExportEvent[];
 }
+
+export type RouterLearningExportEvent = RoutingEvent & {
+  model_request_duration_ms: number | null;
+};
 
 export interface RouterLearningPromptStrategyBestPractice {
   strategyId: string;
@@ -87,6 +103,33 @@ function promptStrategyBestPracticesForEvents(events: RoutingEvent[]): RouterLea
     }));
 }
 
+function routingEventForExport(event: RoutingEvent): RouterLearningExportEvent {
+  return {
+    ...event,
+    model_request_duration_ms: typeof event.modelRequestDurationMs === 'number' && Number.isFinite(event.modelRequestDurationMs)
+      ? Math.round(event.modelRequestDurationMs)
+      : null,
+  };
+}
+
+function snakeCaseDurationBuckets(input: Record<string, { samples: number; avgMs: number; slow: boolean; thresholdMs: number }>): Record<string, { samples: number; avg_ms: number; slow: boolean; threshold_ms: number }> {
+  return Object.fromEntries(
+    Object.entries(input).map(([key, value]) => [key, {
+      samples: value.samples,
+      avg_ms: value.avgMs,
+      slow: value.slow,
+      threshold_ms: value.thresholdMs,
+    }]),
+  );
+}
+
+function modelRequestDurationForExport(summary: LearningSummary['modelRequestDuration']): RouterLearningExportSummary['model_request_duration'] {
+  return {
+    by_model: snakeCaseDurationBuckets(summary.byModel),
+    by_task_type: snakeCaseDurationBuckets(summary.byTaskType),
+  };
+}
+
 export function buildRouterLearningExportPayload({
   events,
   generatedAt = new Date().toISOString(),
@@ -102,11 +145,14 @@ export function buildRouterLearningExportPayload({
     enabled: boolean;
     candidateEvidenceRefreshedAt: string | null;
     candidateEvidenceRefreshCount: number;
+    thresholdAdvice?: AutoRouterThresholdAdvice | null;
     configuredCandidateCount: number;
     candidateCount: number;
   };
 }): RouterLearningExportPayload {
   const benchmarkEventCount = events.filter((event) => event.datasetKind === 'benchmark').length;
+  const generatedAtMs = Date.parse(generatedAt);
+  const cueNowMs = Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now();
   return {
     schemaVersion: 1,
     generatedAt,
@@ -114,17 +160,20 @@ export function buildRouterLearningExportPayload({
       enabled: routerState.enabled,
       candidateEvidenceRefreshedAt: routerState.candidateEvidenceRefreshedAt,
       candidateEvidenceRefreshCount: routerState.candidateEvidenceRefreshCount,
+      thresholdAdvice: routerState.thresholdAdvice ?? null,
       configuredCandidateCount: routerState.configuredCandidateCount,
       activeCandidateCount: routerState.candidateCount,
     },
     promptStrategyBestPractices: promptStrategyBestPracticesForEvents(events),
     summary: {
       ...learningSummary,
+      routingActionCues: buildRoutingLearningActionCues(learningSummary.bestByTaskType, cueNowMs),
+      model_request_duration: modelRequestDurationForExport(learningSummary.modelRequestDuration),
       toolReliability: normalizeToolReliabilityForExport(toolReliability),
     },
     eventCount: events.length,
     productionEventCount: events.length - benchmarkEventCount,
     benchmarkEventCount,
-    events,
+    events: events.map(routingEventForExport),
   };
 }

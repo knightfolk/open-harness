@@ -205,6 +205,37 @@ function revisionPromptFromTeamPlan(artifact: TeamPlanArtifact): string {
   ].join('\n');
 }
 
+function templatePromptFromTeamPlan(artifact: TeamPlanArtifact): string {
+  const payload = {
+    templateType: 'planning-room-plan',
+    sourceArtifactId: artifact.id,
+    sourceArtifactTitle: artifact.title,
+    recommendation: artifact.data.recommendation,
+    successCriteria: artifact.data.successCriteria,
+    executionPhases: artifact.data.executionPhases,
+    validation: artifact.data.validation,
+    risks: artifact.data.risks,
+    decisionLog: artifact.data.finalDecisionLog,
+    participantDeltas: artifact.data.participantDeltas,
+  };
+  return [
+    'Create a reusable Planning Room plan template from this team-plan artifact.',
+    '',
+    'Do not save files or change prompt plugin settings yet. Draft the reusable template and call out any fields that need human review before it becomes project-scoped.',
+    '',
+    `Planning artifact: ${artifact.title}`,
+    `Artifact id: ${artifact.id}`,
+    '',
+    '## Template payload',
+    '```json',
+    JSON.stringify(payload, null, 2),
+    '```',
+    '',
+    '## Source Team Plan',
+    artifact.data.rawMarkdown || artifact.summary,
+  ].join('\n');
+}
+
 function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtifact; onPromote?: (prompt: string) => void }) {
   const participants = artifact.data.participants;
   const completedParticipants = participants.filter((participant) => participant.status === 'complete').length;
@@ -245,6 +276,16 @@ function TeamPlanArtifactCard({ artifact, onPromote }: { artifact: TeamPlanArtif
             >
               <Play size={12} aria-hidden="true" />
               Execute
+            </button>
+            <button
+              className="btn btn-secondary btn-small team-plan-promote-btn"
+              type="button"
+              onClick={() => onPromote(templatePromptFromTeamPlan(artifact))}
+              title="Draft a reusable plan template from this team plan"
+              aria-label={`Create reusable plan template from team plan ${artifact.title}; draft a schema-ready prompt without saving files`}
+            >
+              <FileText size={12} aria-hidden="true" />
+              Template
             </button>
           </div>
         )}

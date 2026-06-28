@@ -17,8 +17,32 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { MODEL_REQUEST_SLOW_DURATION_MS, isSlowModelRequestDurationMs } from '../shared/modelRequestDuration';
+import { redactSecrets } from './sectionRedaction';
 
 // ── Types ──────────────────────────────────────────────
+
+export type ModelSelectionPolicy = 'cheap-direct' | 'classifier' | 'escalated';
+
+export interface RoutingRouteSignal {
+  hasImages: boolean;
+  turns: number;
+  toolCount: number;
+  estimatedInputTokens: number;
+  artifactCount?: number;
+  dirtyGitState?: boolean;
+  thinkingEffort?: string;
+  requiresStrongToolUse?: boolean;
+}
+
+export interface RoutingTaskPromptSnapshot {
+  text: string;
+  hash: string;
+  charCount: number;
+  redactedHits: number;
+  truncated: boolean;
+  limit: number;
+}
 
 export interface RoutingEvent {
   /** Unique event ID */
@@ -27,18 +51,28 @@ export interface RoutingEvent {
   timestamp: string;
   /** Session this event belongs to */
   sessionId: string;
+  /** Harness run this decision belongs to, when available */
+  runId?: string;
   /** The task text (hashed for privacy, full text in dev mode) */
   taskHash: string;
+  /** Bounded redacted routed-task prompt evidence for offline replay review */
+  taskPromptSnapshot?: RoutingTaskPromptSnapshot;
   /** The model that was selected */
   selectedModel: string;
   /** Auto-router score for the selected model (0-1) */
   score: number;
+  /** Classifier viability threshold used for this decision, when classifier routing ran */
+  threshold?: number;
   /** All candidate scores */
   candidateScores: Record<string, number>;
   /** Whether the fallback was used */
   wasFallback: boolean;
   /** Whether the decision was cached */
   wasCached: boolean;
+  /** Deterministic model-selection policy used before/around classifier scoring */
+  modelSelectionPolicy?: ModelSelectionPolicy;
+  /** Route input features used by the workflow/model router */
+  routeSignal?: RoutingRouteSignal;
   /** The classifier model used */
   classifierModel: string | null;
   /** Routing mode (orchestrator/worker) */
@@ -61,6 +95,8 @@ export interface RoutingEvent {
   promptStrategyTaskType?: string;
   /** Prompt strategy variant selection reason */
   promptStrategySelectionReason?: string;
+  /** Measured first model request duration for this routed run, when explicitly captured */
+  modelRequestDurationMs?: number;
   /** User turns at time of routing */
   userTurns: number;
   /** Outcome signal (null until received) */
@@ -71,10 +107,23 @@ export interface RoutingEvent {
   datasetKind?: 'production' | 'benchmark';
 }
 
+export type RoutingDecisionInput = Omit<RoutingEvent, 'outcome' | 'outcomeNote' | 'id'> & {
+  /** Raw routed task text; redacted and capped before persistence */
+  taskPromptText?: string;
+};
+
 export interface TaskTypeModelSuccess {
   total: number;
   success: number;
   rate: number;
+  sampleCount: number;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+}
+
+export interface BestTaskTypeRoutingSignal extends TaskTypeModelSuccess {
+  taskType: string;
+  model: string;
 }
 
 export interface TaskTypeRoutingSummary {
@@ -82,6 +131,18 @@ export interface TaskTypeRoutingSummary {
   success: number;
   rate: number;
   byModel: Record<string, TaskTypeModelSuccess>;
+}
+
+export interface ModelRequestDurationBucket {
+  samples: number;
+  avgMs: number;
+  slow: boolean;
+  thresholdMs: number;
+}
+
+export interface ModelRequestDurationSummary {
+  byModel: Record<string, ModelRequestDurationBucket>;
+  byTaskType: Record<string, ModelRequestDurationBucket>;
 }
 
 export interface LearningSummary {
@@ -95,7 +156,8 @@ export interface LearningSummary {
   byPromptStrategy: Record<string, TaskTypeRoutingSummary>;
   byPromptStrategyFamily: Record<string, TaskTypeRoutingSummary>;
   byPromptStrategyVariant: Record<string, TaskTypeRoutingSummary>;
-  bestByTaskType: Array<{ taskType: string; model: string; total: number; success: number; rate: number }>;
+  modelRequestDuration: ModelRequestDurationSummary;
+  bestByTaskType: BestTaskTypeRoutingSignal[];
   bestPromptStrategyVariants: Array<{ strategyVariant: string; model: string; total: number; success: number; rate: number }>;
 }
 
@@ -114,6 +176,7 @@ export interface RoutingImportResult {
 // ── Storage ────────────────────────────────────────────
 
 const BASE_DIR = join(homedir(), '.openharness', 'router-learning');
+export const ROUTING_TASK_PROMPT_SNAPSHOT_CHAR_LIMIT = 4000;
 
 function ensureDir(): void {
   if (!existsSync(BASE_DIR)) mkdirSync(BASE_DIR, { recursive: true });
@@ -144,10 +207,83 @@ function normalizeString(value: string | undefined, fallback: string): string {
   return trimmed.length > 0 ? trimmed : fallback;
 }
 
-function addSuccess(statMap: Record<string, { total: number; success: number }>, key: string, isSuccess: boolean): void {
-  if (!statMap[key]) statMap[key] = { total: 0, success: 0 };
+function stableTextHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+function normalizeSnapshotLimit(value: unknown): number {
+  const limit = Number(value);
+  if (!Number.isFinite(limit) || limit <= 0) return ROUTING_TASK_PROMPT_SNAPSHOT_CHAR_LIMIT;
+  return Math.min(ROUTING_TASK_PROMPT_SNAPSHOT_CHAR_LIMIT, Math.floor(limit));
+}
+
+export function buildRoutingTaskPromptSnapshot(taskPromptText: unknown): RoutingTaskPromptSnapshot | undefined {
+  if (typeof taskPromptText !== 'string') return undefined;
+  const redaction = redactSecrets(taskPromptText);
+  const charCount = redaction.redacted.length;
+  const truncated = charCount > ROUTING_TASK_PROMPT_SNAPSHOT_CHAR_LIMIT;
+  const text = truncated
+    ? redaction.redacted.slice(0, ROUTING_TASK_PROMPT_SNAPSHOT_CHAR_LIMIT)
+    : redaction.redacted;
+  return {
+    text,
+    hash: stableTextHash(redaction.redacted),
+    charCount,
+    redactedHits: redaction.hits.length,
+    truncated,
+    limit: ROUTING_TASK_PROMPT_SNAPSHOT_CHAR_LIMIT,
+  };
+}
+
+function normalizeRoutingTaskPromptSnapshot(value: unknown): RoutingTaskPromptSnapshot | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const input = value as Record<string, unknown>;
+  if (typeof input.text !== 'string') return undefined;
+  const limit = normalizeSnapshotLimit(input.limit);
+  const redaction = redactSecrets(input.text);
+  const charCount = Math.max(
+    redaction.redacted.length,
+    Number.isFinite(Number(input.charCount)) ? Math.floor(Number(input.charCount)) : 0,
+  );
+  const truncated = redaction.redacted.length > limit || Boolean(input.truncated);
+  const text = redaction.redacted.slice(0, limit);
+  return {
+    text,
+    hash: typeof input.hash === 'string' && /^[a-z0-9]{8}$/i.test(input.hash)
+      ? input.hash
+      : stableTextHash(redaction.redacted),
+    charCount,
+    redactedHits: Math.max(
+      redaction.hits.length,
+      Number.isFinite(Number(input.redactedHits)) ? Math.floor(Number(input.redactedHits)) : 0,
+    ),
+    truncated,
+    limit,
+  };
+}
+
+function updateTimestampRange(stat: { firstSeenAt: string | null; lastSeenAt: string | null }, timestamp: string): void {
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time)) return;
+  if (!stat.firstSeenAt || time < Date.parse(stat.firstSeenAt)) stat.firstSeenAt = timestamp;
+  if (!stat.lastSeenAt || time > Date.parse(stat.lastSeenAt)) stat.lastSeenAt = timestamp;
+}
+
+function addTimedSuccess(
+  statMap: Record<string, { total: number; success: number; firstSeenAt: string | null; lastSeenAt: string | null }>,
+  key: string,
+  isSuccess: boolean,
+  timestamp: string,
+): void {
+  if (!statMap[key]) statMap[key] = { total: 0, success: 0, firstSeenAt: null, lastSeenAt: null };
   statMap[key].total += 1;
   if (isSuccess) statMap[key].success += 1;
+  updateTimestampRange(statMap[key], timestamp);
 }
 
 function toRate(stats: Record<string, { total: number; success: number }>): Record<string, { total: number; success: number; rate: number }> {
@@ -165,7 +301,11 @@ function buildSummaryByKey(
   events: RoutingEvent[],
   getKey: (event: RoutingEvent) => string,
 ): Record<string, TaskTypeRoutingSummary> {
-  const grouped: Record<string, { total: number; success: number; byModel: Record<string, { total: number; success: number }> }> = {};
+  const grouped: Record<string, {
+    total: number;
+    success: number;
+    byModel: Record<string, { total: number; success: number; firstSeenAt: string | null; lastSeenAt: string | null }>;
+  }> = {};
 
   for (const event of events) {
     if (!event.outcome) continue;
@@ -174,16 +314,27 @@ function buildSummaryByKey(
     if (!grouped[key]) grouped[key] = { total: 0, success: 0, byModel: {} };
     grouped[key].total += 1;
     if (event.outcome === 'success') grouped[key].success += 1;
-    addSuccess(grouped[key].byModel, model, event.outcome === 'success');
+    addTimedSuccess(grouped[key].byModel, model, event.outcome === 'success', event.timestamp);
   }
 
   const output: Record<string, TaskTypeRoutingSummary> = {};
   for (const [taskType, agg] of Object.entries(grouped)) {
+    const byModel: Record<string, TaskTypeModelSuccess> = {};
+    for (const [model, s] of Object.entries(agg.byModel)) {
+      byModel[model] = {
+        total: s.total,
+        success: s.success,
+        rate: s.total > 0 ? s.success / s.total : 0,
+        sampleCount: s.total,
+        firstSeenAt: s.firstSeenAt,
+        lastSeenAt: s.lastSeenAt,
+      };
+    }
     output[taskType] = {
       total: agg.total,
       success: agg.success,
       rate: agg.total > 0 ? agg.success / agg.total : 0,
-      byModel: toRate(agg.byModel),
+      byModel,
     };
   }
 
@@ -202,10 +353,10 @@ function buildComplexitySummary(events: RoutingEvent[]): Record<string, TaskType
   return buildSummaryByKey(events, (event) => event.complexity);
 }
 
-function bestByTaskType(taskTypeSummary: Record<string, TaskTypeRoutingSummary>): Array<{ taskType: string; model: string; total: number; success: number; rate: number }> {
+function bestByTaskType(taskTypeSummary: Record<string, TaskTypeRoutingSummary>): BestTaskTypeRoutingSignal[] {
   return Object.entries(taskTypeSummary).map(([taskType, data]) => {
     let bestModel = '';
-    let best: { total: number; success: number; rate: number } | null = null;
+    let best: TaskTypeModelSuccess | null = null;
     for (const [model, modelData] of Object.entries(data.byModel)) {
       if (!best || modelData.rate > best.rate || (modelData.rate === best.rate && modelData.total > best.total)) {
         best = modelData;
@@ -218,8 +369,55 @@ function bestByTaskType(taskTypeSummary: Record<string, TaskTypeRoutingSummary>)
       total: best?.total || 0,
       success: best?.success || 0,
       rate: best?.rate || 0,
+      sampleCount: best?.sampleCount || 0,
+      firstSeenAt: best?.firstSeenAt || null,
+      lastSeenAt: best?.lastSeenAt || null,
     };
   }).filter((row) => row.model !== 'unknown');
+}
+
+function addDurationSample(
+  buckets: Record<string, { samples: number; totalMs: number }>,
+  key: string,
+  durationMs: number,
+): void {
+  const normalizedKey = normalizeString(key, 'unknown');
+  if (!buckets[normalizedKey]) buckets[normalizedKey] = { samples: 0, totalMs: 0 };
+  buckets[normalizedKey].samples += 1;
+  buckets[normalizedKey].totalMs += durationMs;
+}
+
+function finalizeDurationBuckets(
+  buckets: Record<string, { samples: number; totalMs: number }>,
+): Record<string, ModelRequestDurationBucket> {
+  const output: Record<string, ModelRequestDurationBucket> = {};
+  for (const [key, bucket] of Object.entries(buckets)) {
+    if (bucket.samples <= 0) continue;
+    const avgMs = Math.round(bucket.totalMs / bucket.samples);
+    output[key] = {
+      samples: bucket.samples,
+      avgMs,
+      slow: isSlowModelRequestDurationMs(avgMs),
+      thresholdMs: MODEL_REQUEST_SLOW_DURATION_MS,
+    };
+  }
+  return output;
+}
+
+function buildModelRequestDurationSummary(events: RoutingEvent[]): ModelRequestDurationSummary {
+  const byModel: Record<string, { samples: number; totalMs: number }> = {};
+  const byTaskType: Record<string, { samples: number; totalMs: number }> = {};
+  for (const event of events) {
+    if (typeof event.modelRequestDurationMs !== 'number' || !Number.isFinite(event.modelRequestDurationMs) || event.modelRequestDurationMs < 0) {
+      continue;
+    }
+    addDurationSample(byModel, event.selectedModel || 'unknown', event.modelRequestDurationMs);
+    addDurationSample(byTaskType, event.taskType || 'unknown', event.modelRequestDurationMs);
+  }
+  return {
+    byModel: finalizeDurationBuckets(byModel),
+    byTaskType: finalizeDurationBuckets(byTaskType),
+  };
 }
 
 function bestPromptStrategyVariants(strategySummary: Record<string, TaskTypeRoutingSummary>): Array<{ strategyVariant: string; model: string; total: number; success: number; rate: number }> {
@@ -254,6 +452,47 @@ function normalizeDatasetKind(value: unknown): 'production' | 'benchmark' {
   return value === 'benchmark' ? 'benchmark' : 'production';
 }
 
+function normalizeRoutingThreshold(
+  value: unknown,
+  modelSelectionPolicy: ModelSelectionPolicy | undefined,
+): number | undefined {
+  if (modelSelectionPolicy !== 'classifier') return undefined;
+  const threshold = Number(value);
+  return Number.isFinite(threshold) ? threshold : undefined;
+}
+
+function normalizeModelSelectionPolicy(value: unknown): ModelSelectionPolicy | undefined {
+  return value === 'cheap-direct' || value === 'classifier' || value === 'escalated' ? value : undefined;
+}
+
+function normalizeNonNegativeNumber(value: unknown): number | undefined {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : undefined;
+}
+
+function normalizeRouteSignal(value: unknown): RoutingRouteSignal | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  if (typeof input.hasImages !== 'boolean') return undefined;
+  const turns = normalizeNonNegativeNumber(input.turns);
+  const toolCount = normalizeNonNegativeNumber(input.toolCount);
+  const estimatedInputTokens = normalizeNonNegativeNumber(input.estimatedInputTokens);
+  if (turns == null || toolCount == null || estimatedInputTokens == null) return undefined;
+
+  const signal: RoutingRouteSignal = {
+    hasImages: input.hasImages,
+    turns,
+    toolCount,
+    estimatedInputTokens,
+  };
+  const artifactCount = normalizeNonNegativeNumber(input.artifactCount);
+  if (artifactCount != null) signal.artifactCount = artifactCount;
+  if (typeof input.dirtyGitState === 'boolean') signal.dirtyGitState = input.dirtyGitState;
+  if (typeof input.thinkingEffort === 'string' && input.thinkingEffort.trim()) signal.thinkingEffort = input.thinkingEffort.trim();
+  if (typeof input.requiresStrongToolUse === 'boolean') signal.requiresStrongToolUse = input.requiresStrongToolUse;
+  return signal;
+}
+
 function productionEvents(events: RoutingEvent[]): RoutingEvent[] {
   return events.filter((event) => event.datasetKind !== 'benchmark');
 }
@@ -272,16 +511,23 @@ function normalizeImportedEvent(value: unknown, datasetKind: 'production' | 'ben
       .map(([model, score]) => [model, Number(score)]))
     : {};
 
+  const modelSelectionPolicy = normalizeModelSelectionPolicy(input.modelSelectionPolicy);
+
   return {
     id,
     timestamp,
     sessionId: typeof input.sessionId === 'string' ? input.sessionId : 'imported',
+    runId: typeof input.runId === 'string' && input.runId.trim() ? input.runId.trim() : undefined,
     taskHash: typeof input.taskHash === 'string' ? input.taskHash : '',
+    taskPromptSnapshot: normalizeRoutingTaskPromptSnapshot(input.taskPromptSnapshot),
     selectedModel,
     score: Number.isFinite(Number(input.score)) ? Number(input.score) : 0,
+    threshold: normalizeRoutingThreshold(input.threshold, modelSelectionPolicy),
     candidateScores,
     wasFallback: Boolean(input.wasFallback),
     wasCached: Boolean(input.wasCached),
+    modelSelectionPolicy,
+    routeSignal: normalizeRouteSignal(input.routeSignal),
     classifierModel: typeof input.classifierModel === 'string' ? input.classifierModel : null,
     surface: typeof input.surface === 'string' ? input.surface : 'imported',
     complexity: typeof input.complexity === 'string' ? input.complexity : 'unknown',
@@ -293,6 +539,7 @@ function normalizeImportedEvent(value: unknown, datasetKind: 'production' | 'ben
     promptStrategyVariantId: typeof input.promptStrategyVariantId === 'string' ? input.promptStrategyVariantId : undefined,
     promptStrategyTaskType: typeof input.promptStrategyTaskType === 'string' ? input.promptStrategyTaskType : undefined,
     promptStrategySelectionReason: typeof input.promptStrategySelectionReason === 'string' ? input.promptStrategySelectionReason : undefined,
+    modelRequestDurationMs: normalizeNonNegativeNumber(input.modelRequestDurationMs),
     userTurns: Number.isFinite(Number(input.userTurns)) ? Number(input.userTurns) : 0,
     outcome: normalizeOutcome(input.outcome),
     outcomeNote: typeof input.outcomeNote === 'string' ? input.outcomeNote : undefined,
@@ -307,11 +554,17 @@ function normalizeImportedEvent(value: unknown, datasetKind: 'production' | 'ben
  * Record a routing decision. Call after each auto-router invocation.
  * Returns the event ID for later outcome recording.
  */
-export function recordRoutingDecision(event: Omit<RoutingEvent, 'outcome' | 'outcomeNote' | 'id'>): string {
+export function recordRoutingDecision(event: RoutingDecisionInput): string {
   ensureDir();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  const taskPromptSnapshot = buildRoutingTaskPromptSnapshot(event.taskPromptText)
+    || normalizeRoutingTaskPromptSnapshot(event.taskPromptSnapshot);
+  const { taskPromptText: _taskPromptText, taskPromptSnapshot: _taskPromptSnapshot, ...routingEvent } = event;
   const record: RoutingEvent = {
-    ...event,
+    ...routingEvent,
+    taskPromptSnapshot: buildRoutingTaskPromptSnapshot(event.taskPromptText) || taskPromptSnapshot,
+    threshold: normalizeRoutingThreshold(event.threshold, event.modelSelectionPolicy),
+    routeSignal: normalizeRouteSignal(event.routeSignal),
     id,
     outcome: null,
     datasetKind: 'production',
@@ -347,6 +600,33 @@ export function recordOutcome(eventId: string, outcome: RoutingEvent['outcome'],
 
   writeFileSync(path, updated.join('\n') + '\n', 'utf-8');
   return found;
+}
+
+export function recordModelRequestDuration(eventId: string, durationMs: unknown): boolean {
+  const normalizedDurationMs = normalizeNonNegativeNumber(durationMs);
+  if (normalizedDurationMs == null) return false;
+  ensureDir();
+  const path = eventsPath();
+  if (!existsSync(path)) return false;
+
+  const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
+  let found = false;
+  const updated = lines.map((line) => {
+    try {
+      const event = JSON.parse(line) as RoutingEvent;
+      if (event.id === eventId) {
+        event.modelRequestDurationMs = Math.round(normalizedDurationMs);
+        found = true;
+      }
+      return JSON.stringify(event);
+    } catch {
+      return line;
+    }
+  });
+
+  if (!found) return false;
+  writeFileSync(path, updated.join('\n') + '\n', 'utf-8');
+  return true;
 }
 
 /**
@@ -515,6 +795,7 @@ export function getLearningSummary() {
       byPromptStrategy: {},
       byPromptStrategyFamily: {},
       byPromptStrategyVariant: {},
+      modelRequestDuration: { byModel: {}, byTaskType: {} },
       bestByTaskType: [],
       bestPromptStrategyVariants: [],
     } as LearningSummary;
@@ -532,6 +813,7 @@ export function getLearningSummary() {
       ? `${event.promptStrategyId || 'unknown'}:${event.promptStrategyVariantId}`
       : event.promptStrategyId || 'unknown'
   );
+  const modelRequestDuration = buildModelRequestDurationSummary(events);
 
   let total = 0;
   let successes = 0;
@@ -551,6 +833,7 @@ export function getLearningSummary() {
     byPromptStrategy,
     byPromptStrategyFamily,
     byPromptStrategyVariant,
+    modelRequestDuration,
     bestByTaskType: bestByTaskType(byTaskType),
     bestPromptStrategyVariants: bestPromptStrategyVariants(byPromptStrategyVariant),
   };

@@ -7,7 +7,10 @@ const manifest = readFileSync('src/theme/themePluginManifest.ts', 'utf-8');
 const schema = readFileSync('docs/theme-plugin.schema.json', 'utf-8');
 const globalCss = readFileSync('src/styles/global.css', 'utf-8');
 const css = readFileSync('src/styles/components.css', 'utf-8');
-const settings = readFileSync('src/components/SettingsModal.tsx', 'utf-8');
+const settings = [
+  readFileSync('src/components/SettingsModal.tsx', 'utf-8'),
+  readFileSync('src/components/settings/PreferenceSettingsPanes.tsx', 'utf-8'),
+].join('\n');
 
 for (const expected of [
   "export type ThemeTextureRecipe =",

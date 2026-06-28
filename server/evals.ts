@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { v4 as uuid } from 'uuid';
+import { averageFinite, countFinite, finiteNumber, formatFiniteNumber, formatLatencyMs, formatReportScore, roundFinite } from './reportNumberSafety';
 import { redactSecrets } from './sectionRedaction';
 import type { PromptStrategyTrace } from './promptStrategies';
 
@@ -98,8 +99,27 @@ export interface EvalReport {
 }
 
 export interface EvalSummary {
-  byModel: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }>;
-  byPromptStrategy?: Record<string, { family: string; systemStyle: string; avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number; bestModel: string }>;
+  byModel: Record<string, {
+    avgScore: number;
+    avgLatencyMs: number;
+    avgToolCount: number;
+    totalRuns: number;
+    scoreSampleCount?: number;
+    latencySampleCount?: number;
+    toolSampleCount?: number;
+  }>;
+  byPromptStrategy?: Record<string, {
+    family: string;
+    systemStyle: string;
+    avgScore: number;
+    avgLatencyMs: number;
+    avgToolCount: number;
+    totalRuns: number;
+    bestModel: string;
+    scoreSampleCount?: number;
+    latencySampleCount?: number;
+    toolSampleCount?: number;
+  }>;
   bestPromptStrategy?: string;
   bestModel: string;
   recommendations: Array<{ role: string; modelId: string; reason: string }>;
@@ -134,8 +154,18 @@ export interface EvalRecommendation {
 // ── Storage ────────────────────────────────────────────
 
 const PRIMARY_EVALS_DIR = join(homedir(), '.openharness', 'evals');
-const PRIMARY_SUITES_DIR = join(PRIMARY_EVALS_DIR, 'suites');
-const PRIMARY_REPORTS_DIR = join(PRIMARY_EVALS_DIR, 'reports');
+
+function getPrimaryEvalsDir(): string {
+  return process.env.OPENHARNESS_EVALS_DIR?.trim() || PRIMARY_EVALS_DIR;
+}
+
+function getPrimarySuitesDir(): string {
+  return join(getPrimaryEvalsDir(), 'suites');
+}
+
+function getPrimaryReportsDir(): string {
+  return join(getPrimaryEvalsDir(), 'reports');
+}
 
 function dedupe(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
@@ -158,6 +188,11 @@ function getEvalDataHomeCandidates(): string[] {
 }
 
 function getEvalDirCandidates(...parts: string[]): string[] {
+  const explicitEvalsDir = process.env.OPENHARNESS_EVALS_DIR?.trim();
+  if (explicitEvalsDir && parts[0] === 'evals') {
+    return dedupe([join(explicitEvalsDir, ...parts.slice(1))]);
+  }
+
   return dedupe(
     getEvalDataHomeCandidates().map((home) =>
       join(home, '.openharness', ...parts),
@@ -181,8 +216,8 @@ function redactPersistedValue<T>(value: T): T {
 }
 
 function ensureDirs() {
-  mkdirSync(PRIMARY_SUITES_DIR, { recursive: true });
-  mkdirSync(PRIMARY_REPORTS_DIR, { recursive: true });
+  mkdirSync(getPrimarySuitesDir(), { recursive: true });
+  mkdirSync(getPrimaryReportsDir(), { recursive: true });
 }
 
 ensureDirs();
@@ -393,7 +428,8 @@ function scoreResult(result: { response: string; toolCalls: Array<{ name: string
 // ── Report Persistence ─────────────────────────────────
 
 export function saveReport(report: EvalReport): void {
-  const path = join(PRIMARY_REPORTS_DIR, `${report.id}.json`);
+  ensureDirs();
+  const path = join(getPrimaryReportsDir(), `${report.id}.json`);
   writeFileSync(path, JSON.stringify(redactPersistedValue(report), null, 2), 'utf-8');
 }
 
@@ -420,8 +456,8 @@ export function loadReport(id: string): EvalReport | null {
   return null;
 }
 
-export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview']; artifactPath?: string }> {
-  const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; proofReview?: EvalReport['proofReview']; artifactPath?: string }>();
+export function listReports(): Array<{ id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; packContext?: EvalReport['packContext']; proofReview?: EvalReport['proofReview']; artifactPath?: string }> {
+  const reportMap = new Map<string, { id: string; name: string; status: string; createdAt: string; completedAt?: string; total: number; packContext?: EvalReport['packContext']; proofReview?: EvalReport['proofReview']; artifactPath?: string }>();
 
   for (const dir of getReportsDirs()) {
     if (!existsSync(dir)) continue;
@@ -436,6 +472,7 @@ export function listReports(): Array<{ id: string; name: string; status: string;
           createdAt: report.createdAt,
           completedAt: report.completedAt,
           total: report.total,
+          packContext: report.packContext,
           proofReview: report.proofReview,
           artifactPath: getEvalArtifactPath(report.id),
         });
@@ -512,6 +549,34 @@ function getLatestCompletedEvalReport(): EvalReport | null {
   return completed[0];
 }
 
+function usablePromptStrategyComparison(
+  strategyId: string,
+  variantId: string | undefined,
+  value: NonNullable<EvalSummary['byPromptStrategy']>[string],
+): {
+  strategy: EvalRecommendationPromptStrategyComparison;
+  variant?: EvalRecommendationPromptStrategyComparison;
+} | null {
+  const avgScore = finiteNumber(value.avgScore);
+  const runs = finiteNumber(value.totalRuns, { min: 0 });
+  if (avgScore === null || runs === null || runs <= 1) return null;
+  return {
+    strategy: {
+      strategyId,
+      runs,
+      avgScore,
+    },
+    ...(variantId ? {
+      variant: {
+        strategyId,
+        variantId,
+        runs,
+        avgScore,
+      },
+    } : {}),
+  };
+}
+
 export function getLatestEvalRecommendations(): EvalRecommendation[] {
   const latest = getLatestCompletedEvalReport();
   if (!latest?.summary) return [];
@@ -526,24 +591,9 @@ export function getLatestEvalRecommendations(): EvalRecommendation[] {
   const comparedPromptStrategies = Object.entries(compareRows)
     .map(([key, value]) => {
       const [strategyId, variantId] = key.split(':');
-      return {
-        strategy: {
-          strategyId,
-          runs: value.totalRuns,
-          avgScore: value.avgScore,
-          ...(value.totalRuns === 0 ? {} : {}),
-        },
-        ...(variantId ? {
-          variant: {
-            strategyId,
-            variantId,
-            runs: value.totalRuns,
-            avgScore: value.avgScore,
-          },
-        } : {}),
-      };
+      return usablePromptStrategyComparison(strategyId, variantId, value);
     })
-    .filter((item) => item.strategy.runs > 1 || item.variant?.runs)
+    .filter((item): item is NonNullable<typeof item> => item !== null)
     .sort((a, b) => b.strategy.avgScore - a.strategy.avgScore)
     .slice(0, 10)
     .map((item) => ({
@@ -573,8 +623,8 @@ export function getLatestEvalRecommendations(): EvalRecommendation[] {
   }));
 }
 
-function markdownEscape(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+function markdownEscape(text: unknown): string {
+  return String(text ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 }
 
 export function exportEvalRecommendationMarkdown(reportId: string): string | null {
@@ -589,27 +639,29 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
       return {
         strategy: {
           strategyId,
-          runs: value.totalRuns,
+          runs: finiteNumber(value.totalRuns, { min: 0 }) ?? 0,
           avgScore: value.avgScore,
+          scoreSampleCount: value.scoreSampleCount,
         },
         ...(variantId
           ? {
               variant: {
                 strategyId,
                 variantId,
-                runs: value.totalRuns,
+                runs: finiteNumber(value.totalRuns, { min: 0 }) ?? 0,
                 avgScore: value.avgScore,
+                scoreSampleCount: value.scoreSampleCount,
               },
             }
           : {}),
       };
     })
-    .filter((item) => item.strategy.runs > 1 || item.variant?.runs)
-    .sort((a, b) => b.strategy.avgScore - a.strategy.avgScore)
+    .filter((item) => (item.strategy.scoreSampleCount ?? item.strategy.runs) > 0 && (item.strategy.runs > 1 || (item.variant?.runs || 0) > 0))
+    .sort((a, b) => (finiteNumber(b.strategy.avgScore) ?? -Infinity) - (finiteNumber(a.strategy.avgScore) ?? -Infinity))
     .slice(0, 10)
     .map((item) => ({
       strategy: `${item.strategy.strategyId}${item.variant?.variantId ? `:${item.variant.variantId}` : ''}`,
-      avgScore: item.strategy.avgScore.toFixed(1),
+      avgScore: formatFiniteNumber(item.strategy.avgScore, 1),
       runs: item.strategy.runs,
       status: proofLabel,
     }));
@@ -660,7 +712,7 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
         ? 'n/a'
         : comparedPromptStrategies
             .slice(0, 3)
-            .map((item) => `${item.strategy} (${item.avgScore}/10, runs:${item.runs}, ${item.status})`)
+            .map((item) => `${item.strategy} (${item.avgScore}/10, runs:${formatFiniteNumber(item.runs, 0)}, ${item.status})`)
             .join('<br>');
       lines.push(`| ${markdownEscape(rec.role)} | ${markdownEscape(rec.modelId)} | ${proofLabel} | ${markdownEscape(strategyHint)} | ${markdownEscape(rec.reason)} |`);
     }
@@ -672,7 +724,10 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
   lines.push('| Model | Avg score | Avg latency | Avg tools | Runs |');
   lines.push('| --- | ---: | ---: | ---: | ---: |');
   for (const [modelId, model] of Object.entries(summary.byModel)) {
-    lines.push(`| ${markdownEscape(modelId)} | ${model.avgScore}/10 | ${(model.avgLatencyMs / 1000).toFixed(1)}s | ${model.avgToolCount} | ${model.totalRuns} |`);
+    const score = model.scoreSampleCount === 0 ? null : model.avgScore;
+    const latency = model.latencySampleCount === 0 ? null : model.avgLatencyMs;
+    const tools = model.toolSampleCount === 0 ? null : model.avgToolCount;
+    lines.push(`| ${markdownEscape(modelId)} | ${formatReportScore(score)} | ${formatLatencyMs(latency)} | ${formatFiniteNumber(tools, 1)} | ${formatFiniteNumber(model.totalRuns, 0)} |`);
   }
   lines.push('');
 
@@ -684,7 +739,10 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
     lines.push('| Strategy | Family | Style | Avg score | Avg latency | Avg tools | Runs | Best model |');
     lines.push('| --- | --- | --- | ---: | ---: | ---: | ---: | --- |');
     for (const [strategyId, strategy] of Object.entries(summary.byPromptStrategy)) {
-      lines.push(`| ${markdownEscape(strategyId)} | ${markdownEscape(strategy.family)} | ${markdownEscape(strategy.systemStyle)} | ${strategy.avgScore}/10 | ${(strategy.avgLatencyMs / 1000).toFixed(1)}s | ${strategy.avgToolCount} | ${strategy.totalRuns} | ${markdownEscape(strategy.bestModel)} |`);
+      const score = strategy.scoreSampleCount === 0 ? null : strategy.avgScore;
+      const latency = strategy.latencySampleCount === 0 ? null : strategy.avgLatencyMs;
+      const tools = strategy.toolSampleCount === 0 ? null : strategy.avgToolCount;
+      lines.push(`| ${markdownEscape(strategyId)} | ${markdownEscape(strategy.family)} | ${markdownEscape(strategy.systemStyle)} | ${formatReportScore(score)} | ${formatLatencyMs(latency)} | ${formatFiniteNumber(tools, 1)} | ${formatFiniteNumber(strategy.totalRuns, 0)} | ${markdownEscape(strategy.bestModel || 'n/a')} |`);
     }
     lines.push('');
   }
@@ -695,7 +753,7 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
   lines.push('| --- | --- | ---: | --- | --- | --- |');
   for (const result of report.results) {
     const weakest = result.scores.breakdown?.weakestSignal?.label || 'n/a';
-    lines.push(`| ${markdownEscape(result.modelId)} | ${markdownEscape(result.promptName)} | ${result.scores.overallScore}/10 | ${markdownEscape(weakest)} | ${result.scores.validationPassed ? 'pass' : 'fail'} | ${result.status} |`);
+    lines.push(`| ${markdownEscape(result.modelId)} | ${markdownEscape(result.promptName)} | ${formatReportScore(result.scores.overallScore)} | ${markdownEscape(weakest)} | ${result.scores.validationPassed ? 'pass' : 'fail'} | ${result.status} |`);
   }
   lines.push('');
 
@@ -710,19 +768,21 @@ export function exportEvalRecommendationMarkdown(reportId: string): string | nul
 // ── Summary Generation ─────────────────────────────────
 
 export function generateSummary(results: EvalResult[]): EvalSummary {
-  const byModel: Record<string, { scores: number[]; latencies: number[]; toolCounts: number[] }> = {};
+  const byModel: Record<string, { scores: unknown[]; latencies: unknown[]; toolCounts: unknown[]; totalRuns: number }> = {};
   const byPromptStrategy: Record<string, {
     family: string;
     systemStyle: string;
-    scores: number[];
-    latencies: number[];
-    toolCounts: number[];
-    modelScores: Record<string, number[]>;
+    scores: unknown[];
+    latencies: unknown[];
+    toolCounts: unknown[];
+    totalRuns: number;
+    modelScores: Record<string, unknown[]>;
   }> = {};
 
   for (const r of results) {
     if (r.status !== 'ok') continue;
-    if (!byModel[r.modelId]) byModel[r.modelId] = { scores: [], latencies: [], toolCounts: [] };
+    if (!byModel[r.modelId]) byModel[r.modelId] = { scores: [], latencies: [], toolCounts: [], totalRuns: 0 };
+    byModel[r.modelId].totalRuns++;
     byModel[r.modelId].scores.push(r.scores.overallScore);
     byModel[r.modelId].latencies.push(r.scores.latencyMs);
     byModel[r.modelId].toolCounts.push(r.scores.toolCount);
@@ -735,10 +795,12 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
           scores: [],
           latencies: [],
           toolCounts: [],
+          totalRuns: 0,
           modelScores: {},
         };
       }
       const strategy = byPromptStrategy[strategyKey];
+      strategy.totalRuns++;
       strategy.scores.push(r.scores.overallScore);
       strategy.latencies.push(r.scores.latencyMs);
       strategy.toolCounts.push(r.scores.toolCount);
@@ -747,7 +809,7 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
     }
   }
 
-  const byModelSummary: Record<string, { avgScore: number; avgLatencyMs: number; avgToolCount: number; totalRuns: number }> = {};
+  const byModelSummary: EvalSummary['byModel'] = {};
   const byPromptStrategySummary: NonNullable<EvalSummary['byPromptStrategy']> = {};
   let bestModel = '';
   let bestScore = -1;
@@ -755,33 +817,45 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
   let bestPromptStrategyScore = -1;
 
   for (const [modelId, data] of Object.entries(byModel)) {
-    const avgScore = data.scores.reduce((a, b) => a + b, 0) / data.scores.length;
-    const avgLatencyMs = data.latencies.reduce((a, b) => a + b, 0) / data.latencies.length;
-    const avgToolCount = data.toolCounts.reduce((a, b) => a + b, 0) / data.toolCounts.length;
-    byModelSummary[modelId] = { avgScore: Math.round(avgScore * 10) / 10, avgLatencyMs: Math.round(avgLatencyMs), avgToolCount: Math.round(avgToolCount * 10) / 10, totalRuns: data.scores.length };
-    if (avgScore > bestScore) {
+    const avgScore = averageFinite(data.scores);
+    const avgLatencyMs = averageFinite(data.latencies, { min: 0 });
+    const avgToolCount = averageFinite(data.toolCounts, { min: 0 });
+    byModelSummary[modelId] = {
+      avgScore: roundFinite(avgScore, 1),
+      avgLatencyMs: roundFinite(avgLatencyMs, 0),
+      avgToolCount: roundFinite(avgToolCount, 1),
+      totalRuns: data.totalRuns,
+      scoreSampleCount: countFinite(data.scores),
+      latencySampleCount: countFinite(data.latencies, { min: 0 }),
+      toolSampleCount: countFinite(data.toolCounts, { min: 0 }),
+    };
+    if (avgScore !== null && avgScore > bestScore) {
       bestScore = avgScore;
       bestModel = modelId;
     }
   }
 
   for (const [strategyId, data] of Object.entries(byPromptStrategy)) {
-    const avgScore = data.scores.reduce((a, b) => a + b, 0) / data.scores.length;
-    const avgLatencyMs = data.latencies.reduce((a, b) => a + b, 0) / data.latencies.length;
-    const avgToolCount = data.toolCounts.reduce((a, b) => a + b, 0) / data.toolCounts.length;
+    const avgScore = averageFinite(data.scores);
+    const avgLatencyMs = averageFinite(data.latencies, { min: 0 });
+    const avgToolCount = averageFinite(data.toolCounts, { min: 0 });
     const bestModelForStrategy = Object.entries(data.modelScores)
-      .map(([modelId, scores]) => ({ modelId, avgScore: scores.reduce((a, b) => a + b, 0) / scores.length }))
+      .map(([modelId, scores]) => ({ modelId, avgScore: averageFinite(scores) }))
+      .filter((item): item is { modelId: string; avgScore: number } => item.avgScore !== null)
       .sort((a, b) => b.avgScore - a.avgScore)[0]?.modelId || '';
     byPromptStrategySummary[strategyId] = {
       family: data.family,
       systemStyle: data.systemStyle,
-      avgScore: Math.round(avgScore * 10) / 10,
-      avgLatencyMs: Math.round(avgLatencyMs),
-      avgToolCount: Math.round(avgToolCount * 10) / 10,
-      totalRuns: data.scores.length,
+      avgScore: roundFinite(avgScore, 1),
+      avgLatencyMs: roundFinite(avgLatencyMs, 0),
+      avgToolCount: roundFinite(avgToolCount, 1),
+      totalRuns: data.totalRuns,
       bestModel: bestModelForStrategy,
+      scoreSampleCount: countFinite(data.scores),
+      latencySampleCount: countFinite(data.latencies, { min: 0 }),
+      toolSampleCount: countFinite(data.toolCounts, { min: 0 }),
     };
-    if (avgScore > bestPromptStrategyScore) {
+    if (avgScore !== null && avgScore > bestPromptStrategyScore) {
       bestPromptStrategyScore = avgScore;
       bestPromptStrategy = strategyId;
     }
@@ -790,16 +864,20 @@ export function generateSummary(results: EvalResult[]): EvalSummary {
   // Generate recommendations
   const recommendations: Array<{ role: string; modelId: string; reason: string }> = [];
   const roles = ['coder', 'planner', 'reviewer', 'summarizer', 'worker', 'reasoner'];
+  const modelsWithScoreSamples = Object.entries(byModelSummary)
+    .filter(([, model]) => (model.scoreSampleCount ?? model.totalRuns) > 0);
 
   for (const role of roles) {
     // Pick best model for this role based on available data
     let bestForRole = bestModel;
     let reason = 'Highest overall score';
     if (role === 'summarizer') {
-      const summarizer = Object.entries(byModelSummary).sort((a, b) => b[1].avgScore - a[1].avgScore)[0];
+      const summarizer = modelsWithScoreSamples.sort((a, b) => b[1].avgScore - a[1].avgScore)[0];
       if (summarizer) { bestForRole = summarizer[0]; reason = 'Best summary quality'; }
     } else if (role === 'coder') {
-      const coder = Object.entries(byModelSummary).sort((a, b) => b[1].avgToolCount - a[1].avgToolCount)[0];
+      const coder = modelsWithScoreSamples
+        .filter(([, model]) => (model.toolSampleCount ?? model.totalRuns) > 0)
+        .sort((a, b) => b[1].avgToolCount - a[1].avgToolCount)[0];
       if (coder) { bestForRole = coder[0]; reason = 'Most effective tool usage'; }
     }
     recommendations.push({ role, modelId: bestForRole, reason });

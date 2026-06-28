@@ -2,10 +2,14 @@ import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 
 const server = readFileSync('server/index.ts', 'utf-8');
+const sessionRoutes = readFileSync('server/routes/sessionRoutes.ts', 'utf-8');
+const chatMessageRoutes = readFileSync('server/routes/chatMessageRoutes.ts', 'utf-8');
 const runTrace = readFileSync('server/runTrace.ts', 'utf-8');
 const app = readFileSync('src/App.tsx', 'utf-8');
 const api = readFileSync('src/utils/api.ts', 'utf-8');
 const tracker = readFileSync('src/components/SubAgentTracker.tsx', 'utf-8');
+const sessionApi = `${server}\n${sessionRoutes}`;
+const activeSteeringRuntime = `${server}\n${chatMessageRoutes}`;
 
 for (const action of [
   'flag-assumption',
@@ -18,7 +22,7 @@ for (const action of [
   'needs-revision',
 ]) {
   assert.ok(
-    server.includes(`'${action}'`) && runTrace.includes(`| '${action}'`),
+    sessionApi.includes(`'${action}'`) && runTrace.includes(`| '${action}'`),
     `steering action ${action} should be accepted by the API and typed in run traces`,
   );
 }
@@ -37,7 +41,7 @@ for (const expected of [
   'sessionStore.saveSession(session)',
 ]) {
   assert.ok(
-    server.includes(expected),
+    sessionApi.includes(expected),
     `steering endpoint should preserve ${expected}`,
   );
 }
@@ -61,7 +65,7 @@ for (const expected of [
   'Apply these notes to this run before finalizing the next safe phase.',
 ]) {
   assert.ok(
-    server.includes(expected),
+    activeSteeringRuntime.includes(expected),
     `active steering loop should preserve ${expected}`,
   );
 }

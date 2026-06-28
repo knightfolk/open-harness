@@ -6,6 +6,7 @@ export interface RouterLearningImportPreview {
   events: unknown[];
   toolReliabilityPreview?: RouterLearningToolReliabilityImportPreview;
   promptBestPracticePreview?: RouterLearningPromptBestPracticeImportPreview;
+  providerFailureAdherencePreview?: RouterLearningProviderFailureAdherenceImportPreview;
 }
 
 export interface RouterLearningToolReliabilityImportPreview {
@@ -26,6 +27,32 @@ export interface RouterLearningPromptBestPracticeImportPreview {
   sourceRefs: string[];
   note: string;
 }
+
+export interface RouterLearningProviderFailureAdherenceImportPreview {
+  evidenceSource: 'provider_failure_adherence';
+  contextOnly: true;
+  scope: string | null;
+  scopeNote: string | null;
+  loadedEventCount: number;
+  renderedRowCount: number;
+  rowCount: number;
+  filteredRowCount: number | null;
+  appliedStrategyFilter: string | null;
+  strategyCount: number;
+  rowScope: {
+    fullRows: string | null;
+    filteredRows: string | null;
+  };
+  hint: string | null;
+  sampleRowLimit: number;
+  sampleRowCount: number;
+  sampleRowsCapped: boolean;
+  sampleSource: 'fullRows' | 'filteredRows';
+  sampleRows: unknown[];
+  note: string;
+}
+
+const PROVIDER_FAILURE_PREVIEW_SAMPLE_ROW_LIMIT = 20;
 
 function arrayLength(value: unknown): number {
   return Array.isArray(value) ? value.length : 0;
@@ -96,6 +123,51 @@ function buildPromptBestPracticeImportPreview(input: Record<string, any>): Route
   };
 }
 
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function providerFailureAdherenceFromImport(input: Record<string, any>): Record<string, any> | null {
+  const adherence = input.providerFailureAdherence
+    || input.fullExport?.providerFailureAdherence;
+  return adherence && typeof adherence === 'object' ? adherence : null;
+}
+
+function buildProviderFailureAdherenceImportPreview(input: Record<string, any>): RouterLearningProviderFailureAdherenceImportPreview | undefined {
+  const adherence = providerFailureAdherenceFromImport(input);
+  if (!adherence) return undefined;
+  const rows = Array.isArray(adherence.rows) ? adherence.rows : [];
+  const filteredRows = Array.isArray(adherence.filteredRows) ? adherence.filteredRows : null;
+  const strategyBreakdown = Array.isArray(adherence.strategyBreakdown) ? adherence.strategyBreakdown : [];
+  const source = adherence.source && typeof adherence.source === 'object' ? adherence.source as Record<string, any> : {};
+  const summary = adherence.summary && typeof adherence.summary === 'object' ? adherence.summary as Record<string, any> : {};
+  const rowScope = adherence.rowScope && typeof adherence.rowScope === 'object' ? adherence.rowScope as Record<string, any> : {};
+  const sampleRows = rows.slice(0, PROVIDER_FAILURE_PREVIEW_SAMPLE_ROW_LIMIT);
+  return {
+    evidenceSource: 'provider_failure_adherence',
+    contextOnly: true,
+    scope: stringOrNull(adherence.scope),
+    scopeNote: stringOrNull(adherence.scopeNote),
+    loadedEventCount: typeof source.loadedEventCount === 'number' ? source.loadedEventCount : 0,
+    renderedRowCount: typeof source.renderedRowCount === 'number' ? source.renderedRowCount : rows.length,
+    rowCount: typeof summary.rowCount === 'number' ? summary.rowCount : rows.length,
+    filteredRowCount: filteredRows ? filteredRows.length : null,
+    appliedStrategyFilter: stringOrNull(adherence.appliedStrategyFilter),
+    strategyCount: strategyBreakdown.length,
+    rowScope: {
+      fullRows: stringOrNull(rowScope.fullRows),
+      filteredRows: stringOrNull(rowScope.filteredRows),
+    },
+    hint: stringOrNull(adherence.hint),
+    sampleRowLimit: PROVIDER_FAILURE_PREVIEW_SAMPLE_ROW_LIMIT,
+    sampleRowCount: sampleRows.length,
+    sampleRowsCapped: rows.length > PROVIDER_FAILURE_PREVIEW_SAMPLE_ROW_LIMIT,
+    sampleSource: 'fullRows',
+    sampleRows,
+    note: 'Provider failure adherence rows are previewed as context-only evidence and are not merged into local routing learning state.',
+  };
+}
+
 export function buildRouterLearningImportPreview(body: unknown): RouterLearningImportPreview {
   const input = body && typeof body === 'object' ? body as Record<string, any> : {};
   const schemaVersion = typeof input.schemaVersion === 'number'
@@ -134,5 +206,6 @@ export function buildRouterLearningImportPreview(body: unknown): RouterLearningI
     events,
     toolReliabilityPreview: buildToolReliabilityImportPreview(input),
     promptBestPracticePreview: buildPromptBestPracticeImportPreview(input),
+    providerFailureAdherencePreview: buildProviderFailureAdherenceImportPreview(input),
   };
 }

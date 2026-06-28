@@ -34,6 +34,7 @@ export interface RouteDecision {
     };
     candidateScores?: Record<string, number>;
     score?: number;
+    threshold?: number;
     cached?: boolean;
     fallback?: boolean;
     classifierModel?: string | null;
@@ -293,6 +294,7 @@ export async function routeWithAutoRouter(
         },
         candidateScores: decision.scores,
         score: decision.score,
+        threshold: decision.threshold,
         cached: decision.cached,
         fallback: decision.fallback,
         classifierModel: decision.classifierModel,

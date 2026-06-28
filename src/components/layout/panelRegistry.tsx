@@ -12,6 +12,7 @@ export interface PanelDefinition extends PanelConfig {
 
 const iconMap: Record<PanelId, ComponentType<{ size?: number; 'aria-hidden'?: boolean }>> = {
   chat: MessageSquare,
+  'side-chat': MessageSquare,
   browser: Globe,
   terminal: Terminal,
   files: FolderOpen,
@@ -25,6 +26,7 @@ const iconMap: Record<PanelId, ComponentType<{ size?: number; 'aria-hidden'?: bo
 
 export const panelConfigs: Record<PanelId, PanelConfig> = {
   chat:        { id: 'chat',        label: 'Chat',        icon: 'MessageSquare', defaultSize: 920, minSize: 520 },
+  'side-chat': { id: 'side-chat',   label: 'Side Chat',   icon: 'MessageSquare', defaultSize: 360, minSize: 280 },
   browser:     { id: 'browser',     label: 'Browser',     icon: 'Globe',         defaultSize: 360, minSize: 300 },
   terminal:    { id: 'terminal',    label: 'Terminal',     icon: 'Terminal',      defaultSize: 220, minSize: 160 },
   files:       { id: 'files',       label: 'Files',        icon: 'FolderOpen',    defaultSize: 280, minSize: 220 },

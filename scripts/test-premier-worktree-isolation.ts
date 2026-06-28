@@ -12,8 +12,12 @@ const clientTypes = readFileSync('src/types/index.ts', 'utf-8');
 const subAgentTracker = readFileSync('src/components/SubAgentTracker.tsx', 'utf-8');
 const agentWorkState = readFileSync('src/utils/agentWorkState.ts', 'utf-8');
 const app = readFileSync('src/App.tsx', 'utf-8');
-const serverIndex = readFileSync('server/index.ts', 'utf-8');
+const serverIndex = [
+  readFileSync('server/index.ts', 'utf-8'),
+  readFileSync('server/chatStreamSupport.ts', 'utf-8'),
+].join('\n');
 const promptMicroscope = readFileSync('src/components/PromptMicroscope.tsx', 'utf-8');
+const promptMicroscopeTraceIndex = readFileSync('src/utils/promptMicroscopeSections.ts', 'utf-8');
 const safetyPanel = readFileSync('src/components/SafetyPanel.tsx', 'utf-8');
 
 assert.ok(
@@ -127,8 +131,16 @@ for (const expected of [
 }
 
 for (const expected of [
-  "s.type === 'worktree_isolation'",
-  'runTrace.steps.slice().reverse().find',
+  "step.type === 'worktree_isolation'",
+  'worktreeIsolation = step',
+]) {
+  assert.ok(
+    promptMicroscopeTraceIndex.includes(expected),
+    `Prompt Microscope trace index should select worktree isolation metadata: ${expected}`,
+  );
+}
+
+for (const expected of [
   'Worktree isolation',
   'ready · ${worktreeIsolation.worktreeId',
   'preserved · ${worktreeIsolation.worktreeId',

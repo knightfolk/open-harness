@@ -6,6 +6,7 @@ import { v4 as uuid } from 'uuid';
 import { buildScoreBreakdown, type EvalScores, type EvalScoreBreakdown } from './evals';
 import { safeJsonStorePath } from './jsonStorePaths';
 import type { PromptStrategyTrace } from './promptStrategies';
+import { averageFinite, countFinite, finiteNumber, formatCost, formatFiniteNumber, roundFinite } from './reportNumberSafety';
 import { redactSecrets } from './sectionRedaction';
 import { spawnShellCommand, terminateProcessTree } from './shell';
 
@@ -167,6 +168,11 @@ export interface BenchSummary {
     valueScore: number;
     avgSteps: number;
     totalRuns: number;
+    scoreSampleCount?: number;
+    validationSampleCount?: number;
+    latencySampleCount?: number;
+    costSampleCount?: number;
+    stepSampleCount?: number;
   }>;
   bestModel: string;
   bestModelReason?: string;
@@ -742,15 +748,16 @@ export function listBenchRuns(): Array<Pick<BenchRun, 'id' | 'name' | 'status' |
 export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
   const byModel: Record<string, {
     resolved: number; unresolved: number; partial: number; assisted: number;
-    scores: number[]; validationScores: number[]; latencies: number[];
-    costs: number[]; steps: number[];
+    scores: unknown[]; validationScores: unknown[]; latencies: unknown[];
+    costs: unknown[]; steps: unknown[]; totalRuns: number;
   }> = {};
 
   for (const r of results) {
     if (!byModel[r.modelId]) {
-      byModel[r.modelId] = { resolved: 0, unresolved: 0, partial: 0, assisted: 0, scores: [], validationScores: [], latencies: [], costs: [], steps: [] };
+      byModel[r.modelId] = { resolved: 0, unresolved: 0, partial: 0, assisted: 0, scores: [], validationScores: [], latencies: [], costs: [], steps: [], totalRuns: 0 };
     }
     const m = byModel[r.modelId];
+    m.totalRuns++;
     if (r.scores.resolvedStatus === 'resolved') m.resolved++;
     else if (r.scores.resolvedStatus === 'assisted') m.assisted++;
     else if (r.scores.resolvedStatus === 'partial') m.partial++;
@@ -773,20 +780,23 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
   let bestReason = '';
 
   for (const [modelId, data] of Object.entries(byModel)) {
-    const totalRuns = data.scores.length;
+    const totalRuns = data.totalRuns;
     const resolvedRate = totalRuns > 0 ? data.resolved / totalRuns : 0;
-    const avgScore = data.scores.reduce((a, b) => a + b, 0) / (totalRuns || 1);
-    const avgValidationScore = data.validationScores.reduce((a, b) => a + b, 0) / (totalRuns || 1);
-    const avgLatency = data.latencies.reduce((a, b) => a + b, 0) / (totalRuns || 1);
-    const avgCost = data.costs.reduce((a, b) => a + b, 0) / (totalRuns || 1);
-    const avgSteps = data.steps.reduce((a, b) => a + b, 0) / (totalRuns || 1);
-    const costPenalty = Math.log10(1 + avgCost * 100_000) * 0.35;
-    const latencyPenalty = Math.max(0, avgLatency - 30_000) / 120_000;
-    const composite = (resolvedRate * 5)
-      + (avgScore / 10 * 2)
-      + (avgValidationScore / 2 * 2)
-      - costPenalty
-      - latencyPenalty;
+    const avgScore = averageFinite(data.scores);
+    const avgValidationScore = averageFinite(data.validationScores);
+    const avgLatency = averageFinite(data.latencies, { min: 0 });
+    const avgCost = averageFinite(data.costs, { min: 0 });
+    const avgSteps = averageFinite(data.steps, { min: 0 });
+    const costPenalty = avgCost === null ? 0 : Math.log10(1 + avgCost * 100_000) * 0.35;
+    const latencyPenalty = avgLatency === null ? 0 : Math.max(0, avgLatency - 30_000) / 120_000;
+    const hasCompositeEvidence = avgScore !== null && avgValidationScore !== null && avgLatency !== null && avgCost !== null;
+    const composite = hasCompositeEvidence
+      ? (resolvedRate * 5)
+        + (avgScore / 10 * 2)
+        + (avgValidationScore / 2 * 2)
+        - costPenalty
+        - latencyPenalty
+      : 0;
     const roundedValueScore = Math.round(composite * 1000) / 1000;
 
     summary.byModel[modelId] = {
@@ -795,19 +805,25 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
       partial: data.partial,
       assisted: data.assisted,
       resolvedRate: Math.round(resolvedRate * 1000) / 1000,
-      avgScore: Math.round(avgScore * 10) / 10,
-      avgValidationScore: Math.round(avgValidationScore * 10) / 10,
-      avgLatencyMs: Math.round(avgLatency),
-      avgCost: Math.round(avgCost * 1_000_000) / 1_000_000,
+      avgScore: roundFinite(avgScore, 1),
+      avgValidationScore: roundFinite(avgValidationScore, 1),
+      avgLatencyMs: roundFinite(avgLatency, 0),
+      avgCost: roundFinite(avgCost, 6),
       valueScore: roundedValueScore,
-      avgSteps: Math.round(avgSteps * 10) / 10,
+      avgSteps: roundFinite(avgSteps, 1),
       totalRuns,
+      scoreSampleCount: countFinite(data.scores),
+      validationSampleCount: countFinite(data.validationScores),
+      latencySampleCount: countFinite(data.latencies, { min: 0 }),
+      costSampleCount: countFinite(data.costs, { min: 0 }),
+      stepSampleCount: countFinite(data.steps, { min: 0 }),
     };
 
-    if (composite > bestComposite) {
+    if (hasCompositeEvidence && composite > bestComposite) {
       bestComposite = composite;
       bestModel = modelId;
-      bestReason = `Best composite: resolved ${(resolvedRate * 100).toFixed(0)}%, assisted ${data.assisted}/${totalRuns}, score ${avgScore.toFixed(1)}/10, validation ${avgValidationScore.toFixed(1)}/2, cost $${avgCost.toFixed(6)}, latency ${Math.round(avgLatency)}ms.`;
+      const latencyLabel = avgLatency === null ? 'unavailable' : `${formatFiniteNumber(avgLatency, 0)}ms`;
+      bestReason = `Best composite: resolved ${(resolvedRate * 100).toFixed(0)}%, assisted ${data.assisted}/${totalRuns}, score ${formatFiniteNumber(avgScore, 1)}/10, validation ${formatFiniteNumber(avgValidationScore, 1)}/2, cost ${formatCost(avgCost)}, latency ${latencyLabel}.`;
     }
   }
 
@@ -823,11 +839,12 @@ export function generateBenchSummary(results: BenchRunResult[]): BenchSummary {
         reason: `Validation failed: ${summarizeValidationFailure(r.validationResults)}`,
       });
     }
-    if (r.scores.overallScore < 3) {
+    const overallScore = finiteNumber(r.scores.overallScore);
+    if (overallScore !== null && overallScore < 3) {
       summary.regressionFlags.push({
         taskId: r.taskId,
         modelId: r.modelId,
-        reason: `Low score: ${r.scores.overallScore}/10`,
+        reason: `Low score: ${formatFiniteNumber(overallScore, 1)}/10`,
       });
     }
   }

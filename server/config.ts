@@ -147,6 +147,11 @@ export interface CapabilitySettings {
   disabledPlugins: string[];
 }
 
+export interface PromptPluginRenderingConfig {
+  enabled: boolean;
+  allowedPluginIds: string[];
+}
+
 export interface StoredConfig {
   version: number;
   providers: StoredProvider[];
@@ -164,6 +169,7 @@ export interface StoredConfig {
   modelBudgets?: ModelBudget[];
   providerRateLimits?: ProviderRateLimit[];
   capabilitySettings?: CapabilitySettings;
+  promptPluginRendering?: PromptPluginRenderingConfig;
   trustMode: TrustMode;
 }
 
@@ -220,6 +226,10 @@ const DEFAULT_CONFIG: StoredConfig = {
   capabilitySettings: {
     disabledSkills: [],
     disabledPlugins: [],
+  },
+  promptPluginRendering: {
+    enabled: false,
+    allowedPluginIds: [],
   },
 };
 
@@ -278,6 +288,7 @@ export function loadConfig(): StoredConfig {
       modelBudgets: normalizeModelBudgets((parsed as any).modelBudgets),
       providerRateLimits: normalizeProviderRateLimits((parsed as any).providerRateLimits),
       capabilitySettings: normalizeCapabilitySettings((parsed as any).capabilitySettings),
+      promptPluginRendering: normalizePromptPluginRendering((parsed as any).promptPluginRendering),
     };
     const hadInlineCredentials = hasInlineConfigCredentials(config);
     const hydratedConfig = hydrateStoredConfigCredentials(config);
@@ -304,6 +315,14 @@ function normalizeCapabilitySettings(value: unknown): CapabilitySettings {
   return {
     disabledSkills: normalizeIdList(settings.disabledSkills),
     disabledPlugins: normalizeIdList(settings.disabledPlugins),
+  };
+}
+
+function normalizePromptPluginRendering(value: unknown): PromptPluginRenderingConfig {
+  const settings = value && typeof value === 'object' ? value as any : {};
+  return {
+    enabled: settings.enabled === true,
+    allowedPluginIds: normalizeIdList(settings.allowedPluginIds),
   };
 }
 
